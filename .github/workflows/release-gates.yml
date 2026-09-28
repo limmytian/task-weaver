@@ -14,6 +14,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  source-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      TURBO_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build all workspaces
+        run: pnpm build
+      - name: Type check all workspaces
+        run: pnpm typecheck
+      - name: Lint configured workspaces
+        run: pnpm lint
+      - name: Test all configured workspaces
+        run: pnpm test
+      - name: Check rollout and Web interaction safeguards
+        run: |
+          pnpm check:repository-rollout
+          pnpm --filter @task-weaver/web check:interactions
   supply-chain:
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -10,9 +10,8 @@ fix is available. No response or remediation service level is guaranteed.
 
 Do not report suspected vulnerabilities in a public issue, discussion, pull
 request, or chat. Use GitHub's private vulnerability reporting feature when it
-is available. Otherwise, contact
-[limmytian](https://github.com/limmytian) through a private contact method listed
-on that profile.
+is available. Otherwise, email
+[limmytian@gmail.com](mailto:limmytian@gmail.com) privately.
 
 Include the affected version or commit, reproduction steps, expected impact,
 and any suggested mitigation. Do not include real credentials or personal data.

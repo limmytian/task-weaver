@@ -21,10 +21,13 @@ pnpm typecheck
 pnpm lint
 pnpm test
 pnpm build
-scripts/docker-isolated-smoke.sh smoke
 ```
 
-The isolated Docker smoke is required for a release candidate because it verifies migrations from an empty database, API health, and the production Web build without depending on a developer database.
+For an installation rollout, also verify migrations from a dedicated empty database,
+API health, and the production Web build without using a developer or live database.
+Follow [source development and database requirements](deployment.md). Published
+containers and public container deployment examples are deferred; these source
+checks do not certify container release readiness.
 
 ## Migration verification
 

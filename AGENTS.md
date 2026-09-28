@@ -17,7 +17,7 @@ Task Weaver is a project management platform where both humans (via Web UI) and 
 - **General API**: REST (Hono routes)
 - **AI Interface**: `tw` CLI (wraps REST) + autonomous task daemon (`tw daemon`)
 - **MCP Tool Registry**: hosts and proxies external MCP servers so agents can discover/call their tools (@modelcontextprotocol/sdk as client)
-- **Frontend**: Next.js 15 (App Router) + shadcn/ui + Tailwind CSS
+- **Frontend**: Next.js 16 (App Router) + shadcn/ui + Tailwind CSS
 - **Validation**: Zod (shared across tRPC/REST/CLI)
 - **Document Editing**: Markdown (CodeMirror + react-markdown + Mermaid)
 

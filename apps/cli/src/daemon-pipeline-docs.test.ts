@@ -1,10 +1,14 @@
 import assert from 'node:assert'
+import { existsSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
 import { loadDaemonPipelineConfig } from './daemon-pipeline-config.js'
 
 const repositoryRoot = resolve(process.cwd(), '../..')
+const distributionPath = resolve(repositoryRoot, '.release/distribution.json')
+const sourceOnly = existsSync(distributionPath) &&
+  JSON.parse(readFileSync(distributionPath, 'utf8')).sourceOnly === true
 
 test('documented daemon pipeline configuration remains valid', () => {
   const config = loadDaemonPipelineConfig(resolve(repositoryRoot, 'examples/daemon-pipeline/pipeline.yaml'))
@@ -15,12 +19,11 @@ test('documented daemon pipeline configuration remains valid', () => {
   assert.equal(config.environment.TW_API_KEY?.fromEnv, 'TASK_WEAVER_API_KEY')
 })
 
-test('systemd, launchd, and container examples use service mode and graceful supervision', async () => {
+test('systemd and launchd examples use service mode and graceful supervision', async () => {
   const exampleRoot = resolve(repositoryRoot, 'examples/daemon-pipeline')
-  const [systemd, launchd, compose] = await Promise.all([
+  const [systemd, launchd] = await Promise.all([
     readFile(resolve(exampleRoot, 'systemd/task-weaver-pipeline.service'), 'utf8'),
     readFile(resolve(exampleRoot, 'launchd/com.task-weaver.pipeline.plist'), 'utf8'),
-    readFile(resolve(exampleRoot, 'docker-compose.yml'), 'utf8'),
   ])
 
   assert.match(systemd, /daemon pipeline start --config .* --service/)
@@ -28,6 +31,17 @@ test('systemd, launchd, and container examples use service mode and graceful sup
   assert.match(systemd, /ExecStop=\/bin\/kill -TERM \$MAINPID/)
   assert.match(launchd, /<string>--service<\/string>/)
   assert.match(launchd, /<key>SuccessfulExit<\/key>/)
+})
+
+test('container example follows the declared distribution boundary', async () => {
+  const composePath = resolve(repositoryRoot, 'examples/daemon-pipeline/docker-compose.yml')
+  if (sourceOnly) {
+    const distribution = JSON.parse(readFileSync(distributionPath, 'utf8'))
+    assert.equal(distribution.composeProvided, false)
+    assert.equal(existsSync(composePath), false)
+    return
+  }
+  const compose = await readFile(composePath, 'utf8')
   assert.match(compose, /- --service/)
   assert.match(compose, /stop_grace_period: 90s/)
 })
@@ -40,7 +54,11 @@ test('operator runbook covers lifecycle, diagnostics, logs, and exit behavior', 
   assert.match(runbook, /SIGINT or SIGTERM/)
   assert.match(runbook, /launchd/)
   assert.match(runbook, /systemd/)
-  assert.match(runbook, /Docker Compose/)
+  if (sourceOnly) {
+    assert.doesNotMatch(runbook, /Docker Compose|docker-compose\.yml/)
+  } else {
+    assert.match(runbook, /Docker Compose/)
+  }
 })
 
 test('production validation documents every release-blocking SLO and evidence command', async () => {
