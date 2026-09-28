@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.task-weaver.pipeline</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/tw</string>
+    <string>daemon</string>
+    <string>pipeline</string>
+    <string>start</string>
+    <string>--config</string>
+    <string>/usr/local/etc/task-weaver/pipeline.yaml</string>
+    <string>--service</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>TW_API_URL</key>
+    <string>https://task-weaver.example.com</string>
+  </dict>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/usr/local/var/log/task-weaver-pipeline.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/usr/local/var/log/task-weaver-pipeline.stderr.log</string>
+</dict>
+</plist>

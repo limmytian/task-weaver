@@ -1,0 +1,34 @@
+{
+  "name": "@task-weaver/db",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema/index.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "db:migrate": "drizzle-kit migrate",
+    "db:smoke-embedding": "tsx src/embedding-rollout-smoke.ts",
+    "db:studio": "drizzle-kit studio",
+    "db:setup-search": "tsx src/setup-search.ts",
+    "db:seed-skills": "tsx src/seed-skills.ts",
+    "db:migrate-markdown": "tsx src/migrate-html-to-markdown.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.3",
+    "postgres": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.3",
+    "@types/turndown": "^5.0.6",
+    "drizzle-kit": "^0.31.11",
+    "turndown": "^7.2.2",
+    "typescript": "^5.8.0"
+  },
+  "license": "Apache-2.0"
+}

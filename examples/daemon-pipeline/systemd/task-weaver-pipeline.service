@@ -1,0 +1,20 @@
+[Unit]
+Description=Task Weaver daemon pipeline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=task-weaver
+WorkingDirectory=/var/lib/task-weaver
+EnvironmentFile=/etc/task-weaver/pipeline.env
+ExecStart=/usr/local/bin/tw daemon pipeline start --config /etc/task-weaver/pipeline.yaml --service
+ExecStop=/bin/kill -TERM $MAINPID
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=90
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

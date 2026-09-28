@@ -1,0 +1,43 @@
+{
+  "name": "task-weaver",
+  "private": true,
+  "scripts": {
+    "dev": "dotenv -- turbo dev",
+    "build": "turbo build",
+    "test": "turbo test",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "test:daemon-reliability": "tsx --test apps/cli/src/daemon-reliability-harness.test.ts packages/core/src/services/daemon-state-machine.test.ts packages/core/src/services/daemon-fault-injection-e2e.test.ts packages/core/src/services/forge-sync.test.ts",
+    "test:daemon-real-smoke": "tsx apps/cli/src/index.ts daemon pipeline smoke --providers github,gitea --json",
+    "test:embedding-rollout-smoke": "pnpm --filter @task-weaver/db db:smoke-embedding",
+    "check:repository-rollout": "node scripts/check-repository-rollout.mjs",
+    "test:release-gates": "node --test scripts/release-gates.test.mjs scripts/public-deployment.test.mjs scripts/binary-sources.test.mjs",
+    "release:licenses": "node scripts/release-gates.mjs licenses",
+    "release:sbom": "node scripts/release-gates.mjs sbom",
+    "release:provenance": "node scripts/release-gates.mjs provenance",
+    "release:secrets": "node scripts/release-gates.mjs secrets",
+    "release:vulnerabilities": "node scripts/release-gates.mjs vulnerabilities",
+    "release:verify": "node scripts/release-gates.mjs all",
+    "db:generate": "turbo db:generate",
+    "db:push": "turbo db:push",
+    "db:migrate": "turbo db:migrate"
+  },
+  "devDependencies": {
+    "dotenv-cli": "^11.0.0",
+    "tsx": "^4.19.0",
+    "turbo": "^2.4.0",
+    "typescript": "^5.8.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "pnpm": {
+    "overrides": {
+      "browserslist": "4.28.7",
+      "eslint-plugin-react-hooks": "7.0.1",
+      "lodash-es": "4.18.0"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "Apache-2.0"
+}

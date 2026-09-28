@@ -1,0 +1,59 @@
+version: 1
+projectId: 00000000-0000-4000-8000-000000000001
+baseBranch: main
+runMode: foreground
+
+roles:
+  executor:
+    enabled: true
+    workers: 2
+    tools: [codex]
+    capabilities: [git, test]
+    queueMode: sse
+    models:
+      fast: gpt-5.4-mini
+      standard: gpt-5.5
+      strong: gpt-5.5
+    reasoningEffort:
+      fast: low
+      standard: medium
+      strong: high
+    promptFiles:
+      - worker-extra.md
+  reviewer:
+    enabled: true
+    workers: 1
+    tools: [codex]
+    checks:
+      - pnpm typecheck
+      - pnpm test
+    models:
+      strong: gpt-5.5
+    reasoningEffort:
+      strong: high
+    postForgeSummary: true
+  merger:
+    enabled: true
+    workers: 1
+
+retry:
+  maxRestarts: 3
+  initialBackoffMs: 1000
+  maxBackoffMs: 30000
+
+limits:
+  maxActiveRoles: 3
+  shutdownGraceMs: 30000
+  controlPollMs: 500
+
+mergePolicy:
+  mode: provider
+
+environment:
+  TW_API_KEY:
+    fromEnv: TASK_WEAVER_API_KEY
+    required: true
+
+logging:
+  maxBytes: 10485760
+  maxFiles: 5

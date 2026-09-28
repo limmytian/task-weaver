@@ -1,0 +1,15 @@
+ALTER TABLE "task_weaver"."daemon_worker_progress" ADD COLUMN "workspace_state" text DEFAULT 'unknown' NOT NULL;
+ALTER TABLE "task_weaver"."daemon_worker_progress" ADD COLUMN "recovery_disposition" text DEFAULT 'none' NOT NULL;
+ALTER TABLE "task_weaver"."daemon_worker_progress" ADD COLUMN "retry_count" integer DEFAULT 0 NOT NULL;
+ALTER TABLE "task_weaver"."daemon_worker_progress" ADD COLUMN "last_completed_task_id" uuid;
+ALTER TABLE "task_weaver"."daemon_worker_progress" ADD COLUMN "pending_diff_summary" text;
+ALTER TABLE "task_weaver"."daemon_worker_progress" ADD COLUMN "slice_summary" text;
+ALTER TABLE "task_weaver"."daemon_worker_progress" ADD COLUMN "handoff_summary" text;
+ALTER TABLE "task_weaver"."daemon_worker_progress_history" ADD COLUMN "workspace_state" text DEFAULT 'unknown' NOT NULL;
+ALTER TABLE "task_weaver"."daemon_worker_progress_history" ADD COLUMN "recovery_disposition" text DEFAULT 'none' NOT NULL;
+ALTER TABLE "task_weaver"."daemon_worker_progress_history" ADD COLUMN "retry_count" integer DEFAULT 0 NOT NULL;
+ALTER TABLE "task_weaver"."daemon_worker_progress_history" ADD COLUMN "last_completed_task_id" uuid;
+ALTER TABLE "task_weaver"."daemon_worker_progress_history" ADD COLUMN "pending_diff_summary" text;
+ALTER TABLE "task_weaver"."daemon_worker_progress_history" ADD COLUMN "slice_summary" text;
+ALTER TABLE "task_weaver"."daemon_worker_progress_history" ADD COLUMN "handoff_summary" text;
+ALTER TABLE "task_weaver"."daemon_worker_progress" ADD CONSTRAINT "daemon_worker_progress_last_completed_task_id_tasks_id_fk" FOREIGN KEY ("last_completed_task_id") REFERENCES "task_weaver"."tasks"("id") ON DELETE set null ON UPDATE no action;

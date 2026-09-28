@@ -1,0 +1,16 @@
+node_modules/
+.pnpm-store/
+.next/
+.turbo/
+dist/
+out/
+coverage/
+release-artifacts/
+data/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.vscode/
+.idea/

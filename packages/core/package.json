@@ -1,0 +1,27 @@
+{
+  "name": "@task-weaver/core",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schemas": "./src/schemas/index.ts",
+    "./types": "./src/types/index.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsx --test src/**/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@task-weaver/db": "workspace:*",
+    "@task-weaver/realtime": "workspace:^",
+    "drizzle-orm": "^0.45.3",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.3",
+    "typescript": "^5.8.0"
+  },
+  "license": "Apache-2.0"
+}

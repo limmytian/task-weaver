@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "channel": "source-staging",
+  "sourceOnly": true,
+  "containersPublished": false,
+  "composeProvided": false,
+  "npmPublished": false
+}

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "noticeBundleSha256": "204e76bb29896bdd678967f44ae0732c4158788202d6f3db0432d241eb4545ce",
+  "nodeVersion": "24.21.0",
+  "sharpLibvipsVersion": "1.3.4",
+  "rustCommit": "75a75c3e0a67d3fa3d03982775f5bb0356e7b510",
+  "distributionApproved": false
+}
