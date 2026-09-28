@@ -27,7 +27,7 @@ will consider context, severity, repetition, safety, and the interests of the
 community.
 
 Report conduct concerns privately to
-[limmytian](https://github.com/limmytian) through a private contact method listed
-on that profile. Do not open a public issue for sensitive conduct reports.
+[limmytian@gmail.com](mailto:limmytian@gmail.com).
+Do not open a public issue for sensitive conduct reports.
 Reports will be handled as confidentially as reasonably possible, subject to
 safety and legal obligations.
