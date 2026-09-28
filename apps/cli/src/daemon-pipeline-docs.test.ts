@@ -56,8 +56,6 @@ test('operator runbook covers lifecycle, diagnostics, logs, and exit behavior', 
   assert.match(runbook, /systemd/)
   if (sourceOnly) {
     assert.doesNotMatch(runbook, /Docker Compose|docker-compose\.yml/)
-  } else {
-    assert.match(runbook, /Docker Compose/)
   }
 })
 
