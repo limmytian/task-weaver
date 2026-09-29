@@ -9,30 +9,34 @@ keyword and vector search, agent task execution, and an MCP tool registry.
 
 ## Quick start
 
-This checkout is source-only. Published containers, container deployment examples
-and npm packages are not provided yet. Use Node.js from `.node-version` and
-pnpm 9.15.0, and provision an external PostgreSQL database.
+The v0.1.0 Compose example runs the published API and Web containers on Linux
+ARM64. It does not include PostgreSQL: provision a PostgreSQL 16 database with
+pgvector and pg_trgm, then set a connection URL that is reachable from Docker.
 
 ```bash
 cp .env.example .env
-pnpm install --frozen-lockfile
-# Set DATABASE_URL in .env before initialization.
-pnpm exec dotenv -- pnpm --filter @task-weaver/db db:migrate
-pnpm exec dotenv -- pnpm --filter @task-weaver/db db:setup-search
-pnpm dev
+# Set DATABASE_URL in .env before starting the application.
+docker compose config
+docker compose up -d --wait
+curl --fail http://localhost:3001/health
 ```
 
 Open <http://localhost:3000>. The API health endpoint is
 <http://localhost:3001/health>. Both API and Web require the database connection.
 PostgreSQL is maintained by your database operator. See
-[deployment](docs/deployment.md) for database capabilities and source-development
-limitations.
+[deployment](docs/deployment.md) for compatibility, persistence, backup, and
+upgrade guidance.
 
-Development is intended for a trusted local workspace.
+The Compose example and source development are intended for a trusted local
+environment.
 The Web UI and API allow unauthenticated access; an API key identifies an actor
 but does not protect the entire application. Do not expose these services to the
 Internet without an authenticated gateway and a separate deployment review.
 See [deployment](docs/deployment.md) for persistence, backups, and rollback.
+
+The published images and Compose example support Linux ARM64 only. v0.1.0 does
+not publish AMD64 images, floating tags, signatures, npm packages, a first-party
+PostgreSQL image, or complete upgrade/downgrade certification.
 
 ## Development
 
@@ -48,9 +52,9 @@ Development reads the local `.env`. Use the example configuration and never
 commit credentials. The application starts with an empty project list and imports
 the bundled Task Weaver skill package at API startup.
 
-Future container distribution is limited to API and Web. Database operation,
-patching, and backups belong to the database operator. The source checkout
-includes the CLI, shared packages, migrations, skills, and documentation.
+Container distribution is limited to API and Web. Database operation, patching,
+and backups belong to the database operator. The source checkout includes the
+CLI, shared packages, migrations, skills, and documentation.
 
 ```bash
 pnpm typecheck
