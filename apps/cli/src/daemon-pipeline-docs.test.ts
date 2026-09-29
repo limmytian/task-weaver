@@ -7,8 +7,10 @@ import { loadDaemonPipelineConfig } from './daemon-pipeline-config.js'
 
 const repositoryRoot = resolve(process.cwd(), '../..')
 const distributionPath = resolve(repositoryRoot, '.release/distribution.json')
-const sourceOnly = existsSync(distributionPath) &&
-  JSON.parse(readFileSync(distributionPath, 'utf8')).sourceOnly === true
+const distribution = existsSync(distributionPath)
+  ? JSON.parse(readFileSync(distributionPath, 'utf8'))
+  : null
+const sourceOnly = distribution?.sourceOnly === true
 
 test('documented daemon pipeline configuration remains valid', () => {
   const config = loadDaemonPipelineConfig(resolve(repositoryRoot, 'examples/daemon-pipeline/pipeline.yaml'))
@@ -34,16 +36,24 @@ test('systemd and launchd examples use service mode and graceful supervision', a
 })
 
 test('container example follows the declared distribution boundary', async () => {
-  const composePath = resolve(repositoryRoot, 'examples/daemon-pipeline/docker-compose.yml')
-  if (sourceOnly) {
-    const distribution = JSON.parse(readFileSync(distributionPath, 'utf8'))
-    assert.equal(distribution.composeProvided, false)
-    assert.equal(existsSync(composePath), false)
+  const pipelineComposePath = resolve(repositoryRoot, 'examples/daemon-pipeline/docker-compose.yml')
+  if (!distribution) {
+    const compose = await readFile(pipelineComposePath, 'utf8')
+    assert.match(compose, /- --service/)
+    assert.match(compose, /stop_grace_period: 90s/)
     return
   }
-  const compose = await readFile(composePath, 'utf8')
-  assert.match(compose, /- --service/)
-  assert.match(compose, /stop_grace_period: 90s/)
+  if (sourceOnly) {
+    assert.equal(distribution.composeProvided, false)
+    assert.equal(existsSync(pipelineComposePath), false)
+    return
+  }
+  assert.equal(distribution.composeProvided, true)
+  assert.equal(existsSync(pipelineComposePath), false)
+  const compose = await readFile(resolve(repositoryRoot, 'docker-compose.yml'), 'utf8')
+  assert.match(compose, /ghcr\.io\/limmytian\/task-weaver-api@sha256:/)
+  assert.match(compose, /ghcr\.io\/limmytian\/task-weaver-web@sha256:/)
+  assert.doesNotMatch(compose, /^  db:/m)
 })
 
 test('operator runbook covers lifecycle, diagnostics, logs, and exit behavior', async () => {
