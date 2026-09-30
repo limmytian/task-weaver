@@ -2,6 +2,10 @@
 
 Task Weaver is maintained on a best-effort basis by its community.
 
+The current minor release and one preceding minor release are the supported
+lines. Earlier minors receive no routine fixes. A support-window change or
+end-of-life date is announced in release notes before it takes effect.
+
 Use GitHub issues for reproducible defects and focused feature proposals. Use
 GitHub Discussions, when enabled, for setup questions, ideas, and general
 conversation. Before posting, search existing documentation, issues, and

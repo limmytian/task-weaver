@@ -14,7 +14,7 @@ import {
   tasks,
 } from "@task-weaver/db";
 import { emit } from "@task-weaver/realtime";
-import type { Actor, RequirementLeaseFence } from "../schemas/common";
+import type { Actor, RequirementLeaseFence } from "@task-weaver/contracts";
 import type {
   CreateReviewRunInput,
   EvaluateReviewRunInput,
@@ -23,8 +23,8 @@ import type {
   ReviewPolicyInput,
   UpsertReviewCheckInput,
   UpsertReviewFindingInput,
-} from "../schemas/reviews";
-import { ConflictError, NotFoundError, ValidationError } from "../errors";
+} from "@task-weaver/contracts";
+import { ConflictError, NotFoundError, ValidationError } from "@task-weaver/contracts";
 import { assertRequirementLease } from "./claims";
 
 export const DEFAULT_REVIEW_POLICY: ReviewPolicyInput = {

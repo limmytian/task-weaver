@@ -12,7 +12,7 @@ import {
   documentRequirementLinks,
   requirementRepositories,
 } from "@task-weaver/db";
-import type { Actor } from "../schemas/common";
+import type { Actor } from "@task-weaver/contracts";
 import type {
   CreateRequirementInput,
   UpdateRequirementInput,
@@ -20,14 +20,14 @@ import type {
   BatchCreateRequirementsInput,
   CreateExecutionSliceInput,
   UpdateExecutionSliceInput,
-} from "../schemas/requirements";
+} from "@task-weaver/contracts";
 import { emit } from "@task-weaver/realtime";
 import { assertRequirementLease } from "./claims";
 import {
   assertRequirementStatusTransition,
   requirementStatePolicy,
 } from "./daemon-state-machine";
-import { NotFoundError, ValidationError } from "../errors";
+import { NotFoundError, ValidationError } from "@task-weaver/contracts";
 import { assertExecutionSliceCanAdvance } from "./execution-slice-policy";
 
 export async function createRequirement(

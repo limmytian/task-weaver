@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { CompletePiAgentRunInput } from "../schemas/pi-agent";
+import type { CompletePiAgentRunInput } from "@task-weaver/contracts";
 
 const optionalString = (schema: z.ZodString) => z.preprocess(
   (value) => value === "" ? undefined : value,

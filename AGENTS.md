@@ -6,7 +6,7 @@ Human-AI collaborative project management tool — humans and AI agents work tog
 
 Task Weaver is a project management platform where both humans (via Web UI) and AI agents (via the `tw` CLI / REST API) can manage projects, requirements, tasks, kanban boards, and a knowledge base with bidirectional linking and hybrid search (keyword + vector).
 
-- Design documents: `docs/design.md` (English), `docs/design.zh-CN.md` (Simplified Chinese)
+- Design doc: `docs/design.md`
 
 ## Tech Stack
 

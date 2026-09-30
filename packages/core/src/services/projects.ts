@@ -13,9 +13,9 @@ import {
   requirementClaims,
   activityLog,
 } from "@task-weaver/db";
-import type { Actor } from "../schemas/common";
-import type { CreateProjectInput, UpdateProjectInput, ListProjectsInput } from "../schemas/projects";
-import { NotFoundError } from "../errors";
+import type { Actor } from "@task-weaver/contracts";
+import type { CreateProjectInput, UpdateProjectInput, ListProjectsInput } from "@task-weaver/contracts";
+import { NotFoundError } from "@task-weaver/contracts";
 
 export async function createProject(
   db: Database,

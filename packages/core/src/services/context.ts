@@ -1,7 +1,7 @@
 import { and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { type Database, documents } from "@task-weaver/db";
-import type { Actor } from "../schemas/common";
-import type { SearchContextInput, ImportSkillInput } from "../schemas/documents";
+import type { Actor } from "@task-weaver/contracts";
+import type { SearchContextInput, ImportSkillInput } from "@task-weaver/contracts";
 import { documentService } from "./index";
 import { getPackageMetadataForDocuments } from "./skill-packages";
 

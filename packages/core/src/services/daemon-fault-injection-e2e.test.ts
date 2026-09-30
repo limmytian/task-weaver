@@ -9,7 +9,7 @@ import {
   daemonRoleForPhase,
   planRepositoryRetry,
 } from './daemon-state-machine'
-import type { DaemonPhase } from '../schemas/daemon-state'
+import type { DaemonPhase } from "@task-weaver/contracts"
 
 const now = new Date('2026-07-24T08:00:00.000Z')
 const daemons = [

@@ -1,6 +1,6 @@
 import { and, eq, lt, notInArray } from "drizzle-orm";
 import { type Database, executionSlices } from "@task-weaver/db";
-import { NotFoundError, ValidationError } from "../errors";
+import { NotFoundError, ValidationError } from "@task-weaver/contracts";
 
 export const TERMINAL_EXECUTION_SLICE_STATUSES = ["done", "cancelled"] as const;
 

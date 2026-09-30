@@ -8,11 +8,11 @@ import {
   getPartnersGatewayWorkerConfig,
   isTransientGatewayError,
   normalizeGatewayArtifactReferences,
-  type Actor,
   type PartnersGatewayConfig,
   type PartnersGatewayJob,
-  piAgentService,
-} from "@task-weaver/core";
+  type PartnersGatewayWorkerConfig,
+} from "@task-weaver/partners-gateway";
+import { type Actor, piAgentService } from "@task-weaver/core";
 
 const TERMINAL_STATES = new Set<PartnersGatewayJob["state"]>([
   "cancelled",
@@ -68,6 +68,7 @@ export class PiAgentGatewayWorker {
   private lastPollAt: string | null = null;
   private lastCompletedAt: string | null = null;
   private lastError: string | null = null;
+  private idleController: AbortController | null = null;
 
   constructor(
     private readonly db: Database,
@@ -102,10 +103,15 @@ export class PiAgentGatewayWorker {
   async stop() {
     if (!this.loopPromise) return;
     this.controller?.abort();
+    this.idleController?.abort();
     await this.loopPromise;
     this.controller = null;
     this.loopPromise = null;
     this.dependencies.log.info(`Partners Gateway Ti worker '${this.options.workerId}' stopped`);
+  }
+
+  wake() {
+    this.idleController?.abort();
   }
 
   async runOnce(signal: AbortSignal): Promise<boolean> {
@@ -258,12 +264,26 @@ export class PiAgentGatewayWorker {
     while (!signal.aborted) {
       try {
         const processed = await this.runOnce(signal);
-        if (!processed && !await this.dependencies.wait(this.options.idlePollIntervalMs, signal)) return;
+        if (!processed && !await this.waitUntilNextPoll(signal)) return;
       } catch (error) {
         this.lastError = (error instanceof Error ? error.message : String(error)).slice(0, 8000);
         this.dependencies.log.error("Partners Gateway Ti worker iteration failed", error);
-        if (!await this.dependencies.wait(this.options.idlePollIntervalMs, signal)) return;
+        if (!await this.waitUntilNextPoll(signal)) return;
       }
+    }
+  }
+
+  private async waitUntilNextPoll(signal: AbortSignal): Promise<boolean> {
+    const idleController = new AbortController();
+    this.idleController = idleController;
+    const abortIdle = () => idleController.abort();
+    signal.addEventListener("abort", abortIdle, { once: true });
+    try {
+      await this.dependencies.wait(this.options.idlePollIntervalMs, idleController.signal);
+      return !signal.aborted;
+    } finally {
+      signal.removeEventListener("abort", abortIdle);
+      this.idleController = null;
     }
   }
 }
@@ -275,6 +295,15 @@ export function createPiAgentGatewayWorkerFromEnv(
 ) {
   if (!gatewayConfig.enabled) return null;
   const workerConfig = getPartnersGatewayWorkerConfig(env);
+  return createPiAgentGatewayWorker(db, gatewayConfig, workerConfig);
+}
+
+export function createPiAgentGatewayWorker(
+  db: Database,
+  gatewayConfig: PartnersGatewayConfig,
+  workerConfig: PartnersGatewayWorkerConfig,
+) {
+  if (!gatewayConfig.enabled) return null;
   return new PiAgentGatewayWorker(
     db,
     createPartnersGatewayClient(gatewayConfig),
@@ -294,20 +323,11 @@ export function createPiAgentGatewayWorkerFromEnv(
   );
 }
 
-let registeredRuntime: {
-  config: PartnersGatewayConfig;
-  worker: PiAgentGatewayWorker | null;
-} | null = null;
-
-export function registerPiAgentGatewayRuntime(
+export function getPiAgentGatewayWorkerStatus(
   config: PartnersGatewayConfig,
   worker: PiAgentGatewayWorker | null,
 ) {
-  registeredRuntime = { config, worker };
-}
-
-export function getPiAgentGatewayWorkerStatus() {
-  if (!registeredRuntime?.config.enabled || !registeredRuntime.worker) {
+  if (!config.enabled || !worker) {
     return {
       enabled: false,
       running: false,
@@ -320,15 +340,15 @@ export function getPiAgentGatewayWorkerStatus() {
       lastError: null,
     };
   }
-  return registeredRuntime.worker.getStatus();
+  return worker.getStatus();
 }
 
-export async function checkPiAgentGatewayHealth() {
-  if (!registeredRuntime?.config.enabled) {
+export async function checkPiAgentGatewayHealth(config: PartnersGatewayConfig) {
+  if (!config.enabled) {
     return { ok: false, enabled: false, error: "Partners Gateway is not configured" };
   }
   try {
-    const gateway = await createPartnersGatewayClient(registeredRuntime.config).health();
+    const gateway = await createPartnersGatewayClient(config).health();
     return { ok: true, enabled: true, gateway };
   } catch (error) {
     return {

@@ -2,9 +2,11 @@
 
 ## Supported Versions
 
-Security fixes are provided for the latest released version and the current
-default branch when practical. Older versions may require upgrading before a
-fix is available. No response or remediation service level is guaranteed.
+Security fixes target the current released minor line, the immediately
+preceding minor line, and the current default branch. Affected older lines
+require an upgrade. The project publishes an end-of-support notice before a
+minor line leaves this window. No response or remediation service level is
+guaranteed.
 
 ## Reporting a Vulnerability
 
@@ -16,6 +18,9 @@ is available. Otherwise, email
 Include the affected version or commit, reproduction steps, expected impact,
 and any suggested mitigation. Do not include real credentials or personal data.
 
-The maintainer will assess the report, coordinate a fix and disclosure when
-appropriate, and credit reporters who request recognition. Please allow a
-reasonable private remediation period before public disclosure.
+The release maintainer will acknowledge and triage the report privately,
+identify affected supported versions, prepare fixes under embargo, and
+coordinate advisory publication with the patched release. Public issue and
+pull request details remain limited until disclosure. Reporters may request
+credit or anonymity. Please allow a reasonable private remediation period
+before public disclosure.

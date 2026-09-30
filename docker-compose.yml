@@ -1,15 +1,15 @@
 services:
   migrate:
-    image: ghcr.io/limmytian/task-weaver-api@sha256:7d89b0bfe4adf251d7831fbed0b473fae631aca0befc862d06e07ebf58442359
-    platform: linux/arm64
+    image: ${TW_API_IMAGE:-ghcr.io/limmytian/task-weaver-api@sha256:7d89b0bfe4adf251d7831fbed0b473fae631aca0befc862d06e07ebf58442359}
+    platform: ${TW_IMAGE_PLATFORM:-linux/arm64}
     working_dir: /app
     command: ["sh", "-c", "./node_modules/.bin/tsx node_modules/@task-weaver/db/src/migrate.ts && ./node_modules/.bin/tsx node_modules/@task-weaver/db/src/setup-search.ts"]
     environment:
       DATABASE_URL: ${MIGRATION_DATABASE_URL:-${DATABASE_URL:?Configure an external PostgreSQL connection}}
 
   api:
-    image: ghcr.io/limmytian/task-weaver-api@sha256:7d89b0bfe4adf251d7831fbed0b473fae631aca0befc862d06e07ebf58442359
-    platform: linux/arm64
+    image: ${TW_API_IMAGE:-ghcr.io/limmytian/task-weaver-api@sha256:7d89b0bfe4adf251d7831fbed0b473fae631aca0befc862d06e07ebf58442359}
+    platform: ${TW_IMAGE_PLATFORM:-linux/arm64}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${API_PORT:-3001}:3001"
@@ -30,8 +30,8 @@ services:
       retries: 30
 
   web:
-    image: ghcr.io/limmytian/task-weaver-web@sha256:3d9dbbf08c73c888fd9d9f18b66ed7520113a2f698deab84bc5f4a34455d5e35
-    platform: linux/arm64
+    image: ${TW_WEB_IMAGE:-ghcr.io/limmytian/task-weaver-web@sha256:3d9dbbf08c73c888fd9d9f18b66ed7520113a2f698deab84bc5f4a34455d5e35}
+    platform: ${TW_IMAGE_PLATFORM:-linux/arm64}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${WEB_PORT:-3000}:3000"

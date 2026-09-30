@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { embeddingBaseUrlSchema, embeddingProviderConfigSchema, embeddingSecretReferenceSchema } from "../../schemas/embeddings";
+import { embeddingBaseUrlSchema, embeddingProviderConfigSchema, embeddingSecretReferenceSchema } from "@task-weaver/contracts";
 import { EmbeddingProviderError, resolveEmbeddingSecretReference } from "./index";
 
 test("embedding configuration accepts opaque references but rejects credential-bearing endpoints", () => {

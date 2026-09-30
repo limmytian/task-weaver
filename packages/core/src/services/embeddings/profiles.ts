@@ -7,14 +7,14 @@ import {
   embeddingGenerations,
   embeddingProfiles,
 } from "@task-weaver/db";
-import type { Actor } from "../../schemas/common";
+import type { Actor } from "@task-weaver/contracts";
 import {
   createEmbeddingProfileSchema,
   type CreateEmbeddingProfileInput,
   type UpdateEmbeddingProfileInput,
   updateEmbeddingProfileSchema,
-} from "../../schemas/embeddings";
-import { ConflictError, NotFoundError, ValidationError } from "../../errors";
+} from "@task-weaver/contracts";
+import { ConflictError, NotFoundError, ValidationError } from "@task-weaver/contracts";
 import {
   assertEmbeddingGenerationTransition,
   assertEmbeddingProfileTransition,

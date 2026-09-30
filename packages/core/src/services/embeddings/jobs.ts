@@ -20,8 +20,8 @@ import {
   embeddingJobs,
   embeddingProfiles,
 } from "@task-weaver/db";
-import type { Actor } from "../../schemas/common";
-import type { CreateEmbeddingJobInput } from "../../schemas/embeddings";
+import type { Actor } from "@task-weaver/contracts";
+import type { CreateEmbeddingJobInput } from "@task-weaver/contracts";
 import { EmbeddingProviderError, type EmbeddingProvider } from "./provider";
 import {
   hashDocumentEmbeddingContent,

@@ -1,6 +1,6 @@
 import { Command, Option } from 'commander'
 import { spawn } from 'node:child_process'
-import { buildPiAgentRunPrompt } from '@task-weaver/core'
+import { buildPiAgentRunPrompt } from '@task-weaver/partners-gateway'
 import { get, post, put } from '../client.js'
 import { printJson, printKv, printTable } from '../output.js'
 

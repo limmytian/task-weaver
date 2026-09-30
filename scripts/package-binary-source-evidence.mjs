@@ -102,6 +102,7 @@ for await (const chunk of createReadStream(target)) digest.update(chunk);
 const report = { schemaVersion: 1, archive: "corresponding-source-candidate.tar.gz", sha256: digest.digest("hex"),
   bytes: statSync(target).size, members: paths.length + 1 + (delivery ? delivery.files.length + 4 + (lock.rustRuntimeEvidence?.registryDependencyLock ? 2 : 0) : 0), sourceLockSha256: hash(bytes), deterministicMetadata: true,
   sourceOnlyRustVendor: Boolean(delivery), omittedNativePayloads: delivery?.omittedImportLibraries.length ?? 0,
-  distributionApproved: false, limitation: "Candidate source/notices sidecar; unresolved notice or delivery obligations still prevent publication." };
+  distributionApproved: false,
+  limitation: "Candidate source/notices sidecar; technical notice handling is complete, but owner review and explicit publication authorization remain required." };
 writeFileSync(resolve(root, "source-package.json"), json(report));
 console.log(json(report));

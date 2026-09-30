@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${TW_NAMESPACE}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: task-weaver-skill-data
+  namespace: ${TW_NAMESPACE}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-weaver-api
+  namespace: ${TW_NAMESPACE}
+spec:
+  selector:
+    app: task-weaver-api
+  ports:
+    - port: 3001
+      targetPort: 3001
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-weaver-web
+  namespace: ${TW_NAMESPACE}
+spec:
+  selector:
+    app: task-weaver-web
+  ports:
+    - port: 3000
+      targetPort: 3000

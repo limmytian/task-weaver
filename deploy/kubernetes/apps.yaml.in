@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-weaver-api
+  namespace: ${TW_NAMESPACE}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: task-weaver-api
+  template:
+    metadata:
+      labels:
+        app: task-weaver-api
+    spec:
+      containers:
+        - name: api
+          image: ${TW_API_IMAGE}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3001
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-database
+                  key: url
+            - name: NODE_ENV
+              value: production
+            - name: TW_DAEMON_MODE
+              value: polling
+            - name: SKILL_PACKAGE_STORAGE_DIR
+              value: /app/data/skill-packages
+          volumeMounts:
+            - name: skill-data
+              mountPath: /app/data
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      volumes:
+        - name: skill-data
+          persistentVolumeClaim:
+            claimName: task-weaver-skill-data
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-weaver-web
+  namespace: ${TW_NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: task-weaver-web
+  template:
+    metadata:
+      labels:
+        app: task-weaver-web
+    spec:
+      containers:
+        - name: web
+          image: ${TW_WEB_IMAGE}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-database
+                  key: url
+            - name: TW_API_URL
+              value: http://task-weaver-api:3001
+            - name: NODE_ENV
+              value: production
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10

@@ -1,36 +1,65 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Task Weaver Web
 
-## Getting Started
+The Task Weaver Web application is a Next.js App Router client for the public Task Weaver services. It resolves every request actor through the shared runtime ports and composes its navigation, settings, and extension pages from typed Task Weaver modules.
 
-First, run the development server:
+## Development
+
+From the repository root:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+pnpm --filter @task-weaver/web dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The default development URL is `http://localhost:3000`. A PostgreSQL connection string must be supplied through the normal deployment environment.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Identity and access
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The tRPC context delegates identity resolution to `IdentityPort`. The default implementation accepts the trusted `X-Actor-Id` and `X-Actor-Type` headers and otherwise resolves an anonymous human actor. Deployments can replace all runtime ports through `createWebRuntime()` or `configureWebRuntime()`.
 
-## Learn More
+Every tRPC procedure enforces the `core.web.access` permission and `core.web` entitlement on the server. Capability-based navigation filtering is presentation logic only; it does not replace server-side authorization.
 
-To learn more about Next.js, take a look at the following resources:
+## Web modules
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Use `defineTaskWeaverWebModule()` to provide typed Web contributions. A module can contribute:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- navigation entries, including an optional icon token and capability requirement;
+- settings entries with a route, title, description, and optional icon token;
+- extension pages with a title, optional description, and React component.
 
-## Deploy on Vercel
+Extension page routes must start with `/projects/extensions/`. The application owns one static App Router catch-all route at `/projects/extensions/[...slug]`, so modules do not write files into the public application or create routes dynamically at runtime. Modules and their page components must be supplied to `createWebRuntime()` as static build inputs. The default runtime imports only `coreWebModule`; host builds supply additional modules explicitly.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```tsx
+import { TASK_WEAVER_MODULE_API_VERSION } from "@task-weaver/module-sdk";
+import { defineTaskWeaverWebModule } from "./lib/web-module-registry";
+import { configureWebRuntime } from "./lib/web-runtime";
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+const exampleModule = defineTaskWeaverWebModule({
+  manifest: {
+    apiVersion: TASK_WEAVER_MODULE_API_VERSION,
+    id: "example.web",
+    name: "Example Web",
+    version: "1.0.0",
+    supportedCoreVersion: "^0.2.0",
+    capabilities: ["example.ui"],
+  },
+  web: {
+    navigation: [{
+      id: "example-navigation",
+      label: "Example",
+      href: "/projects/extensions/example",
+      requiredCapability: "example.ui",
+    }],
+    pages: [{
+      id: "example-page",
+      route: "/projects/extensions/example",
+      page: { title: "Example", component: ExamplePage },
+      requiredCapability: "example.ui",
+    }],
+  },
+});
+
+configureWebRuntime({ modules: [exampleModule], ports });
+```
+
+The host build is responsible for installing the runtime before it begins serving requests. Duplicate contribution IDs and page routes, unsupported Core versions, invalid descriptors, and routes outside the catch-all prefix fail during composition.

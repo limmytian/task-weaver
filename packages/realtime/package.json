@@ -1,7 +1,6 @@
 {
   "name": "@task-weaver/realtime",
-  "version": "0.0.1",
-  "private": true,
+  "version": "0.2.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -10,11 +9,12 @@
   "scripts": {
     "build": "tsc",
     "test": "tsx --test src/**/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "node -e \"throw new Error('Publish the verified CE release tarball, not the workspace package')\""
   },
   "dependencies": {
-    "postgres": "^3.4.0",
-    "zod": "^3.24.0"
+    "@task-weaver/contracts": "workspace:^",
+    "postgres": "^3.4.0"
   },
   "devDependencies": {
     "@types/node": "^25.3.5",

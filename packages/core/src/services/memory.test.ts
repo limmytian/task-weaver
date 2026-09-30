@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { memories } from '@task-weaver/db'
-import { searchMemorySchema } from '../schemas/memory.js'
+import { searchMemorySchema } from "@task-weaver/contracts"
 import { calculateSlidingRenewal, searchMemories } from './memory.js'
 
 type Row = Record<string, any>

@@ -9,7 +9,7 @@ import {
   requirements,
   requirementClaims,
 } from "@task-weaver/db";
-import { ConflictError, NotFoundError, ValidationError } from "../errors";
+import { ConflictError, NotFoundError, ValidationError } from "@task-weaver/contracts";
 import {
   claimRequirement,
   claimTask,
@@ -18,8 +18,8 @@ import {
 } from "./claims";
 import { updateTaskStatus } from "./tasks";
 import { DAEMON_QUEUE_REQUIREMENT_STATUSES } from "./daemon-state-machine";
-import { getDaemonConfig } from "../schemas/daemons";
-import type { Actor } from "../schemas/common";
+import { getDaemonConfig } from "./daemon-config";
+import type { Actor } from "@task-weaver/contracts";
 import type {
   DaemonRole,
   DaemonControlAction,
@@ -28,7 +28,7 @@ import type {
   RegisterDaemonInput,
   SchedulerEligibilityDiagnostics,
   SchedulerEligibilityReason,
-} from "../schemas/daemons";
+} from "@task-weaver/contracts";
 import { emit } from "@task-weaver/realtime";
 import { reconcileInterruptedWorker } from "./daemon-progress";
 import { matchDaemonTaskCapabilities } from "./daemon-capabilities";

@@ -8,7 +8,7 @@ import {
   scheduleRuns,
   tasks,
 } from "@task-weaver/db";
-import type { Actor } from "../schemas/common";
+import type { Actor } from "@task-weaver/contracts";
 import type {
   AcquirePiAgentRunInput,
   CompletePiAgentRunInput,
@@ -19,8 +19,8 @@ import type {
   SetDefaultPiModelInput,
   UpsertPiAgentPolicyInput,
   UpsertPiModelConfigInput,
-} from "../schemas/pi-agent";
-import { NotFoundError, ValidationError } from "../errors";
+} from "@task-weaver/contracts";
+import { NotFoundError, ValidationError } from "@task-weaver/contracts";
 
 type PiModelConfig = typeof piAgentModelConfigs.$inferSelect;
 

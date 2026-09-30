@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { trpc } from "@/trpc/client";
-import type { TaskStatus, TaskPriority } from "@task-weaver/core";
+import type { TaskStatus, TaskPriority } from "@task-weaver/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {

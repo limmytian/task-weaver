@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { useWebIdentity } from "@/components/web-identity-provider";
 import {
   Select,
   SelectContent,
@@ -54,7 +55,7 @@ const defaultForm: FormState = {
   name: "",
   scope: "global",
   projectId: "",
-  personalOwnerId: "web-user",
+  personalOwnerId: "",
   personalOwnerType: "human",
   baseUrl: "https://api.openai.com/v1",
   model: "text-embedding-3-small",
@@ -69,8 +70,14 @@ const defaultForm: FormState = {
   retentionGenerations: "2",
 };
 
-function formFor(profile?: EmbeddingProfile | null): FormState {
-  if (!profile) return defaultForm;
+function formFor(profile: EmbeddingProfile | null | undefined, actor: { id: string; type: OwnerType }): FormState {
+  if (!profile) {
+    return {
+      ...defaultForm,
+      personalOwnerId: actor.id,
+      personalOwnerType: actor.type,
+    };
+  }
   return {
     name: profile.name,
     scope: profile.scope,
@@ -152,8 +159,9 @@ export function EmbeddingProfileDialog({
   profile?: EmbeddingProfile | null;
   onSaved: (profileId: string) => void;
 }) {
+  const actor = useWebIdentity();
   const editing = Boolean(profile);
-  const initialForm = useMemo(() => formFor(profile), [profile]);
+  const initialForm = useMemo(() => formFor(profile, actor), [actor, profile]);
   const [form, setForm] = useState<FormState>(initialForm);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitError, setSubmitError] = useState<string | null>(null);

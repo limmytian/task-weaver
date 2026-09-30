@@ -34,12 +34,21 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.1
         version: 1.30.1(zod@3.25.76)
+      '@task-weaver/contracts':
+        specifier: workspace:^
+        version: link:../../packages/contracts
       '@task-weaver/core':
         specifier: workspace:*
         version: link:../../packages/core
       '@task-weaver/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@task-weaver/module-sdk':
+        specifier: workspace:^
+        version: link:../../packages/module-sdk
+      '@task-weaver/partners-gateway':
+        specifier: workspace:^
+        version: link:../../packages/partners-gateway
       '@task-weaver/realtime':
         specifier: workspace:*
         version: link:../../packages/realtime
@@ -77,9 +86,15 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.1
         version: 1.30.1(zod@3.25.76)
+      '@task-weaver/contracts':
+        specifier: workspace:^
+        version: link:../../packages/contracts
       '@task-weaver/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@task-weaver/partners-gateway':
+        specifier: workspace:^
+        version: link:../../packages/partners-gateway
       commander:
         specifier: ^12.0.0
         version: 12.1.0
@@ -126,12 +141,18 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.90.21
         version: 5.90.21(react@19.2.3)
+      '@task-weaver/contracts':
+        specifier: workspace:^
+        version: link:../../packages/contracts
       '@task-weaver/core':
         specifier: workspace:*
         version: link:../../packages/core
       '@task-weaver/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@task-weaver/module-sdk':
+        specifier: workspace:^
+        version: link:../../packages/module-sdk
       '@task-weaver/realtime':
         specifier: workspace:*
         version: link:../../packages/realtime
@@ -223,6 +244,9 @@ importers:
       tailwindcss:
         specifier: ^4
         version: 4.2.1
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.15
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
@@ -230,11 +254,33 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  packages/contracts:
+    dependencies:
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^25.3.3
+        version: 25.3.5
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.15
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+
   packages/core:
     dependencies:
+      '@task-weaver/contracts':
+        specifier: workspace:^
+        version: link:../contracts
       '@task-weaver/db':
         specifier: workspace:*
         version: link:../db
+      '@task-weaver/module-sdk':
+        specifier: workspace:^
+        version: link:../module-sdk
       '@task-weaver/realtime':
         specifier: workspace:^
         version: link:../realtime
@@ -254,22 +300,34 @@ importers:
 
   packages/db:
     dependencies:
+      '@task-weaver/module-sdk':
+        specifier: workspace:^
+        version: link:../module-sdk
       drizzle-orm:
         specifier: ^0.45.3
         version: 0.45.3(gel@2.2.0)(postgres@3.4.8)
       postgres:
         specifier: ^3.4.0
         version: 3.4.8
+      semver:
+        specifier: ^7.7.3
+        version: 7.8.5
     devDependencies:
       '@types/node':
         specifier: ^25.3.3
         version: 25.3.3
+      '@types/semver':
+        specifier: ^7.7.1
+        version: 7.8.0
       '@types/turndown':
         specifier: ^5.0.6
         version: 5.0.6
       drizzle-kit:
         specifier: ^0.31.11
         version: 0.31.11
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.15
       turndown:
         specifier: ^7.2.2
         version: 7.2.2
@@ -277,14 +335,70 @@ importers:
         specifier: ^5.8.0
         version: 5.9.3
 
-  packages/realtime:
+  packages/module-sdk:
     dependencies:
-      postgres:
-        specifier: ^3.4.0
-        version: 3.4.8
+      '@task-weaver/contracts':
+        specifier: workspace:^
+        version: link:../contracts
+      semver:
+        specifier: ^7.7.3
+        version: 7.8.5
       zod:
         specifier: ^3.24.0
         version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^25.3.3
+        version: 25.3.5
+      '@types/semver':
+        specifier: ^7.7.1
+        version: 7.8.0
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.15
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+
+  packages/partners-gateway:
+    dependencies:
+      '@task-weaver/contracts':
+        specifier: workspace:^
+        version: link:../contracts
+      '@task-weaver/core':
+        specifier: workspace:*
+        version: link:../core
+      '@task-weaver/db':
+        specifier: workspace:*
+        version: link:../db
+      '@task-weaver/module-sdk':
+        specifier: workspace:^
+        version: link:../module-sdk
+      hono:
+        specifier: ^4.13.9
+        version: 4.13.9
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^25.3.3
+        version: 25.3.5
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.15
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+
+  packages/realtime:
+    dependencies:
+      '@task-weaver/contracts':
+        specifier: workspace:^
+        version: link:../contracts
+      postgres:
+        specifier: ^3.4.0
+        version: 3.4.8
     devDependencies:
       '@types/node':
         specifier: ^25.3.5
@@ -2728,6 +2842,9 @@ packages:
 
   '@types/react@19.2.14':
     resolution: {integrity: sha512-ilcTH/UniCkMdtexkoCN0bI7pMcJDvmQFPvuPvmEaYA/NSfFTAgdUSLAoVjaRJm7+6PvcM+q1zYOwS4wTYMF9w==}
+
+  '@types/semver@7.8.0':
+    resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
 
   '@types/statuses@2.0.6':
     resolution: {integrity: sha512-xMAgYwceFhRA2zY+XbEA7mxYbA093wdiW8Vu6gZPGWy9cmOyU9XesH1tNcEWsKFd5Vzrqx5T3D38PWx1FIIXkA==}
@@ -8399,6 +8516,8 @@ snapshots:
   '@types/react@19.2.14':
     dependencies:
       csstype: 3.2.3
+
+  '@types/semver@7.8.0': {}
 
   '@types/statuses@2.0.6': {}
 

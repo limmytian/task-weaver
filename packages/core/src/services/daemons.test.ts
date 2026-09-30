@@ -17,13 +17,13 @@ import {
   tasks,
   taskStatusLog,
 } from "@task-weaver/db";
-import { ValidationError } from "../errors";
+import { ValidationError } from "@task-weaver/contracts";
 import {
   daemonProgressQuerySchema,
   daemonTimelineQuerySchema,
   registerDaemonSchema,
   reportDaemonProgressSchema,
-} from "../schemas/daemons";
+} from "@task-weaver/contracts";
 import {
   claimRequirement,
   heartbeatRequirementClaim,

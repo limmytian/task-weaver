@@ -2,7 +2,7 @@ import type {
   EmbeddingGenerationStatus,
   EmbeddingJobStatus,
   EmbeddingProfileStatus,
-} from "../../schemas/embeddings";
+} from "@task-weaver/contracts";
 
 const PROFILE_TRANSITIONS: Record<EmbeddingProfileStatus, readonly EmbeddingProfileStatus[]> = {
   disabled: ["enabled", "failed"],

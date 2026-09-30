@@ -5,7 +5,7 @@ import {
   requirements,
   type Database,
 } from "@task-weaver/db";
-import type { DaemonMetricsQuery } from "../schemas/daemons";
+import type { DaemonMetricsQuery } from "@task-weaver/contracts";
 import { listDaemonControlPlaneQueues } from "./daemons";
 
 const STALE_AFTER_MS = 30_000;

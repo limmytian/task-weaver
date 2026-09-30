@@ -15,3 +15,16 @@ export function inspectLocalImage(image, platform, execute = spawnSync) {
   assert.match(details.Id, /^sha256:[a-f0-9]{64}$/);
   return details;
 }
+
+export function redactScannerHostPaths(report) {
+  const redacted = structuredClone(report);
+  const databaseConfiguration = redacted.descriptor?.configuration?.db;
+  if (databaseConfiguration && typeof databaseConfiguration["cache-dir"] === "string") {
+    databaseConfiguration["cache-dir"] = "<local-cache-redacted>";
+  }
+  const databaseStatus = redacted.descriptor?.db?.status;
+  if (databaseStatus && typeof databaseStatus.path === "string") {
+    databaseStatus.path = "<local-cache-redacted>";
+  }
+  return redacted;
+}

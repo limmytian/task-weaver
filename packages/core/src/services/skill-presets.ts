@@ -8,8 +8,8 @@ import {
   skillPackages,
   skillPackageVersions,
 } from "@task-weaver/db";
-import type { Actor } from "../schemas/common";
-import type { RegisterSkillPackageInput } from "../schemas/skill-packages";
+import type { Actor } from "@task-weaver/contracts";
+import type { RegisterSkillPackageInput } from "@task-weaver/contracts";
 import { registerPackage, updatePackageMetadata, updatePackageVersionStatus } from "./skill-packages";
 import type { SkillPackageStorageAdapter } from "./skill-package-storage";
 import { sha256Hex } from "./skill-package-storage";

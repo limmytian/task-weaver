@@ -89,9 +89,11 @@ checkout instructions above.
 
 ## Documentation and community
 
-- Architecture: [English](docs/design.md) · [Simplified Chinese](docs/design.zh-CN.md)
+- [Architecture](docs/design.md)
 - [Deployment and rollback](docs/deployment.md)
 - [Release gates](docs/release-gates.md)
+- [CE packages](docs/ce-packages.md) and [release operations](docs/release-operations.md)
+- [Install, upgrade, and recovery](docs/ce-upgrades.md)
 - [REST API reference](skills/task-weaver/rest-api-reference.md)
 - [Agent workflows](skills/task-weaver/workflows.md)
 - [Daemon pipeline runbook](docs/daemon-pipeline-runbook.md)

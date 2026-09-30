@@ -9,10 +9,13 @@ Use a clean checkout with the pinned Node.js and pnpm versions:
 
 ```bash
 pnpm install --frozen-lockfile
+pnpm check:module-boundaries
 pnpm release:verify
 ```
 
-The command writes deterministic reports to `release-artifacts/` and checks:
+The module boundary command checks package imports, package exports, and static
+dependency direction. The release verification command writes deterministic
+reports to `release-artifacts/` and checks:
 
 - package license metadata and reviewed license policy exceptions;
 - a CycloneDX JSON software bill of materials;

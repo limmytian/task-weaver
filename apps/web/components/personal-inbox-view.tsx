@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { CalendarDays, CheckCircle2, Clock, Inbox, MessageSquareText, Plus, Search } from "lucide-react";
 import { trpc } from "@/trpc/client";
-import type { TaskPriority, TaskStatus } from "@task-weaver/core";
+import type { TaskPriority, TaskStatus } from "@task-weaver/contracts";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";

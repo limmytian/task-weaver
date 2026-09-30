@@ -10,7 +10,7 @@ import {
   taskRepositories,
   tasks,
 } from "@task-weaver/db";
-import type { Actor } from "../schemas/common";
+import type { Actor } from "@task-weaver/contracts";
 import type {
   AddRequirementRepositoryInput,
   AddTaskRepositoryInput,
@@ -22,8 +22,8 @@ import type {
   SyncRequirementRepositoryForgeStateInput,
   UpdateRepositoryInput,
   UpdateRequirementRepositoryDeliveryInput,
-} from "../schemas/repositories";
-import { ConflictError, NotFoundError, ValidationError } from "../errors";
+} from "@task-weaver/contracts";
+import { ConflictError, NotFoundError, ValidationError } from "@task-weaver/contracts";
 import { assertRequirementLease } from "./claims";
 import { emit } from "@task-weaver/realtime";
 import {

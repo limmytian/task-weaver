@@ -4,7 +4,7 @@ import { use, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import type { ExecutionSliceStatus, ModelTier } from "@task-weaver/core";
+import type { ExecutionSliceStatus, ModelTier } from "@task-weaver/contracts";
 import {
   DndContext,
   DragOverlay,

@@ -1,7 +1,7 @@
 import { eq, and, gt, isNull, or } from "drizzle-orm";
 import { type Database, apiKeys } from "@task-weaver/db";
 import { createHash, randomBytes } from "node:crypto";
-import { NotFoundError } from "../errors";
+import { NotFoundError } from "@task-weaver/contracts";
 
 function hashKey(key: string): string {
   return createHash("sha256").update(key).digest("hex");

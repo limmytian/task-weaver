@@ -15,7 +15,7 @@ import {
   repositories,
 } from "@task-weaver/db";
 import { emit } from "@task-weaver/realtime";
-import type { Actor } from "../schemas/common";
+import type { Actor } from "@task-weaver/contracts";
 import type {
   CreateTaskInput,
   UpdateTaskInput,
@@ -24,11 +24,11 @@ import type {
   BatchCreateTasksInput,
   BatchUpdateTasksInput,
   CreatePersonalTaskInput,
-} from "../schemas/tasks";
-import { NotFoundError, ValidationError, ConflictError } from "../errors";
+} from "@task-weaver/contracts";
+import { NotFoundError, ValidationError, ConflictError } from "@task-weaver/contracts";
 import { checkBlockingDependencies } from "./claims";
 import { assertRequirementLease } from "./claims";
-import type { RequirementLeaseFence } from "../schemas/common";
+import type { RequirementLeaseFence } from "@task-weaver/contracts";
 import { requirementStatusAfterTaskCreation } from "./daemon-state-machine";
 import { updateRequirement } from "./requirements";
 import { recordTaskStatusProgress } from "./daemon-progress";

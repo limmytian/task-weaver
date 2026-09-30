@@ -1,0 +1,89 @@
+name: Prepare CE binary candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Reviewed public source commit or branch
+        required: true
+        type: string
+      version:
+        description: Version already declared in the reviewed source
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ce-binary-candidate-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04-arm
+    environment: ce-candidate
+    timeout-minutes: 180
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      TURBO_TELEMETRY_DISABLED: "1"
+      TASK_WEAVER_AUDIT_REGISTRY: https://registry.npmjs.org
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: docker/setup-buildx-action@v3
+      - uses: dtolnay/rust-toolchain@1.96.0
+      - uses: anchore/sbom-action/download-syft@v0
+        id: syft
+      - uses: anchore/scan-action/download-grype@v7.4.0
+        id: grype
+      - name: Verify required host tools
+        env:
+          SYFT_COMMAND: ${{ steps.syft.outputs.cmd }}
+          GRYPE_COMMAND: ${{ steps.grype.outputs.cmd }}
+        run: |
+          printf '%s\n' "$(dirname "$SYFT_COMMAND")" "$(dirname "$GRYPE_COMMAND")" >> "$GITHUB_PATH"
+          cargo --version
+          curl --version
+          tar --version
+      - name: Verify source
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm check:ce-version
+          pnpm check:module-boundaries
+          pnpm build
+          pnpm typecheck
+          pnpm test
+          pnpm test:release-gates
+          pnpm release:verify
+      - name: Build and verify the paired binary candidate
+        env:
+          VERSION: ${{ inputs.version }}
+        run: node scripts/prepare-ce-binary-candidate.mjs "$VERSION"
+      - name: Preserve complete passing candidate for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: ce-binary-candidate
+          path: release-artifacts/ce-binary-candidate/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Preserve failed gate diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ce-binary-candidate-diagnostics
+          path: |
+            release-artifacts/binary-licenses/
+            release-artifacts/images/
+            release-artifacts/native-replacement/verification.json
+            release-artifacts/deployment-verification.json
+          if-no-files-found: warn

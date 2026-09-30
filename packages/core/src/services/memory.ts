@@ -1,13 +1,13 @@
 import { and, eq, isNull, or, sql, desc } from "drizzle-orm";
 import { type Database, memories } from "@task-weaver/db";
-import type { Actor } from "../schemas/common";
+import type { Actor } from "@task-weaver/contracts";
 import type {
   RecordMemoryInput,
   UpdateMemoryInput,
   SearchMemoryInput,
   ListMemoriesInput,
-} from "../schemas/memory";
-import { NotFoundError } from "../errors";
+} from "@task-weaver/contracts";
+import { NotFoundError } from "@task-weaver/contracts";
 
 // -- Helpers --
 

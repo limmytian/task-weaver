@@ -25,9 +25,12 @@ test("public deployment uses only the published digest-pinned ARM64 application 
   ];
   assert.equal(compose.split(expectedImages[0]).length - 1, 2);
   assert.equal(compose.split(expectedImages[1]).length - 1, 1);
-  assert.equal((compose.match(/platform: linux\/arm64/g) ?? []).length, 3);
-  for (const match of compose.matchAll(/^\s+image:\s+(\S+)/gm)) {
-    assert.ok(expectedImages.includes(match[1]), `Unexpected public image: ${match[1]}`);
+  assert.equal((compose.match(/platform: \$\{TW_IMAGE_PLATFORM:-linux\/arm64\}/g) ?? []).length, 3);
+  const configuredImages = [...compose.matchAll(/^\s+image:\s+\$\{TW_(API|WEB)_IMAGE:-([^}]+)\}/gm)];
+  assert.equal(configuredImages.length, 3);
+  for (const match of configuredImages) {
+    const expected = match[1] === "API" ? expectedImages[0] : expectedImages[1];
+    assert.equal(match[2], expected);
   }
   const policy = JSON.parse(read(`${source}.release/distribution.json`));
   assert.equal(policy.sourceOnly, false);

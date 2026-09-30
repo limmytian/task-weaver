@@ -1,0 +1,42 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+
+const [version] = process.argv.slice(2);
+if (!version) throw new Error("Usage: node scripts/prepare-ce-binary-candidate.mjs <version>");
+assert.ok(existsSync("LICENSE") && !existsSync("open-source.manifest.json"), "Use an independent verified public checkout");
+assert.equal(JSON.parse(readFileSync("packages/contracts/package.json")).version, version);
+const api = "task-weaver-api:ce-candidate";
+const web = "task-weaver-web:ce-candidate";
+const run = (command, args) => execFileSync(command, args, { stdio: "inherit" });
+const script = (name, ...args) => run(process.execPath, [`scripts/${name}.mjs`, ...args]);
+for (const [app, image] of [["api", api], ["web", web]]) {
+  run("docker", ["buildx", "build", "--platform", "linux/arm64", "--load", "--file", `apps/${app}/Dockerfile`, "--tag", image, "."]);
+}
+script("collect-image-license-evidence", "--platform=linux/arm64", api, web);
+const root = "release-artifacts/binary-sources";
+script("prepare-binary-sources", "release-artifacts/binary-licenses");
+script("assemble-binary-sources", `${root}/source-plan.json`, "--acquire");
+script("vendor-binary-rust-sources", `${root}/source-lock.json`);
+script("assemble-binary-sources", `${root}/rust-source-plan.json`);
+script("verify-librsvg-lock", `${root}/source-lock.json`);
+script("extract-binary-licenses", `${root}/verified-source-lock.json`);
+script("supplement-binary-license-plan", `${root}/verified-source-lock.json`);
+script("assemble-binary-sources", `${root}/supplemental-source-plan.json`, "--acquire");
+script("extract-binary-licenses", `${root}/source-lock.json`);
+script("add-rust-runtime-inputs", `${root}/source-lock.json`, "release-artifacts/binary-licenses");
+script("assemble-binary-sources", `${root}/rust-runtime-source-plan.json`, "--acquire");
+script("vendor-binary-rust-sources", `${root}/source-lock.json`, "--runtime-dependencies");
+script("assemble-binary-sources", `${root}/rust-runtime-dependencies-source-plan.json`);
+script("verify-librsvg-lock", `${root}/source-lock.json`);
+script("extract-binary-licenses", `${root}/verified-source-lock.json`);
+script("assemble-runtime-notices", `${root}/verified-source-lock.json`);
+assert.ok(readFileSync(`${root}/runtime-source-NOTICES.txt`).equals(readFileSync("THIRD_PARTY_LICENSES/runtime-source-NOTICES.txt")), "Acquired source notices differ from the reviewed notices delivered in the images");
+script("verify-native-replacement", web, "linux/arm64");
+script("verify-binary-source-evidence", `${root}/source-lock.json`, "release-artifacts/binary-licenses", "release-artifacts/native-replacement/verification.json");
+script("package-binary-source-evidence", `${root}/source-lock.json`);
+for (const image of [api, web]) script("verify-runtime-layers", image, "linux/arm64");
+run("grype", ["db", "update"]);
+script("inspect-release-images", "--platform=linux/arm64", api, web);
+script("verify-ce-image-deployment", api, web);
+script("package-ce-binary-candidate", version, api, web);

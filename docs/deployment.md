@@ -7,6 +7,10 @@ Every image reference is pinned to an immutable OCI digest and declares
 database image. Workspace package names and versions do not imply npm
 publication.
 
+For a verified newer release, set `TW_API_IMAGE` and `TW_WEB_IMAGE` together to
+its OCI digest references. See [CE Install, Upgrade, and Recovery](ce-upgrades.md)
+for the Kubernetes manifests, backup rehearsal, and rollback procedure.
+
 ## Database compatibility
 
 Provide a dedicated PostgreSQL database reachable from the Compose network. The

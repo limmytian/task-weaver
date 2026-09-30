@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ValidationError } from "../errors";
+import { ValidationError } from "@task-weaver/contracts";
 import { assertExecutionSliceCanAdvance } from "./execution-slice-policy";
 
 function policyDb(slice: Record<string, unknown>, earlierSlices: Record<string, unknown>[]) {

@@ -8,7 +8,7 @@ import {
   tasks,
   requirements,
 } from "@task-weaver/db";
-import { NotFoundError } from "../errors";
+import { NotFoundError } from "@task-weaver/contracts";
 
 interface RecommendationItem {
   id: string;

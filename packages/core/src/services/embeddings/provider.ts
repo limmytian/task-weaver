@@ -1,4 +1,4 @@
-import type { EmbeddingProviderConfig } from "../../schemas/embeddings";
+import type { EmbeddingProviderConfig } from "@task-weaver/contracts";
 
 export type EmbeddingProviderErrorCode =
   | "invalid_config"

@@ -1,9 +1,8 @@
 import { eq, and, desc } from "drizzle-orm";
 import { type Database, webhooks, webhookDeliveries } from "@task-weaver/db";
-import { type RealtimeEvent } from "@task-weaver/realtime";
 import { createHmac, randomBytes } from "crypto";
-import { NotFoundError } from "../errors";
-import type { CreateWebhookInput, UpdateWebhookInput } from "../schemas/webhooks";
+import { NotFoundError } from "@task-weaver/contracts";
+import type { CreateWebhookInput, RealtimeEvent, UpdateWebhookInput } from "@task-weaver/contracts";
 
 type Actor = { id: string; type: "human" | "agent" };
 

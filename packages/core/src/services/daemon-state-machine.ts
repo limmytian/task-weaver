@@ -1,5 +1,5 @@
-import { ValidationError } from "../errors";
-import { daemonOutcomeCodeSchema, daemonOutcomeSchema } from "../schemas/daemon-state";
+import { ValidationError } from "@task-weaver/contracts";
+import { daemonOutcomeCodeSchema, daemonOutcomeSchema } from "@task-weaver/contracts";
 import type {
   DaemonFollowUpPolicy,
   DaemonOutcome,
@@ -7,11 +7,11 @@ import type {
   DaemonPhase,
   DaemonQueueOwner,
   DaemonRetryPolicy,
-} from "../schemas/daemon-state";
-import type { RequirementStatus } from "../schemas/requirements";
-import type { RepositoryDeliveryOperation, RepositoryDeliveryStatus } from "../schemas/repositories";
-import type { TaskStatus } from "../schemas/tasks";
-import type { DaemonRole } from "../schemas/daemons";
+} from "@task-weaver/contracts";
+import type { RequirementStatus } from "@task-weaver/contracts";
+import type { RepositoryDeliveryOperation, RepositoryDeliveryStatus } from "@task-weaver/contracts";
+import type { TaskStatus } from "@task-weaver/contracts";
+import type { DaemonRole } from "@task-weaver/contracts";
 
 export interface RequirementStatePolicy {
   phase: DaemonPhase;

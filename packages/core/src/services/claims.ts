@@ -10,13 +10,13 @@ import {
   activityLog,
 } from "@task-weaver/db";
 import { emit } from "@task-weaver/realtime";
-import type { Actor, RequirementLeaseFence } from "../schemas/common";
-import { NotFoundError, ValidationError } from "../errors";
+import type { Actor, RequirementLeaseFence } from "@task-weaver/contracts";
+import { NotFoundError, ValidationError } from "@task-weaver/contracts";
 import {
   assertRequirementStatusTransition,
   requirementStatePolicy,
 } from "./daemon-state-machine";
-import type { RequirementStatus } from "../schemas/requirements";
+import type { RequirementStatus } from "@task-weaver/contracts";
 
 const DEFAULT_DURATION_MINUTES = 30;
 

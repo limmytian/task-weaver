@@ -1,0 +1,25 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: task-weaver-migrate-${TW_RELEASE_NAME}
+  namespace: ${TW_NAMESPACE}
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: ${TW_API_IMAGE}
+          imagePullPolicy: IfNotPresent
+          workingDir: /app
+          command:
+            - sh
+            - -c
+            - ./node_modules/.bin/tsx node_modules/@task-weaver/db/src/migrate.ts && ./node_modules/.bin/tsx node_modules/@task-weaver/db/src/setup-search.ts
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-database
+                  key: url

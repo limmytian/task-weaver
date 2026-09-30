@@ -16,8 +16,8 @@ import {
   schedules,
   tasks,
 } from "@task-weaver/db";
-import { NotFoundError, ValidationError } from "../errors";
-import type { Actor } from "../schemas/common";
+import { NotFoundError, ValidationError } from "@task-weaver/contracts";
+import type { Actor } from "@task-weaver/contracts";
 import type {
   BuildAssistantContextInput,
   AssistantActionProposal,
@@ -26,8 +26,8 @@ import type {
   CreateAssistantMessageInput,
   SendAssistantMessageInput,
   UpdateAssistantActionStatusInput,
-} from "../schemas/assistant";
-import type { TaskStatus } from "../schemas/tasks";
+} from "@task-weaver/contracts";
+import type { TaskStatus } from "@task-weaver/contracts";
 import { createDocument } from "./documents";
 import { createRun, resolveModel } from "./pi-agent";
 import { createSchedule, updateSchedule } from "./schedules";

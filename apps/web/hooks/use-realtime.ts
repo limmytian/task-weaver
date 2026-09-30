@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { acceptRealtimeSequence } from "@task-weaver/realtime/sequence";
+import { acceptRealtimeSequence } from "@task-weaver/contracts/events";
 import { trpc } from "@/trpc/client";
 
 type ConnectionState = "connecting" | "live" | "reconnecting" | "stale";

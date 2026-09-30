@@ -1,12 +1,12 @@
 import { and, eq, or, sql, inArray } from "drizzle-orm";
 import { type Database, mcpServers, mcpTools, mcpToolCalls } from "@task-weaver/db";
-import type { Actor } from "../schemas/common";
+import type { Actor } from "@task-weaver/contracts";
 import type {
   RegisterMcpServerInput,
   UpdateMcpServerInput,
   SearchMcpToolsInput,
-} from "../schemas/mcp";
-import { NotFoundError, ConflictError } from "../errors";
+} from "@task-weaver/contracts";
+import { NotFoundError, ConflictError } from "@task-weaver/contracts";
 
 export interface McpPoolClient {
   listTools(): Promise<{ tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }> }>;

@@ -12,7 +12,7 @@ import {
   embeddingGenerations,
   embeddingProfiles,
 } from "@task-weaver/db";
-import type { Actor } from "../schemas/common";
+import type { Actor } from "@task-weaver/contracts";
 import type {
   CreateDocumentInput,
   UpdateDocumentInput,
@@ -21,9 +21,9 @@ import type {
   ListDocumentVersionsInput,
   CompareDocumentVersionsInput,
   RevertDocumentInput,
-} from "../schemas/documents";
+} from "@task-weaver/contracts";
 import { emit } from "@task-weaver/realtime";
-import { NotFoundError } from "../errors";
+import { NotFoundError } from "@task-weaver/contracts";
 import {
   profileDocumentsCondition,
   reconcileDeletedDocumentEmbedding,
@@ -88,7 +88,7 @@ export function parseWikiLinks(content: string): ParsedLink[] {
 
 // -- Document type inference --
 
-import type { DocType } from "../schemas/documents";
+import type { DocType } from "@task-weaver/contracts";
 
 const DOC_TYPE_RULES: { type: DocType; titlePatterns: RegExp[]; contentPatterns: RegExp[]; weight: number }[] = [
   {

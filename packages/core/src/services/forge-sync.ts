@@ -3,7 +3,7 @@ import type {
   RepositoryDeliveryStatus,
   RepositoryMergeStatus,
   RepositoryReviewStatus,
-} from '../schemas/repositories'
+} from "@task-weaver/contracts"
 
 export interface ForgeSyncTransition {
   deliveryStatus: RepositoryDeliveryStatus

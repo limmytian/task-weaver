@@ -1,0 +1,28 @@
+{
+  "name": "@task-weaver/contracts",
+  "version": "0.2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schemas": "./src/schemas/index.ts",
+    "./schemas/*": "./src/schemas/*.ts",
+    "./types": "./src/types/index.ts",
+    "./errors": "./src/errors.ts",
+    "./events": "./src/events.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsx --test src/*.test.ts src/**/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "node -e \"throw new Error('Publish the verified CE release tarball, not the workspace package')\""
+  },
+  "dependencies": {
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.3",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  },
+  "license": "Apache-2.0"
+}

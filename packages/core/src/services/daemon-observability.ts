@@ -16,7 +16,7 @@ import type {
   ObservabilityNextAction,
   ObservabilityForecastEntity,
   ObservabilityLiveness,
-} from "../schemas/observability";
+} from "@task-weaver/contracts";
 import { listDaemonControlPlaneQueues } from "./daemons";
 
 const STALE_AFTER_MS = 30_000;

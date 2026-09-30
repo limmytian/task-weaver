@@ -1,0 +1,30 @@
+{
+  "name": "@task-weaver/partners-gateway",
+  "version": "0.2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./module": "./src/module.ts",
+    "./worker": "./src/worker.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsx --test src/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "node -e \"throw new Error('Publish the verified CE release tarball, not the workspace package')\""
+  },
+  "dependencies": {
+    "@task-weaver/contracts": "workspace:^",
+    "@task-weaver/core": "workspace:*",
+    "@task-weaver/db": "workspace:*",
+    "@task-weaver/module-sdk": "workspace:^",
+    "hono": "^4.13.9",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.3",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  },
+  "license": "Apache-2.0"
+}

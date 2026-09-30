@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import test from "node:test";
 import { alpineRemoteSources, assertChecksums, expandVersion, hash, publicUrl, safePath } from "./binary-source-lib.mjs";
-import { inspectLocalImage } from "./image-inspection-lib.mjs";
+import { inspectLocalImage, redactScannerHostPaths } from "./image-inspection-lib.mjs";
 
 test("source paths cannot escape the bundle or introduce shell options", () => {
   for (const path of ["../secret", "/etc/passwd", "-option", "a/../../b", "a//b", "a/./b", "a\\b", "a b"]) assert.throws(() => safePath(path));
@@ -26,6 +26,16 @@ test("platform inspection fallback validates the actual local image CPU", () => 
   assert.equal(inspectLocalImage("fixture", "linux/arm64", execute).Architecture, "arm64");
   assert.equal(calls, 2);
   assert.throws(() => inspectLocalImage("fixture", "linux/arm64", () => result("amd64")));
+});
+
+test("scanner reports do not retain host cache paths", () => {
+  const report = { descriptor: { configuration: { db: { "cache-dir": "/Users/example/cache" } },
+    db: { status: { path: "/Users/example/cache/vulnerability.db", built: "2026-09-28" } } }, matches: [] };
+  const redacted = redactScannerHostPaths(report);
+  assert.equal(redacted.descriptor.configuration.db["cache-dir"], "<local-cache-redacted>");
+  assert.equal(redacted.descriptor.db.status.path, "<local-cache-redacted>");
+  assert.equal(redacted.descriptor.db.status.built, "2026-09-28");
+  assert.equal(report.descriptor.db.status.path, "/Users/example/cache/vulnerability.db", "Input must not be mutated");
 });
 
 test("native version URLs expand only supported literals, never execute shell", () => {
@@ -93,6 +103,10 @@ test("binary evidence verification fails on source, image, or license-text drift
     assert.equal(pack().status, 0);
     const archive = join(root, "corresponding-source-candidate.tar.gz");
     const first = hash(readFileSync(archive));
+    const packageReport = JSON.parse(readFileSync(join(root, "source-package.json")));
+    assert.equal(packageReport.distributionApproved, false);
+    assert.match(packageReport.limitation, /owner review and explicit publication authorization/);
+    assert.doesNotMatch(packageReport.limitation, /unresolved notice/);
     assert.equal(pack().status, 0);
     assert.equal(hash(readFileSync(archive)), first, "Repeated packaging must have identical bytes");
     const extracted = spawnSync("tar", ["-xOf", archive, "--", "source"], { encoding: "utf8" });

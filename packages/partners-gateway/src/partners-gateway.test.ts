@@ -11,7 +11,7 @@ import {
   normalizeGatewayArtifactReferences,
   parseGatewaySseEvent,
   PartnersGatewayError,
-} from "./partners-gateway";
+} from "./index";
 
 test("reads Partners gateway config from environment", () => {
   const config = getPartnersGatewayConfig({

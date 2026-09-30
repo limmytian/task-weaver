@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { type Database, projects } from "@task-weaver/db";
-import type { Actor } from "../schemas/common";
+import type { Actor } from "@task-weaver/contracts";
 import type {
   ApplyPlanInput,
   PlanCommentInput,
@@ -9,8 +9,8 @@ import type {
   PlanNoteInput,
   PlanRequirementDependencyInput,
   PlanTaskDependencyInput,
-} from "../schemas/plans";
-import { NotFoundError, ValidationError } from "../errors";
+} from "@task-weaver/contracts";
+import { NotFoundError, ValidationError } from "@task-weaver/contracts";
 import * as documentService from "./documents";
 import * as requirementService from "./requirements";
 import * as taskService from "./tasks";

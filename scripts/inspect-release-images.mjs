@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { inspectLocalImage } from "./image-inspection-lib.mjs";
+import { inspectLocalImage, redactScannerHostPaths } from "./image-inspection-lib.mjs";
 
 // Syft reads local Docker images. Grype queries its downloaded advisory database;
 // repository files and image contents are not uploaded to a scanning service.
@@ -55,8 +55,8 @@ try {
     if (![0, 2].includes(vulnerabilities.status)) {
       throw new Error(`Grype failed for ${image}; exit ${vulnerabilities.status}`);
     }
-    writeFileSync(vulnerabilitiesPath, vulnerabilities.stdout);
-    const report = JSON.parse(vulnerabilities.stdout);
+    const report = redactScannerHostPaths(JSON.parse(vulnerabilities.stdout));
+    writeFileSync(vulnerabilitiesPath, `${JSON.stringify(report, null, 2)}\n`);
     if (platform && inspectLocalImage(image, platform).Id !== details.Id) throw new Error("Image changed during SBOM/vulnerability inspection");
     const counts = {};
     for (const match of report.matches ?? []) {

@@ -1,7 +1,7 @@
 import assert from "node:assert";
 import test from "node:test";
-import { ValidationError } from "../errors";
-import { requirementStatusSchema } from "../schemas/requirements";
+import { ValidationError } from "@task-weaver/contracts";
+import { requirementStatusSchema } from "@task-weaver/contracts";
 import {
   DAEMON_QUEUE_REQUIREMENT_STATUSES,
   MAX_REPOSITORY_AUTO_RETRY_ATTEMPTS,

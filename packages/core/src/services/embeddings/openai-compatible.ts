@@ -3,7 +3,7 @@ import { z } from "zod";
 import {
   embeddingProviderConfigSchema,
   type EmbeddingProviderConfig,
-} from "../../schemas/embeddings";
+} from "@task-weaver/contracts";
 import {
   EmbeddingProviderError,
   type EmbeddingBatchResult,

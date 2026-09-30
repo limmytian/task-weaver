@@ -14,21 +14,8 @@ import {
   ValidationError,
 } from "@task-weaver/core";
 import type { Env } from "../middleware/actor.js";
-import {
-  checkPiAgentGatewayHealth,
-  getPiAgentGatewayWorkerStatus,
-} from "../pi-agent-gateway-worker.js";
 
 const piAgentRoutes = new Hono<Env>();
-
-piAgentRoutes.get("/worker/status", (c) => {
-  return c.json(getPiAgentGatewayWorkerStatus());
-});
-
-piAgentRoutes.get("/worker/health", async (c) => {
-  const health = await checkPiAgentGatewayHealth();
-  return c.json(health, health.ok ? 200 : 503);
-});
 
 piAgentRoutes.get("/configs", async (c) => {
   const db = c.get("db");

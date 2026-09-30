@@ -17,6 +17,7 @@ import {
   Settings,
   WandSparkles,
   GitFork,
+  type LucideIcon,
 } from "lucide-react";
 import { trpc } from "@/trpc/client";
 import {
@@ -32,22 +33,23 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
+import type { VisibleWebNavigationItem } from "@/lib/web-extension-types";
 
-const navItems = [
-  { title: "Projects", href: "/projects", icon: LayoutDashboard },
-  { title: "Personal", href: "/projects/personal", icon: Inbox },
-  { title: "Documents", href: "/projects/documents", icon: FileText },
-  { title: "Repositories", href: "/projects/repositories", icon: GitFork },
-  { title: "Search", href: "/projects/search", icon: Search },
-  { title: "Memories", href: "/projects/memories", icon: Brain },
-  { title: "Skills", href: "/projects/skills", icon: Puzzle },
-  { title: "MCP Servers", href: "/projects/mcp", icon: Server },
-  { title: "Daemons", href: "/projects/daemons", icon: Cpu },
-  { title: "Ti Agent", href: "/projects/agents", icon: WandSparkles },
-  { title: "Settings", href: "/projects/settings", icon: Settings },
-];
+const navigationIcons: Readonly<Record<string, LucideIcon>> = {
+  agent: WandSparkles,
+  brain: Brain,
+  cpu: Cpu,
+  document: FileText,
+  inbox: Inbox,
+  layout: LayoutDashboard,
+  puzzle: Puzzle,
+  repository: GitFork,
+  search: Search,
+  server: Server,
+  settings: Settings,
+};
 
-export function AppSidebar() {
+export function AppSidebar({ navigation }: { navigation: readonly VisibleWebNavigationItem[] }) {
   const pathname = usePathname();
   const { data: pinnedProjects } = trpc.project.pinned.useQuery();
 
@@ -84,20 +86,23 @@ export function AppSidebar() {
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => (
+              {navigation.map((item) => {
+                const Icon = navigationIcons[item.icon ?? ""] ?? Puzzle;
+                return (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
                     asChild
                     isActive={isNavActive(item.href)}
-                    tooltip={item.title}
+                    tooltip={item.label}
                   >
                     <Link href={item.href}>
-                      <item.icon className="h-4 w-4" />
-                      <span>{item.title}</span>
+                      <Icon className="h-4 w-4" />
+                      <span>{item.label}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
-              ))}
+                );
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

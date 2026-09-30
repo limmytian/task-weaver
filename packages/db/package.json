@@ -1,7 +1,6 @@
 {
   "name": "@task-weaver/db",
-  "version": "0.0.1",
-  "private": true,
+  "version": "0.2.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -9,6 +8,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "test": "tsx --test src/*.test.ts src/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
@@ -17,16 +17,21 @@
     "db:studio": "drizzle-kit studio",
     "db:setup-search": "tsx src/setup-search.ts",
     "db:seed-skills": "tsx src/seed-skills.ts",
-    "db:migrate-markdown": "tsx src/migrate-html-to-markdown.ts"
+    "db:migrate-markdown": "tsx src/migrate-html-to-markdown.ts",
+    "prepublishOnly": "node -e \"throw new Error('Publish the verified CE release tarball, not the workspace package')\""
   },
   "dependencies": {
+    "@task-weaver/module-sdk": "workspace:^",
     "drizzle-orm": "^0.45.3",
-    "postgres": "^3.4.0"
+    "postgres": "^3.4.0",
+    "semver": "^7.7.3"
   },
   "devDependencies": {
     "@types/node": "^25.3.3",
+    "@types/semver": "^7.7.1",
     "@types/turndown": "^5.0.6",
     "drizzle-kit": "^0.31.11",
+    "tsx": "^4.21.0",
     "turndown": "^7.2.2",
     "typescript": "^5.8.0"
   },

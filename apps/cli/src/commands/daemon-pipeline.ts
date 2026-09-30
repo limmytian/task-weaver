@@ -3,9 +3,8 @@ import { dirname, resolve } from 'node:path'
 import { Command } from 'commander'
 import {
   buildDaemonReleaseEvidence,
-  type DaemonRealSmokeEvidence,
-  type DaemonSloReport,
-} from '@task-weaver/core'
+} from '@task-weaver/core/daemon-release-gate'
+import type { DaemonRealSmokeEvidence, DaemonSloReport } from '@task-weaver/contracts'
 import {
   PIPELINE_ROLES,
   defaultPipelineRoot,

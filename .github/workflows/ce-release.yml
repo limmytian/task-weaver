@@ -1,0 +1,163 @@
+name: CE release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing annotated public tag version without the v prefix
+        required: true
+        type: string
+      candidate_run_id:
+        description: Reviewed public Actions run containing the ce-binary-candidate artifact
+        required: true
+        type: string
+      previous_tag:
+        description: Previous immutable tag, empty for the first package release
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+  packages: write
+  id-token: write
+
+concurrency:
+  group: ce-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: ce-release
+    timeout-minutes: 90
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      TURBO_TELEMETRY_DISABLED: "1"
+      SOURCE_DATE_EPOCH: "0"
+      TASK_WEAVER_AUDIT_REGISTRY: https://registry.npmjs.org
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Validate release input
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install and validate source
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm check:ce-version
+          pnpm check:module-boundaries
+          pnpm build
+          pnpm typecheck
+          pnpm test
+          pnpm test:release-gates
+          pnpm release:verify
+      - name: Assemble source and npm artifacts
+        env:
+          VERSION: ${{ inputs.version }}
+          PREVIOUS_TAG: ${{ inputs.previous_tag }}
+        run: |
+          pnpm release:pack-ce "$VERSION"
+          if [ -n "$PREVIOUS_TAG" ]; then
+            pnpm release:notes "$VERSION" "$PREVIOUS_TAG"
+          else
+            pnpm release:notes "$VERSION"
+          fi
+          pnpm release:assemble-ce "$VERSION"
+          if [ -n "$PREVIOUS_TAG" ]; then
+            mkdir -p release-artifacts/previous-npm
+            gh release download "$PREVIOUS_TAG" --dir release-artifacts/previous-npm
+            pnpm check:ce-artifacts release-artifacts/previous-npm release-artifacts/npm
+          fi
+      - uses: sigstore/cosign-installer@v4.0.0
+      - name: Load reviewed binary candidate and complete evidence gate
+        env:
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          VERSION: ${{ inputs.version }}
+          PUBLIC_REPOSITORY: ${{ github.repository }}
+        run: |
+          [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/${PUBLIC_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" > candidate-run.json
+          node scripts/check-ce-candidate-run.mjs candidate-run.json "$(git rev-parse HEAD)" "$PUBLIC_REPOSITORY"
+          gh run download "$CANDIDATE_RUN_ID" --repo "$PUBLIC_REPOSITORY" \
+            --name ce-binary-candidate --dir binary-candidate
+          node scripts/load-ce-binary-candidate.mjs binary-candidate "$VERSION"
+      - uses: anchore/scan-action@v7.4.0
+        with:
+          image: task-weaver-api:release
+          fail-build: true
+          severity-cutoff: high
+          output-format: json
+          output-file: release-artifacts/bundle/api-vulnerabilities.json
+      - uses: anchore/scan-action@v7.4.0
+        with:
+          image: task-weaver-web:release
+          fail-build: true
+          severity-cutoff: high
+          output-format: json
+          output-file: release-artifacts/bundle/web-vulnerabilities.json
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build and sign immutable OCI images
+        env:
+          VERSION: ${{ inputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          for app in api web; do
+            image="ghcr.io/${REPOSITORY}-${app}:${VERSION}-arm64"
+            if docker manifest inspect "$image" >/dev/null 2>&1; then
+              echo "Image tag already exists: $image" >&2
+              exit 1
+            fi
+            docker tag "task-weaver-${app}:release" "$image"
+            docker push "$image"
+            digest=$(docker image inspect "$image" --format '{{json .RepoDigests}}' | \
+              jq -r --arg repository "${image%:*}" '.[] | select(startswith($repository + "@")) | split("@")[1]')
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            local_id=$(docker image inspect "task-weaver-${app}:release" --format '{{.Id}}')
+            jq -n --arg image "$image" --arg digest "$digest" --arg localImageId "$local_id" \
+              '{image: $image, digest: $digest, localImageId: $localImageId}' > "release-artifacts/bundle/${app}-image.json"
+            cosign sign --yes "${image%:*}@${digest}"
+            cosign attest --yes --type cyclonedx \
+              --predicate "release-artifacts/bundle/${app}-image.sbom.json" "${image%:*}@${digest}"
+            cosign attest --yes --type custom \
+              --predicate release-artifacts/bundle/source-provenance.json "${image%:*}@${digest}"
+            printf '%s@%s\n' "${image%:*}" "$digest" > "release-artifacts/bundle/${app}-image.digest"
+          done
+      - name: Finalize checksums and sign release files
+        run: |
+          pnpm release:finalize-ce
+          for asset in release-artifacts/bundle/*; do
+            cosign sign-blob --yes --bundle "${asset}.sigstore.json" "$asset"
+          done
+      - name: Create public release from reviewed artifacts
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "Release already exists for v${VERSION}" >&2
+            exit 1
+          fi
+          prerelease=()
+          if [[ "$VERSION" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "v${VERSION}" release-artifacts/bundle/* \
+            --title "Task Weaver v${VERSION}" \
+            --notes-file release-artifacts/bundle/RELEASE_NOTES.md \
+            --verify-tag --draft "${prerelease[@]}"
+          gh release edit "v${VERSION}" --draft=false

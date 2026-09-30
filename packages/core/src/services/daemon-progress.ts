@@ -12,8 +12,8 @@ import {
   taskStatusLog,
 } from "@task-weaver/db";
 import { emit } from "@task-weaver/realtime";
-import { NotFoundError, ValidationError } from "../errors";
-import type { Actor } from "../schemas/common";
+import { NotFoundError, ValidationError } from "@task-weaver/contracts";
+import type { Actor } from "@task-weaver/contracts";
 import type {
   DaemonProgressPhase,
   DaemonProgressSource,
@@ -24,13 +24,13 @@ import type {
   DaemonHistoryQuery,
   ReconcileDaemonWorkerInput,
   ReportDaemonProgressInput,
-} from "../schemas/daemons";
+} from "@task-weaver/contracts";
 import {
   isProgressTransitionValid,
   redactObservabilityAttributes,
   redactObservabilityText,
-} from "../schemas/observability";
-import type { TaskStatus } from "../schemas/tasks";
+} from "@task-weaver/contracts";
+import type { TaskStatus } from "@task-weaver/contracts";
 import { assertRequirementLease } from "./claims";
 import { buildDaemonTimeline } from "./daemon-timeline";
 

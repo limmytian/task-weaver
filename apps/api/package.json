@@ -3,6 +3,9 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/application.ts"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
@@ -13,8 +16,11 @@
   "dependencies": {
     "@hono/node-server": "^1.19.10",
     "@modelcontextprotocol/sdk": "^1.30.1",
+    "@task-weaver/contracts": "workspace:^",
     "@task-weaver/core": "workspace:*",
     "@task-weaver/db": "workspace:*",
+    "@task-weaver/module-sdk": "workspace:^",
+    "@task-weaver/partners-gateway": "workspace:^",
     "@task-weaver/realtime": "workspace:*",
     "@trpc/server": "^11.0.0",
     "drizzle-orm": "^0.45.3",

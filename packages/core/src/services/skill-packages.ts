@@ -8,7 +8,7 @@ import {
   skillPackageStorageObjects,
   skillPackageVersions,
 } from "@task-weaver/db";
-import type { Actor } from "../schemas/common";
+import type { Actor } from "@task-weaver/contracts";
 import type {
   DownloadSkillPackageInput,
   ListSkillPackagesInput,
@@ -19,8 +19,8 @@ import type {
   UpdateSkillPackageMetadataInput,
   UpdateSkillPackageVersionStatusInput,
   VerifySkillPackageStorageInput,
-} from "../schemas/skill-packages";
-import { ConflictError, NotFoundError, ValidationError } from "../errors";
+} from "@task-weaver/contracts";
+import { ConflictError, NotFoundError, ValidationError } from "@task-weaver/contracts";
 import type { SkillPackageStorageAdapter } from "./skill-package-storage";
 import { sha256Hex } from "./skill-package-storage";
 import { createDocument, deleteDocument, updateDocument } from "./documents";

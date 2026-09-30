@@ -6,7 +6,7 @@ import {
   createRepositorySchema,
   repositoryAuthPolicySchema,
   syncRequirementRepositoryForgeStateSchema,
-} from "../schemas/repositories";
+} from "@task-weaver/contracts";
 import {
   deliveryIdentityPhase,
   aggregateRequirementDelivery,

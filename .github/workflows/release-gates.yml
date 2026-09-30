@@ -31,6 +31,10 @@ jobs:
           cache: pnpm
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
+      - name: Check module dependency and compatibility boundaries
+        run: |
+          pnpm check:ce-version
+          pnpm check:module-boundaries
       - name: Build all workspaces
         run: pnpm build
       - name: Type check all workspaces

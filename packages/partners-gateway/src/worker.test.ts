@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { PiAgentGatewayWorker } from "./pi-agent-gateway-worker";
+import { PiAgentGatewayWorker } from "./worker";
 
 const actor = { id: "worker-actor", type: "agent" as const };
 const options = {

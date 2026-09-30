@@ -2,25 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Database, Key } from "lucide-react";
+import { Database, Key, Puzzle, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { VisibleWebSettingsItem } from "@/lib/web-extension-types";
 
-const modules = [
-  {
-    href: "/projects/settings/api-keys",
-    title: "API Keys",
-    description: "Agent authentication",
-    icon: Key,
-  },
-  {
-    href: "/projects/settings/embeddings",
-    title: "Embedding Search",
-    description: "Semantic retrieval",
-    icon: Database,
-  },
-];
+const settingsIcons: Readonly<Record<string, LucideIcon>> = {
+  key: Key,
+  storage: Database,
+};
 
-export function SettingsNav() {
+export function SettingsNav({ modules }: { modules: readonly VisibleWebSettingsItem[] }) {
   const pathname = usePathname();
 
   return (
@@ -32,6 +23,7 @@ export function SettingsNav() {
         <nav className="grid grid-cols-2 gap-2 md:grid-cols-1" aria-label="Settings modules">
           {modules.map((module) => {
             const active = pathname === module.href;
+            const Icon = settingsIcons[module.icon ?? ""] ?? Puzzle;
             return (
               <Link
                 key={module.href}
@@ -44,7 +36,7 @@ export function SettingsNav() {
                     : "border-transparent text-muted-foreground hover:border-border hover:bg-muted/40 hover:text-foreground",
                 )}
               >
-                <module.icon className={cn("mt-0.5 h-4 w-4 shrink-0", active && "text-primary")} />
+                <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", active && "text-primary")} />
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-medium">{module.title}</span>
                   <span className="mt-0.5 hidden text-xs text-muted-foreground sm:block">

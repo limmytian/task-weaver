@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { reviewPolicyInputSchema } from '../schemas/reviews'
+import { reviewPolicyInputSchema } from "@task-weaver/contracts"
 import { mapForgeSnapshot } from './forge-sync'
 import { evaluateReviewPolicy } from './reviews'
 
