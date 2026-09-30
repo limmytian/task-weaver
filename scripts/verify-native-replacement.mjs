@@ -41,10 +41,13 @@ const baselineHash = hash(readFileSync(resolve(root, "original.so")));
 const build = `cp /work/original.so /work/replacement/libvips-original.so &&
 patchelf --set-soname libvips-original.so /work/replacement/libvips-original.so &&
 tcc -nostdlib -shared /fixture.c -Wl,-soname,${location.filename} /work/replacement/libvips-original.so -Wl,-rpath,'$ORIGIN' -o /work/replacement/${location.filename}`;
+const compilerImage = "node:24.21.0-alpine3.23@sha256:9ec4a2e289874ed0d722e1772ec2de45d2801541db8612f3638b26f128c69ac2";
+// BuildKit's cache does not populate the Docker engine's local image store.
+run(["pull", "--platform", platform, compilerImage]);
 console.log("Building the user-modified replacement in a disposable compiler container.");
 run(["run", "--rm", "--pull=never", "--platform", platform, "--user", "root", "--mount", `type=bind,source=${root},target=/work`,
   "--mount", `type=bind,source=${resolve(import.meta.dirname, "fixtures/libvips-replacement.c")},target=/fixture.c,readonly`,
-  "--entrypoint", "sh", "node:24.21.0-alpine3.23@sha256:9ec4a2e289874ed0d722e1772ec2de45d2801541db8612f3638b26f128c69ac2",
+  "--entrypoint", "sh", compilerImage,
   "-c", `apk add --no-cache tcc musl-dev patchelf >/tmp/test-tools.log && ${build}`]);
 const processing = `const sharp=require(${JSON.stringify(location.sharp)}); sharp({create:{width:2,height:2,channels:3,background:'red'}}).png().toBuffer().then(b=>sharp(b).metadata()).then(m=>{if(m.width!==2||m.height!==2)throw new Error('Native processing mismatch');console.log(JSON.stringify({width:m.width,height:m.height}))})`;
 const baseline = run(["run", "--rm", "--pull=never", "--platform", platform, "--network=none", "--read-only", "--entrypoint", "node", image, "-e", processing]);
