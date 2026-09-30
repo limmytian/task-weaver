@@ -1,42 +1,44 @@
-# Task Weaver 设计文档
+# Task Weaver Design Document
 
-> 人机协作的项目管理工具 —— 让人类和 AI Agent 在同一个平台上协同工作。
+> A project management tool for human–AI collaboration, where humans and AI agents work together in one platform.
 
-## 1. 项目概述
+[简体中文](design.zh-CN.md)
 
-Task Weaver 是一个面向人机协作场景的项目管理平台。人类通过 Web UI 操作，AI Agent 通过 REST API 接入，两者是平等的参与者，共享同一套数据和业务逻辑。
+## 1. Project Overview
 
-### 1.1 核心能力
+Task Weaver is a project management platform for human–AI collaboration. Humans use the Web UI, and AI agents use the REST API. Both are equal participants sharing the same data and business logic.
 
-- **项目管理**：创建和管理多个项目，每个项目有独立的需求、任务集和看板视图
-- **需求管理**：需求挂在项目下，任务必须挂在需求上，需求可与文档双向关联
-- **任务系统**：完整的任务生命周期管理，支持状态流转、依赖关系、备注评论
-- **知识库**：支持全局文档和项目文档，文档间双向关联，文档与任务/需求多对多关联，文档版本管理
-- **双重搜索**：精准关键词搜索 + 向量语义搜索
-- **实时协作**：人类可实时查看 AI Agent 的工作进展，反之亦然
-- **MCP 管理**：注册和管理第三方 MCP Server，代理调用其工具
-- **Memory 系统**：AI Agent 的记忆存储与检索
-- **Skills 管理**：技能文件导入 DB，按 intent 语义搜索
-- **Daemon 系统**：CLI daemon 注册、心跳、任务 claiming/locking
-- **Webhooks**：事件驱动的外部通知，支持重试
+### 1.1 Core Capabilities
 
-### 1.2 核心原则
+- **Project management:** Create and manage projects, each with its own requirements, tasks, and kanban board.
+- **Requirement management:** Requirements belong to projects; tasks belong to requirements; requirements can link bidirectionally to documents.
+- **Task system:** Manage the full task lifecycle, status changes, dependencies, notes, and comments.
+- **Knowledge base:** Support global and project documents, bidirectional document links, many-to-many task and requirement links, and document versions.
+- **Hybrid search:** Combine exact keyword search with vector semantic search.
+- **Realtime collaboration:** Humans and agents can follow each other's progress.
+- **MCP registry:** Register external MCP servers and proxy calls to their tools.
+- **Memory:** Store and retrieve agent memories.
+- **Skills:** Import skill files into the database and discover them by intent.
+- **Daemon:** Register CLI daemons, send heartbeats, and claim work with leases.
+- **Webhooks:** Deliver event-driven notifications with retries.
 
-- **接口平等**：人和 AI 走同一套业务逻辑，不存在"二等公民"
-- **灵活不死板**：任务状态允许自由跳转，不强制线性流转
-- **关联即价值**：文档与文档、文档与任务之间的双向关联构成知识网络
-- **渐进复杂度**：单 PostgreSQL 即可运行，按需扩展
+### 1.2 Principles
+
+- **Equal interfaces:** Humans and agents use the same business logic.
+- **Flexible workflows:** Task statuses can change freely rather than following a mandatory linear sequence.
+- **Useful links:** Bidirectional links between documents, tasks, and requirements form a knowledge network.
+- **Incremental complexity:** One PostgreSQL instance is sufficient to start; expand when needed.
 
 ---
 
-## 2. 系统架构
+## 2. System Architecture
 
-### 2.1 整体架构图
+### 2.1 Architecture Diagram
 
-```
+```text
                         ┌──────────────────────────────────────┐
                         │          @task-weaver/core           │
-                        │   (业务逻辑 · Zod Schema · 类型定义)   │
+                        │  Business logic · Zod · Shared types │
                         └──────────┬───────────┬───────────────┘
                                    │           │
                  ┌─────────────────┼───────────┼─────────────────┐
@@ -44,8 +46,8 @@ Task Weaver 是一个面向人机协作场景的项目管理平台。人类通�
                  ▼                 ▼           ▼                 ▼
           ┌────────────┐  ┌─────────────┐  ┌──────────┐  ┌───────────┐
           │  Next.js   │  │  Hono API   │  │   CLI    │  │  MCP Pool │
-          │  Web App   │  │  (tRPC +    │  │  Daemon  │  │  (第三方   │
-          │            │  │   REST +    │  │          │  │   MCP 连接) │
+          │  Web App   │  │  (tRPC +    │  │  Daemon  │  │  External │
+          │            │  │   REST +    │  │          │  │    MCP    │
           │  apps/web  │  │   GraphQL)  │  │ apps/cli │  │           │
           └─────┬──────┘  └──────┬──────┘  └────┬─────┘  └─────┬─────┘
                 │                │              │              │
@@ -55,60 +57,60 @@ Task Weaver 是一个面向人机协作场景的项目管理平台。人类通�
                                  ▼                             ▼
                         ┌──────────────────────────────────────┐
                         │          @task-weaver/db              │
-                        │     (Drizzle ORM · 数据库访问层)       │
+                        │    Drizzle ORM · Database access     │
                         └──────────────────┬───────────────────┘
                                            │
                                            ▼
                         ┌──────────────────────────────────────┐
                         │       PostgreSQL + pgvector           │
-                        │  (数据存储 · 全文搜索 · 向量搜索)       │
+                        │ Storage · Full-text · Vector search  │
                         └──────────────────────────────────────┘
 ```
 
-### 2.2 Monorepo 结构
+### 2.2 Monorepo Layout
 
-```
+```text
 task-weaver/
 ├── apps/
-│   ├── web/                    # Next.js 前端应用
-│   ├── api/                    # Hono API 服务 (tRPC + REST + GraphQL)
-│   └── cli/                    # CLI 工具 & Daemon
+│   ├── web/                    # Next.js frontend
+│   ├── api/                    # Hono API (tRPC + REST + GraphQL)
+│   └── cli/                    # CLI and daemon
 ├── packages/
-│   ├── core/                   # 核心业务逻辑、Zod Schema、类型定义
-│   ├── db/                     # Drizzle Schema、迁移、数据库客户端
-│   ├── realtime/               # 实时事件类型与发布订阅抽象
-│   └── ui/                     # 共享 UI 组件 (shadcn/ui)
-├── skills/                     # AI Agent Skills（SKILL.md 格式）
-├── docs/                       # 项目文档
-├── turbo.json                  # Turborepo 配置
-├── pnpm-workspace.yaml         # pnpm workspace 配置
+│   ├── core/                   # Business logic, Zod schemas, and types
+│   ├── db/                     # Drizzle schema, migrations, and database client
+│   ├── realtime/               # Realtime event types and pub/sub abstraction
+│   └── ui/                     # Shared shadcn/ui components
+├── skills/                     # Agent Skills packages
+├── docs/                       # Project documentation
+├── turbo.json                  # Turborepo configuration
+├── pnpm-workspace.yaml         # pnpm workspace configuration
 └── package.json
 ```
 
-### 2.3 技术选型
+### 2.3 Technology Choices
 
-| 层级 | 技术 | 选型理由 |
-|------|------|----------|
-| 构建 / Monorepo | Turborepo + pnpm | 智能缓存、并行构建、严格依赖隔离 |
-| 后端框架 | Hono | TypeScript 原生、极快、运行时无关 |
-| 数据库 | PostgreSQL + pgvector | JSONB 存文档、tsvector 全文搜索、pgvector 向量搜索、LISTEN/NOTIFY 实时通知 |
-| ORM | Drizzle ORM | 类型安全、SQL-like API、轻量无引擎二进制 |
-| 前端 API | tRPC v11 | 端到端类型安全、SSE 订阅支持实时更新 |
-| 通用 API | REST (Hono Routes) | 通用兼容，任何语言/工具均可调用 |
-| GraphQL | Hono route | 灵活查询 |
-| 前端框架 | Next.js 15 (App Router) | RSC 性能优化、文件路由 |
-| UI 组件 | shadcn/ui + Tailwind CSS | 代码可控、无许可证限制、基于 Radix 可访问性原语 |
-| 数据校验 | Zod | tRPC/REST 共用同一套 Schema |
-| 文档编辑 | Markdown (CodeMirror + react-markdown + Mermaid) | AI-friendly, 支持 `[[wiki-link]]`、Mermaid 图表 |
-| 向量 Embedding | OpenAI text-embedding-3-small 或可替换 | 1536 维，成本低 |
+| Layer | Technology | Rationale |
+|-------|------------|-----------|
+| Build and monorepo | Turborepo + pnpm | Caching, parallel builds, and dependency isolation |
+| Backend | Hono | Native TypeScript, small footprint, and runtime portability |
+| Database | PostgreSQL + pgvector | JSONB documents, `tsvector` full-text search, vector search, and LISTEN/NOTIFY |
+| ORM | Drizzle ORM | Type safety and a lightweight SQL-like API |
+| Frontend API | tRPC v11 | End-to-end types and SSE subscriptions |
+| General API | REST with Hono routes | Language-agnostic HTTP/JSON access |
+| GraphQL | Hono route | Flexible queries |
+| Frontend | Next.js 16 App Router | React Server Components and file-based routing |
+| UI | shadcn/ui + Tailwind CSS | Editable components built on accessible Radix primitives |
+| Validation | Zod | Shared schemas across tRPC and REST |
+| Document editing | Markdown with CodeMirror, react-markdown, and Mermaid | Agent-friendly content, wiki links, and diagrams |
+| Embeddings | OpenAI `text-embedding-3-small` or a replacement | 1536-dimensional vectors at low cost |
 
 ---
 
-## 3. 数据模型
+## 3. Data Model
 
-### 3.1 ER 关系总览
+### 3.1 Entity Relationships
 
-```
+```text
 ┌──────────┐       ┌────────────────┐       ┌──────────────┐
 │ projects │──1:N──│ requirements   │──1:N──│    tasks      │
 └────┬─────┘       └───────┬────────┘       └──────┬───────┘
@@ -128,10 +130,10 @@ task-weaver/
              └──────┬───────┘    └──────────────┘
                     │
               ┌─────┴──────┐    ┌──────────────────┐
-              │  doc_links │    │  document_versions│
+              │  doc_links │    │ document_versions│
               └────────────┘    └──────────────────┘
 
-项目可见或独立实体：
+Other project-visible or independent entities:
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
 │  mcp_servers │  │   daemons    │  │   webhooks   │  │   api_keys   │
 ├──────────────┤  └──────────────┘  ├──────────────┤  └──────────────┘
@@ -141,62 +143,62 @@ task-weaver/
 └──────────────┘
 ```
 
-核心约束：
-- requirements 必须关联 project
-- project-scoped tasks must link to a requirement under the same project; personal tasks use `scope = personal` and owner fields instead of fake projects/requirements
-- documents 可以不关联 project（全局文档），也可以关联（项目文档）
-- documents 有 `docType` 区分类型：`requirement` / `design` / `meeting` / `guide` / `reference` / `skill` / `other`
-- document_versions 实现乐观并发控制的版本历史
-- retrieval assets（MCP tools、Skills、Memories）统一使用 global/project/personal/actor/node/client scope 语义
+Core constraints:
 
-### 3.2 核心表
+- Every requirement belongs to a project.
+- Project tasks belong to a requirement in the same project; personal tasks use `scope = personal` and owner fields.
+- Documents can be global or project-scoped.
+- `docType` identifies `requirement`, `design`, `meeting`, `guide`, `reference`, `skill`, or `other` documents.
+- `document_versions` stores version history for optimistic concurrency control.
+- Retrieval assets (MCP tools, Skills, and Memories) share global, project, personal, actor, node, and client scopes.
 
-详细字段定义见 `packages/db/src/schema/` 下各文件。以下列出主要表和关键字段：
+### 3.2 Core Tables
 
-| 表 | 文件 | 说明 |
-|------|------|------|
-| `projects` | `projects.ts` | 项目。status: `active` / `archived` |
-| `requirements` | `requirements.ts` | 需求。status: `draft` / `approved` / `in_progress` / `in_review` / `ready_to_merge` / `done` / `cancelled` / `archived` |
-| `tasks` | `tasks.ts` | 任务。`scope`: `project` / `personal`; status: `todo` / `in_progress` / `in_review` / `done` / `cancelled` |
-| `task_status_log` | `tasks.ts` | 状态变更日志 |
-| `task_dependencies` | `tasks.ts` | 任务依赖（`blocks` / `related`） |
-| `requirement_dependencies` | `requirements.ts` | Requirement-to-requirement dependencies (`blocks` / `related`) |
-| `execution_slices` | `requirements.ts` | Ordered AI execution slices inside a requirement lane |
-| `task_comments` | `tasks.ts` | 任务评论 |
-| `task_notes` | `tasks.ts` | 任务备注 |
-| `documents` | `documents.ts` | 知识库文档，含 `docType` / `version` / `summary` / `keywords` |
-| `document_versions` | `documents.ts` | 文档版本历史 |
-| `document_links` | `documents.ts` | 文档↔文档双向关联 |
-| `document_task_links` | `documents.ts` | 文档↔任务多对多 |
-| `document_requirement_links` | `documents.ts` | 文档↔需求多对多 |
-| `memories` | `memories.ts` | AI 记忆。类型：`user` / `feedback` / `project` / `reference` / `other` |
-| `mcp_servers` | `mcp-servers.ts` | 第三方 MCP Server 注册表 |
-| `mcp_tools` | `mcp-servers.ts` | 从 MCP Server 同步的工具列表 |
-| `mcp_tool_calls` | `mcp-servers.ts` | MCP 工具调用记录 |
-| `skill_packages` | `skill-packages.ts` | Filesystem-shaped skill package identity and scope metadata |
-| `skill_package_versions` | `skill-packages.ts` | Immutable package version manifests and storage summaries |
-| `skill_package_storage_objects` | `skill-packages.ts` | Server-owned storage object metadata for archives and files |
-| `skill_package_files` | `skill-packages.ts` | Per-version file manifest with hashes, readability, executability, and indexed document links |
-| `daemons` | `daemons.ts` | CLI daemon registry (heartbeat, capabilities, active workers) |
-| `requirement_claims` | `requirements.ts` | Distributed leases for daemon-owned requirement lanes |
-| `repositories` | `repositories.ts` | Instance catalog identity, safe endpoints, visibility, and non-secret auth policy |
-| `requirement_repositories` | `repositories.ts` | Requirement workspace membership and per-repository delivery lifecycle |
-| `task_repositories` | `repositories.ts` | Optional Task scope hints into the Requirement workspace |
-| `schedules` | `schedules.ts` | One-off and recurring task generation templates |
-| `schedule_runs` | `schedules.ts` | Idempotent schedule occurrences and generated task links |
-| `ti_model_configs` | `ti-agent.ts` | User-scoped Ti provider/model configuration and default model selection |
-| `ti_agent_policies` | `ti-agent.ts` | Owner-scoped Ti execution policy, limits, and safety controls |
-| `ti_agent_runs` | `ti-agent.ts` | Bounded server-side Ti execution queue, leases, and audit results |
-| `assistant_conversations` | `assistant.ts` | Contextual Ti assistant dialog sessions linked to project/requirement/task/schedule surfaces |
-| `assistant_messages` | `assistant.ts` | Assistant dialog messages with optional context snapshots and Ti run metadata |
-| `assistant_actions` | `assistant.ts` | Structured assistant action proposals, approvals, execution results, and audit links |
-| `webhooks` | `webhooks.ts` | Webhook 配置（URL、事件、密钥） |
-| `webhook_deliveries` | `webhooks.ts` | Webhook 投递记录（含重试） |
-| `api_keys` | `api-keys.ts` | API Key 管理 |
-| `activity_log` | `activity.ts` | 全局操作日志 |
+Detailed fields live in `packages/db/src/schema/`. The main tables are:
+
+| Table | File | Purpose |
+|-------|------|---------|
+| `projects` | `projects.ts` | Projects with `active` or `archived` status |
+| `requirements` | `requirements.ts` | Requirements with `draft`, `approved`, `in_progress`, `in_review`, `ready_to_merge`, `done`, `cancelled`, or `archived` status |
+| `tasks` | `tasks.ts` | Project or personal tasks with `todo`, `in_progress`, `in_review`, `done`, or `cancelled` status |
+| `task_status_log` | `tasks.ts` | Task status history |
+| `task_dependencies` | `tasks.ts` | Task dependencies: `blocks` or `related` |
+| `requirement_dependencies` | `requirements.ts` | Requirement dependencies: `blocks` or `related` |
+| `execution_slices` | `requirements.ts` | Ordered execution slices within a requirement lane |
+| `task_comments` | `tasks.ts` | Task comments |
+| `task_notes` | `tasks.ts` | Task notes |
+| `documents` | `documents.ts` | Knowledge base documents and metadata |
+| `document_versions` | `documents.ts` | Document version history |
+| `document_links` | `documents.ts` | Bidirectional document links |
+| `document_task_links` | `documents.ts` | Document-to-task links |
+| `document_requirement_links` | `documents.ts` | Document-to-requirement links |
+| `memories` | `memories.ts` | Agent memories: `user`, `feedback`, `project`, `reference`, or `other` |
+| `mcp_servers` | `mcp-servers.ts` | External MCP server registry |
+| `mcp_tools` | `mcp-servers.ts` | Synchronized MCP tool list |
+| `mcp_tool_calls` | `mcp-servers.ts` | MCP tool call records |
+| `skill_packages` | `skill-packages.ts` | Skill package identity and scope metadata |
+| `skill_package_versions` | `skill-packages.ts` | Immutable package versions and storage summaries |
+| `skill_package_storage_objects` | `skill-packages.ts` | Server-managed archive and file objects |
+| `skill_package_files` | `skill-packages.ts` | Versioned file manifest, hashes, flags, and indexed document links |
+| `daemons` | `daemons.ts` | Daemon registry, heartbeats, capabilities, and active workers |
+| `requirement_claims` | `requirements.ts` | Distributed requirement-lane leases |
+| `repositories` | `repositories.ts` | Repository identities, endpoints, visibility, and non-secret auth policy |
+| `requirement_repositories` | `repositories.ts` | Requirement workspaces and repository delivery state |
+| `task_repositories` | `repositories.ts` | Optional task hints within a requirement workspace |
+| `schedules` | `schedules.ts` | One-off and recurring task templates |
+| `schedule_runs` | `schedules.ts` | Idempotent occurrences and generated task links |
+| `ti_model_configs` | `ti-agent.ts` | Owner-scoped Ti model configuration |
+| `ti_agent_policies` | `ti-agent.ts` | Owner-scoped Ti execution controls |
+| `ti_agent_runs` | `ti-agent.ts` | Ti queue, leases, and audit records |
+| `assistant_conversations` | `assistant.ts` | Contextual assistant sessions |
+| `assistant_messages` | `assistant.ts` | Dialog messages, context snapshots, and Ti metadata |
+| `assistant_actions` | `assistant.ts` | Action proposals, approvals, results, and audit links |
+| `webhooks` | `webhooks.ts` | Webhook configuration, URLs, events, and secrets |
+| `webhook_deliveries` | `webhooks.ts` | Webhook deliveries and retries |
+| `api_keys` | `api-keys.ts` | API key management |
+| `activity_log` | `activity.ts` | Global activity history |
 
 ---
-
 ### 3.3 Assistant Dialog Foundations
 
 The contextual assistant is a management copilot backed by bounded Task Weaver context and Ti execution records. Conversation storage is separate from task comments so exploratory chat does not pollute durable task history, while important outcomes can still be linked back through action targets and activity log entries.
@@ -269,7 +271,7 @@ Catch-up and expiry policy is intentionally separate from the core schedule iden
 
 ---
 
-### 3.4 Server-Side Ti Agent Boundary
+### 3.5 Server-Side Ti Agent Boundary
 
 Ti is the server-side Task Weaver agent: a bounded assigned-automation worker with a private execution adapter behind it. It is not the same execution path as `tw daemon`, and it must not claim arbitrary requirement lanes or project coding work.
 
@@ -389,95 +391,95 @@ REST search endpoints return a consistent `{ items: [...] }` envelope for machin
 
 ---
 
-## 5. 任务状态机
+## 5. Task Status Machine
 
-### 5.1 状态定义
+### 5.1 Statuses
 
-| 状态 | 含义 |
-|------|------|
-| `todo` | 待办，尚未开始 |
-| `in_progress` | 进行中 |
-| `in_review` | 审查中 |
-| `ready_to_merge` | 审查通过，等待合并 |
-| `done` | 已完成 |
-| `cancelled` | 已取消（终态） |
+| Status | Meaning |
+|--------|---------|
+| `todo` | Not started |
+| `in_progress` | In progress |
+| `in_review` | Under review |
+| `ready_to_merge` | Review passed and awaiting merge |
+| `done` | Completed |
+| `cancelled` | Cancelled; terminal state |
 
-### 5.2 流转规则
+### 5.2 Transitions
 
-**核心原则：允许自由跳转，不强制线性流程。唯一限制：`cancelled` 不可再流转。**
+Task statuses can change freely without a mandatory linear sequence. `cancelled` is the only terminal state.
 
-每次状态变更：
-1. 更新 `tasks.status`
-2. `done` 时自动记录 `completedAt`，离开 `done` 时清空
-3. 写入 `task_status_log`
-4. 写入 `activity_log`
-5. 通过 PG NOTIFY 发送实时事件
-6. 触发 Webhook 投递
+Each transition:
 
----
-
-## 6. 知识库与搜索
-
-### 6.1 文档分类
-
-- **全局文档**（`projectId = null`）：不属于任何项目，全局可见
-- **项目文档**（`projectId` 指定）：归属特定项目
-- **文档类型**（`docType`）：`skill` 类型的文档即为 Skills
-
-### 6.2 双向关联
-
-- **文档↔文档**：通过 `document_links`，支持 `[[wiki-link]]` 语法自动解析
-- **文档↔任务**：通过 `document_task_links`（`references` / `documents` / `output`）
-- **文档↔需求**：通过 `document_requirement_links`
-
-### 6.3 版本管理
-
-文档通过 `version` 字段实现乐观并发控制，每次变更记录到 `document_versions` 表，支持回滚。
-
-### 6.4 搜索系统
-
-| 模式 | 实现 | 说明 |
-|------|------|------|
-| `keyword` | PostgreSQL `tsvector` / `tsquery` | 精准全文搜索，触发器自动维护 |
-| `semantic` | pgvector + Embedding | 向量语义搜索 |
-| `hybrid` | 两者加权融合 | 默认模式，关键词 0.4 + 语义 0.6 |
+1. Updates `tasks.status`.
+2. Sets `completedAt` on `done` and clears it when leaving `done`.
+3. Appends to `task_status_log`.
+4. Appends to `activity_log`.
+5. Publishes a realtime event through PostgreSQL NOTIFY.
+6. Triggers webhook delivery.
 
 ---
 
-## 7. 接入方式
+## 6. Knowledge Base and Search
 
-```
+### 6.1 Document Categories
+
+- **Global documents** have `projectId = null` and are visible globally.
+- **Project documents** have a project `projectId`.
+- **Document types** use `docType`; a document with `docType = skill` is a Skill.
+
+### 6.2 Bidirectional Links
+
+- **Document to document:** `document_links` supports automatic `[[wiki-link]]` resolution.
+- **Document to task:** `document_task_links` supports `references`, `documents`, and `output` relationships.
+- **Document to requirement:** `document_requirement_links` stores the link.
+
+### 6.3 Versioning
+
+Documents use `version` for optimistic concurrency. Each change is recorded in `document_versions`, which supports rollback.
+
+### 6.4 Search
+
+| Mode | Implementation | Behavior |
+|------|----------------|----------|
+| `keyword` | PostgreSQL `tsvector` / `tsquery` | Exact full-text search with trigger-maintained indexes |
+| `semantic` | pgvector + embeddings | Vector semantic search |
+| `hybrid` | Weighted combination | Default weight: keyword 0.4 and semantic 0.6 |
+
+---
+
+## 7. Access Channels
+
+```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│                         接入方式                                      │
+│                         Access channels                              │
 ├──────────────┬──────────────────┬───────────────┬────────────────────┤
-│   Web UI     │   AI Agent       │  CLI Daemon   │   通用工具/脚本     │
-│   (人类)     │   (REST API)     │  (REST API)   │   (curl 等)        │
+│   Web UI     │   AI Agent       │  CLI Daemon   │  Tools and scripts │
+│   (human)    │   (REST API)     │  (REST API)   │  (for example curl)│
 ├──────────────┼──────────────────┼───────────────┼────────────────────┤
 │   tRPC       │   REST API       │   REST API    │   REST API         │
-│   (类型安全)  │  + Skills 指引    │  + 任务认领    │   (JSON, 通用兼容)  │
+│   typed      │  + Skills guide  │  + task claim │   JSON            │
 └──────────────┴──────────────────┴───────────────┴────────────────────┘
 ```
 
-- **Web UI** → Next.js 前端通过 tRPC 调用 API
-- **AI Agent** → 通过 REST API（Bearer Token 认证）+ Skills 文件指引使用方式
-- **CLI Daemon** → 通过 REST API 注册、心跳、认领任务
-- **第三方 MCP Server** → Task Weaver 作为 MCP 客户端，通过 MCP Pool 连接和调用外部 MCP Server 的工具
+- **Web UI:** The Next.js frontend calls the API through tRPC.
+- **AI agents:** Use the REST API with bearer-token authentication and Skills guidance.
+- **CLI daemons:** Register, send heartbeats, and claim work through REST.
+- **External MCP servers:** Task Weaver acts as an MCP client through its connection pool.
 
 ---
 
-## 7. 第三方 MCP Server 管理
+## 8. External MCP Server Registry
 
-Task Weaver 可以注册和管理外部 MCP Server，作为工具的聚合代理：
+Task Weaver registers external MCP servers and acts as a tool proxy:
 
-- **注册**：记录 MCP Server 的连接信息（stdio / sse / streamable-http）
-- **连接池**（`mcp-pool`）：维护到各 MCP Server 的长连接，支持空闲回收
-- **工具同步**：从已连接的 MCP Server 拉取工具列表，缓存到 `mcp_tools` 表
-- **代理调用**：通过 Task Weaver API 代理调用第三方 MCP Server 的工具，记录调用历史
-- **TTL & 状态管理**：支持 `clientId` + `expiresAt` + `ttl` 实现临时注册和自动过期
+- **Registration:** Store connection details for stdio, SSE, or Streamable HTTP servers.
+- **Connection pool:** Maintain connections and reclaim idle ones.
+- **Tool synchronization:** Fetch tool lists and cache them in `mcp_tools`.
+- **Proxy calls:** Invoke external tools through the Task Weaver API and record call history.
+- **TTL and status:** Use `clientId`, `expiresAt`, and `ttl` for temporary registrations and expiry.
 
 ---
-
-## 8. Daemon System
+## 9. Daemon System
 
 The CLI daemon is the runtime carrier for autonomous AI agents. It registers with the API, advertises local AI tool capabilities, acquires work, spawns an AI CLI, and reports liveness and progress back to Task Weaver.
 
@@ -553,75 +555,75 @@ The Web Daemons page shows:
 
 ---
 
-## 9. Memory 系统
+## 10. Memory
 
-AI Agent 的结构化记忆存储：
+Structured memories for AI agents:
 
-- **类型**：`user` / `feedback` / `project` / `reference` / `other`
-- **作用域**：可关联到项目，也可以是全局记忆
-- **实体关联**：可选关联到具体的 project / requirement / task / document
-- **过期机制**：支持 `expiresAt` 自动过期
-- **搜索**：支持按类型、标签、关键词检索
+- **Types:** `user`, `feedback`, `project`, `reference`, and `other`.
+- **Scope:** A memory can belong to a project or be global.
+- **Entity links:** Optionally link to a project, requirement, task, or document.
+- **Expiry:** `expiresAt` supports automatic expiry.
+- **Search:** Filter by type, tag, and keyword.
 
 ---
 
-## 10. 实时系统
+## 11. Realtime Events
 
-```
-写入操作（REST API / tRPC）
+```text
+Write (REST API / tRPC)
          │
          ▼
-   @task-weaver/core 执行业务逻辑
+   @task-weaver/core business logic
          │
-         ├──► 写入 PostgreSQL
+         ├──► Write to PostgreSQL
          │
          ├──► pg_notify('realtime_events', ...)
          │
          └──► webhookService.deliverEvent(...)
                     │
                     ▼
-              Webhook 投递（HTTP POST + 重试）
+              Webhook delivery (HTTP POST + retry)
 
-pg_notify 路径：
-   Hono API / Next.js 监听 PG NOTIFY
+PostgreSQL NOTIFY path:
+   Hono API / Next.js listens for notifications
          │
          ▼
-   tRPC SSE → 浏览器实时更新 UI
+   tRPC SSE → browser UI updates
 ```
 
 ---
 
-## 11. 认证与权限
+## 12. Authentication and Authorization
 
-| 类型 | 认证方式 | 说明 |
-|------|----------|------|
-| 人类用户 | Session / JWT（Web UI 登录） | 通过 Web 前端管理 |
-| AI Agent | API Key（`Authorization: Bearer tw_xxx`） | 每个 Agent 独立 Key |
-| CLI Daemon | API Key + daemon 注册 | 注册后通过 REST API 操作 |
+| Actor | Authentication | Purpose |
+|-------|----------------|---------|
+| Human | Session / JWT through Web UI | Manage through the frontend |
+| AI agent | API key (`Authorization: Bearer tw_xxx`) | Independent key per agent |
+| CLI daemon | API key and daemon registration | Operate through REST after registration |
 
 ---
 
-## 12. 开发环境
+## 13. Development Environment
 
-### 依赖
+### Requirements
 
 - Node.js >= 20
 - pnpm >= 9
-- PostgreSQL >= 16（需安装 pgvector 扩展）
+- PostgreSQL >= 16 with the pgvector extension
 
-### 启动
+### Startup
 
 ```bash
-pnpm install          # 安装依赖
-pnpm dev              # 并行启动所有服务
-pnpm build            # 构建
-pnpm lint             # 检查
-pnpm typecheck        # 类型检查
+pnpm install          # Install dependencies
+pnpm dev              # Start all services in parallel
+pnpm build            # Build
+pnpm lint             # Lint
+pnpm typecheck        # Type-check
 ```
 
-### 端口约定
+### Ports
 
-| 服务 | 端口 | 说明 |
-|------|------|------|
-| Next.js Web | 3000 | 前端应用 |
-| Hono API | 3001 | API 服务（tRPC + REST + GraphQL） |
+| Service | Port | Purpose |
+|---------|------|---------|
+| Next.js Web | 3000 | Frontend |
+| Hono API | 3001 | API service (tRPC + REST + GraphQL) |

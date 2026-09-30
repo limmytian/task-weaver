@@ -89,7 +89,7 @@ checkout instructions above.
 
 ## Documentation and community
 
-- [Architecture](docs/design.md)
+- Architecture: [English](docs/design.md) · [Simplified Chinese](docs/design.zh-CN.md)
 - [Deployment and rollback](docs/deployment.md)
 - [Release gates](docs/release-gates.md)
 - [REST API reference](skills/task-weaver/rest-api-reference.md)
