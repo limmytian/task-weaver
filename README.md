@@ -89,7 +89,7 @@ checkout instructions above.
 
 ## Documentation and community
 
-- [Architecture](docs/design.md)
+- [Architecture](docs/design.md) ([简体中文](docs/design.zh-CN.md))
 - [Deployment and rollback](docs/deployment.md)
 - [Release gates](docs/release-gates.md)
 - [CE packages](docs/ce-packages.md) and [release operations](docs/release-operations.md)

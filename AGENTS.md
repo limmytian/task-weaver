@@ -6,7 +6,7 @@ Human-AI collaborative project management tool — humans and AI agents work tog
 
 Task Weaver is a project management platform where both humans (via Web UI) and AI agents (via the `tw` CLI / REST API) can manage projects, requirements, tasks, kanban boards, and a knowledge base with bidirectional linking and hybrid search (keyword + vector).
 
-- Design doc: `docs/design.md`
+- Design documents: `docs/design.md` (English), `docs/design.zh-CN.md` (Simplified Chinese)
 
 ## Tech Stack
 
@@ -78,6 +78,7 @@ skills/task-weaver/
 ## Code Conventions
 
 - **All code and comments MUST be written in English.** No exceptions — variable names, function names, type definitions, comments, error messages, log messages, commit messages, and documentation within code files must all use English.
+- Keep English documentation canonical and maintain requested translations in separate language-suffixed files. Keep code samples and code comments in English in every version.
 - Use TypeScript strict mode across all packages
 - Shared Zod schemas in `@task-weaver/core` — all interfaces (tRPC, REST, CLI) must use the same schemas
 - Use Drizzle ORM for all database operations — no raw SQL unless absolutely necessary
