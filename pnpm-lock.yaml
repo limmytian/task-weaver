@@ -297,16 +297,10 @@ importers:
       postgres:
         specifier: ^3.4.0
         version: 3.4.8
-      semver:
-        specifier: ^7.7.3
-        version: 7.8.5
     devDependencies:
       '@types/node':
         specifier: ^25.3.3
         version: 25.3.3
-      '@types/semver':
-        specifier: ^7.7.1
-        version: 7.8.0
       '@types/turndown':
         specifier: ^5.0.6
         version: 5.0.6
@@ -2802,9 +2796,6 @@ packages:
 
   '@types/react@19.2.14':
     resolution: {integrity: sha512-ilcTH/UniCkMdtexkoCN0bI7pMcJDvmQFPvuPvmEaYA/NSfFTAgdUSLAoVjaRJm7+6PvcM+q1zYOwS4wTYMF9w==}
-
-  '@types/semver@7.8.0':
-    resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
 
   '@types/statuses@2.0.6':
     resolution: {integrity: sha512-xMAgYwceFhRA2zY+XbEA7mxYbA093wdiW8Vu6gZPGWy9cmOyU9XesH1tNcEWsKFd5Vzrqx5T3D38PWx1FIIXkA==}
@@ -8476,8 +8467,6 @@ snapshots:
   '@types/react@19.2.14':
     dependencies:
       csstype: 3.2.3
-
-  '@types/semver@7.8.0': {}
 
   '@types/statuses@2.0.6': {}
 
