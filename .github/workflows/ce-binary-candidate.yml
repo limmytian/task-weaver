@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ce-binary-candidate-${{ inputs.version }}
+  group: ce-binary-candidate-${{ inputs.version }}-${{ inputs.ref }}
   cancel-in-progress: false
 
 jobs:
