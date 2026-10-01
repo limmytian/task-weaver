@@ -71,6 +71,7 @@ test("creates gateway jobs with service-token headers", async () => {
   });
 
   const job = await client.createJob({
+    id: "tw_pi_stable_run",
     executionMode: "ephemeral_interpreter",
     command: { argv: ["echo", "ok"] },
     timeoutSeconds: 30,
@@ -79,6 +80,7 @@ test("creates gateway jobs with service-token headers", async () => {
   assert.equal(job.id, "job_1");
   assert.equal(calls[0]?.url, "http://gateway.local/v1/jobs");
   assert.equal((calls[0]?.init?.headers as Record<string, string>).authorization, "Bearer secret-token");
+  assert.equal((calls[0]?.init?.headers as Record<string, string>)["idempotency-key"], "tw_pi_stable_run");
 });
 
 test("maps Ti agent runs to gateway job requests", () => {
@@ -106,6 +108,24 @@ test("maps Ti agent runs to gateway job requests", () => {
   assert.equal(request.projectId, "project_1");
   assert.equal(request.inputs?.files[0]?.content, "Do the assigned work");
   assert.equal((request.metadata?.taskWeaver as Record<string, unknown>).taskId, "22222222-2222-2222-2222-222222222222");
+});
+
+test("keeps job requests stable when persisted execution metadata changes", () => {
+  const run = { id: "stable-run", requestedPiProvider: "openai", requestedPiModel: "gpt-5.5",
+    actualPiProvider: "openai", actualPiModel: "gpt-5.5" };
+  const config = { enabled: true, defaultTimeoutSeconds: 30 };
+  const initial = buildGatewayJobRequestFromPiRun({ run, prompt: "Stable task", config });
+  const recovered = buildGatewayJobRequestFromPiRun({
+    run: { ...run, actualPiProvider: "partners-gateway", actualPiModel: "kubernetes" },
+    prompt: "Stable task", config,
+  });
+  assert.deepEqual(recovered, initial);
+  const unspecified = { ...run, requestedPiProvider: null, requestedPiModel: null };
+  assert.deepEqual(
+    buildGatewayJobRequestFromPiRun({ run: unspecified, prompt: "Stable task", config }),
+    buildGatewayJobRequestFromPiRun({ run: { ...unspecified, actualPiProvider: "partners-gateway", actualPiModel: "kubernetes" },
+      prompt: "Stable task", config }),
+  );
 });
 
 test("maps gateway terminal jobs to Ti completion payloads", () => {

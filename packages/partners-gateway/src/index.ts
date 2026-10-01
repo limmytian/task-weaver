@@ -111,6 +111,8 @@ export type PartnersGatewayPiRun = {
   id: string;
   taskId?: string | null;
   scheduleRunId?: string | null;
+  requestedPiProvider?: string | null;
+  requestedPiModel?: string | null;
   actualPiProvider?: string | null;
   actualPiModel?: string | null;
   task?: {
@@ -171,7 +173,10 @@ export function createPartnersGatewayClient(
     async createJob(request: PartnersGatewayJobRequest): Promise<PartnersGatewayJob> {
       const response = await fetchImpl(`${baseUrl}/v1/jobs`, {
         method: "POST",
-        headers,
+        headers: {
+          ...headers,
+          ...(request.id ? { "idempotency-key": request.id } : {}),
+        },
         body: JSON.stringify(request),
       });
       return parseGatewayJson<PartnersGatewayJob>(response);
@@ -300,8 +305,8 @@ export function buildGatewayJobRequestFromPiRun(input: {
         piAgentRunId: input.run.id,
         taskId: input.run.taskId ?? null,
         scheduleRunId: input.run.scheduleRunId ?? null,
-        requestedProvider: input.run.actualPiProvider ?? null,
-        requestedModel: input.run.actualPiModel ?? null,
+        requestedProvider: input.run.requestedPiProvider ?? null,
+        requestedModel: input.run.requestedPiModel ?? null,
       },
       prompt: input.prompt,
     },

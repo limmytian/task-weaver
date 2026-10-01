@@ -112,8 +112,13 @@ business architecture.
   notifications, and metering. Core supplies default implementations.
 - Core owns its migration journal. Modules may declare separately owned schema
   namespaces and migration journals, with collisions rejected before startup.
-- Partners Gateway is the reference module. Package compatibility and worker
-  tests do not establish its full real-PostgreSQL end-to-end verification.
+- Partners Gateway is the reference module. `pnpm test:gateway-postgres` verifies
+  migrated real PostgreSQL persistence, API/Gateway HTTP and SSE transport,
+  retries, leases, terminal outcomes, and worker lifecycle using a local Gateway
+  protocol fixture. `pnpm test:gateway-live` verifies a deployed Gateway with
+  remote shell execution, SSE, artifacts, idempotent retries, terminal outcomes,
+  and real Core persistence and lease recovery. The default worker prints its
+  staged prompt; AI model execution requires separate integration.
 
 See [module contracts](../packages/module-sdk/README.md),
 [extension compatibility](extension-compatibility.md), and

@@ -44,7 +44,7 @@ import webhookRoutes from "./routes/webhooks.js";
 import { mcpPool } from "./mcp-pool.js";
 import { createPartnersGatewayModule } from "@task-weaver/partners-gateway/module";
 
-export const TASK_WEAVER_CORE_VERSION = "0.2.0" as const;
+export const TASK_WEAVER_CORE_VERSION = "0.2.1" as const;
 
 export interface ApiModuleRuntimeContext {
   db: Database;

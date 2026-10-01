@@ -107,8 +107,11 @@ task-weaver/
 - 运行时端口定义身份、授权、权益、审计、秘密解析、通知与计量；Core 提供默认实现。
 - Core 拥有自己的迁移日志。模块可声明独立的 schema 命名空间和迁移日志，
   启动前会拒绝命名空间冲突。
-- Partners Gateway 是参考模块。包兼容性和 worker 测试不等于完成了真实
-  PostgreSQL 环境中的全链路端到端验证。
+- Partners Gateway 是参考模块。`pnpm test:gateway-postgres` 使用本地 Gateway
+  协议测试服务，验证迁移后的真实 PostgreSQL 持久化、API/Gateway HTTP 与 SSE
+  通信、重试、租约、终态和 worker 生命周期。`pnpm test:gateway-live` 验证已部署
+  Gateway 的远端 Shell 执行、SSE、产物、幂等重试、终态，以及真实 Core 持久化
+  和租约恢复。默认 worker 仅输出已暂存的任务提示词；AI 模型执行需要单独集成。
 
 参见[模块契约](../packages/module-sdk/README.md)、
 [扩展兼容性](extension-compatibility.md)与[版本化包](ce-packages.md)。

@@ -53,8 +53,8 @@ export function createPartnersGatewayModule(db: Database, env: NodeJS.ProcessEnv
       apiVersion: TASK_WEAVER_MODULE_API_VERSION,
       id: moduleId,
       name: "Partners Gateway reference module",
-      version: "0.2.0",
-      supportedCoreVersion: "^0.2.0",
+      version: "0.2.1",
+      supportedCoreVersion: "^0.2.1",
       capabilities: ["partners-gateway.execution"],
       permissions: [{
         id: "partners-gateway.worker.read",

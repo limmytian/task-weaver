@@ -7,6 +7,35 @@ projects, requirements, tasks, documents, and activity history.
 The application includes kanban boards, a linked Markdown knowledge base,
 keyword and vector search, agent task execution, and an MCP tool registry.
 
+## v0.2.1 Gateway reliability patch
+
+Version 0.2.1 fixes Partners Gateway submissions that could execute again during
+retries or lease recovery. The client now sends the stable run job ID as
+`Idempotency-Key` and preserves the originally requested provider/model in
+submission metadata. Deployments without Partners Gateway enabled are unaffected.
+No database migration or license change is introduced by this patch.
+
+The default Gateway worker prints the staged task prompt; autonomous model
+execution requires additional integration. The live verification command covers
+actual remote shell execution, streaming, artifacts, terminal outcomes and Core
+persistence. See [the Gateway module](packages/partners-gateway/README.md).
+
+The Compose defaults below retain the original v0.1.0 pinned images. To install
+or upgrade to the reviewed v0.2.1 images, verify its release signatures and
+checksums, download `api-image.digest` and `web-image.digest`, and configure:
+
+```bash
+export TW_API_IMAGE="$(cat api-image.digest)"
+export TW_WEB_IMAGE="$(cat web-image.digest)"
+docker compose config
+docker compose up -d --wait
+```
+
+Back up the database and skill data before an upgrade and follow
+[the upgrade and recovery guide](docs/ce-upgrades.md). Versioned Linux ARM64
+images and the six npm tarballs are distributed through GHCR and GitHub Release
+assets; this release does not publish to npmjs.
+
 ## Quick start
 
 The v0.1.0 Compose example runs the published API and Web containers on Linux

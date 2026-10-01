@@ -72,7 +72,7 @@ test("worker health route probes the configured gateway", async () => {
 test("module configuration rejects incomplete Gateway credentials before startup", () => {
   const module = createPartnersGatewayModule({} as Database, {});
   assert.throws(() => composeTaskWeaverModules([module], {
-    coreVersion: "0.2.0",
+    coreVersion: module.manifest.version,
     configuration: {
       [module.manifest.id]: {
         enabled: true,
@@ -91,7 +91,7 @@ test("module configuration rejects incomplete Gateway credentials before startup
 
 test("reference module accepts compatible Core updates and rejects unsupported updates", () => {
   const module = createPartnersGatewayModule({} as Database, {});
-  const compatible = composeTaskWeaverModules([module], { coreVersion: "0.2.1" });
+  const compatible = composeTaskWeaverModules([module], { coreVersion: "0.2.2" });
   assert.equal(compatible.workers[0]?.id, "partners-gateway-runner");
   assert.equal(compatible.apiRoutes[0]?.path, "/api/v1/pi-agent/worker");
   assert.throws(() => composeTaskWeaverModules([module], { coreVersion: "0.3.0" }),

@@ -13,7 +13,7 @@ import type {
   WebSettingsDescriptor,
 } from "./web-extension-types";
 
-export const TASK_WEAVER_WEB_CORE_VERSION = "0.2.0";
+export const TASK_WEAVER_WEB_CORE_VERSION = "0.2.1";
 export const WEB_EXTENSION_ROUTE_PREFIX = "/projects/extensions/";
 
 export interface WebModuleRegistry {
