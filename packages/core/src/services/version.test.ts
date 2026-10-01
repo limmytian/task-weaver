@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { APPLICATION_VERSION } from "@task-weaver/contracts";
 import { compareVersions, createVersionChecker, installedBuild } from "./version";
 
 const release = { tag_name: "v0.3.0", html_url: "https://github.com/limmytian/task-weaver/releases/tag/v0.3.0", draft: false, prerelease: false, published_at: "2026-10-01T00:00:00Z" };
@@ -53,7 +54,7 @@ test("stable source and bounded content are verified before comparison", async (
   }
 });
 test("build identity never invents a commit when metadata is missing", () => {
-  assert.deepEqual(installedBuild({ NODE_ENV: "production" }), { version: "0.3.0", commit: null, development: true });
+  assert.deepEqual(installedBuild({ NODE_ENV: "production" }), { version: APPLICATION_VERSION, commit: null, development: true });
   assert.equal(installedBuild({ NODE_ENV: "production", TW_BUILD_COMMIT: "a".repeat(40) }).development, false);
   assert.equal(installedBuild({ TW_BUILD_COMMIT: "invalid" }).commit, null);
 });

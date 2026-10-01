@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { APPLICATION_VERSION } from "@task-weaver/contracts";
 import versionRoutes from "./version.js";
 
 test("version endpoints expose build metadata without database access and honor disabled checks", async () => {
@@ -11,7 +12,7 @@ test("version endpoints expose build metadata without database access and honor 
       assert.equal(response.status, 200);
       const result = await response.json();
       assert.equal(result.status, "disabled");
-      assert.equal(result.installed.version, "0.3.0");
+      assert.equal(result.installed.version, APPLICATION_VERSION);
       assert.equal(result.latest, null);
     }
   } finally {

@@ -157,3 +157,27 @@ test("independent consumption receipts reject changed commits, platforms and run
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("registry preflight fails closed on existing tags or authentication errors before writes", () => {
+  const root = mkdtempSync(join(tmpdir(), "tw-publication-preflight-"));
+  const script = resolve("scripts/publish-ce-oci.mjs");
+  try {
+    for (const args of [["init", "-q"], ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "Fixture"]]) assert.equal(spawnSync("git", args, { cwd: root }).status, 0);
+    const commit = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
+    mkdirSync(join(root, "release-artifacts/bundle"), { recursive: true });
+    mkdirSync(join(root, "bin"));
+    writeFileSync(join(root, "release-artifacts/bundle/source-provenance.json"), "{}");
+    writeFileSync(join(root, "release-artifacts/bundle/ce-candidate-set.json"), JSON.stringify({ version: "0.3.1", commit }));
+    const calls = join(root, "calls.txt");
+    for (const [status, error, message] of [[0, "", /Immutable image tag already exists/], [1, "unauthorized", /Cannot establish registry tag availability/], [1, "manifest unknown", /ce-candidate-amd64.json/]]) {
+      writeFileSync(calls, "");
+      writeFileSync(join(root, "bin/docker"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$TW_TEST_CALLS"\nprintf '%s\\n' '${error}' >&2\nexit ${status}\n`, { mode: 0o755 });
+      const result = spawnSync(process.execPath, [script, "0.3.1", "example/task-weaver"], { cwd: root, env: { ...process.env, PATH: `${join(root, "bin")}:${process.env.PATH}`, TW_TEST_CALLS: calls }, encoding: "utf8" });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, message);
+      const commands = readFileSync(calls, "utf8");
+      assert.doesNotMatch(commands, /push|imagetools create|tag /);
+      assert.equal(commands.trim().split("\n").length, error === "manifest unknown" ? 6 : 1);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

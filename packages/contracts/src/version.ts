@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const APPLICATION_VERSION = "0.3.0";
+export const APPLICATION_VERSION = "0.3.1";
 export const RELEASES_URL = "https://github.com/limmytian/task-weaver/releases";
 export const versionStatusSchema = z.object({
   installed: z.object({ version: z.string(), commit: z.string().nullable(), development: z.boolean() }),

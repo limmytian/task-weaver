@@ -7,6 +7,37 @@ projects, requirements, tasks, documents, and activity history.
 The application includes kanban boards, a linked Markdown knowledge base,
 keyword and vector search, agent task execution, and an MCP tool registry.
 
+## v0.3.1 multi-architecture images and version information
+
+Version 0.3.1 adds API and Web OCI indexes for Linux AMD64 and ARM64. Each
+platform is built on a native runner, separately verified, and independently
+installed before publication. The index and platform manifests are signed;
+platform SBOMs and source evidence remain separately identified.
+
+Settings > Version shows the Web build and offers a manual check of the latest
+official stable release. It links to downloads and upgrade guidance. It does not
+install updates. `TW_VERSION_CHECK_ENABLED=false` disables outbound checks on
+the API or Web service. REST clients can read `GET /api/v1/version` or request
+`POST /api/v1/version/check` for the API build.
+
+To use this release, verify its signatures and checksums and download
+`api-image.digest` and `web-image.digest` from
+[the release](https://github.com/limmytian/task-weaver/releases/tag/v0.3.1).
+The Compose defaults still select the historical ARM64 v0.1.0 images; configure
+the new index digests and your host platform explicitly:
+
+```bash
+export TW_API_IMAGE="$(cat api-image.digest)"
+export TW_WEB_IMAGE="$(cat web-image.digest)"
+export TW_IMAGE_PLATFORM=linux/amd64 # Use linux/arm64 on ARM64 hosts.
+docker compose config
+docker compose up -d --wait
+```
+
+Back up application data first and follow [the upgrade guide](docs/ce-upgrades.md).
+The five npm packages remain release attachment tarballs, not npmjs publications.
+Existing v0.3.0 artifacts remain immutable and ARM64 only.
+
 ## v0.3.0 unified application
 
 Version 0.3.0 retires the separate CE/Pro application architecture. Task Weaver
@@ -66,7 +97,7 @@ but does not protect the entire application. Do not expose these services to the
 Internet without an authenticated gateway and a separate deployment review.
 See [deployment](docs/deployment.md) for persistence, backups, and rollback.
 
-The published images and Compose example support Linux ARM64 only. v0.1.0 does
+The historical v0.1.0 images selected by Compose defaults support Linux ARM64 only. v0.1.0 does
 not publish AMD64 images, floating tags, signatures, npm packages, a first-party
 PostgreSQL image, or complete upgrade/downgrade certification.
 
@@ -141,7 +172,6 @@ Project branding is covered by the [trademark policy](TRADEMARKS.md).
 
 ## Development architecture
 
-Development version 0.3.0 consolidates Task Weaver into one application and removes
-the retired in-process SDK. The release information above describes published
-0.2.1, not a new 0.3.0 publication. See [the transition](docs/architecture-transition.md)
+Task Weaver 0.3 consolidates the application and removes the retired in-process
+SDK. Version 0.3.1 adds multi-architecture distribution and manual version checks. See [the transition](docs/architecture-transition.md)
 and [deferred plugin planning](docs/plugin-roadmap.md).

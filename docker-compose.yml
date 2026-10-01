@@ -16,6 +16,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Configure an external PostgreSQL connection}
       NODE_ENV: production
+      TW_VERSION_CHECK_ENABLED: ${TW_VERSION_CHECK_ENABLED:-true}
       TW_DAEMON_MODE: polling
       SKILL_PACKAGE_STORAGE_DIR: /app/data/skill-packages
     volumes:
@@ -37,6 +38,7 @@ services:
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
     environment:
       DATABASE_URL: ${DATABASE_URL:?Configure an external PostgreSQL connection}
+      TW_VERSION_CHECK_ENABLED: ${TW_VERSION_CHECK_ENABLED:-true}
       TW_API_URL: http://api:3001
       NODE_ENV: production
     depends_on:
