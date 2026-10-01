@@ -24,6 +24,8 @@ COPY --from=runtime-base / /
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENTRYPOINT ["docker-entrypoint.sh"]
 WORKDIR /app
+ARG TW_BUILD_COMMIT
+ENV TW_BUILD_COMMIT=$TW_BUILD_COMMIT
 ENV NODE_ENV=production
 
 COPY --from=installer /app/apps/web/.next/standalone ./

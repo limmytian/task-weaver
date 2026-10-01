@@ -208,3 +208,12 @@ retroactively change an existing tag or certify AMD64 artifacts. A future
 release must complete both native candidate gates and independent consumption
 verification before advertising multi-architecture support. Production upgrades
 remain an operator decision.
+
+## Installed build identification
+
+The candidate builder passes its exact public commit as `TW_BUILD_COMMIT` to
+both image builds. An operator building an image manually should also supply
+`--build-arg TW_BUILD_COMMIT=<full-source-commit>`; missing metadata remains
+explicitly unknown. The version page identifies the Web build. REST metadata
+identifies the API build separately. Set `TW_VERSION_CHECK_ENABLED=false` on
+each service to disable manual outbound release checks for offline deployments.

@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Database, Key, Puzzle, type LucideIcon } from "lucide-react";
+import { Database, Key, Puzzle, Server, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SettingsItem } from "@/lib/navigation";
 
 const settingsIcons: Readonly<Record<string, LucideIcon>> = {
   key: Key,
   storage: Database,
+  server: Server,
 };
 
 export function SettingsNav({ modules }: { modules: readonly SettingsItem[] }) {

@@ -14,6 +14,7 @@ export const navigation: readonly NavigationItem[] = [
       { id: "settings", label: "Settings", href: "/projects/settings", icon: "settings" },
     ];
 export const settings: readonly SettingsItem[] = [
+  { id: "version", href: "/projects/settings/version", title: "Version", description: "Build and release information", icon: "server" },
   { id: "api-keys", href: "/projects/settings/api-keys", title: "API Keys", description: "Agent authentication", icon: "key" },
   { id: "embeddings", href: "/projects/settings/embeddings", title: "Embedding Search", description: "Semantic retrieval", icon: "storage" },
 ];

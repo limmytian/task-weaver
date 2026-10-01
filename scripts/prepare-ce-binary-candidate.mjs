@@ -15,7 +15,7 @@ const web = `task-weaver-web:ce-candidate-${architecture}`;
 const run = (command, args) => execFileSync(command, args, { stdio: "inherit" });
 const script = (name, ...args) => run(process.execPath, [`scripts/${name}.mjs`, ...args]);
 for (const [app, image] of [["api", api], ["web", web]]) {
-  run("docker", ["buildx", "build", "--platform", platform, "--load", "--file", `apps/${app}/Dockerfile`, "--tag", image, "."]);
+  run("docker", ["buildx", "build", "--platform", platform, "--load", "--build-arg", `TW_BUILD_COMMIT=${execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()}`, "--file", `apps/${app}/Dockerfile`, "--tag", image, "."]);
 }
 script("collect-image-license-evidence", `--platform=${platform}`, api, web);
 const root = "release-artifacts/binary-sources";

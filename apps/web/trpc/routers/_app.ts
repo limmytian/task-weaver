@@ -16,6 +16,8 @@ import { assistantRouter } from "./assistant";
 import { repositoryRouter } from "./repository";
 import { embeddingRouter } from "./embedding";
 
+import { versionRouter } from "./version";
+
 export const appRouter = router({
   project: projectRouter,
   task: taskRouter,
@@ -33,6 +35,7 @@ export const appRouter = router({
   assistant: assistantRouter,
   repository: repositoryRouter,
   embedding: embeddingRouter,
+  version: versionRouter,
 });
 
 export type AppRouter = typeof appRouter;

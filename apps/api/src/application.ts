@@ -30,6 +30,7 @@ import reviewRoutes from "./routes/reviews.js";
 import scheduleRoutes from "./routes/schedules.js";
 import searchRoutes from "./routes/search.js";
 import taskRoutes from "./routes/tasks.js";
+import versionRoutes from "./routes/version.js";
 import webhookRoutes from "./routes/webhooks.js";
 import { mcpPool } from "./mcp-pool.js";
 import { createPartnersGatewayRuntime } from "@task-weaver/partners-gateway/runtime";
@@ -79,6 +80,7 @@ const consoleLogger: ApplicationLogger = {
 function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
   return {
     apiRoutes: [
+      { id: "version", method: "GET", path: "/api/v1/version", route: versionRoutes },
       { id: "projects", method: "GET", path: "/api/v1/projects", route: projectRoutes },
       { id: "tasks", method: "GET", path: "/api/v1/tasks", mountPath: "/api/v1", route: taskRoutes },
       { id: "documents", method: "GET", path: "/api/v1/documents", route: documentRoutes },

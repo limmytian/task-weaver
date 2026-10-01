@@ -5,4 +5,6 @@ if (new Set(versions).size !== 1) throw new Error(`Package versions differ: ${ve
 const version = versions[0];
 const match = readFileSync("apps/api/src/application.ts", "utf8").match(/TASK_WEAVER_VERSION = "([^"]+)"/);
 if (!version || match?.[1] !== version) throw new Error("Application and package versions must agree");
+const buildVersion = readFileSync("packages/contracts/src/version.ts", "utf8").match(/APPLICATION_VERSION = "([^\"]+)"/);
+if (buildVersion?.[1] !== version) throw new Error("Build metadata version must match application version");
 console.log(`Task Weaver package/runtime version: ${version}`);

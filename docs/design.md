@@ -635,3 +635,22 @@ pnpm typecheck        # Type-check
 |---------|------|---------|
 | Next.js Web | 3000 | Frontend |
 | Hono API | 3001 | API service (tRPC + REST + GraphQL) |
+
+## Version information and manual release checks
+
+The Settings version page identifies the installed Web application version and
+build commit. Container candidates embed the frozen public commit through
+`TW_BUILD_COMMIT`; builds without valid metadata are explicitly identified as
+development builds with an unknown commit. API and Web deployments can use
+different builds. The API exposes its own metadata at `GET /api/v1/version` and
+a manual check at `POST /api/v1/version/check`.
+
+Opening the page does not contact an external release service. A manual check
+queries only the official GitHub latest-stable-release endpoint, excludes draft
+and prerelease responses, compares semantic versions, and validates the official
+release link. Checks have a five-second timeout, a 64 KiB response limit,
+coalesced concurrent requests and a five-minute success/rate-limit cache. Failed
+checks are cached for one minute and remain unavailable rather than reporting
+that the installation is current. `TW_VERSION_CHECK_ENABLED=false` disables
+outbound checks. The page links to release downloads and operator upgrade
+instructions; it has no download, install, restart or deployment action.

@@ -34,3 +34,4 @@ export * as planService from "./plans";
 export * from "./daemon-slo";
 export * from "./daemon-metrics";
 export * from "./daemon-release-gate";
+export * from "./version";

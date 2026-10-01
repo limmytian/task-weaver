@@ -6,3 +6,4 @@ export * from "./daemon-slo";
 export * from "./release-evidence";
 
 export { resolveActor } from "./actor";
+export * from "./version";
