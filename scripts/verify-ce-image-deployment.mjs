@@ -5,7 +5,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { inspectLocalImage } from "./image-inspection-lib.mjs";
 
-const [apiImage, webImage] = process.argv.slice(2);
+import { releasePlatform } from "./release-platforms.mjs";
+
+const [apiImage, webImage, requestedPlatform] = process.argv.slice(2);
+const platform = releasePlatform(requestedPlatform);
 if (!apiImage || !webImage) throw new Error("Usage: node scripts/verify-ce-image-deployment.mjs <api-image> <web-image>");
 const databaseImage = "pgvector/pgvector@sha256:c8483555ce48101872f888c1df8a895ff689d6c7c7a5f7ac266475f9dfe89e0b";
 const prefix = `tw-ce-candidate-${randomUUID().slice(0, 8)}`;
@@ -24,20 +27,20 @@ async function ready(check, label) {
 function start(name, args) {
   const container = `${prefix}-${name}`;
   containers.push(container);
-  docker(["run", "-d", "--name", container, "--platform", "linux/arm64", "--network", prefix, ...args]);
+  docker(["run", "-d", "--name", container, "--platform", platform, "--network", prefix, ...args]);
   return container;
 }
 function port(name, number) {
   return Number(docker(["port", name, `${number}/tcp`]).split(":").at(-1));
 }
-const images = [apiImage, webImage].map((image) => ({ image, imageId: inspectLocalImage(image, "linux/arm64").Id, platform: "linux/arm64" }));
+const images = [apiImage, webImage].map((image) => ({ image, imageId: inspectLocalImage(image, platform).Id, platform: platform }));
 try {
   docker(["network", "create", prefix]);
   docker(["volume", "create", prefix]);
   const database = start("database", ["--network-alias", "database", "-e", `POSTGRES_PASSWORD=${password}`, databaseImage]);
   await ready(() => docker(["exec", database, "pg_isready", "-U", "postgres"]).includes("accepting connections"), "PostgreSQL");
   for (const script of ["migrate.ts", "setup-search.ts"]) {
-    docker(["run", "--rm", "--platform", "linux/arm64", "--network", prefix, "-e", `DATABASE_URL=${url}`, apiImage,
+    docker(["run", "--rm", "--platform", platform, "--network", prefix, "-e", `DATABASE_URL=${url}`, apiImage,
       "./node_modules/.bin/tsx", `node_modules/@task-weaver/db/src/${script}`]);
   }
   const api = start("api", ["--network-alias", "api", "-p", "127.0.0.1::3001", "-e", `DATABASE_URL=${url}`,
@@ -61,7 +64,7 @@ try {
   }
   const output = resolve("release-artifacts/deployment-verification.json");
   mkdirSync(resolve("release-artifacts"), { recursive: true });
-  writeFileSync(output, `${JSON.stringify({ schemaVersion: 1, mode: "isolated-fresh-install", imageIds: images,
+  writeFileSync(output, `${JSON.stringify({ schemaVersion: 1, mode: "isolated-fresh-install", platform, imageIds: images,
     databaseImage, migrationPassed: true, searchSetupPassed: true, apiHealthy: true, webHealthy: true,
     restCreateReadPassed: true, passed: true }, null, 2)}\n`);
   console.log(output);

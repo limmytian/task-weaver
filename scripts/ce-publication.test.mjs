@@ -31,9 +31,10 @@ test("publication loads reviewed image bytes and applies evidence gates before r
   const publicWorkflow = existsSync("open-source/public-files") ? "open-source/public-files/.github/workflows/ce-release.yml" : ".github/workflows/ce-release.yml";
   for (const path of [publicWorkflow, ".gitea/workflows/ce-registry-release.yml"].filter(existsSync)) {
     const source = readFileSync(path, "utf8");
-    assert.ok(source.indexOf("load-ce-binary-candidate.mjs") < source.indexOf("docker push"));
+    const publication = path === publicWorkflow ? readFileSync("scripts/publish-ce-oci.mjs", "utf8") : source;
+    assert.ok(source.indexOf("load-ce-binary-candidate.mjs") < source.indexOf(path === publicWorkflow ? "publish-ce-oci.mjs" : "docker push"));
     assert.doesNotMatch(source, /docker buildx build/);
-    assert.match(source, /--type cyclonedx/);
+    assert.match(publication, /cyclonedx/);
   }
   if (!existsSync(".gitea/workflows/ce-registry-release.yml")) return;
   const mirror = readFileSync(".gitea/workflows/ce-registry-release.yml", "utf8");
@@ -102,4 +103,24 @@ test("publication accepts only the successful controlled candidate workflow at t
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("multi-platform indexes bind exactly the reviewed AMD64 and ARM64 child digests", async () => {
+  const { verifyOciIndex } = await import("./oci-index.mjs");
+  const expected = { "linux/amd64": `sha256:${"a".repeat(64)}`, "linux/arm64": `sha256:${"b".repeat(64)}` };
+  const index = { schemaVersion: 2, mediaType: "application/vnd.oci.image.index.v1+json", manifests: Object.entries(expected).map(([platform, digest]) => ({ digest, size: 512, platform: { os: "linux", architecture: platform.split("/")[1] } })) };
+  assert.equal(verifyOciIndex(index, expected), index);
+  for (const mutate of [copy => copy.manifests.pop(), copy => copy.manifests[1].platform.architecture = "amd64", copy => copy.manifests[0].digest = expected["linux/arm64"], copy => copy.manifests[0].platform.os = "windows", copy => copy.manifests[0].platform.variant = "v9"]) {
+    const copy = structuredClone(index);
+    mutate(copy);
+    assert.throws(() => verifyOciIndex(copy, expected));
+  }
+});
+
+test("source evidence requires one supported CPU and chooses its native Rust targets", async () => {
+  const { rustTargets, sourcePlatform } = await import("./release-platforms.mjs");
+  assert.deepEqual(rustTargets("linux/amd64"), ["x86_64-unknown-linux-musl", "x86_64-unknown-linux-gnu"]);
+  assert.deepEqual(rustTargets("linux/arm64"), ["aarch64-unknown-linux-musl", "aarch64-unknown-linux-gnu"]);
+  assert.throws(() => sourcePlatform({ images: [{ platform: "linux/amd64" }, { platform: "linux/arm64" }] }));
+  assert.throws(() => rustTargets("linux/riscv64"));
 });

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { rustTargets, sourcePlatform } from "./release-platforms.mjs";
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -82,9 +83,10 @@ const tuples = (text) => text.split("[[package]]").slice(1).map((block) => Objec
 const originalPackages = new Set(tuples(original));
 const updatedPackages = tuples(updated);
 assert.ok(updatedPackages.every((pkg) => originalPackages.has(pkg)), "Post-edit dependencies are not covered by the original lock source superset");
+const targets = rustTargets(sourcePlatform(lock));
 const linuxTrees = [];
 const linuxPackages = new Set();
-for (const target of ["aarch64-unknown-linux-musl", "aarch64-unknown-linux-gnu"]) {
+for (const target of targets) {
   const tree = spawnSync("cargo", ["tree", "--locked", "--offline", "--manifest-path", resolve(source, "Cargo.toml"),
     "--package", "librsvg-c", "--all-features", "--edges", "normal,build", "--target", target,
     "--prefix", "none", "--format", "{p}", "--color", "never",
@@ -107,7 +109,7 @@ if (runtimeSource) {
   extract(runtimeSource, resolve(scratch, "runtime-source"));
   standardLibrarySource = resolve(scratch, "runtime-source/rust-src-nightly/rust-src/lib/rustlib/src/rust/library");
   assert.equal(hash(readFileSync(resolve(standardLibrarySource, "Cargo.lock"))), lock.rustRuntimeEvidence.registryDependencyLock.sha256);
-  for (const target of ["aarch64-unknown-linux-musl", "aarch64-unknown-linux-gnu"]) {
+  for (const target of targets) {
     const tree = spawnSync("cargo", ["tree", "--locked", "--offline", "--manifest-path", resolve(standardLibrarySource, "Cargo.toml"),
       "--package", "std", "--all-features", "--edges", "normal,build", "--target", target, "--prefix", "none", "--format", "{p}", "--color", "never",
       "--config", 'source.crates-io.replace-with="vendored-sources"', "--config", `source.vendored-sources.directory=${JSON.stringify(vendor)}`],

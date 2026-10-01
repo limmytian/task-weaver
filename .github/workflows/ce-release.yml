@@ -94,52 +94,47 @@ jobs:
           node scripts/check-ce-candidate-run.mjs candidate-run.json "$(git rev-parse HEAD)" "$PUBLIC_REPOSITORY"
           gh run download "$CANDIDATE_RUN_ID" --repo "$PUBLIC_REPOSITORY" \
             --name ce-binary-candidate --dir binary-candidate
-          node scripts/load-ce-binary-candidate.mjs binary-candidate "$VERSION"
+          node scripts/load-ce-candidate-set.mjs binary-candidate "$VERSION"
+          # load-ce-binary-candidate.mjs verifies each platform before publication.
       - uses: anchore/scan-action@v7.4.0
         with:
-          image: task-weaver-api:release
+          image: task-weaver-api:release-amd64
           fail-build: true
           severity-cutoff: high
           output-format: json
-          output-file: release-artifacts/bundle/api-vulnerabilities.json
+          output-file: release-artifacts/bundle/api-vulnerabilities-amd64.json
       - uses: anchore/scan-action@v7.4.0
         with:
-          image: task-weaver-web:release
+          image: task-weaver-web:release-amd64
           fail-build: true
           severity-cutoff: high
           output-format: json
-          output-file: release-artifacts/bundle/web-vulnerabilities.json
+          output-file: release-artifacts/bundle/web-vulnerabilities-amd64.json
+      - uses: anchore/scan-action@v7.4.0
+        with:
+          image: task-weaver-api:release-arm64
+          fail-build: true
+          severity-cutoff: high
+          output-format: json
+          output-file: release-artifacts/bundle/api-vulnerabilities-arm64.json
+      - uses: anchore/scan-action@v7.4.0
+        with:
+          image: task-weaver-web:release-arm64
+          fail-build: true
+          severity-cutoff: high
+          output-format: json
+          output-file: release-artifacts/bundle/web-vulnerabilities-arm64.json
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - name: Build and sign immutable OCI images
+      - uses: docker/setup-buildx-action@v3
+      - name: Promote and sign reviewed platform images and OCI indexes
         env:
           VERSION: ${{ inputs.version }}
           REPOSITORY: ${{ github.repository }}
-        run: |
-          for app in api web; do
-            image="ghcr.io/${REPOSITORY}-${app}:${VERSION}-arm64"
-            if docker manifest inspect "$image" >/dev/null 2>&1; then
-              echo "Image tag already exists: $image" >&2
-              exit 1
-            fi
-            docker tag "task-weaver-${app}:release" "$image"
-            docker push "$image"
-            digest=$(docker image inspect "$image" --format '{{json .RepoDigests}}' | \
-              jq -r --arg repository "${image%:*}" '.[] | select(startswith($repository + "@")) | split("@")[1]')
-            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-            local_id=$(docker image inspect "task-weaver-${app}:release" --format '{{.Id}}')
-            jq -n --arg image "$image" --arg digest "$digest" --arg localImageId "$local_id" \
-              '{image: $image, digest: $digest, localImageId: $localImageId}' > "release-artifacts/bundle/${app}-image.json"
-            cosign sign --yes "${image%:*}@${digest}"
-            cosign attest --yes --type cyclonedx \
-              --predicate "release-artifacts/bundle/${app}-image.sbom.json" "${image%:*}@${digest}"
-            cosign attest --yes --type custom \
-              --predicate release-artifacts/bundle/source-provenance.json "${image%:*}@${digest}"
-            printf '%s@%s\n' "${image%:*}" "$digest" > "release-artifacts/bundle/${app}-image.digest"
-          done
+        run: node scripts/publish-ce-oci.mjs "$VERSION" "$REPOSITORY"
       - name: Finalize checksums and sign release files
         run: |
           pnpm release:finalize-ce

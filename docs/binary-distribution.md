@@ -186,3 +186,25 @@ Generated evidence intentionally records `distributionApproved: false`. Only a
 completed, reviewed release checklist and the owner's publication checkpoint can
 approve publication. Do not treat successful acquisition or a replacement test
 as blanket permission to publish.
+
+## Independent AMD64 and ARM64 candidates
+
+Future candidates run on native `ubuntu-24.04` (AMD64) and
+`ubuntu-24.04-arm` (ARM64) runners. Each platform separately passes source,
+license, native replacement, source-only Rust coverage, vulnerability, and
+fresh-install gates. `merge-ce-binary-candidates.mjs` aggregates both candidates
+only when their version and public source commit match. Each platform retains
+its image archive, configuration digest, corresponding source and verification
+reports. A missing or mismatched platform blocks aggregation.
+
+Publication loads these archives without rebuilding. Platform manifests receive
+separate signatures, SBOM attestations and source provenance. The unified OCI
+index receives a signature and provenance binding both reviewed child digests;
+a single platform SBOM is never presented as evidence for the entire index.
+Immutable version and platform tags are checked before registry writes.
+
+The published v0.3.0 images remain ARM64 only. Adding this pipeline does not
+retroactively change an existing tag or certify AMD64 artifacts. A future
+release must complete both native candidate gates and independent consumption
+verification before advertising multi-architecture support. Production upgrades
+remain an operator decision.

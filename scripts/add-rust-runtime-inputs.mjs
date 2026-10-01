@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { rustTargets, sourcePlatform } from "./release-platforms.mjs";
 
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -29,7 +30,7 @@ add("recipe", channelUrl, "channel-rust-nightly.toml");
 for (const name of ["COPYRIGHT", "LICENSE-APACHE", "LICENSE-MIT", "REUSE.toml", "license-metadata.json"]) {
   add(name.startsWith("LICENSE") || name === "COPYRIGHT" ? "license" : "recipe", `https://raw.githubusercontent.com/rust-lang/rust/${commit}/${name}`, name);
 }
-for (const [pkg, target] of [["rust-src", '"*"'], ["rust-docs", "aarch64-unknown-linux-musl"]]) {
+for (const [pkg, target] of [["rust-src", '"*"'], ["rust-docs", rustTargets(sourcePlatform(lock))[0]]]) {
   const block = channel.split(/(?=^\[)/m).find((entry) => entry.startsWith(`[pkg.${pkg}.target.${target}]\n`));
   const url = block?.match(/^xz_url = "([^"]+)"/m)?.[1];
   const sha256 = block?.match(/^xz_hash = "([a-f0-9]{64})"/m)?.[1];

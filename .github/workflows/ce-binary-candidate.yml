@@ -21,7 +21,17 @@ concurrency:
 
 jobs:
   candidate:
-    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     environment: ce-candidate
     timeout-minutes: 180
     env:
@@ -67,11 +77,11 @@ jobs:
       - name: Build and verify the paired binary candidate
         env:
           VERSION: ${{ inputs.version }}
-        run: node scripts/prepare-ce-binary-candidate.mjs "$VERSION"
+        run: node scripts/prepare-ce-binary-candidate.mjs "$VERSION" "${{ matrix.platform }}"
       - name: Preserve complete passing candidate for review
         uses: actions/upload-artifact@v4
         with:
-          name: ce-binary-candidate
+          name: ce-binary-candidate-${{ matrix.arch }}
           path: release-artifacts/ce-binary-candidate/
           if-no-files-found: error
           retention-days: 14
@@ -80,10 +90,35 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ce-binary-candidate-diagnostics
+          name: ce-binary-candidate-diagnostics-${{ matrix.arch }}
           path: |
             release-artifacts/binary-licenses/
             release-artifacts/images/
             release-artifacts/native-replacement/verification.json
             release-artifacts/deployment-verification.json
           if-no-files-found: warn
+
+  aggregate:
+    needs: candidate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ce-binary-candidate-*
+          path: candidates
+      - name: Bind both reviewed platform candidates to the frozen public commit
+        run: node scripts/merge-ce-binary-candidates.mjs candidates release-artifacts/paired-candidate "${{ inputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ce-binary-candidate
+          path: release-artifacts/paired-candidate/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

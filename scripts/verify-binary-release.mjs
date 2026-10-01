@@ -6,6 +6,8 @@ import { createReadStream, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { hash, json, safePath } from "./binary-source-lib.mjs";
 
+import { releasePlatform } from "./release-platforms.mjs";
+
 const [deploymentPath] = process.argv.slice(2);
 if (!deploymentPath) throw new Error("Usage: node scripts/verify-binary-release.mjs <disposable-deployment-verification.json>");
 const root = resolve("release-artifacts");
@@ -29,7 +31,8 @@ for await (const chunk of createReadStream(resolve(root, "binary-sources", safeP
 assert.equal(digest.digest("hex"), sidecar.sha256);
 const images = [];
 for (const image of licenses.inventory) {
-  assert.equal(image.platform, "linux/arm64", "Only the rehearsed ARM64 scope is supported");
+  releasePlatform(image.platform);
+  assert.ok(licenses.inventory.every(entry => entry.platform === image.platform), "A candidate must not mix platform evidence");
   const report = read(`binary-licenses/${safePath(image.report)}`);
   assert.equal(report.runtimeNoticeVerified, true);
   const scan = scans.inventory.find((entry) => entry.imageId === image.imageId && entry.platform === image.platform);
@@ -44,6 +47,7 @@ for (const image of licenses.inventory) {
   assert.ok(deployment.imageIds.some((entry) => entry.imageId === image.imageId && entry.platform === image.platform));
   if (image.nativeLibraryPackages) {
     assert.equal(replacement.imageId, image.imageId);
+    assert.equal(replacement.platform, image.platform);
     assert.equal(replacement.passed, true);
     assert.equal(replacement.markerObserved, true);
     assert.equal(replacement.missingLibraryControlFailed, true);
@@ -56,6 +60,6 @@ const result = { schemaVersion: 1, images, correspondingSource: sidecar, sourceI
   imageSbomAndVulnerabilityGatePassed: true, modifiedLibraryReplacementPassed: true, disposableDeploymentPassed: true,
   deploymentReportSha256: hash(readFileSync(resolve(deploymentPath))), passed: true, distributionApproved: false,
   remaining: ["Owner review of the complete paired source/notice delivery and publication checkpoint.",
-    "AMD64, signed/registry publication, full native rebuild/reproducibility and upgrade certification are not established by this ARM64 rehearsal."] };
+    "Other platforms, signed/registry publication, full native rebuild/reproducibility and upgrade certification are not established by this platform-specific rehearsal."] };
 writeFileSync(resolve(root, "binary-release-verification.json"), json(result));
 console.log(json(result));

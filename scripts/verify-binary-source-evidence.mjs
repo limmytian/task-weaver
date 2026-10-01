@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { rustTargets, sourcePlatform } from "./release-platforms.mjs";
 
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -80,6 +81,9 @@ if (lock.components.some((entry) => entry.id === "rust-standard-library")) {
 if (lock.files.some((file) => file.path.startsWith("rust-crates/"))) {
   const coverage = JSON.parse(readFileSync(resolve(root, safePath(lock.rustVendoring.linuxSourceCoverage))));
   assert.equal(coverage.passed, true);
+  const targets = rustTargets(sourcePlatform(lock));
+  assert.deepEqual(coverage.trees.filter(tree => tree.package === "librsvg-c").map(tree => tree.target).sort(), [...targets].sort(), "Native source trees do not cover the image platform");
+  if (lock.rustRuntimeEvidence?.registryDependencyLock) assert.deepEqual(coverage.trees.filter(tree => tree.package === "std").map(tree => tree.target).sort(), [...targets].sort());
   assert.equal(coverage.sourceOnlyVendorReplayPassed, true);
   assert.equal(coverage.postEditCargoLockSha256, rust.postEditCargoLockSha256);
   for (const tree of coverage.trees) {

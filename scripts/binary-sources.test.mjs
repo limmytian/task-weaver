@@ -147,6 +147,7 @@ test("source sidecar delivers verified source-only vendor files, not raw native 
   for (const name of ["license-texts.txt", "license-extraction.json", "runtime-source-NOTICES.txt", "notice-case-resolutions.json",
     "librsvg-release-Cargo.lock", "librsvg-post-edit-Cargo.lock", "rust-lock-verification.json", "rust-license-declarations.json",
     "linux-rust-source-coverage.json", "aarch64-unknown-linux-musl-source-tree.txt", "aarch64-unknown-linux-gnu-source-tree.txt"]) save(name, "fixture");
+  save("linux-rust-source-coverage.json", { trees: [{ target: "aarch64-unknown-linux-musl" }, { target: "aarch64-unknown-linux-gnu" }] });
   save("license-extraction.json", { evidence: [] });
   save("rust-source-delivery.json", { linuxTreeReplayPassed: true, files: [{ path: "rust-vendor/fixture/Cargo.toml",
     sourcePath: "local-vendor/fixture/Cargo.toml", sha256: hash(readFileSync(join(root, "local-vendor/fixture/Cargo.toml"))), mode: 0o644 }],

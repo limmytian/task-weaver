@@ -85,8 +85,9 @@ async function* archive() {
       for await (const chunk of createReadStream(path)) yield chunk;
       yield Buffer.alloc((512 - size % 512) % 512);
     }
-    for (const path of ["linux-rust-source-coverage.json", "aarch64-unknown-linux-musl-source-tree.txt", "aarch64-unknown-linux-gnu-source-tree.txt",
-      ...(lock.rustRuntimeEvidence?.registryDependencyLock ? ["std-aarch64-unknown-linux-musl-source-tree.txt", "std-aarch64-unknown-linux-gnu-source-tree.txt"] : [])]) {
+    const coverage = JSON.parse(readFileSync(resolve(root, "linux-rust-source-coverage.json")));
+    const treeFiles = coverage.trees.map(tree => `${tree.package === "std" ? "std-" : ""}${tree.target}-source-tree.txt`);
+    for (const path of ["linux-rust-source-coverage.json", ...treeFiles]) {
       const data = readFileSync(resolve(root, path));
       yield header(path, data.length);
       yield data;
@@ -100,7 +101,7 @@ await pipeline(Readable.from(archive()), createGzip({ level: 6 }), createWriteSt
 const digest = createHash("sha256");
 for await (const chunk of createReadStream(target)) digest.update(chunk);
 const report = { schemaVersion: 1, archive: "corresponding-source-candidate.tar.gz", sha256: digest.digest("hex"),
-  bytes: statSync(target).size, members: paths.length + 1 + (delivery ? delivery.files.length + 4 + (lock.rustRuntimeEvidence?.registryDependencyLock ? 2 : 0) : 0), sourceLockSha256: hash(bytes), deterministicMetadata: true,
+  bytes: statSync(target).size, members: paths.length + 1 + (delivery ? delivery.files.length + 2 + JSON.parse(readFileSync(resolve(root, "linux-rust-source-coverage.json"))).trees.length : 0), sourceLockSha256: hash(bytes), deterministicMetadata: true,
   sourceOnlyRustVendor: Boolean(delivery), omittedNativePayloads: delivery?.omittedImportLibraries.length ?? 0,
   distributionApproved: false,
   limitation: "Candidate source/notices sidecar; technical notice handling is complete, but owner review and explicit publication authorization remain required." };
