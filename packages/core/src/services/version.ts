@@ -57,7 +57,7 @@ export function createVersionChecker(options: { fetch?: typeof fetch; now?: () =
             const chunk = await reader.read();
             if (chunk.done) break;
             size += chunk.value.byteLength;
-            if (size > 65_536) throw new Error("Release response exceeds limit");
+            if (size > 1_048_576) throw new Error("Release response exceeds limit");
             chunks.push(chunk.value);
           }
         } finally { await reader.cancel(); }

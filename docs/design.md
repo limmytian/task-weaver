@@ -648,7 +648,7 @@ a manual check at `POST /api/v1/version/check`.
 Opening the page does not contact an external release service. A manual check
 queries only the official GitHub latest-stable-release endpoint, excludes draft
 and prerelease responses, compares semantic versions, and validates the official
-release link. Checks have a five-second timeout, a 64 KiB response limit,
+release link. Checks have a five-second timeout, a 1 MiB response limit,
 coalesced concurrent requests and a five-minute success/rate-limit cache. Failed
 checks are cached for one minute and remain unavailable rather than reporting
 that the installation is current. `TW_VERSION_CHECK_ENABLED=false` disables

@@ -20,7 +20,7 @@ test("only explicit checks fetch, with a fixed URL, coalescing and expiry", asyn
     assert.equal(url, "https://api.github.com/repos/limmytian/task-weaver/releases/latest");
     assert.equal(options?.redirect, "error");
     assert.ok(options?.signal);
-    return Response.json(release);
+    return Response.json({ ...release, assets: [{ description: "x".repeat(100_000) }] });
   } });
   assert.equal(checker.info().status, "not_checked");
   assert.equal(calls, 0);
@@ -46,7 +46,7 @@ test("stable source and bounded content are verified before comparison", async (
   for (const value of [{ ...release, prerelease: true }, { ...release, draft: true }, { ...release, html_url: "https://example.invalid" }, { ...release, tag_name: "v0.3.0-rc.1" }]) {
     assert.equal((await createVersionChecker({ fetch: async () => Response.json(value) }).check()).status, "unavailable");
   }
-  const oversized = createVersionChecker({ fetch: async () => new Response("x".repeat(65_537)) });
+  const oversized = createVersionChecker({ fetch: async () => new Response("x".repeat(1_048_577)) });
   assert.equal((await oversized.check()).status, "unavailable");
   for (const [version, status] of [["0.3.0", "current"], ["0.4.0-dev.1", "ahead"], ["0.3.0-rc.1", "update_available"]]) {
     assert.equal((await createVersionChecker({ installed: installed(version), fetch: async () => Response.json(release) }).check()).status, status);
