@@ -1,13 +1,12 @@
 import type { Context, Next } from "hono";
 import type { Database } from "@task-weaver/db";
 import type { Actor } from "@task-weaver/contracts";
-import type { TaskWeaverRuntimePorts } from "@task-weaver/module-sdk/ports";
+import { resolveActor } from "@task-weaver/contracts";
 
 export type Env = {
   Variables: {
     db: Database;
     actor: Actor;
-    ports: TaskWeaverRuntimePorts;
   };
 };
 
@@ -35,13 +34,10 @@ export async function actorMiddleware(
     // c.get throws if variable not set — continue to set it
   }
 
-  const identity = await c.get("ports").identity.resolveIdentity({
-    headers: {
-      "x-actor-id": c.req.header("X-Actor-Id"),
-      "x-actor-type": c.req.header("X-Actor-Type"),
-    },
-  });
-  c.set("actor", identity.actor);
+  c.set("actor", resolveActor({
+    "x-actor-id": c.req.header("X-Actor-Id"),
+    "x-actor-type": c.req.header("X-Actor-Type"),
+  }));
 
   await next();
 }

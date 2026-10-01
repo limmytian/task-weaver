@@ -1,6 +1,6 @@
 # CE Package Releases
 
-The six packages under `packages/` share one semantic version and one immutable
+The five current packages under `packages/` share one semantic version and one immutable
 Git tag, `vMAJOR.MINOR.PATCH`. Applications remain private workspace packages
 and are distributed through container images. A release candidate uses a tag
 such as `v0.2.0-rc.1`; it never replaces a stable artifact.
@@ -83,3 +83,7 @@ key and both CI run records with the release record.
 
 Do not dispatch either publication workflow until the license, legal,
 third-party, vulnerability, and release decision gates have been approved.
+
+The CE prefix in tooling is a retained legacy distribution identifier, not an
+edition boundary. 0.3.0 removes the legacy SDK/default-port/extension exports;
+this breaking transition is documented in architecture-transition.md.

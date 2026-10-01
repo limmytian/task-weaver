@@ -33,7 +33,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
-import type { VisibleWebNavigationItem } from "@/lib/web-extension-types";
+import type { NavigationItem } from "@/lib/navigation";
 
 const navigationIcons: Readonly<Record<string, LucideIcon>> = {
   agent: WandSparkles,
@@ -49,7 +49,7 @@ const navigationIcons: Readonly<Record<string, LucideIcon>> = {
   settings: Settings,
 };
 
-export function AppSidebar({ navigation }: { navigation: readonly VisibleWebNavigationItem[] }) {
+export function AppSidebar({ navigation }: { navigation: readonly NavigationItem[] }) {
   const pathname = usePathname();
   const { data: pinnedProjects } = trpc.project.pinned.useQuery();
 

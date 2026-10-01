@@ -25,7 +25,7 @@ test("static checks reject hidden namespaces, reversed imports, and dynamic impo
     /non-public import/,
   );
   assert.match(
-    sourceBoundaryViolations("packages/module-sdk/src/example.ts", "import '../../core/src/index'")[0],
+    sourceBoundaryViolations("packages/contracts/src/example.ts", "import '../../core/src/index'")[0],
     /cannot import/,
   );
   assert.match(
@@ -36,7 +36,7 @@ test("static checks reject hidden namespaces, reversed imports, and dynamic impo
 
 test("public package export maps point only to existing source files", () => {
   const packages = [
-    "contracts", "module-sdk", "partners-gateway", "core", "db", "realtime",
+    "contracts", "partners-gateway", "core", "db", "realtime",
   ];
   for (const name of packages) {
     const packageRoot = join(repositoryRoot, "packages", name);
@@ -49,5 +49,5 @@ test("public package export maps point only to existing source files", () => {
     }
   }
   const gateway = JSON.parse(readFileSync(join(repositoryRoot, "packages/partners-gateway/package.json"), "utf8"));
-  assert.deepEqual(Object.keys(gateway.exports).sort(), [".", "./module", "./worker"]);
+  assert.deepEqual(Object.keys(gateway.exports).sort(), [".", "./runtime", "./worker"]);
 });

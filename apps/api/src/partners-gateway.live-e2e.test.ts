@@ -5,7 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { eq } from "drizzle-orm";
 import { serve } from "@hono/node-server";
 import { createDb, runMigrations, projects, requirements, tasks, piAgentRuns } from "@task-weaver/db";
-import { apiKeyService, createDefaultRuntimePorts, piAgentService } from "@task-weaver/core";
+import { apiKeyService, piAgentService } from "@task-weaver/core";
 import { createPartnersGatewayClient, type PartnersGatewayJob, type PartnersGatewayJobRequest, type PartnersGatewayEvent } from "@task-weaver/partners-gateway";
 import { PiAgentGatewayWorker } from "@task-weaver/partners-gateway/worker";
 import { createApiApplication } from "./application.js";
@@ -132,7 +132,7 @@ test("live Partners Gateway executes Kubernetes jobs with real Core persistence"
       const [requirement] = await db.insert(requirements).values({ projectId: project!.id, title: prefix, createdBy: actor.id }).returning();
       const [task] = await db.insert(tasks).values({ projectId: project!.id, requirementId: requirement!.id,
         title: "Live Kubernetes execution", createdBy: actor.id, assignee: prefix, assigneeType: "agent" }).returning();
-      const application = createApiApplication({ db, databaseUrl: databaseUrl!, ports: createDefaultRuntimePorts(),
+      const application = createApiApplication({ db, databaseUrl: databaseUrl!,
         env: { TW_PRESET_SKILLS_SYNC: "disabled" } });
       const api = serve({ fetch: application.app.fetch, port: 0, hostname: "127.0.0.1" });
       await new Promise<void>((resolve) => api.listening ? resolve() : api.once("listening", resolve));

@@ -1,13 +1,13 @@
 {
   "name": "@task-weaver/db",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema/index.ts"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
     "test": "tsx --test src/*.test.ts src/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
@@ -21,14 +21,11 @@
     "prepublishOnly": "node -e \"throw new Error('Publish the verified CE release tarball, not the workspace package')\""
   },
   "dependencies": {
-    "@task-weaver/module-sdk": "workspace:^",
     "drizzle-orm": "^0.45.3",
-    "postgres": "^3.4.0",
-    "semver": "^7.7.3"
+    "postgres": "^3.4.0"
   },
   "devDependencies": {
     "@types/node": "^25.3.3",
-    "@types/semver": "^7.7.1",
     "@types/turndown": "^5.0.6",
     "drizzle-kit": "^0.31.11",
     "tsx": "^4.21.0",

@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 
 const script = resolve("scripts/check-ce-artifact-compatibility.mjs");
-const names = ["contracts", "module-sdk", "db", "realtime", "core", "partners-gateway"];
+const names = ["contracts", "db", "realtime", "core", "partners-gateway"];
 
 function makeArtifacts(root, version, sql) {
   const directory = join(root, version);
@@ -43,4 +43,27 @@ test("release comparison accepts additive packages and rejects historical SQL ch
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+function changeExports(directory, name, version, exports) {
+  const stage = join(directory, `stage-${name}`);
+  writeFileSync(join(stage, "package/package.json"), JSON.stringify({ name: `@task-weaver/${name}`, version, exports }));
+  execFileSync("tar", ["-czf", join(directory, `task-weaver-${name}-${version}.tgz`), "-C", stage, "package"]);
+}
+
+test("0.3 transition permits only named retired exports and preserves SQL", () => {
+  const root = mkdtempSync(join(tmpdir(), "tw-retired-exports-"));
+  try {
+    const previous = makeArtifacts(root, "0.2.1", "SELECT 1;\n");
+    const next = makeArtifacts(root, "0.3.0", "SELECT 1;\n");
+    changeExports(previous, "core", "0.2.1", { ".": "./index.js", "./default-ports": "./ports.js" });
+    changeExports(previous, "partners-gateway", "0.2.1", { ".": "./index.js", "./module": "./module.js" });
+    const accepted = spawnSync(process.execPath, [script, previous, next], { encoding: "utf8" });
+    assert.equal(accepted.status, 0, accepted.stderr);
+    assert.equal(JSON.parse(readFileSync(join(next, "compatibility.json"), "utf8")).breakingExports.length, 2);
+    changeExports(previous, "core", "0.2.1", { ".": "./index.js", "./unexpected": "./extra.js" });
+    const rejected = spawnSync(process.execPath, [script, previous, next], { encoding: "utf8" });
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /removed public export/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

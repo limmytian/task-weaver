@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
-export const PUBLIC_PACKAGES = ["contracts", "module-sdk", "db", "realtime", "core", "partners-gateway"];
+export const PUBLIC_PACKAGES = ["contracts", "db", "realtime", "core", "partners-gateway"];
 const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/;
 
 function visit(directory, callback) {

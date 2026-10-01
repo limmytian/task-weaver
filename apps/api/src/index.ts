@@ -1,7 +1,6 @@
 import { serve } from "@hono/node-server";
-import { createDb, runCoreAndExtensionMigrations } from "@task-weaver/db";
-import { createDefaultRuntimePorts } from "@task-weaver/core";
-import { createApiApplication, TASK_WEAVER_CORE_VERSION } from "./application.js";
+import { createDb, runMigrations } from "@task-weaver/db";
+import { createApiApplication } from "./application.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -11,11 +10,9 @@ if (!databaseUrl) {
 const application = createApiApplication({
   db: createDb(databaseUrl),
   databaseUrl,
-  ports: createDefaultRuntimePorts(),
-  coreVersion: TASK_WEAVER_CORE_VERSION,
 });
 
-await runCoreAndExtensionMigrations(databaseUrl, application.composition);
+await runMigrations(databaseUrl);
 console.log("Database migrations completed");
 await application.start();
 

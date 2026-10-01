@@ -43,9 +43,6 @@ importers:
       '@task-weaver/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@task-weaver/module-sdk':
-        specifier: workspace:^
-        version: link:../../packages/module-sdk
       '@task-weaver/partners-gateway':
         specifier: workspace:^
         version: link:../../packages/partners-gateway
@@ -150,9 +147,6 @@ importers:
       '@task-weaver/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@task-weaver/module-sdk':
-        specifier: workspace:^
-        version: link:../../packages/module-sdk
       '@task-weaver/realtime':
         specifier: workspace:*
         version: link:../../packages/realtime
@@ -278,9 +272,6 @@ importers:
       '@task-weaver/db':
         specifier: workspace:*
         version: link:../db
-      '@task-weaver/module-sdk':
-        specifier: workspace:^
-        version: link:../module-sdk
       '@task-weaver/realtime':
         specifier: workspace:^
         version: link:../realtime
@@ -300,9 +291,6 @@ importers:
 
   packages/db:
     dependencies:
-      '@task-weaver/module-sdk':
-        specifier: workspace:^
-        version: link:../module-sdk
       drizzle-orm:
         specifier: ^0.45.3
         version: 0.45.3(gel@2.2.0)(postgres@3.4.8)
@@ -335,31 +323,6 @@ importers:
         specifier: ^5.8.0
         version: 5.9.3
 
-  packages/module-sdk:
-    dependencies:
-      '@task-weaver/contracts':
-        specifier: workspace:^
-        version: link:../contracts
-      semver:
-        specifier: ^7.7.3
-        version: 7.8.5
-      zod:
-        specifier: ^3.24.0
-        version: 3.25.76
-    devDependencies:
-      '@types/node':
-        specifier: ^25.3.3
-        version: 25.3.5
-      '@types/semver':
-        specifier: ^7.7.1
-        version: 7.8.0
-      tsx:
-        specifier: ^4.19.0
-        version: 4.23.15
-      typescript:
-        specifier: ^5.8.0
-        version: 5.9.3
-
   packages/partners-gateway:
     dependencies:
       '@task-weaver/contracts':
@@ -371,9 +334,6 @@ importers:
       '@task-weaver/db':
         specifier: workspace:*
         version: link:../db
-      '@task-weaver/module-sdk':
-        specifier: workspace:^
-        version: link:../module-sdk
       hono:
         specifier: ^4.13.9
         version: 4.13.9

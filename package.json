@@ -28,7 +28,6 @@
     "release:assemble-ce": "node scripts/assemble-ce-release.mjs",
     "release:finalize-ce": "node scripts/finalize-ce-release.mjs",
     "deploy:render-kubernetes": "node scripts/render-ce-kubernetes.mjs",
-    "release:stamp-canary": "node scripts/stamp-ce-canary.mjs",
     "check:ce-artifacts": "node scripts/check-ce-artifact-compatibility.mjs",
     "test:gateway-postgres": "node scripts/verify-partners-gateway-postgres.mjs",
     "test:gateway-live": "node scripts/verify-partners-gateway-postgres.mjs --live"

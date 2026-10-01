@@ -8,7 +8,7 @@ if (!version || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$
   throw new Error("Usage: node scripts/ce-release-notes.mjs <version> [previous-tag]");
 }
 
-for (const name of ["contracts", "module-sdk", "db", "realtime", "core", "partners-gateway"]) {
+for (const name of ["contracts", "db", "realtime", "core", "partners-gateway"]) {
   const manifest = JSON.parse(readFileSync(`packages/${name}/package.json`, "utf8"));
   if (manifest.version !== version) throw new Error(`${manifest.name} does not match release version ${version}`);
 }

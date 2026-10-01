@@ -26,7 +26,6 @@ export * as daemonMetricsService from "./daemon-metrics";
 export * as executionSlicePolicyService from "./execution-slice-policy";
 export * as scheduleService from "./schedules";
 export * as piAgentService from "./pi-agent";
-export * as defaultPortsService from "./default-ports";
 export * as assistantService from "./assistant";
 export * as skillPackageStorageService from "./skill-package-storage";
 export * as skillPackageService from "./skill-packages";

@@ -1,16 +1,15 @@
 {
   "name": "@task-weaver/core",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./schemas": "./src/schemas/index.ts",
     "./types": "./src/types/index.ts",
-    "./default-ports": "./src/services/default-ports.ts",
     "./daemon-release-gate": "./src/services/daemon-release-gate.ts"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
     "test": "tsx --test src/*.test.ts src/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "node -e \"throw new Error('Publish the verified CE release tarball, not the workspace package')\""
@@ -18,7 +17,6 @@
   "dependencies": {
     "@task-weaver/contracts": "workspace:^",
     "@task-weaver/db": "workspace:*",
-    "@task-weaver/module-sdk": "workspace:^",
     "@task-weaver/realtime": "workspace:^",
     "drizzle-orm": "^0.45.3",
     "zod": "^3.24.0"

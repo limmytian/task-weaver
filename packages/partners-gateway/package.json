@@ -1,14 +1,14 @@
 {
   "name": "@task-weaver/partners-gateway",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./module": "./src/module.ts",
-    "./worker": "./src/worker.ts"
+    "./worker": "./src/worker.ts",
+    "./runtime": "./src/runtime.ts"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
     "test": "tsx --test src/*.test.ts",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "node -e \"throw new Error('Publish the verified CE release tarball, not the workspace package')\""
@@ -17,7 +17,6 @@
     "@task-weaver/contracts": "workspace:^",
     "@task-weaver/core": "workspace:*",
     "@task-weaver/db": "workspace:*",
-    "@task-weaver/module-sdk": "workspace:^",
     "hono": "^4.13.9",
     "zod": "^3.24.0"
   },

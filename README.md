@@ -7,22 +7,26 @@ projects, requirements, tasks, documents, and activity history.
 The application includes kanban boards, a linked Markdown knowledge base,
 keyword and vector search, agent task execution, and an MCP tool registry.
 
-## v0.2.1 Gateway reliability patch
+## v0.3.0 unified application
 
-Version 0.2.1 fixes Partners Gateway submissions that could execute again during
-retries or lease recovery. The client now sends the stable run job ID as
-`Idempotency-Key` and preserves the originally requested provider/model in
-submission metadata. Deployments without Partners Gateway enabled are unaffected.
-No database migration or license change is introduced by this patch.
+Version 0.3.0 retires the separate CE/Pro application architecture. Task Weaver
+is one application; the isolated plugin ecosystem is deferred planning.
+The in-process module SDK, injectable license/authorization ports, Web extension
+registry and extension SQL migration runner are removed. This is a breaking
+change for consumers of those 0.2.x interfaces. The shared business packages,
+Core migration history and first-party Partners Gateway remain intact.
+See [the architecture transition](docs/architecture-transition.md).
 
-The default Gateway worker prints the staged task prompt; autonomous model
-execution requires additional integration. The live verification command covers
-actual remote shell execution, streaming, artifacts, terminal outcomes and Core
-persistence. See [the Gateway module](packages/partners-gateway/README.md).
+Five compiled npm tarballs (contracts, db, realtime, core and partners-gateway)
+are GitHub Release attachments; this release does not publish to npmjs. API and
+Web images, signatures, SBOMs and corresponding-source evidence retain the
+Linux ARM64 release scope. Gateway idempotency and lease-recovery fixes from
+0.2.1 remain included. The default Gateway worker prints the task prompt;
+autonomous model execution still requires additional integration.
 
-The Compose defaults below retain the original v0.1.0 pinned images. To install
-or upgrade to the reviewed v0.2.1 images, verify its release signatures and
-checksums, download `api-image.digest` and `web-image.digest`, and configure:
+Compose defaults retain the original v0.1.0 pinned images. To select 0.3.0,
+verify the release signatures and checksums, download `api-image.digest` and
+`web-image.digest` from that release, and configure:
 
 ```bash
 export TW_API_IMAGE="$(cat api-image.digest)"
@@ -32,9 +36,8 @@ docker compose up -d --wait
 ```
 
 Back up the database and skill data before an upgrade and follow
-[the upgrade and recovery guide](docs/ce-upgrades.md). Versioned Linux ARM64
-images and the six npm tarballs are distributed through GHCR and GitHub Release
-assets; this release does not publish to npmjs.
+[the upgrade and recovery guide](docs/ce-upgrades.md). Existing 0.2.x signed
+artifacts remain immutable. Core database migration files are unchanged.
 
 ## Quick start
 
@@ -135,3 +138,10 @@ Copyright 2026 limmytian. Task Weaver is licensed under [Apache-2.0](LICENSE).
 Third-party components retain their licenses; see [NOTICE](NOTICE),
 [third-party notices](THIRD_PARTY_NOTICES.md), and `THIRD_PARTY_LICENSES/`.
 Project branding is covered by the [trademark policy](TRADEMARKS.md).
+
+## Development architecture
+
+Development version 0.3.0 consolidates Task Weaver into one application and removes
+the retired in-process SDK. The release information above describes published
+0.2.1, not a new 0.3.0 publication. See [the transition](docs/architecture-transition.md)
+and [deferred plugin planning](docs/plugin-roadmap.md).

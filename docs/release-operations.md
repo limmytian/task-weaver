@@ -22,8 +22,9 @@ versioned as `vMAJOR.MINOR.PATCH`, and never moved. Release candidates use an
    export. Run the source, secret, license, vulnerability, module boundary,
    version, build, typecheck, test, and deployment checks.
 2. Compare the candidate with the preceding release's package exports and
-   migration journal. Compile extension consumers against the current release
-   and the next mainline canary. Rehearse a previous-minor database upgrade
+   migration journal. Review explicit breaking removals for the 0.3 transition; the retired
+   in-process Pro SDK/canary is not a supported consumer. Future plugins must
+   validate the actual isolated host. Rehearse a previous-minor database upgrade
    and restore from a verified backup.
 3. Build API and Web images for Linux ARM64, scan the exact local candidates,
    and review native license evidence. A scan failure, missing advisory
@@ -48,7 +49,7 @@ versioned as `vMAJOR.MINOR.PATCH`, and never moved. Release candidates use an
    and the previous tag, if any. Test the candidate-producing Actions run before
    the first release; a local image build is insufficient.
 
-The workflow creates a deterministic public source archive, six compiled npm
+The workflow creates a deterministic public source archive, five compiled npm
 tarballs, checksums, a CycloneDX source SBOM, provenance and notice files,
 vulnerability reports, the corresponding-source archive, digest-pinned OCI
 images with signed CycloneDX SBOM and source-provenance attestations, and
@@ -68,7 +69,7 @@ Release. The registry mirror is a separate manual workflow that clones the
 same public tag and publishes signed packages and images to its own registry.
 Compare source commit, package hashes, and image digests across both runs.
 Prerelease npm packages use the `next` dist-tag; stable packages use `latest`.
-GitHub distributes the six npm tarballs as release assets. Public npm-registry
+GitHub distributes the five npm tarballs as release assets. Public npm-registry
 publication is a separate decision and is not performed by this workflow.
 
 ## Verify and retain artifacts

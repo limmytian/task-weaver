@@ -24,7 +24,6 @@
     "@task-weaver/contracts": "workspace:^",
     "@task-weaver/core": "workspace:*",
     "@task-weaver/db": "workspace:*",
-    "@task-weaver/module-sdk": "workspace:^",
     "@task-weaver/realtime": "workspace:*",
     "@trpc/client": "^11.11.0",
     "@trpc/react-query": "^11.11.0",

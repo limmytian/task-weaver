@@ -8,14 +8,13 @@ import ts from "typescript";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const publicPackages = new Map([
   ["packages/contracts", []],
-  ["packages/module-sdk", ["contracts"]],
   ["packages/realtime", ["contracts"]],
-  ["packages/db", ["module-sdk"]],
-  ["packages/core", ["contracts", "db", "module-sdk", "realtime"]],
-  ["packages/partners-gateway", ["contracts", "core", "db", "module-sdk"]],
-  ["apps/api", ["contracts", "core", "db", "module-sdk", "partners-gateway", "realtime"]],
+  ["packages/db", []],
+  ["packages/core", ["contracts", "db", "realtime"]],
+  ["packages/partners-gateway", ["contracts", "core", "db"]],
+  ["apps/api", ["contracts", "core", "db", "partners-gateway", "realtime"]],
   ["apps/cli", ["contracts", "core", "partners-gateway"]],
-  ["apps/web", ["contracts", "core", "db", "module-sdk", "realtime"]],
+  ["apps/web", ["contracts", "core", "db", "realtime"]],
 ]);
 const hiddenNamespace = /^@task-weaver\/(?:private|internal|enterprise|pro)(?:\/|$)|^@(?:private|internal)\//;
 const sourceExtensions = /\.(?:[cm]?[jt]s|tsx)$/;

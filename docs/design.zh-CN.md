@@ -37,18 +37,13 @@ Task Weaver 是一个面向人机协作场景的项目管理平台。人类通�
 
 ```mermaid
 flowchart TD
-    CLI[CLI and daemon] -->|REST| API[Hono API composition root]
-    WEB[Next.js Web and tRPC adapters] --> CORE[Core business services]
+    CLI[CLI and daemon] -->|REST| API[Hono API application]
+    WEB[Next.js Web and tRPC] --> CORE[Core business services]
     API --> CORE
-    API --> MODULE[Partners Gateway reference module]
-    API --> SDK[Module SDK and runtime ports]
-    WEB --> SDK
-    MODULE --> SDK
-    CORE --> SDK
+    API --> GATEWAY[First-party Partners Gateway integration]
     CORE --> CONTRACTS[Shared contracts and schemas]
-    SDK --> CONTRACTS
     CORE --> DB[Drizzle database adapter]
-    MODULE -->|Owned migrations when declared| DB
+    GATEWAY --> CORE
     CORE --> RT[Realtime contracts and transport]
     DB --> PG[PostgreSQL and pgvector]
 ```
@@ -63,7 +58,6 @@ task-weaver/
 │   └── cli/                    # CLI and daemon
 ├── packages/
 │   ├── contracts/              # Shared schemas, types, and event contracts
-│   ├── module-sdk/             # Framework-neutral module contracts and ports
 │   ├── core/                   # Business services and default runtime adapters
 │   ├── db/                     # Drizzle schema, Core and extension migrations
 │   ├── partners-gateway/       # Independently composed reference module
@@ -94,27 +88,26 @@ task-weaver/
 
 ---
 
-### 2.4 模块边界
+### 2.4 单一主应用与延期插件规划
 
-上一轮模块边界工作将共享契约、模块 SDK 和独立装配的模块从 Core 业务服务中分离。
-本轮发布分发工作沿用这些边界并为包建立版本，不引入另一套业务架构。
+Task Weaver 采用单一主应用，不再维护独立的 CE/Pro 产品架构。
+共享 Contracts、Core、数据库、Realtime 与 Partners Gateway 包仍服务于现有功能。
+旧版进程内模块 SDK、默认许可证/授权端口、Web 扩展注册器和扩展迁移执行器已移除。
+API 与 Web 直接装配内置功能，数据库仅执行现有 Core 迁移；API key 校验与 actor 语义保持不变。
+原有授权端口默认允许所有请求，不构成已实施的角色权限系统。
 
-- `@task-weaver/contracts` 负责共享 Zod schema、公共类型和事件定义。
-- `@task-weaver/module-sdk` 仅依赖 Contracts、Zod 和 SemVer，不引入 Hono、
-  tRPC、Next.js、Drizzle 或数据库客户端。
-- API 和 Web 适配器装配模块路由、后台 worker、订阅者、健康检查、导航和插槽，
-  并在启动前检查兼容性与注册冲突。模块路由仍必须执行服务端授权检查。
-- 运行时端口定义身份、授权、权益、审计、秘密解析、通知与计量；Core 提供默认实现。
-- Core 拥有自己的迁移日志。模块可声明独立的 schema 命名空间和迁移日志，
-  启动前会拒绝命名空间冲突。
-- Partners Gateway 是参考模块。`pnpm test:gateway-postgres` 使用本地 Gateway
-  协议测试服务，验证迁移后的真实 PostgreSQL 持久化、API/Gateway HTTP 与 SSE
-  通信、重试、租约、终态和 worker 生命周期。`pnpm test:gateway-live` 验证已部署
-  Gateway 的远端 Shell 执行、SSE、产物、幂等重试、终态，以及真实 Core 持久化
-  和租约恢复。默认 worker 仅输出已暂存的任务提示词；AI 模型执行需要单独集成。
+Partners Gateway 保留状态/健康接口、worker 生命周期、幂等重试与租约恢复。
+`pnpm test:gateway-postgres` 验证一次性 PostgreSQL 与 Gateway HTTP/SSE 通信；
+`pnpm test:gateway-live` 需要显式提供测试地址和凭据。默认 worker 不自动调用 AI 模型。
 
-参见[模块契约](../packages/module-sdk/README.md)、
-[扩展兼容性](extension-compatibility.md)与[版本化包](ce-packages.md)。
+插件生态仅列入低优先级草案，当前不实施，也不规划基础功能扩展。
+未来第三方插件必须在独立进程或容器中隔离运行，不能获得宿主数据库连接、任意 SQL
+或其他插件数据权限；通过宿主受控接口和专属存储服务访问数据，权限取插件授权与
+用户/项目授权的交集。前端采用隔离容器与受限桥接，不暴露宿主令牌。
+权限声明本身不是隔离措施，不能把旧的可信官方代码模型当作第三方安全模型。
+
+参见[架构调整](architecture-transition.md)、[延期插件路线](plugin-roadmap.md)
+与[版本化包](ce-packages.md)。
 
 ## 3. 数据模型
 

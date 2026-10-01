@@ -37,18 +37,13 @@ Task Weaver is a project management platform for human–AI collaboration. Human
 
 ```mermaid
 flowchart TD
-    CLI[CLI and daemon] -->|REST| API[Hono API composition root]
-    WEB[Next.js Web and tRPC adapters] --> CORE[Core business services]
+    CLI[CLI and daemon] -->|REST| API[Hono API application]
+    WEB[Next.js Web and tRPC] --> CORE[Core business services]
     API --> CORE
-    API --> MODULE[Partners Gateway reference module]
-    API --> SDK[Module SDK and runtime ports]
-    WEB --> SDK
-    MODULE --> SDK
-    CORE --> SDK
+    API --> GATEWAY[First-party Partners Gateway integration]
     CORE --> CONTRACTS[Shared contracts and schemas]
-    SDK --> CONTRACTS
     CORE --> DB[Drizzle database adapter]
-    MODULE -->|Owned migrations when declared| DB
+    GATEWAY --> CORE
     CORE --> RT[Realtime contracts and transport]
     DB --> PG[PostgreSQL and pgvector]
 ```
@@ -63,7 +58,6 @@ task-weaver/
 │   └── cli/                    # CLI and daemon
 ├── packages/
 │   ├── contracts/              # Shared schemas, types, and event contracts
-│   ├── module-sdk/             # Framework-neutral module contracts and ports
 │   ├── core/                   # Business services and default runtime adapters
 │   ├── db/                     # Drizzle schema, Core and extension migrations
 │   ├── partners-gateway/       # Independently composed reference module
@@ -94,35 +88,31 @@ task-weaver/
 
 ---
 
-### 2.4 Module Boundaries
+### 2.4 Unified application and deferred plugin planning
 
-The modular composition introduced in the module-boundary work separates
-`@task-weaver/contracts`, `@task-weaver/module-sdk`, and independently composed
-modules from Core business services. This release-distribution work preserves
-those boundaries and versions their packages; it does not introduce another
-business architecture.
+Task Weaver has one application, without a separate CE/Pro product architecture.
+Contracts, Core, database, realtime and Partners Gateway packages still support
+existing functionality. The old in-process module SDK, default licensing/access
+ports, Web extension registry and extension migration runner are removed.
+API/Web assemble built-in functionality directly; only Core migrations run.
+API-key validation and actor conventions remain unchanged. The removed default
+access ports allowed every request; they were not an implemented role system.
 
-- Contracts own shared Zod schemas, public types, and event definitions.
-- The module SDK depends on Contracts, Zod, and SemVer, without importing Hono,
-  tRPC, Next.js, Drizzle, or a database client.
-- API and Web adapters compose module routes, workers, subscribers, health
-  checks, navigation, and slots, validating compatibility and collisions before
-  startup. Server-side authorization remains mandatory for contributed routes.
-- Runtime ports define identity, authorization, entitlements, audit, secrets,
-  notifications, and metering. Core supplies default implementations.
-- Core owns its migration journal. Modules may declare separately owned schema
-  namespaces and migration journals, with collisions rejected before startup.
-- Partners Gateway is the reference module. `pnpm test:gateway-postgres` verifies
-  migrated real PostgreSQL persistence, API/Gateway HTTP and SSE transport,
-  retries, leases, terminal outcomes, and worker lifecycle using a local Gateway
-  protocol fixture. `pnpm test:gateway-live` verifies a deployed Gateway with
-  remote shell execution, SSE, artifacts, idempotent retries, terminal outcomes,
-  and real Core persistence and lease recovery. The default worker prints its
-  staged prompt; AI model execution requires separate integration.
+Partners Gateway retains status/health endpoints, worker lifecycle, idempotent
+retries and lease recovery. `pnpm test:gateway-postgres` verifies disposable
+PostgreSQL and Gateway HTTP/SSE transport; `pnpm test:gateway-live` requires
+explicit test endpoints/credentials. The default worker does not invoke an AI model.
 
-See [module contracts](../packages/module-sdk/README.md),
-[extension compatibility](extension-compatibility.md), and
-[versioned packages](ce-packages.md).
+Plugin work is a low-priority draft, not current implementation. Additional
+foundation features are not planned in this transition. Future third-party code
+runs in separate processes/containers without host database connections, arbitrary
+SQL or access to other plugin data. Host-brokered APIs and plugin-owned storage
+enforce the intersection of plugin grants and user/project access. Frontend
+isolation uses narrow bridges without host tokens. Permission declarations alone
+are not isolation; the old trusted official-code model is not a third-party sandbox.
+
+See [architecture transition](architecture-transition.md),
+[deferred plugin roadmap](plugin-roadmap.md) and [versioned packages](ce-packages.md).
 
 ## 3. Data Model
 

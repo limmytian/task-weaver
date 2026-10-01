@@ -4,3 +4,5 @@ export * from "./errors";
 export * from "./events";
 export * from "./daemon-slo";
 export * from "./release-evidence";
+
+export { resolveActor } from "./actor";

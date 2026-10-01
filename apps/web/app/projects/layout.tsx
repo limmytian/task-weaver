@@ -4,7 +4,8 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { RealtimeProvider } from "@/components/realtime-provider";
 import { AssistantDialog } from "@/components/assistant-dialog";
 import { WebIdentityProvider } from "@/components/web-identity-provider";
-import { getWebRuntime, resolveWebRequestState } from "@/lib/web-runtime";
+import { navigation } from "@/lib/navigation";
+import { resolveActor } from "@task-weaver/contracts";
 
 export default async function ProjectsLayout({
   children,
@@ -12,14 +13,14 @@ export default async function ProjectsLayout({
   children: React.ReactNode;
 }) {
   const [cookieStore, requestHeaders] = await Promise.all([cookies(), headers()]);
-  const webState = await resolveWebRequestState(getWebRuntime(), requestHeaders);
+  const actor = resolveActor(Object.fromEntries(requestHeaders.entries()));
   const sidebarState = cookieStore.get("sidebar_state")?.value;
   const defaultSidebarOpen = sidebarState == null ? true : sidebarState === "true";
 
   return (
-    <WebIdentityProvider actor={webState.identity.actor}>
+    <WebIdentityProvider actor={actor}>
       <SidebarProvider defaultOpen={defaultSidebarOpen}>
-        <AppSidebar navigation={webState.contributions.navigation} />
+        <AppSidebar navigation={navigation} />
         <SidebarInset className="pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-20">
           <RealtimeProvider>
             {children}

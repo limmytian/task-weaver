@@ -5,7 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { eq } from "drizzle-orm";
 import { serve } from "@hono/node-server";
 import { createDb, runMigrations, projects, requirements, tasks, piAgentRuns, activityLog } from "@task-weaver/db";
-import { apiKeyService, createDefaultRuntimePorts, piAgentService } from "@task-weaver/core";
+import { apiKeyService, piAgentService } from "@task-weaver/core";
 import { createPartnersGatewayClient } from "@task-weaver/partners-gateway";
 import { PiAgentGatewayWorker } from "@task-weaver/partners-gateway/worker";
 import { createApiApplication } from "./application.js";
@@ -88,7 +88,7 @@ test("Partners Gateway persists HTTP/SSE execution in real PostgreSQL", {
     PARTNERS_GATEWAY_WORKER_IDLE_POLL_MS: "100",
     TW_PRESET_SKILLS_SYNC: "disabled",
   };
-  const application = createApiApplication({ db, databaseUrl: databaseUrl!, ports: createDefaultRuntimePorts(), env });
+  const application = createApiApplication({ db, databaseUrl: databaseUrl!, env });
   const api = serve({ fetch: application.app.fetch, port: 0, hostname: "127.0.0.1" });
   await new Promise<void>((resolve) => api.listening ? resolve() : api.once("listening", resolve));
   const apiAddress = api.address();

@@ -7,17 +7,11 @@ import {
   type PartnersGatewayConfig,
 } from "@task-weaver/partners-gateway";
 import {
-  TASK_WEAVER_MODULE_API_VERSION,
-  defineTaskWeaverModule,
-} from "@task-weaver/module-sdk";
-import {
   checkPiAgentGatewayHealth,
   createPiAgentGatewayWorker,
   getPiAgentGatewayWorkerStatus,
   type PiAgentGatewayWorker,
 } from "./worker.js";
-
-const moduleId = "task-weaver.partners-gateway";
 
 const gatewayConfigurationSchema = z.object({
   enabled: z.boolean(),
@@ -35,10 +29,10 @@ const gatewayConfigurationSchema = z.object({
   }
 });
 
-export function createPartnersGatewayModule(db: Database, env: NodeJS.ProcessEnv = process.env) {
+export function createPartnersGatewayRuntime(db: Database, env: NodeJS.ProcessEnv = process.env) {
   const defaultConfig = getPartnersGatewayConfig(env);
   const workerConfig = defaultConfig.enabled ? getPartnersGatewayWorkerConfig(env) : null;
-  let config: PartnersGatewayConfig = defaultConfig;
+  const config: PartnersGatewayConfig = gatewayConfigurationSchema.parse(defaultConfig);
   let worker: PiAgentGatewayWorker | null = null;
 
   const routes = new Hono();
@@ -48,24 +42,7 @@ export function createPartnersGatewayModule(db: Database, env: NodeJS.ProcessEnv
     return context.json(health, health.ok ? 200 : 503);
   });
 
-  return defineTaskWeaverModule({
-    manifest: {
-      apiVersion: TASK_WEAVER_MODULE_API_VERSION,
-      id: moduleId,
-      name: "Partners Gateway reference module",
-      version: "0.2.1",
-      supportedCoreVersion: "^0.2.1",
-      capabilities: ["partners-gateway.execution"],
-      permissions: [{
-        id: "partners-gateway.worker.read",
-        description: "Read the Partners Gateway worker status and health",
-      }],
-    },
-    configuration: {
-      schema: gatewayConfigurationSchema,
-      defaultValue: defaultConfig,
-      sensitiveKeys: ["serviceToken"],
-    },
+  return {
     apiRoutes: [{
       id: "partners-gateway-worker-controls",
       method: "GET",
@@ -74,8 +51,7 @@ export function createPartnersGatewayModule(db: Database, env: NodeJS.ProcessEnv
     }],
     workers: [{
       id: "partners-gateway-runner",
-      start: (context: { composition: { configuration: Readonly<Record<string, unknown>> } }) => {
-        config = context.composition.configuration[moduleId] as PartnersGatewayConfig;
+      start: () => {
         const resolvedWorkerConfig = workerConfig ?? getPartnersGatewayWorkerConfig(env);
         worker = createPiAgentGatewayWorker(db, config, resolvedWorkerConfig);
         worker?.start();
@@ -87,7 +63,7 @@ export function createPartnersGatewayModule(db: Database, env: NodeJS.ProcessEnv
     }],
     eventSubscribers: [{
       id: "partners-gateway-scheduled-run",
-      eventTypes: ["schedule_run_created"],
+      eventTypes: ["schedule_run_created"] as const,
       handle: () => worker?.wake(),
     }],
     healthChecks: [{
@@ -96,5 +72,5 @@ export function createPartnersGatewayModule(db: Database, env: NodeJS.ProcessEnv
         status: worker?.getStatus().lastError ? "degraded" as const : "healthy" as const,
       }),
     }],
-  });
+  };
 }

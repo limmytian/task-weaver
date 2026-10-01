@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
+import { PUBLIC_PACKAGES } from "./pack-ce.mjs";
 
 const version = process.argv[2];
 const rehearsal = process.argv.includes("--rehearsal");
@@ -29,7 +30,9 @@ const sourceTar = execFileSync("git", ["archive", "--format=tar", `--prefix=task
 writeFileSync(join(output, sourceName), gzipSync(sourceTar, { level: 9, mtime: 0 }));
 
 const npmInventory = JSON.parse(readFileSync(resolve(root, "release-artifacts/npm/npm-artifacts.json"), "utf8"));
-if (npmInventory.version !== version || npmInventory.artifacts.length !== 6) {
+if (npmInventory.version !== version || npmInventory.artifacts.length !== PUBLIC_PACKAGES.length
+  || new Set(npmInventory.artifacts.map(artifact => artifact.package)).size !== PUBLIC_PACKAGES.length
+  || PUBLIC_PACKAGES.some(name => !npmInventory.artifacts.some(artifact => artifact.package === `@task-weaver/${name}`))) {
   throw new Error("CE npm inventory does not match the release version or package count.");
 }
 for (const artifact of npmInventory.artifacts) {

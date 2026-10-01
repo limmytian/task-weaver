@@ -8,7 +8,7 @@ if (!previousDirectory || !nextDirectory) {
 }
 const previousRoot = resolve(previousDirectory);
 const nextRoot = resolve(nextDirectory);
-const packages = ["contracts", "module-sdk", "db", "realtime", "core", "partners-gateway"];
+const packages = ["contracts", "db", "realtime", "core", "partners-gateway"];
 
 function archive(root, name, version) {
   return join(root, `task-weaver-${name}-${version}.tgz`);
@@ -24,11 +24,23 @@ const nextInventory = JSON.parse(readFileSync(join(nextRoot, "npm-artifacts.json
 const previousVersion = previousInventory.version;
 const nextVersion = nextInventory.version;
 const exportCounts = {};
+const retiredExports = /^0\.2\./.test(previousVersion) && /^0\.3\./.test(nextVersion)
+  ? { core: new Set(["./default-ports"]), "partners-gateway": new Set(["./module"]) }
+  : {};
+const breakingExports = [];
+const retiredSdk = previousInventory.artifacts?.some(item => item.package === "@task-weaver/module-sdk")
+  && !nextInventory.artifacts?.some(item => item.package === "@task-weaver/module-sdk");
+if (retiredSdk && !(/^0\.2\./.test(previousVersion) && /^0\.3\./.test(nextVersion))) {
+  throw new Error("Removing the module-sdk package is authorized only for the 0.3 transition");
+}
 for (const name of packages) {
   const oldManifest = manifest(previousRoot, name, previousVersion);
   const newManifest = manifest(nextRoot, name, nextVersion);
   for (const key of Object.keys(oldManifest.exports)) {
-    if (!(key in newManifest.exports)) throw new Error(`${name} removed public export ${key}`);
+    if (!(key in newManifest.exports)) {
+      if (!retiredExports[name]?.has(key)) throw new Error(`${name} removed public export ${key}`);
+      breakingExports.push({ package: name, export: key });
+    }
   }
   exportCounts[name] = { previous: Object.keys(oldManifest.exports).length, next: Object.keys(newManifest.exports).length };
 }
@@ -52,6 +64,8 @@ const result = {
   previousVersion,
   nextVersion,
   exportCounts,
+  breakingExports,
+  retiredSdk: Boolean(retiredSdk),
   previousMigrations: oldJournal.entries.length,
   nextMigrations: newJournal.entries.length,
 };
