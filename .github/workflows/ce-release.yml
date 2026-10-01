@@ -96,6 +96,16 @@ jobs:
             --name ce-binary-candidate --dir binary-candidate
           node scripts/load-ce-candidate-set.mjs binary-candidate "$VERSION"
           # load-ce-binary-candidate.mjs verifies each platform before publication.
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.candidate_run_id }}
+          pattern: ce-consumption-*
+          path: release-artifacts/consumption
+      - name: Verify independent native consumption receipts
+        env:
+          VERSION: ${{ inputs.version }}
+        run: node scripts/verify-ce-consumption.mjs release-artifacts/consumption "$VERSION"
       - uses: anchore/scan-action@v7.4.0
         with:
           image: task-weaver-api:release-amd64

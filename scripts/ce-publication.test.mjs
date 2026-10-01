@@ -124,3 +124,36 @@ test("source evidence requires one supported CPU and chooses its native Rust tar
   assert.throws(() => sourcePlatform({ images: [{ platform: "linux/amd64" }, { platform: "linux/arm64" }] }));
   assert.throws(() => rustTargets("linux/riscv64"));
 });
+
+test("independent consumption receipts reject changed commits, platforms and runtime identities", () => {
+  const root = mkdtempSync(join(tmpdir(), "tw-native-consumption-"));
+  const script = resolve("scripts/verify-ce-consumption.mjs");
+  const save = (path, value) => {
+    mkdirSync(join(root, path, ".."), { recursive: true });
+    writeFileSync(join(root, path), JSON.stringify(value));
+  };
+  try {
+    for (const args of [["init", "-q"], ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "Fixture"]]) assert.equal(spawnSync("git", args, { cwd: root }).status, 0);
+    const commit = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
+    const version = "0.3.1";
+    const reports = {};
+    for (const arch of ["amd64", "arm64"]) {
+      const platform = `linux/${arch}`;
+      const images = ["api", "web"].map((app, i) => ({ app, platform, imageId: `sha256:${String(i + 1).repeat(64)}`, configDigest: `sha256:${String(i + 3).repeat(64)}` }));
+      const loaded = { commit, version, platform, images, passed: true };
+      const deployment = { platform, imageIds: images, build: { commit, version }, buildMetadataPassed: true, passed: true, migrationPassed: true, searchSetupPassed: true, apiHealthy: true, webHealthy: true, restCreateReadPassed: true };
+      save(`release-artifacts/bundle/ce-candidate-${arch}.json`, { images });
+      save(`receipts/ce-consumption-${arch}/bundle/ce-load-verification.json`, loaded);
+      save(`receipts/ce-consumption-${arch}/deployment-verification.json`, deployment);
+      reports[arch] = deployment;
+    }
+    const run = () => spawnSync(process.execPath, [script, "receipts", version], { cwd: root, encoding: "utf8" });
+    assert.equal(run().status, 0);
+    for (const mutate of [report => report.build.commit = "0".repeat(40), report => report.platform = "linux/arm64", report => report.imageIds[0].imageId = `sha256:${"f".repeat(64)}`, report => report.migrationPassed = false]) {
+      const changed = structuredClone(reports.amd64);
+      mutate(changed);
+      save("receipts/ce-consumption-amd64/deployment-verification.json", changed);
+      assert.notEqual(run().status, 0);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

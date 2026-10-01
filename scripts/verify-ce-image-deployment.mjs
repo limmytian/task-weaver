@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { inspectLocalImage } from "./image-inspection-lib.mjs";
 
@@ -56,6 +56,24 @@ try {
     assert.ok(response.ok, `REST smoke failed: ${path} (${response.status})`);
     return response.json();
   };
+  let buildMetadataPassed = false;
+  let build = null;
+  if (process.argv.includes("--verify-build")) {
+    const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    const version = JSON.parse(readFileSync("packages/contracts/package.json", "utf8")).version;
+    const apiMetadata = await request("/version");
+    const webResponse = await fetch(`http://127.0.0.1:${port(web, 3000)}/api/trpc/version.info`);
+    assert.ok(webResponse.ok, "Web build metadata unavailable");
+    const webMetadata = (await webResponse.json()).result.data.json;
+    for (const metadata of [apiMetadata, webMetadata]) {
+      assert.equal(metadata.installed.version, version);
+      assert.equal(metadata.installed.commit, commit);
+      assert.equal(metadata.installed.development, false);
+      assert.equal(metadata.status, "not_checked", "Installation must not perform an outbound release check");
+    }
+    buildMetadataPassed = true;
+    build = { commit, version };
+  }
   const project = await request("/projects", { name: "CE binary candidate smoke" });
   const requirement = await request(`/projects/${project.id}/requirements`, { title: "Verify candidate deployment" });
   const task = await request(`/projects/${project.id}/tasks`, { title: "Preserve candidate fixture", requirementId: requirement.id });
@@ -65,8 +83,8 @@ try {
   const output = resolve("release-artifacts/deployment-verification.json");
   mkdirSync(resolve("release-artifacts"), { recursive: true });
   writeFileSync(output, `${JSON.stringify({ schemaVersion: 1, mode: "isolated-fresh-install", platform, imageIds: images,
-    databaseImage, migrationPassed: true, searchSetupPassed: true, apiHealthy: true, webHealthy: true,
-    restCreateReadPassed: true, passed: true }, null, 2)}\n`);
+    databaseImage, build, migrationPassed: true, searchSetupPassed: true, apiHealthy: true, webHealthy: true,
+    restCreateReadPassed: true, buildMetadataPassed, passed: true }, null, 2)}\n`);
   console.log(output);
 } finally {
   for (const container of containers.reverse()) {

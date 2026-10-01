@@ -122,3 +122,44 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+
+  consume:
+    needs: aggregate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - uses: actions/download-artifact@v4
+        with:
+          name: ce-binary-candidate-${{ matrix.arch }}
+          path: candidate
+      - name: Independently load reviewed bytes and verify native installation and build identity
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          node scripts/load-ce-binary-candidate.mjs candidate "$VERSION" "${{ matrix.platform }}"
+          node scripts/verify-ce-image-deployment.mjs "task-weaver-api:release-${{ matrix.arch }}" "task-weaver-web:release-${{ matrix.arch }}" "${{ matrix.platform }}" --verify-build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ce-consumption-${{ matrix.arch }}
+          path: |
+            release-artifacts/deployment-verification.json
+            release-artifacts/bundle/ce-load-verification.json
+          if-no-files-found: error
+          retention-days: 14

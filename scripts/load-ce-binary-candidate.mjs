@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createReadStream, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { safePath } from "./binary-source-lib.mjs";
@@ -45,6 +45,7 @@ assert.equal(verification.passed, true);
 assert.deepEqual(verification.images.map(({ imageId }) => imageId).sort(), candidate.images.map(({ imageId }) => imageId).sort());
 const output = resolve(outputDirectory ?? "release-artifacts/bundle");
 mkdirSync(output, { recursive: true });
+const loadedImages = [];
 for (const entry of candidate.images) {
   execFileSync("docker", ["load", "--input", join(root, safePath(entry.archive))], { stdio: "inherit" });
   const image = inspectLocalImage(entry.imageRef, platform);
@@ -62,6 +63,7 @@ for (const entry of candidate.images) {
     }
   }
   assert.equal(`${image.Os}/${image.Architecture}`, platform);
+  loadedImages.push({ app: entry.app, imageId: image.Id, configDigest: entry.configDigest, platform });
   execFileSync("docker", ["tag", entry.imageRef, `task-weaver-${entry.app}:release${candidate.schemaVersion === 2 ? `-${architecture}` : ""}`]);
   const scans = read("release-artifacts/images/inventory.json");
   const scan = scans.inventory.find(({ imageId }) => imageId === entry.imageId);
@@ -72,4 +74,5 @@ for (const entry of candidate.images) {
 copyFileSync(join(root, "ce-candidate.json"), join(output, "ce-candidate.json"));
 copyFileSync(join(root, "release-artifacts/binary-release-verification.json"), join(output, "binary-release-verification.json"));
 copyFileSync(join(root, "release-artifacts/binary-sources", safePath(verification.correspondingSource.archive)), join(output, "corresponding-source.tar.gz"));
+writeFileSync(join(output, "ce-load-verification.json"), JSON.stringify({ version, commit, platform, images: loadedImages, passed: true }, null, 2) + "\n");
 console.log("Loaded verified CE binary candidate; publication approval is enforced by the protected release environment.");

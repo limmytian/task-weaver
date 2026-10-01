@@ -217,3 +217,11 @@ both image builds. An operator building an image manually should also supply
 explicitly unknown. The version page identifies the Web build. REST metadata
 identifies the API build separately. Set `TW_VERSION_CHECK_ENABLED=false` on
 each service to disable manual outbound release checks for offline deployments.
+
+A passing aggregate is followed by separate native consumption jobs. These
+fresh runners download and load the reviewed archives, verify configuration
+identity, initialize disposable PostgreSQL, exercise API create/read operations
+and check both running build commits. Publication requires the entire controlled
+workflow to succeed and validates the two consumption receipts against the
+candidate configuration digests. Receipt checks fail closed on source, CPU,
+configuration or installation drift.

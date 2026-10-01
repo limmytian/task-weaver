@@ -24,7 +24,7 @@ mkdirSync(output, { recursive: true });
 const images = [];
 for (const [app, image] of [["api", apiImage], ["web", webImage]]) {
   const details = inspectLocalImage(image, platform);
-  assert.ok(verification.images.some(({ imageId, platform }) => imageId === details.Id && platform === platform));
+  assert.ok(verification.images.some(entry => entry.imageId === details.Id && entry.platform === platform));
   const archive = `${app}-image.tar`;
   execFileSync("docker", ["save", "--output", join(output, archive), image]);
   const digest = createHash("sha256");
