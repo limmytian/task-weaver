@@ -10,6 +10,7 @@ import {
 import { resolve } from "node:path";
 import { actorMiddleware, type Env } from "./middleware/actor.js";
 import { apiKeyMiddleware } from "./middleware/api-key.js";
+import agentUsageRoutes from "./routes/agent-usage.js";
 import activityRoutes from "./routes/activity.js";
 import apiKeyRoutes from "./routes/api-keys.js";
 import assistantRoutes from "./routes/assistant.js";
@@ -80,6 +81,7 @@ const consoleLogger: ApplicationLogger = {
 function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
   return {
     apiRoutes: [
+      { id: "agent-usage", method: "GET", path: "/api/v1/agent-usage", route: agentUsageRoutes },
       { id: "version", method: "GET", path: "/api/v1/version", route: versionRoutes },
       { id: "projects", method: "GET", path: "/api/v1/projects", route: projectRoutes },
       { id: "tasks", method: "GET", path: "/api/v1/tasks", mountPath: "/api/v1", route: taskRoutes },

@@ -19,6 +19,7 @@ export async function request<T>(
     actorId?: string
     actorType?: 'human' | 'agent'
     omitAuth?: boolean
+    signal?: AbortSignal
   },
 ): Promise<T> {
   const config = loadConfig()
@@ -36,6 +37,7 @@ export async function request<T>(
   const res = await fetch(url, {
     method,
     headers,
+    signal: opts?.signal,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
 

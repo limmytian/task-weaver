@@ -102,3 +102,16 @@ pnpm build            # Build all packages
 pnpm lint             # Lint all packages
 pnpm typecheck        # Type check all packages
 ```
+
+## Development and Delivery
+
+- GitHub `limmytian/task-weaver` is the canonical product source repository.
+- Develop the next patch release on `0.3.2`; do not merge it to `main`
+  until the owner authorizes the version release merge.
+- Every commit must include a DCO signoff (`git commit -s`).
+- Keep local environment configuration ignored. Never commit credentials,
+  private infrastructure configuration, or private repository history.
+- Internal planning and environment-specific runbooks belong in Task Weaver
+  project documents; secret values belong in deployment Secret facilities.
+- Source development does not authorize artifact publication or production
+  deployment. Existing public release tags and signatures remain immutable.

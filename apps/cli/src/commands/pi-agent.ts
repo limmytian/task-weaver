@@ -1,17 +1,21 @@
 import { Command, Option } from 'commander'
+import { randomUUID } from 'node:crypto'
+import { unknownUsage } from '../agent-usage.js'
+import { request } from '../client.js'
 import { spawn } from 'node:child_process'
 import { buildPiAgentRunPrompt } from '@task-weaver/partners-gateway'
 import { get, post, put } from '../client.js'
 import { printJson, printKv, printTable } from '../output.js'
 
-function runCommand(command: string, args: string[], timeoutMs: number): Promise<{
+function runCommand(command: string, args: string[], timeoutMs: number, usageEnvironment?: NodeJS.ProcessEnv, onSpawn?: () => void): Promise<{
   code: number | null
   signal: NodeJS.Signals | null
   stdout: string
   stderr: string
 }> {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...usageEnvironment } })
+    child.once('spawn', () => onSpawn?.())
     let stdout = ''
     let stderr = ''
     const timer = setTimeout(() => {
@@ -346,7 +350,24 @@ export function registerPiAgent(program: Command): void {
       if (run.actualPiModel) args.push('--model', run.actualPiModel)
       args.push(prompt)
       const executorCommand = opts.piCommand ?? opts.executorCommand ?? 'pi'
-      const result = await runCommand(executorCommand, args, Number(opts.duration) * 60_000)
+      const processId = randomUUID()
+      const usageStartedAt = new Date().toISOString()
+      const usagePath = `/api/v1/pi-agent/runs/${run.id}/usage`
+      let launched = false
+      let registration = Promise.resolve()
+      const result = await runCommand(executorCommand, args, Number(opts.duration) * 60_000, { TW_USAGE_PROCESS_ID: processId, TW_USAGE_STARTED_AT: usageStartedAt, TW_TI_RUN_ID: run.id, TW_TI_ATTEMPT: String(run.retryCount), TW_TI_WORKER_ID: opts.worker }, () => {
+        launched = true
+        registration = request('POST', usagePath, { processId, workerId: opts.worker, attempt: run.retryCount, startedAt: usageStartedAt, revision: 0, summary: unknownUsage(), outcome: 'running' }, { signal: AbortSignal.timeout(2_500) }).then(() => undefined).catch(() => {
+          console.warn('Ti usage registration failed; accounting coverage may be incomplete.')
+        })
+      })
+      const usageEndedAt = new Date().toISOString()
+      if (launched) {
+        await registration
+        try {
+          await request('POST', `${usagePath}/${processId}/finish`, { outcome: result.signal ? 'cancelled' : result.code === 0 ? 'succeeded' : 'failed', endedAt: usageEndedAt }, { signal: AbortSignal.timeout(2_500) })
+        } catch { console.warn('Ti usage finalization failed; accounting coverage may be incomplete.') }
+      }
       const succeeded = result.code === 0
       const completed = await post(`/api/v1/pi-agent/runs/${run.id}/complete`, {
         status: succeeded ? 'succeeded' : 'failed',

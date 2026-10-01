@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander'
 import { ApiError } from './client.js'
+import { registerAgentUsage } from './commands/agent-usage.js'
 import { registerAuth } from './commands/auth.js'
 import { registerProjects } from './commands/projects.js'
 import { registerRequirements } from './commands/requirements.js'
@@ -23,6 +24,7 @@ const program = new Command()
   .description('Task Weaver CLI — manage projects, tasks, and documents')
   .version('0.0.1')
 
+registerAgentUsage(program)
 registerAuth(program)
 registerProjects(program)
 registerRequirements(program)

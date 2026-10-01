@@ -637,3 +637,24 @@ pnpm typecheck        # Type-check
 失败结果缓存一分钟，保持不可用状态，不会误报为最新版本。
 `TW_VERSION_CHECK_ENABLED=false` 可禁用对外检查。页面提供发布下载和
 运维升级说明链接，不包含下载、安装、重启或部署操作。
+
+## Agent 整次进程 token 用量
+
+`agent_usage_runs` 为每次实际 agent 进程保存一份紧凑的累计汇总，包含可为空的
+输入、输出及缓存计数、provider/model、来源、阶段、项目/需求/任务归属、运行结果，
+以及 complete/partial/unknown 完整性。执行、审查、返工或重启后的重试进程各有
+独立 UUID。快照版本在数据库行锁下更新同一条记录，重复上报不会累加。daemon
+共享需求执行只计一次，不重复归入每个任务。失败或取消仍保留已报告计数并标记
+partial；缓存可能与输入重叠，因此单独展示。
+
+daemon 在日志截断前读取已验证的 Codex JSONL；未验证的 CLI 格式保持 unknown。
+实际 Ti runtime 可通过 API key 认证的 TW 接口独立上报，无需 Partners 提供模型
+计量。Partners 保持执行基础设施职责，shell job 元数据不代表模型用量。已知但未
+上报的 Ti 尝试降低可见覆盖程度；无法恢复的历史进程明确不在统计范围内。
+REST、CLI 和 Web Agent Usage 页面提供运行明细，以及项目、需求、任务和时间范围
+汇总。Web 查询沿用实例访问边界；REST 需要有效 API key 及显式项目范围。报告
+归属校验及从数据库推导的 Ti 任务范围防止运行记录被重新归属到其他项目。
+
+此功能不涉及金额、单次调用记录、原始 usage 事件、prompt、response、凭据或基于
+文本长度的估算；Embedding 用量保持独立。契约、限制和验收说明见独立英文文档
+[Agent token usage](agent-token-usage.md)。

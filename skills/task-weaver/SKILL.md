@@ -619,3 +619,21 @@ Use this when a task needs a capability the core `tw` commands don't cover (e.g.
 8. **Claim before working** — in interactive/multi-agent mode, always `tw task claim` before starting work. **Exception:** in daemon/executor mode the daemon already holds the requirement lane — don't claim or release (see [Operating Modes](#operating-modes))
 9. **Use `--json`** — pipe CLI output to parse task IDs and other fields programmatically
 10. **Keep repository credentials local** — store only non-secret endpoints and profile references in Task Weaver; never put tokens in URLs, prompts, comments, or documents
+
+## Agent Token Usage
+
+Use `tw usage runs --project <id> --json` for compact whole-process records and
+`tw usage summary --project <id> --req <id> --json` for totals and coverage.
+Add `--task`, `--since`, or `--until` to narrow the scope. Shared requirement runs
+are counted once at requirement/project scope and excluded from individual tasks.
+Missing counters are unknown; cache counters may overlap input and must not be
+added. Summary totals are nullable decimal strings, with reporting-process counts.
+Coverage warns about known Ti attempts without reports and excludes unregistered
+historical daemon processes. No money or per-call records are stored.
+
+Actual Ti runtimes can report compact cumulative snapshots using
+`tw usage report-ti <run-id> --file usage.json --json`, independently of Partners.
+Reuse a process UUID and start time across increasing revisions; fresh retries
+use fresh process UUIDs. Initial Ti registration requires the current attempt and
+worker lease. Reporting requires the assigned-agent or run-creator API key.
+See [rest-api-reference.md](rest-api-reference.md) for the endpoints.

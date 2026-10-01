@@ -654,3 +654,28 @@ checks are cached for one minute and remain unavailable rather than reporting
 that the installation is current. `TW_VERSION_CHECK_ENABLED=false` disables
 outbound checks. The page links to release downloads and operator upgrade
 instructions; it has no download, install, restart or deployment action.
+
+## Whole-process agent token usage
+
+`agent_usage_runs` stores one compact cumulative summary per actual agent process,
+with nullable input/output/cache counters, provider/model identity, source, phase,
+project/requirement/task attribution, outcome and complete/partial/unknown coverage.
+A fresh execution, review, rework or retry process has its own UUID. Snapshot
+revisions update the same row under a database row lock; replay never adds totals.
+Shared daemon requirement work is counted once and excluded from individual task
+totals. Failed/cancelled runs retain reported counters as partial. Cache counters
+remain separate because they can overlap input.
+
+The daemon observes verified Codex JSONL before log truncation. Unverified CLI
+formats remain unknown. Actual Ti runtimes can report directly through API-key
+authenticated TW endpoints independently of Partners. Partners remains execution
+infrastructure; shell-job metadata is not model usage. Known Ti attempts without
+reports reduce visible coverage; unavailable historical process data is explicitly
+outside accounting. REST/CLI and the Web Agent Usage page provide process details
+and project/requirement/task/time summaries. Web reads follow the existing instance
+boundary; REST requires a validated key and explicit project scope. Reporting
+ownership and database-derived Ti attribution prevent row/project reassignment.
+
+The feature excludes money, per-call records, raw usage events, prompts, responses,
+credentials and text-based estimates. Embedding usage is separate. See
+[Agent token usage](agent-token-usage.md) for contracts, limits and validation.

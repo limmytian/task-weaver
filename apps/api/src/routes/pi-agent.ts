@@ -1,5 +1,8 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import {
+  agentUsageService,
+  reportPiAgentUsageSchema,
   acquirePiAgentRunSchema,
   completePiAgentRunSchema,
   createPiAgentRunSchema,
@@ -166,6 +169,32 @@ piAgentRoutes.post("/runs/:id/complete", async (c) => {
   }
   try {
     return c.json(await piAgentService.completeRun(db, c.req.param("id"), parsed.data, actor));
+  } catch (err) {
+    if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
+    if (err instanceof ValidationError) return c.json({ error: err.message }, 400);
+    throw err;
+  }
+});
+
+piAgentRoutes.post("/runs/:id/usage", async (c) => {
+  if (!c.req.header("Authorization")?.startsWith("Bearer ") || !c.get("actor").id.startsWith("apikey:")) return c.json({ error: "Authenticated API key required" }, 401);
+  const parsed = reportPiAgentUsageSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
+  try {
+    return c.json(await agentUsageService.reportPiUsage(c.get("db"), c.req.param("id"), parsed.data, c.get("actor")));
+  } catch (err) {
+    if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
+    if (err instanceof ValidationError) return c.json({ error: err.message }, 400);
+    throw err;
+  }
+});
+
+piAgentRoutes.post("/runs/:id/usage/:processId/finish", async (c) => {
+  if (!c.req.header("Authorization")?.startsWith("Bearer ") || !c.get("actor").id.startsWith("apikey:")) return c.json({ error: "Authenticated API key required" }, 401);
+  const parsed = z.object({ outcome: z.enum(["succeeded", "failed", "cancelled"]), endedAt: z.string().datetime() }).strict().safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
+  try {
+    return c.json(await agentUsageService.finishPiUsage(c.get("db"), c.req.param("id"), c.req.param("processId"), parsed.data, c.get("actor")));
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
     if (err instanceof ValidationError) return c.json({ error: err.message }, 400);

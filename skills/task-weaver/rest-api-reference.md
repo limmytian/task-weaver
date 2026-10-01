@@ -2314,3 +2314,34 @@ GET /health
 ```
 
 Note: at `/health`, not under `/api/v1`.
+
+## Agent token usage
+
+Usage REST endpoints require a validated API key. All queries require `projectId`;
+optional filters are `requirementId`, `taskId`, `since` (inclusive process start),
+`until` (exclusive), `phase`, `completeness`, `limit` and `offset`.
+
+- `GET /api/v1/agent-usage/runs`: paginated whole-process summaries.
+- `GET /api/v1/agent-usage/runs/:processId?projectId=...`: scoped process details.
+- `GET /api/v1/agent-usage/summary`: totals and complete/partial/unknown coverage;
+  ignores pagination, returns nullable decimal-string sums and per-counter report
+  counts. Known unregistered Ti attempts reduce coverage across the entire selected
+  project/requirement/task scope because their process timestamps are unavailable.
+- `POST /api/v1/agent-usage/runs`: daemon snapshots with `processId`, `daemonId`,
+  `projectId`, `requirementId`, `agent`, `phase`, `startedAt`, `endedAt`, `outcome`,
+  `revision` and `summary`. Initial registration requires an active daemon lane.
+- `POST /api/v1/pi-agent/runs/:runId/usage`: actual Ti snapshots with `processId`,
+  `workerId`, `attempt`, `startedAt`, `endedAt`, `outcome`, `revision` and `summary`.
+  Requires assigned-agent or creator identity and an active worker lease for initial
+  registration. Task/project attribution is derived from the Ti run.
+- `POST /api/v1/pi-agent/runs/:runId/usage/:processId/finish`: local runner finalization
+  with terminal `outcome` and `endedAt`, preserving latest reported counters.
+
+`summary` contains nullable `inputTokens`, `outputTokens`, `cacheReadTokens`,
+`cacheWriteTokens`; `cacheSemantics` (`included`, `additional`, `unknown`);
+`provider`, `model` (`multiple`/`unknown` allowed); and `completeness`
+(`complete`, `partial`, `unknown`). Unknown has no counters; complete requires input
+and output counters. Failed/cancelled/running processes with counters are partial.
+Snapshot revisions replace rather than add; changed attribution, decreasing counters,
+conflicting replays and terminal restarts are rejected. No model-call records,
+raw usage events, payloads or monetary fields are accepted.

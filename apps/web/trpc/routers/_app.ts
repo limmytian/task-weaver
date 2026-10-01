@@ -1,3 +1,4 @@
+import { agentUsageRouter } from "./agent-usage";
 import { router } from "../init";
 import { projectRouter } from "./project";
 import { taskRouter } from "./task";
@@ -19,6 +20,7 @@ import { embeddingRouter } from "./embedding";
 import { versionRouter } from "./version";
 
 export const appRouter = router({
+  agentUsage: agentUsageRouter,
   project: projectRouter,
   task: taskRouter,
   requirement: requirementRouter,

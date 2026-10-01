@@ -17,6 +17,9 @@ export interface AsyncCommandOptions {
   signal?: AbortSignal
   redact?: (value: string) => string
   onOutput?: (event: CommandOutputEvent) => void
+  /** Raw stdout observer, before redaction and bounded log retention. */
+  onStdout?: (chunk: Buffer) => void
+  onSpawn?: () => void
 }
 
 export interface AsyncCommandResult {
@@ -109,6 +112,10 @@ export async function runCommand(
       stdio: ['ignore', 'pipe', 'pipe'],
     })
 
+    child.once('spawn', () => {
+      try { options.onSpawn?.() } catch { /* Observers cannot interrupt execution. */ }
+    })
+
     const emit = (stream: CommandOutputStream, chunk: Buffer) => {
       const text = redact(chunk.toString('utf8'))
       if (!text || !options.onOutput) return
@@ -121,6 +128,7 @@ export async function runCommand(
 
     child.stdout?.on('data', (chunk: Buffer | string) => {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      try { options.onStdout?.(buffer) } catch { /* Observers cannot interrupt execution. */ }
       const appended = appendBounded(stdout, buffer, maxOutputBytes)
       stdout = appended.value
       outputTruncated ||= appended.truncated

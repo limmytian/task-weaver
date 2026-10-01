@@ -4,6 +4,7 @@ import { homedir, hostname } from 'os'
 import { join, resolve } from 'path'
 import { Command } from 'commander'
 import { runCommand } from '../async-command.js'
+import { runMeteredAgent } from '../agent-usage.js'
 import { commandFailureSummary } from '../daemon-finalization.js'
 import {
   DaemonLifecycle,
@@ -1006,7 +1007,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           cancelled: false,
           outputTruncated: false,
           durationMs: 0,
-        } : await runCommand(
+        } : await runMeteredAgent(
           toolCmd,
           buildArgv(toolCmd, prompt, workspacePath, selectedModel, selectedReasoningEffort),
           {
@@ -1034,6 +1035,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
               }
             },
           },
+          { daemonId, projectId: requirement.projectId, requirementId: requirement.id, agent: toolCmd, phase: initialWorkspaceSnapshot.workspaceState === 'dirty' ? 'rework' : 'execution' },
         )
         const cancelReason = cancellationReason(signal)
         const outcome = childResult.timedOut
@@ -1574,12 +1576,12 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         process.exitCode = exitCode
       }
 
-      const runAiReview = async (prompt: string, cwd: string, signal?: AbortSignal): Promise<ReviewDecision> => {
+      const runAiReview = async (prompt: string, cwd: string, requirement: { id: string; projectId: string }, signal?: AbortSignal): Promise<ReviewDecision> => {
         if (!reviewTool) {
           return { approved: true, summary: 'AI review skipped.' }
         }
         const modelTier = 'strong'
-        const child = await runCommand(
+        const child = await runMeteredAgent(
           reviewTool,
           buildArgv(reviewTool, prompt, cwd, modelMappings[modelTier], thinkMappings[modelTier]),
           {
@@ -1601,6 +1603,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
               }
             },
           },
+          { daemonId, projectId: requirement.projectId, requirementId: requirement.id, agent: reviewTool, phase: 'review' },
         )
         const output = [child.stdout, child.stderr].filter(Boolean).join('\n').trim()
         if (!child.ok) {
@@ -1770,7 +1773,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
               extraPrompt: extraWorkerPrompt,
               run: trustedRun,
               runCheck: (command, cwd) => runShellCommand(command, cwd, signal),
-              runAiReview: reviewTool ? (prompt, cwd) => runAiReview(prompt, cwd, signal) : undefined,
+              runAiReview: reviewTool ? (prompt, cwd) => runAiReview(prompt, cwd, requirement, signal) : undefined,
               allowUnreviewed: Boolean(opts.allowUnreviewed),
               onPrepared: async ({ headCommit, baseCommit }) => {
                 const run = await fencedPost<{ id: string }>(
