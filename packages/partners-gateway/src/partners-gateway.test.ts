@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  buildGatewayJobRequestFromPiRun,
-  buildPiCompletionFromGateway,
+  buildGatewayJobRequestFromTiRun,
+  buildTiCompletionFromGateway,
   createPartnersGatewayClient,
   getPartnersGatewayConfig,
   getPartnersGatewayWorkerConfig,
@@ -71,7 +71,7 @@ test("creates gateway jobs with service-token headers", async () => {
   });
 
   const job = await client.createJob({
-    id: "tw_pi_stable_run",
+    id: "tw_ti_stable_run",
     executionMode: "ephemeral_interpreter",
     command: { argv: ["echo", "ok"] },
     timeoutSeconds: 30,
@@ -80,17 +80,17 @@ test("creates gateway jobs with service-token headers", async () => {
   assert.equal(job.id, "job_1");
   assert.equal(calls[0]?.url, "http://gateway.local/v1/jobs");
   assert.equal((calls[0]?.init?.headers as Record<string, string>).authorization, "Bearer secret-token");
-  assert.equal((calls[0]?.init?.headers as Record<string, string>)["idempotency-key"], "tw_pi_stable_run");
+  assert.equal((calls[0]?.init?.headers as Record<string, string>)["idempotency-key"], "tw_ti_stable_run");
 });
 
 test("maps Ti agent runs to gateway job requests", () => {
-  const request = buildGatewayJobRequestFromPiRun({
+  const request = buildGatewayJobRequestFromTiRun({
     run: {
       id: "11111111-1111-1111-1111-111111111111",
       taskId: "22222222-2222-2222-2222-222222222222",
       scheduleRunId: null,
-      actualPiProvider: "openai",
-      actualPiModel: "gpt-5.5",
+      actualProvider: "openai",
+      actualModel: "gpt-5.5",
     },
     prompt: "Do the assigned work",
     config: {
@@ -103,7 +103,7 @@ test("maps Ti agent runs to gateway job requests", () => {
     },
   });
 
-  assert.equal(request.id, "tw_pi_11111111-1111-1111-1111-111111111111");
+  assert.equal(request.id, "tw_ti_11111111-1111-1111-1111-111111111111");
   assert.equal(request.tenantId, "tenant_1");
   assert.equal(request.projectId, "project_1");
   assert.equal(request.inputs?.files[0]?.content, "Do the assigned work");
@@ -111,25 +111,25 @@ test("maps Ti agent runs to gateway job requests", () => {
 });
 
 test("keeps job requests stable when persisted execution metadata changes", () => {
-  const run = { id: "stable-run", requestedPiProvider: "openai", requestedPiModel: "gpt-5.5",
-    actualPiProvider: "openai", actualPiModel: "gpt-5.5" };
+  const run = { id: "stable-run", requestedProvider: "openai", requestedModel: "gpt-5.5",
+    actualProvider: "openai", actualModel: "gpt-5.5" };
   const config = { enabled: true, defaultTimeoutSeconds: 30 };
-  const initial = buildGatewayJobRequestFromPiRun({ run, prompt: "Stable task", config });
-  const recovered = buildGatewayJobRequestFromPiRun({
-    run: { ...run, actualPiProvider: "partners-gateway", actualPiModel: "kubernetes" },
+  const initial = buildGatewayJobRequestFromTiRun({ run, prompt: "Stable task", config });
+  const recovered = buildGatewayJobRequestFromTiRun({
+    run: { ...run, actualProvider: "partners-gateway", actualModel: "kubernetes" },
     prompt: "Stable task", config,
   });
   assert.deepEqual(recovered, initial);
-  const unspecified = { ...run, requestedPiProvider: null, requestedPiModel: null };
+  const unspecified = { ...run, requestedProvider: null, requestedModel: null };
   assert.deepEqual(
-    buildGatewayJobRequestFromPiRun({ run: unspecified, prompt: "Stable task", config }),
-    buildGatewayJobRequestFromPiRun({ run: { ...unspecified, actualPiProvider: "partners-gateway", actualPiModel: "kubernetes" },
+    buildGatewayJobRequestFromTiRun({ run: unspecified, prompt: "Stable task", config }),
+    buildGatewayJobRequestFromTiRun({ run: { ...unspecified, actualProvider: "partners-gateway", actualModel: "kubernetes" },
       prompt: "Stable task", config }),
   );
 });
 
 test("maps gateway terminal jobs to Ti completion payloads", () => {
-  const completion = buildPiCompletionFromGateway({
+  const completion = buildTiCompletionFromGateway({
     job: {
       id: "job_1",
       state: "succeeded",
@@ -145,8 +145,8 @@ test("maps gateway terminal jobs to Ti completion payloads", () => {
   });
 
   assert.equal(completion.status, "succeeded");
-  assert.equal(completion.actualPiProvider, "partners-gateway");
-  assert.equal(completion.actualPiModel, "local");
+  assert.equal(completion.actualProvider, "partners-gateway");
+  assert.equal(completion.actualModel, "local");
   assert.equal(completion.outputSummary, "review ready");
   assert.equal(completion.costMetadata?.gatewayJobId, "job_1");
 });

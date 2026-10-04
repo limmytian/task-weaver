@@ -12,7 +12,7 @@ import { memoryRouter } from "./memory";
 import { skillRouter } from "./skill";
 import { daemonRouter } from "./daemon";
 import { scheduleRouter } from "./schedule";
-import { piAgentRouter } from "./pi-agent";
+import { tiAgentRouter } from "./ti-agent";
 import { assistantRouter } from "./assistant";
 import { repositoryRouter } from "./repository";
 import { embeddingRouter } from "./embedding";
@@ -33,7 +33,7 @@ export const appRouter = router({
   skill: skillRouter,
   daemon: daemonRouter,
   schedule: scheduleRouter,
-  piAgent: piAgentRouter,
+  tiAgent: tiAgentRouter,
   assistant: assistantRouter,
   repository: repositoryRouter,
   embedding: embeddingRouter,

@@ -2330,11 +2330,11 @@ optional filters are `requirementId`, `taskId`, `since` (inclusive process start
 - `POST /api/v1/agent-usage/runs`: daemon snapshots with `processId`, `daemonId`,
   `projectId`, `requirementId`, `agent`, `phase`, `startedAt`, `endedAt`, `outcome`,
   `revision` and `summary`. Initial registration requires an active daemon lane.
-- `POST /api/v1/pi-agent/runs/:runId/usage`: actual Ti snapshots with `processId`,
+- `POST /api/v1/ti/runs/:runId/usage`: actual Ti snapshots with `processId`,
   `workerId`, `attempt`, `startedAt`, `endedAt`, `outcome`, `revision` and `summary`.
   Requires assigned-agent or creator identity and an active worker lease for initial
   registration. Task/project attribution is derived from the Ti run.
-- `POST /api/v1/pi-agent/runs/:runId/usage/:processId/finish`: local runner finalization
+- `POST /api/v1/ti/runs/:runId/usage/:processId/finish`: local runner finalization
   with terminal `outcome` and `endedAt`, preserving latest reported counters.
 
 `summary` contains nullable `inputTokens`, `outputTokens`, `cacheReadTokens`,

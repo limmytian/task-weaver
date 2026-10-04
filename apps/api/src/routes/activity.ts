@@ -4,7 +4,7 @@ import type { Env } from "../middleware/actor.js";
 
 const activity = new Hono<Env>();
 
-type ActivityEntityType = "project" | "task" | "document" | "requirement" | "repository" | "daemon" | "schedule" | "pi_agent_model_config" | "pi_agent_policy" | "pi_agent_run";
+type ActivityEntityType = "project" | "task" | "document" | "requirement" | "repository" | "daemon" | "schedule" | "ti_agent_model_config" | "ti_agent_policy" | "ti_agent_run";
 
 function parseQueryInput(query: Record<string, string>): activityLogService.ListActivityLogInput {
   return {

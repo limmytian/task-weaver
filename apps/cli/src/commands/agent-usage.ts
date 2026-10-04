@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { Command } from 'commander'
 import {
   agentUsageQuerySchema,
-  reportPiAgentUsageSchema,
+  reportTiAgentUsageSchema,
 } from '@task-weaver/contracts'
 import { get, post } from '../client.js'
 import { printJson, printTable, printKv } from '../output.js'
@@ -84,11 +84,11 @@ export function registerAgentUsage(program: Command) {
     )
     .option('--json', 'output JSON')
     .action(async (runId, opts) => {
-      const body = reportPiAgentUsageSchema.parse(
+      const body = reportTiAgentUsageSchema.parse(
         JSON.parse(readFileSync(opts.file, 'utf8')),
       )
       const data: any = await post(
-        `/api/v1/pi-agent/runs/${encodeURIComponent(runId)}/usage`,
+        `/api/v1/ti/runs/${encodeURIComponent(runId)}/usage`,
         body,
       )
       if (opts.json) return printJson(data)

@@ -4,10 +4,10 @@ import { createServer } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { eq } from "drizzle-orm";
 import { serve } from "@hono/node-server";
-import { createDb, runMigrations, projects, requirements, tasks, piAgentRuns, activityLog } from "@task-weaver/db";
-import { apiKeyService, piAgentService } from "@task-weaver/core";
+import { createDb, runMigrations, projects, requirements, tasks, tiAgentRuns, activityLog } from "@task-weaver/db";
+import { apiKeyService, tiAgentService } from "@task-weaver/core";
 import { createPartnersGatewayClient } from "@task-weaver/partners-gateway";
-import { PiAgentGatewayWorker } from "@task-weaver/partners-gateway/worker";
+import { TiAgentGatewayWorker } from "@task-weaver/partners-gateway/worker";
 import { createApiApplication } from "./application.js";
 
 const databaseUrl = process.env.TW_GATEWAY_E2E_DATABASE_URL;
@@ -93,9 +93,9 @@ test("Partners Gateway persists HTTP/SSE execution in real PostgreSQL", {
   await new Promise<void>((resolve) => api.listening ? resolve() : api.once("listening", resolve));
   const apiAddress = api.address();
   assert.ok(apiAddress && typeof apiAddress !== "string");
-  const base = `http://127.0.0.1:${apiAddress.port}/api/v1/pi-agent`;
+  const base = `http://127.0.0.1:${apiAddress.port}/api/v1/ti`;
   const headers = { authorization: `Bearer ${key.rawKey}`, "content-type": "application/json" };
-  const worker = new PiAgentGatewayWorker(db, createPartnersGatewayClient(config), config, {
+  const worker = new TiAgentGatewayWorker(db, createPartnersGatewayClient(config), config, {
     actor, assignedAgentId: "gateway-e2e-agent", workerId: "gateway-e2e-worker",
     leaseDurationMinutes: 1, heartbeatIntervalMs: 20, progressFlushIntervalMs: 1,
     idlePollIntervalMs: 20, statusPollIntervalMs: 20, retryBaseDelayMs: 30, retryMaxDelayMs: 30,
@@ -104,13 +104,13 @@ test("Partners Gateway persists HTTP/SSE execution in real PostgreSQL", {
     const [task] = await db.insert(tasks).values({ projectId: project!.id, requirementId: requirement!.id,
       title: "Gateway E2E task", createdBy: actor.id, assignee: "gateway-e2e-agent", assigneeType: "agent" }).returning();
     const result = await fetch(`${base}/runs`, { method: "POST", headers, body: JSON.stringify({ taskId: task!.id,
-      assignedAgentId: "gateway-e2e-agent", requestedPiProvider: "fixture", requestedPiModel: "fixture", maxRetries }) });
+      assignedAgentId: "gateway-e2e-agent", requestedProvider: "fixture", requestedModel: "fixture", maxRetries }) });
     assert.equal(result.status, 201, await result.clone().text());
     return await result.json() as { id: string };
   }
-  async function waitFor(id: string, predicate: (run: Awaited<ReturnType<typeof piAgentService.getRun>>) => boolean) {
+  async function waitFor(id: string, predicate: (run: Awaited<ReturnType<typeof tiAgentService.getRun>>) => boolean) {
     for (let attempt = 0; attempt < 200; attempt++) {
-      const run = await piAgentService.getRun(db, id);
+      const run = await tiAgentService.getRun(db, id);
       if (predicate(run)) return run;
       await delay(10);
     }
@@ -135,13 +135,13 @@ test("Partners Gateway persists HTTP/SSE execution in real PostgreSQL", {
         assert.ok(progress.leaseExpiresAt! > running.leaseExpiresAt!);
         assert.equal(progress.leaseOwnerId, "gateway-e2e-worker");
         await execution;
-        const done = await piAgentService.getRun(db, run.id);
+        const done = await tiAgentService.getRun(db, run.id);
         assert.equal(done.status, state === "polling" ? "succeeded" : state === "timed_out" ? "failed" : state);
         assert.equal(done.leaseOwnerId, null);
         assert.equal(done.leaseExpiresAt, null);
         assert.ok(done.completedAt);
-        assert.equal(done.actualPiProvider, "partners-gateway");
-        assert.equal(done.piSessionId, `tw_pi_${run.id}`);
+        assert.equal(done.actualProvider, "partners-gateway");
+        assert.equal(done.sandboxSessionId, `tw_ti_${run.id}`);
         assert.ok(done.outputSummary?.includes("Gateway E2E progress"));
         assert.deepEqual(done.costMetadata?.gatewayArtifacts, [{ id: "result", path: "/workspace/result.json" }]);
         const history = await db.select().from(activityLog).where(eq(activityLog.entityId, run.id));
@@ -155,34 +155,34 @@ test("Partners Gateway persists HTTP/SSE execution in real PostgreSQL", {
       transientFailures = 1;
       const run = await createRun(1);
       await worker.runOnce(new AbortController().signal);
-      const retry = await piAgentService.getRun(db, run.id);
+      const retry = await tiAgentService.getRun(db, run.id);
       assert.equal(retry.status, "queued");
       assert.equal(retry.retryCount, 1);
       assert.equal(retry.leaseOwnerId, null);
       assert.ok(retry.nextAttemptAt);
       await delay(40);
       await worker.runOnce(new AbortController().signal);
-      assert.equal((await piAgentService.getRun(db, run.id)).status, "succeeded");
+      assert.equal((await tiAgentService.getRun(db, run.id)).status, "succeeded");
       transientFailures = 2;
       const exhausted = await createRun(1);
       await worker.runOnce(new AbortController().signal);
       await delay(40);
       await assert.rejects(worker.runOnce(new AbortController().signal));
-      const failed = await piAgentService.getRun(db, exhausted.id);
+      const failed = await tiAgentService.getRun(db, exhausted.id);
       assert.equal(failed.status, "failed");
       assert.equal(failed.retryCount, 1);
       assert.equal(failed.leaseOwnerId, null);
     });
     await t.test("concurrent workers acquire once and recover an expired lease", async () => {
       const run = await createRun();
-      const results = await Promise.allSettled(["worker-a", "worker-b"].map((workerId) => piAgentService.acquireRun(db,
+      const results = await Promise.allSettled(["worker-a", "worker-b"].map((workerId) => tiAgentService.acquireRun(db,
         { assignedAgentId: "gateway-e2e-agent", workerId, durationMinutes: 1 }, actor)));
       assert.equal(results.filter((result) => result.status === "fulfilled" && result.value?.id === run.id).length, 1);
-      await db.update(piAgentRuns).set({ leaseExpiresAt: new Date(Date.now() - 1_000) }).where(eq(piAgentRuns.id, run.id));
+      await db.update(tiAgentRuns).set({ leaseExpiresAt: new Date(Date.now() - 1_000) }).where(eq(tiAgentRuns.id, run.id));
       const before = submissions;
       await worker.runOnce(new AbortController().signal);
       assert.equal(submissions, before + 1);
-      assert.equal((await piAgentService.getRun(db, run.id)).status, "succeeded");
+      assert.equal((await tiAgentService.getRun(db, run.id)).status, "succeeded");
     });
     await t.test("application starts the module worker and shuts down cleanly", async () => {
       await application.start();

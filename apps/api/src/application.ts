@@ -22,7 +22,7 @@ import graphqlRoutes from "./graphql/index.js";
 import mcpRoutes from "./routes/mcp.js";
 import memoryRoutes from "./routes/memory.js";
 import observabilityRoutes from "./routes/observability.js";
-import piAgentRoutes from "./routes/pi-agent.js";
+import tiRoutes from "./routes/ti.js";
 import planRoutes from "./routes/plans.js";
 import projectRoutes from "./routes/projects.js";
 import repositoryRoutes from "./routes/repositories.js";
@@ -95,7 +95,7 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
       { id: "mcp", method: "GET", path: "/api/v1/mcp", route: mcpRoutes },
       { id: "memories", method: "GET", path: "/api/v1/memories", route: memoryRoutes },
       { id: "schedules", method: "GET", path: "/api/v1/schedules", mountPath: "/api/v1", route: scheduleRoutes },
-      { id: "pi-agent", method: "GET", path: "/api/v1/pi-agent", route: piAgentRoutes },
+      { id: "ti-agent", method: "GET", path: "/api/v1/ti", route: tiRoutes },
       { id: "assistant", method: "GET", path: "/api/v1/assistant", route: assistantRoutes },
       { id: "plans", method: "POST", path: "/api/v1/plans", route: planRoutes },
       { id: "graphql", method: "POST", path: "/api/v1/graphql", route: graphqlRoutes },

@@ -61,7 +61,7 @@ export default function ProjectSchedulesPage({
   const { data: project, isLoading: projectLoading } = trpc.project.get.useQuery({ id });
   const { data: requirements } = trpc.requirement.list.useQuery({ projectId: id });
   const { data: schedules, isLoading } = trpc.schedule.list.useQuery({ projectId: id });
-  const { data: modelConfigs } = trpc.piAgent.listConfigs.useQuery({ includeDisabled: false });
+  const { data: modelConfigs } = trpc.tiAgent.listConfigs.useQuery({ includeDisabled: false });
 
   const requirementTitleById = useMemo(
     () => new Map((requirements ?? []).map((requirement) => [requirement.id, requirement.title])),
@@ -149,8 +149,8 @@ export default function ProjectSchedulesPage({
       autoRun: autoRun === "true",
       assignedExecutor: autoRun === "true" ? TI_SERVER_AGENT_ID : undefined,
       assignedExecutorType: autoRun === "true" ? "agent" : undefined,
-      requestedPiProvider: piProvider || undefined,
-      requestedPiModel: piModel || undefined,
+      requestedProvider: piProvider || undefined,
+      requestedModel: piModel || undefined,
     });
   };
 
@@ -346,8 +346,8 @@ export default function ProjectSchedulesPage({
                         {schedule.assignedExecutor === TI_SERVER_AGENT_ID && (
                           <Badge variant="outline">Ti agent</Badge>
                         )}
-                        {schedule.requestedPiModel && (
-                          <Badge variant="outline">{schedule.requestedPiProvider ?? "ti"}:{schedule.requestedPiModel}</Badge>
+                        {schedule.requestedModel && (
+                          <Badge variant="outline">{schedule.requestedProvider ?? "ti"}:{schedule.requestedModel}</Badge>
                         )}
                       </div>
                     </div>
@@ -396,7 +396,7 @@ export default function ProjectSchedulesPage({
                               <td className="px-3 py-2">{formatDate(run.plannedFor)}</td>
                               <td className="px-3 py-2">{run.status}</td>
                               <td className="px-3 py-2">{run.generatedTaskId ?? "-"}</td>
-                              <td className="px-3 py-2">{run.requestedPiModel ?? run.actualPiModel ?? "-"}</td>
+                              <td className="px-3 py-2">{run.requestedModel ?? run.actualModel ?? "-"}</td>
                               <td className="px-3 py-2">{run.skippedReason ?? "-"}</td>
                             </tr>
                           ))}

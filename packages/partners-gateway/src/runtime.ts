@@ -7,10 +7,10 @@ import {
   type PartnersGatewayConfig,
 } from "@task-weaver/partners-gateway";
 import {
-  checkPiAgentGatewayHealth,
-  createPiAgentGatewayWorker,
-  getPiAgentGatewayWorkerStatus,
-  type PiAgentGatewayWorker,
+  checkTiAgentGatewayHealth,
+  createTiAgentGatewayWorker,
+  getTiAgentGatewayWorkerStatus,
+  type TiAgentGatewayWorker,
 } from "./worker.js";
 
 const gatewayConfigurationSchema = z.object({
@@ -33,27 +33,29 @@ export function createPartnersGatewayRuntime(db: Database, env: NodeJS.ProcessEn
   const defaultConfig = getPartnersGatewayConfig(env);
   const workerConfig = defaultConfig.enabled ? getPartnersGatewayWorkerConfig(env) : null;
   const config: PartnersGatewayConfig = gatewayConfigurationSchema.parse(defaultConfig);
-  let worker: PiAgentGatewayWorker | null = null;
+  let worker: TiAgentGatewayWorker | null = null;
 
   const routes = new Hono();
-  routes.get("/status", (context) => context.json(getPiAgentGatewayWorkerStatus(config, worker)));
+  routes.get("/status", (context) => context.json(getTiAgentGatewayWorkerStatus(config, worker)));
   routes.get("/health", async (context) => {
-    const health = await checkPiAgentGatewayHealth(config);
+    const health = await checkTiAgentGatewayHealth(config);
     return context.json(health, health.ok ? 200 : 503);
   });
 
   return {
-    apiRoutes: [{
-      id: "partners-gateway-worker-controls",
-      method: "GET",
-      path: "/api/v1/pi-agent/worker",
-      route: routes,
-    }],
+    apiRoutes: [
+      {
+        id: "partners-gateway-worker-controls",
+        method: "GET",
+        path: "/api/v1/ti/worker",
+        route: routes,
+      },
+    ],
     workers: [{
       id: "partners-gateway-runner",
       start: () => {
         const resolvedWorkerConfig = workerConfig ?? getPartnersGatewayWorkerConfig(env);
-        worker = createPiAgentGatewayWorker(db, config, resolvedWorkerConfig);
+        worker = createTiAgentGatewayWorker(db, config, resolvedWorkerConfig);
         worker?.start();
       },
       stop: async () => {

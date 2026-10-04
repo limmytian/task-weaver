@@ -381,7 +381,7 @@ export default function UsagePage() {
                                 </dd>
                                 <dt>Ti run / attempt</dt>
                                 <dd>
-                                  {run.piRunId ?? "—"} / {run.attempt ?? "—"}
+                                  {run.tiRunId ?? "—"} / {run.attempt ?? "—"}
                                 </dd>
                               </dl>
                             </details>

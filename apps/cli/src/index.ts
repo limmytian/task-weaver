@@ -14,7 +14,7 @@ import { registerMcp } from './commands/mcp.js'
 import { registerMemory } from './commands/memory.js'
 import { registerDaemon } from './commands/daemon.js'
 import { registerSchedules } from './commands/schedules.js'
-import { registerPiAgent } from './commands/pi-agent.js'
+import { registerTiAgent } from './commands/ti.js'
 import { registerPlans } from './commands/plans.js'
 import { registerRepositories } from './commands/repositories.js'
 import { registerEmbeddings } from './commands/embeddings.js'
@@ -37,7 +37,7 @@ registerMcp(program)
 registerMemory(program)
 registerDaemon(program)
 registerSchedules(program)
-registerPiAgent(program)
+registerTiAgent(program)
 registerPlans(program)
 registerRepositories(program)
 registerEmbeddings(program)

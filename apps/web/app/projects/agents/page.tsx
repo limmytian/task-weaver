@@ -93,7 +93,7 @@ export default function AgentsPage() {
 
 function PolicyCard() {
   const utils = trpc.useUtils();
-  const { data: policy, isLoading } = trpc.piAgent.getPolicy.useQuery();
+  const { data: policy, isLoading } = trpc.tiAgent.getPolicy.useQuery();
   const [enabled, setEnabled] = useState("false");
   const [executionMode, setExecutionMode] = useState<"disabled" | "dry_run" | "live">("disabled");
   const [maxConcurrentRuns, setMaxConcurrentRuns] = useState("1");
@@ -129,10 +129,10 @@ function PolicyCard() {
   }, [policy]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  const savePolicy = trpc.piAgent.upsertPolicy.useMutation({
+  const savePolicy = trpc.tiAgent.upsertPolicy.useMutation({
     onSuccess: () => {
       toast.success("Ti agent policy saved");
-      utils.piAgent.getPolicy.invalidate();
+      utils.tiAgent.getPolicy.invalidate();
     },
     onError: (err) => toast.error(err.message),
   });
@@ -326,10 +326,10 @@ function ModelConfigCard() {
   const [enabled, setEnabled] = useState("true");
   const [isDefault, setIsDefault] = useState("false");
 
-  const upsertConfig = trpc.piAgent.upsertConfig.useMutation({
+  const upsertConfig = trpc.tiAgent.upsertConfig.useMutation({
     onSuccess: () => {
       toast.success("Model config saved");
-      utils.piAgent.listConfigs.invalidate();
+      utils.tiAgent.listConfigs.invalidate();
       setModel("");
       setBaseUrl("");
       setLabel("");
@@ -352,7 +352,8 @@ function ModelConfigCard() {
       apiKeyRef: apiKeyRef.trim() || undefined,
       credentialStatus,
       enabled: enabled === "true",
-      isDefault: isDefault === "true",
+      isDefaultAgent: isDefault === "true",
+      isDefaultChat: isDefault === "true",
     });
   };
 
@@ -447,11 +448,11 @@ function ModelConfigCard() {
 
 function ModelListCard() {
   const utils = trpc.useUtils();
-  const { data: configs, isLoading } = trpc.piAgent.listConfigs.useQuery({ includeDisabled: true });
-  const setDefault = trpc.piAgent.setDefaultConfig.useMutation({
+  const { data: configs, isLoading } = trpc.tiAgent.listConfigs.useQuery({ includeDisabled: true });
+  const setDefault = trpc.tiAgent.setDefaultConfig.useMutation({
     onSuccess: () => {
       toast.success("Default model updated");
-      utils.piAgent.listConfigs.invalidate();
+      utils.tiAgent.listConfigs.invalidate();
     },
     onError: (err) => toast.error(err.message),
   });
@@ -481,7 +482,7 @@ function ModelListCard() {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium">{config.label || `${config.provider}:${config.model}`}</span>
-                    {config.isDefault && (
+                    {(config.isDefaultAgent || config.isDefaultChat) && (
                       <Badge variant="default">
                         <Star className="mr-1 h-3 w-3" />
                         Default
@@ -501,8 +502,8 @@ function ModelListCard() {
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={config.isDefault || !config.enabled || setDefault.isPending}
-                  onClick={() => setDefault.mutate({ configId: config.id })}
+                  disabled={(config.isDefaultAgent && config.isDefaultChat) || !config.enabled || setDefault.isPending}
+                  onClick={() => setDefault.mutate({ configId: config.id, target: "both" })}
                 >
                   <CheckCircle2 className="mr-1 h-4 w-4" />
                   Make Default
@@ -517,7 +518,7 @@ function ModelListCard() {
 }
 
 function RunsCard() {
-  const { data: runs, isLoading } = trpc.piAgent.listRuns.useQuery({
+  const { data: runs, isLoading } = trpc.tiAgent.listRuns.useQuery({
     assignedAgentId: TI_SERVER_AGENT_ID,
     limit: 25,
   });
@@ -564,14 +565,14 @@ function RunsCard() {
                       <div className="max-w-[220px] truncate">{run.task?.title ?? run.taskId ?? "-"}</div>
                     </td>
                     <td className="px-3 py-2">
-                      {run.actualPiProvider && run.actualPiModel
-                        ? `${run.actualPiProvider}:${run.actualPiModel}`
+                      {run.actualProvider && run.actualModel
+                        ? `${run.actualProvider}:${run.actualModel}`
                         : "-"}
                     </td>
                     <td className="px-3 py-2">{run.leaseOwnerId ?? "-"}</td>
                     <td className="px-3 py-2">
                       <div className="max-w-[260px] truncate">
-                        {run.errorMessage ?? run.outputSummary ?? run.fallbackReason ?? "-"}
+                        {run.errorMessage ?? run.outputSummary ?? "-"}
                       </div>
                     </td>
                   </tr>

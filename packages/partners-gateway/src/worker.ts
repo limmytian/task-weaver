@@ -1,9 +1,9 @@
 import type { Database } from "@task-weaver/db";
 import { hostname } from "node:os";
 import {
-  buildGatewayJobRequestFromPiRun,
-  buildPiAgentRunPrompt,
-  buildPiCompletionFromGateway,
+  buildGatewayJobRequestFromTiRun,
+  buildTiAgentRunPrompt,
+  buildTiCompletionFromGateway,
   createPartnersGatewayClient,
   getPartnersGatewayWorkerConfig,
   isTransientGatewayError,
@@ -12,7 +12,7 @@ import {
   type PartnersGatewayJob,
   type PartnersGatewayWorkerConfig,
 } from "@task-weaver/partners-gateway";
-import { type Actor, piAgentService } from "@task-weaver/core";
+import { type Actor, tiAgentService } from "@task-weaver/core";
 
 const TERMINAL_STATES = new Set<PartnersGatewayJob["state"]>([
   "cancelled",
@@ -23,7 +23,7 @@ const TERMINAL_STATES = new Set<PartnersGatewayJob["state"]>([
 
 type GatewayClient = ReturnType<typeof createPartnersGatewayClient>;
 
-export type PiAgentGatewayWorkerOptions = {
+export type TiAgentGatewayWorkerOptions = {
   actor: Actor;
   assignedAgentId: string;
   workerId: string;
@@ -37,30 +37,30 @@ export type PiAgentGatewayWorkerOptions = {
 };
 
 type WorkerDependencies = {
-  acquireRun: typeof piAgentService.acquireRun;
-  getRun: typeof piAgentService.getRun;
-  heartbeatRunLease: typeof piAgentService.heartbeatRunLease;
-  updateRunProgress: typeof piAgentService.updateRunProgress;
-  scheduleRunRetry: typeof piAgentService.scheduleRunRetry;
-  completeRun: typeof piAgentService.completeRun;
+  acquireRun: typeof tiAgentService.acquireRun;
+  getRun: typeof tiAgentService.getRun;
+  heartbeatRunLease: typeof tiAgentService.heartbeatRunLease;
+  updateRunProgress: typeof tiAgentService.updateRunProgress;
+  scheduleRunRetry: typeof tiAgentService.scheduleRunRetry;
+  completeRun: typeof tiAgentService.completeRun;
   wait: typeof waitFor;
   now: () => number;
   log: Pick<Console, "info" | "error">;
 };
 
 const defaultDependencies: WorkerDependencies = {
-  acquireRun: piAgentService.acquireRun,
-  getRun: piAgentService.getRun,
-  heartbeatRunLease: piAgentService.heartbeatRunLease,
-  updateRunProgress: piAgentService.updateRunProgress,
-  scheduleRunRetry: piAgentService.scheduleRunRetry,
-  completeRun: piAgentService.completeRun,
+  acquireRun: tiAgentService.acquireRun,
+  getRun: tiAgentService.getRun,
+  heartbeatRunLease: tiAgentService.heartbeatRunLease,
+  updateRunProgress: tiAgentService.updateRunProgress,
+  scheduleRunRetry: tiAgentService.scheduleRunRetry,
+  completeRun: tiAgentService.completeRun,
   wait: waitFor,
   now: Date.now,
   log: console,
 };
 
-export class PiAgentGatewayWorker {
+export class TiAgentGatewayWorker {
   private controller: AbortController | null = null;
   private loopPromise: Promise<void> | null = null;
   private activeRunId: string | null = null;
@@ -74,7 +74,7 @@ export class PiAgentGatewayWorker {
     private readonly db: Database,
     private readonly gatewayClient: GatewayClient,
     private readonly gatewayConfig: PartnersGatewayConfig,
-    private readonly options: PiAgentGatewayWorkerOptions,
+    private readonly options: TiAgentGatewayWorkerOptions,
     private readonly dependencies: WorkerDependencies = defaultDependencies,
   ) {}
 
@@ -126,16 +126,19 @@ export class PiAgentGatewayWorker {
     this.activeRunId = run.id;
     this.lastError = null;
 
+    let sessionIdToCleanup: string | null = null;
+
     try {
       const detailedRun = await this.dependencies.getRun(this.db, run.id);
       if (signal.aborted) return true;
-      const prompt = buildPiAgentRunPrompt(detailedRun);
-      let job = await this.gatewayClient.createJob(buildGatewayJobRequestFromPiRun({
+      const prompt = buildTiAgentRunPrompt(detailedRun);
+      let job = await this.gatewayClient.createJob(buildGatewayJobRequestFromTiRun({
         run: detailedRun,
         prompt,
         config: this.gatewayConfig,
       }));
-      const events = [];
+      sessionIdToCleanup = job.sessionId ?? job.id;
+      const events: Parameters<typeof buildTiCompletionFromGateway>[0]["events"] = [];
       let nextProgressFlushAt = this.dependencies.now() + this.options.progressFlushIntervalMs;
       let heartbeatFailure: unknown;
       let heartbeatInFlight = Promise.resolve();
@@ -166,12 +169,12 @@ export class PiAgentGatewayWorker {
             const shouldFlush = this.dependencies.now() >= nextProgressFlushAt
               || TERMINAL_STATES.has(job.state);
             if (shouldFlush) {
-              const progress = buildPiCompletionFromGateway({ job, events });
+              const progress = buildTiCompletionFromGateway({ job, events });
               await this.dependencies.updateRunProgress(this.db, run.id, {
                 workerId: this.options.workerId,
-                actualPiProvider: progress.actualPiProvider,
-                actualPiModel: progress.actualPiModel,
-                piSessionId: progress.piSessionId,
+                actualProvider: progress.actualProvider,
+                actualModel: progress.actualModel,
+                sandboxSessionId: progress.sandboxSessionId,
                 eventLog: progress.eventLog ?? [],
                 outputSummary: progress.outputSummary,
               }, this.options.actor);
@@ -212,7 +215,7 @@ export class PiAgentGatewayWorker {
       const message = error instanceof Error ? error.message : String(error);
       this.lastError = message.slice(0, 8000);
       if (isTransientGatewayError(error)) {
-        const delayMs = piAgentService.piAgentRetryBackoffMs(
+        const delayMs = tiAgentService.tiAgentRetryBackoffMs(
           run.retryCount + 1,
           this.options.retryBaseDelayMs,
           this.options.retryMaxDelayMs,
@@ -231,23 +234,28 @@ export class PiAgentGatewayWorker {
       }
       await this.dependencies.completeRun(this.db, run.id, {
         status: "failed",
-        actualPiProvider: "partners-gateway",
+        actualProvider: "partners-gateway",
         errorMessage: message.slice(0, 8000),
       }, this.options.actor).catch((completionError: unknown) => {
         this.dependencies.log.error("Failed to record Partners Gateway Ti run failure", completionError);
       });
       throw error;
     } finally {
+      if (sessionIdToCleanup) {
+        await this.gatewayClient.deleteSession(sessionIdToCleanup).catch((cleanupErr) => {
+          this.dependencies.log.error(`Failed to delete sandbox workspace for session ${sessionIdToCleanup}`, cleanupErr);
+        });
+      }
       this.activeRunId = null;
     }
   }
 
   private async buildTerminalCompletion(
     job: PartnersGatewayJob,
-    events: Parameters<typeof buildPiCompletionFromGateway>[0]["events"],
+    events: Parameters<typeof buildTiCompletionFromGateway>[0]["events"],
   ) {
     const artifacts = await this.gatewayClient.listArtifacts(job.id);
-    const completion = buildPiCompletionFromGateway({ job, events });
+    const completion = buildTiCompletionFromGateway({ job, events });
     const artifactReferences = normalizeGatewayArtifactReferences(artifacts.items);
     return {
       ...completion,
@@ -288,23 +296,23 @@ export class PiAgentGatewayWorker {
   }
 }
 
-export function createPiAgentGatewayWorkerFromEnv(
+export function createTiAgentGatewayWorkerFromEnv(
   db: Database,
   gatewayConfig: PartnersGatewayConfig,
   env: NodeJS.ProcessEnv = process.env,
 ) {
   if (!gatewayConfig.enabled) return null;
   const workerConfig = getPartnersGatewayWorkerConfig(env);
-  return createPiAgentGatewayWorker(db, gatewayConfig, workerConfig);
+  return createTiAgentGatewayWorker(db, gatewayConfig, workerConfig);
 }
 
-export function createPiAgentGatewayWorker(
+export function createTiAgentGatewayWorker(
   db: Database,
   gatewayConfig: PartnersGatewayConfig,
   workerConfig: PartnersGatewayWorkerConfig,
 ) {
   if (!gatewayConfig.enabled) return null;
-  return new PiAgentGatewayWorker(
+  return new TiAgentGatewayWorker(
     db,
     createPartnersGatewayClient(gatewayConfig),
     gatewayConfig,
@@ -323,9 +331,9 @@ export function createPiAgentGatewayWorker(
   );
 }
 
-export function getPiAgentGatewayWorkerStatus(
+export function getTiAgentGatewayWorkerStatus(
   config: PartnersGatewayConfig,
-  worker: PiAgentGatewayWorker | null,
+  worker: TiAgentGatewayWorker | null,
 ) {
   if (!config.enabled || !worker) {
     return {
@@ -343,7 +351,7 @@ export function getPiAgentGatewayWorkerStatus(
   return worker.getStatus();
 }
 
-export async function checkPiAgentGatewayHealth(config: PartnersGatewayConfig) {
+export async function checkTiAgentGatewayHealth(config: PartnersGatewayConfig) {
   if (!config.enabled) {
     return { ok: false, enabled: false, error: "Partners Gateway is not configured" };
   }
@@ -358,6 +366,13 @@ export async function checkPiAgentGatewayHealth(config: PartnersGatewayConfig) {
     };
   }
 }
+
+// Aliases for compatibility
+export const PiAgentGatewayWorker = TiAgentGatewayWorker;
+export const createPiAgentGatewayWorker = createTiAgentGatewayWorker;
+export const createPiAgentGatewayWorkerFromEnv = createTiAgentGatewayWorkerFromEnv;
+export const getPiAgentGatewayWorkerStatus = getTiAgentGatewayWorkerStatus;
+export const checkPiAgentGatewayHealth = checkTiAgentGatewayHealth;
 
 function waitFor(milliseconds: number, signal: AbortSignal) {
   if (signal.aborted) return Promise.resolve(false);

@@ -84,7 +84,7 @@ test('usage CLI sends validated scopes and compact Ti reports without emitting c
     }),
   )
   await run('report-ti', task, '--file', file, '--json')
-  assert.equal(paths[1], `/api/v1/pi-agent/runs/${task}/usage`)
+  assert.equal(paths[1], `/api/v1/ti/runs/${task}/usage`)
   assert.equal((bodies[0] as any).summary.inputTokens, 0)
   assert.equal((bodies[0] as any).summary.outputTokens, null)
   writeFileSync(file, JSON.stringify({ transcript: 'must not be transmitted' }))

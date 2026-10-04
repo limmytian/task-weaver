@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { CompletePiAgentRunInput } from "@task-weaver/contracts";
+import type { CompleteTiAgentRunInput } from "@task-weaver/contracts";
 
 const optionalString = (schema: z.ZodString) => z.preprocess(
   (value) => value === "" ? undefined : value,
@@ -76,12 +76,19 @@ export type PartnersGatewayJobRequest = {
 
 export type PartnersGatewayJob = {
   id: string;
+  sessionId?: string | null;
   state: "queued" | "preparing" | "running" | "cancel_requested" | "cancelled" | "succeeded" | "failed" | "timed_out";
   executionMode: PartnersGatewayJobRequest["executionMode"];
   provider?: string;
   exitCode?: number | null;
   terminalReason?: string | null;
   artifactCount?: number;
+  metadata?: Record<string, unknown>;
+};
+
+export type PartnersGatewaySession = {
+  id: string;
+  state: "starting" | "running" | "stopped" | "failed";
   metadata?: Record<string, unknown>;
 };
 
@@ -107,14 +114,16 @@ export class PartnersGatewayError extends Error {
   }
 }
 
-export type PartnersGatewayPiRun = {
+export type PartnersGatewayTiRun = {
   id: string;
   taskId?: string | null;
   scheduleRunId?: string | null;
-  requestedPiProvider?: string | null;
-  requestedPiModel?: string | null;
-  actualPiProvider?: string | null;
-  actualPiModel?: string | null;
+  requestedProvider?: string | null;
+  requestedModel?: string | null;
+  actualProvider?: string | null;
+  actualModel?: string | null;
+  workspacePolicy?: "ephemeral" | "persistent_purged_on_finish" | null;
+  sandboxSessionId?: string | null;
   task?: {
     id: string;
     title: string;
@@ -190,6 +199,28 @@ export function createPartnersGatewayClient(
     async listArtifacts(jobId: string): Promise<{ items: unknown[] }> {
       const response = await fetchImpl(`${baseUrl}/v1/jobs/${jobId}/artifacts`, { headers });
       return parseGatewayJson<{ items: unknown[] }>(response);
+    },
+
+    async deleteSession(sessionId: string): Promise<void> {
+      const response = await fetchImpl(`${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}`, {
+        method: "DELETE",
+        headers,
+      });
+      if (!response.ok && response.status !== 404) {
+        await parseGatewayJson(response);
+      }
+    },
+
+    async syncWorkspaceFiles(
+      sessionId: string,
+      files: Array<{ path: string; content: string }>,
+    ): Promise<{ written: string[]; totalBytes: number }> {
+      const response = await fetchImpl(`${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/workspace/sync`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ files }),
+      });
+      return parseGatewayJson<{ written: string[]; totalBytes: number }>(response);
     },
 
     async health(): Promise<Record<string, unknown>> {
@@ -272,17 +303,18 @@ export function parseGatewaySseEvent(block: string): PartnersGatewayEvent | null
   } as PartnersGatewayEvent;
 }
 
-export function buildGatewayJobRequestFromPiRun(input: {
-  run: PartnersGatewayPiRun;
+export function buildGatewayJobRequestFromTiRun(input: {
+  run: PartnersGatewayTiRun;
   prompt: string;
   config: PartnersGatewayConfig;
   timeoutSeconds?: number;
 }): PartnersGatewayJobRequest {
   return {
-    id: `tw_pi_${input.run.id}`,
+    id: `tw_ti_${input.run.id}`,
     tenantId: input.config.tenantId,
     projectId: input.config.projectId,
     executionMode: "ephemeral_interpreter",
+    sessionId: input.run.sandboxSessionId ?? null,
     command: {
       argv: ["bash", "-lc", "cat \"$TASK_WEAVER_PROMPT_FILE\" && echo"],
       cwd: "/workspace",
@@ -302,18 +334,18 @@ export function buildGatewayJobRequestFromPiRun(input: {
     },
     metadata: {
       taskWeaver: {
-        piAgentRunId: input.run.id,
+        tiAgentRunId: input.run.id,
         taskId: input.run.taskId ?? null,
         scheduleRunId: input.run.scheduleRunId ?? null,
-        requestedProvider: input.run.requestedPiProvider ?? null,
-        requestedModel: input.run.requestedPiModel ?? null,
+        requestedProvider: input.run.requestedProvider ?? null,
+        requestedModel: input.run.requestedModel ?? null,
       },
       prompt: input.prompt,
     },
   };
 }
 
-export function buildPiAgentRunPrompt(run: PartnersGatewayPiRun) {
+export function buildTiAgentRunPrompt(run: PartnersGatewayTiRun) {
   const lines = [
     "You are Ti, the bounded Task Weaver server-side agent.",
     "Execute only the explicitly assigned task below. Do not claim unrelated work, do not edit repositories unless the task explicitly requires it, and keep output concise.",
@@ -330,7 +362,7 @@ export function buildPiAgentRunPrompt(run: PartnersGatewayPiRun) {
   return lines.join("\n");
 }
 
-export function mapGatewayEventForPiRun(event: PartnersGatewayEvent) {
+export function mapGatewayEventForTiRun(event: PartnersGatewayEvent) {
   return {
     sequence: event.sequence,
     type: event.type,
@@ -341,19 +373,21 @@ export function mapGatewayEventForPiRun(event: PartnersGatewayEvent) {
   };
 }
 
-export function buildPiCompletionFromGateway(input: {
+export function buildTiCompletionFromGateway(input: {
   job: PartnersGatewayJob;
   events: PartnersGatewayEvent[];
   outputSummary?: string | null;
   errorMessage?: string | null;
-}): CompletePiAgentRunInput {
-  const status = mapGatewayStateToPiStatus(input.job.state);
+  tokenUsageId?: string | null;
+}): CompleteTiAgentRunInput {
+  const status = mapGatewayStateToTiStatus(input.job.state);
   return {
     status,
-    actualPiProvider: "partners-gateway",
-    actualPiModel: input.job.provider ?? null,
-    piSessionId: input.job.id,
-    eventLog: input.events.map(mapGatewayEventForPiRun),
+    actualProvider: "partners-gateway",
+    actualModel: input.job.provider ?? null,
+    sandboxSessionId: input.job.id,
+    tokenUsageId: input.tokenUsageId ?? null,
+    eventLog: input.events.map(mapGatewayEventForTiRun),
     outputSummary: input.outputSummary ?? summarizeGatewayEvents(input.events),
     errorMessage: input.errorMessage ?? (status === "failed" ? input.job.terminalReason ?? "Gateway job failed" : null),
     costMetadata: {
@@ -389,7 +423,7 @@ export function isTransientGatewayError(error: unknown) {
   return error instanceof TypeError;
 }
 
-function mapGatewayStateToPiStatus(state: PartnersGatewayJob["state"]): CompletePiAgentRunInput["status"] {
+function mapGatewayStateToTiStatus(state: PartnersGatewayJob["state"]): CompleteTiAgentRunInput["status"] {
   if (state === "succeeded") return "succeeded";
   if (state === "cancelled") return "cancelled";
   if (state === "failed" || state === "timed_out") return "failed";

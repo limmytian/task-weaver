@@ -21,7 +21,7 @@ function fixture() {
 
 test("first-party Gateway controls and health remain available without Pro composition", async () => {
   const { application } = fixture();
-  const status = await application.app.request("/api/v1/pi-agent/worker/status");
+  const status = await application.app.request("/api/v1/ti/worker/status");
   assert.equal(status.status, 200);
   const health = await application.app.request("/health");
   assert.equal(health.status, 200);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { PiAgentGatewayWorker } from "./worker";
+import { TiAgentGatewayWorker } from "./worker";
 
 const actor = { id: "worker-actor", type: "agent" as const };
 const options = {
@@ -23,23 +23,26 @@ const gatewayConfig = {
   defaultTimeoutSeconds: 900,
 };
 
-test("acquires, submits, heartbeats, and completes a gateway run", async () => {
+test("acquires, submits, heartbeats, completes, and cleans up sandbox session", async () => {
   const calls: string[] = [];
   let completionMetadata: Record<string, unknown> | null | undefined;
   let now = 0;
-  const worker = new PiAgentGatewayWorker(
+  const worker = new TiAgentGatewayWorker(
     {} as never,
     {
       async createJob() {
         calls.push("createJob");
-        return { id: "job-1", state: "running" as const, executionMode: "ephemeral_interpreter" as const };
+        return { id: "job-1", state: "running" as const, executionMode: "ephemeral_interpreter" as const, sessionId: "session-1" };
       },
       async getJob() {
         calls.push("getJob");
-        return { id: "job-1", state: "succeeded" as const, executionMode: "ephemeral_interpreter" as const };
+        return { id: "job-1", state: "succeeded" as const, executionMode: "ephemeral_interpreter" as const, sessionId: "session-1" };
       },
       async listArtifacts() {
         return { items: [{ id: "artifact-1", path: "/workspace/result.json", content: "excluded" }] };
+      },
+      async deleteSession(sessionId: string) {
+        calls.push(`deleteSession:${sessionId}`);
       },
       async health() { return { status: "ok" }; },
       async *streamEvents() {
@@ -48,7 +51,7 @@ test("acquires, submits, heartbeats, and completes a gateway run", async () => {
         yield { type: "log.stdout", sequence: 1, state: "running" as const, chunk: "working" };
         yield { type: "job.state", sequence: 2, state: "succeeded" as const };
       },
-    },
+    } as never,
     gatewayConfig,
     options,
     {
@@ -62,8 +65,8 @@ test("acquires, submits, heartbeats, and completes a gateway run", async () => {
           id: "run-1",
           taskId: "task-1",
           scheduleRunId: null,
-          actualPiProvider: "openai",
-          actualPiModel: "gpt-5.5",
+          actualModelProvider: "openai",
+          actualModelId: "gpt-5.5",
           task: { id: "task-1", title: "Do work", description: null, priority: "high" },
         } as never;
       },
@@ -94,7 +97,8 @@ test("acquires, submits, heartbeats, and completes a gateway run", async () => {
   assert.deepEqual(calls.slice(0, 4), ["acquire", "getRun", "createJob", "streamEvents"]);
   assert.ok(calls.includes("heartbeat"));
   assert.ok(calls.includes("progress:2"));
-  assert.equal(calls.at(-1), "complete:succeeded");
+  assert.ok(calls.includes("complete:succeeded"));
+  assert.equal(calls.at(-1), "deleteSession:session-1");
   assert.deepEqual(completionMetadata?.gatewayArtifacts, [{
     id: "artifact-1",
     path: "/workspace/result.json",
@@ -104,7 +108,7 @@ test("acquires, submits, heartbeats, and completes a gateway run", async () => {
 test("shutdown interruption leaves the active run leased for recovery", async () => {
   const calls: string[] = [];
   const controller = new AbortController();
-  const worker = new PiAgentGatewayWorker(
+  const worker = new TiAgentGatewayWorker(
     {} as never,
     {
       async createJob() {
@@ -115,11 +119,12 @@ test("shutdown interruption leaves the active run leased for recovery", async ()
         return { id: "job-1", state: "running" as const, executionMode: "ephemeral_interpreter" as const };
       },
       async listArtifacts() { return { items: [] }; },
+      async deleteSession() {},
       async health() { return { status: "ok" }; },
       async *streamEvents() {
         controller.abort();
       },
-    },
+    } as never,
     gatewayConfig,
     options,
     {
@@ -145,7 +150,7 @@ test("shutdown interruption leaves the active run leased for recovery", async ()
 test("shutdown after acquisition does not submit new gateway work", async () => {
   const calls: string[] = [];
   const controller = new AbortController();
-  const worker = new PiAgentGatewayWorker(
+  const worker = new TiAgentGatewayWorker(
     {} as never,
     {
       async createJob() {
@@ -156,9 +161,10 @@ test("shutdown after acquisition does not submit new gateway work", async () => 
         return { id: "job-1", state: "running" as const, executionMode: "ephemeral_interpreter" as const };
       },
       async listArtifacts() { return { items: [] }; },
+      async deleteSession() {},
       async health() { return { status: "ok" }; },
       async *streamEvents() { calls.push("streamEvents"); },
-    },
+    } as never,
     gatewayConfig,
     options,
     {
@@ -183,15 +189,16 @@ test("shutdown after acquisition does not submit new gateway work", async () => 
 
 test("transient gateway failures schedule durable retry without terminal completion", async () => {
   const calls: string[] = [];
-  const worker = new PiAgentGatewayWorker(
+  const worker = new TiAgentGatewayWorker(
     {} as never,
     {
       async createJob() { throw new TypeError("network unavailable"); },
       async getJob() { throw new Error("not reached"); },
       async listArtifacts() { throw new Error("not reached"); },
+      async deleteSession() {},
       async health() { return { status: "ok" }; },
       async *streamEvents() {},
-    },
+    } as never,
     gatewayConfig,
     options,
     {

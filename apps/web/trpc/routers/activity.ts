@@ -8,7 +8,7 @@ export const activityRouter = router({
       z.object({
         projectId: z.string().uuid().optional(),
         entityType: z
-          .enum(["project", "task", "document", "requirement", "repository", "daemon", "schedule", "pi_agent_model_config", "pi_agent_policy", "pi_agent_run"])
+          .enum(["project", "task", "document", "requirement", "repository", "daemon", "schedule", "ti_agent_model_config", "ti_agent_policy", "ti_agent_run"])
           .optional(),
         entityId: z.string().uuid().optional(),
         actorId: z.string().optional(),

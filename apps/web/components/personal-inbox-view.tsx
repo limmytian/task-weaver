@@ -69,7 +69,7 @@ export function PersonalInboxView() {
   } = trpc.task.listPersonal.useQuery({
     completedWithinDays: view === "completed" ? 30 : undefined,
   });
-  const { data: tiModelConfigs } = trpc.piAgent.listConfigs.useQuery({ includeDisabled: false });
+  const { data: tiModelConfigs } = trpc.tiAgent.listConfigs.useQuery({ includeDisabled: false });
 
   const createTask = trpc.task.createPersonal.useMutation({
     onSuccess: () => {
@@ -167,8 +167,8 @@ export function PersonalInboxView() {
                 expectedAt: expectedDate ? new Date(`${expectedDate}T00:00:00`) : undefined,
                 assignee: assignTi === "true" ? TI_SERVER_AGENT_ID : undefined,
                 assigneeType: assignTi === "true" ? "agent" : undefined,
-                requestedPiProvider: assignTi === "true" ? selectedTiModel?.provider : undefined,
-                requestedPiModel: assignTi === "true" ? selectedTiModel?.model : undefined,
+                requestedProvider: assignTi === "true" ? selectedTiModel?.provider : undefined,
+                requestedModel: assignTi === "true" ? selectedTiModel?.model : undefined,
               });
             }}
           >
@@ -222,7 +222,7 @@ export function PersonalInboxView() {
                   {(tiModelConfigs ?? []).map((config) => (
                     <SelectItem key={config.id} value={config.id}>
                       {config.label || `${config.provider}:${config.model}`}
-                      {config.isDefault ? " (default)" : ""}
+                      {(config.isDefaultAgent || config.isDefaultChat) ? " (default)" : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>

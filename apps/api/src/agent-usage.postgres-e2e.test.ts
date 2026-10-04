@@ -10,7 +10,7 @@ import {
   tasks,
   daemons,
   requirementClaims,
-  piAgentRuns,
+  tiAgentRuns,
   agentUsageRuns,
 } from "@task-weaver/db";
 import { apiKeyService } from "@task-weaver/core";
@@ -274,7 +274,7 @@ test(
     assert.equal(excluded.runs, 0);
 
     const [piRun] = await db
-      .insert(piAgentRuns)
+      .insert(tiAgentRuns)
       .values({
         taskId: task!.id,
         assignedAgentId: actorId,
@@ -305,7 +305,7 @@ test(
       1 / 4,
       "Unreported Ti work cannot imply complete coverage",
     );
-    const path = `pi-agent/runs/${piRun!.id}/usage`;
+    const path = `ti/runs/${piRun!.id}/usage`;
     assert.equal(
       (
         await request(path, pi, {
@@ -352,9 +352,9 @@ test(
     assert.equal(saved?.summary.model, "multiple");
     assert.equal(saved?.summary.completeness, "partial");
     await db
-      .update(piAgentRuns)
+      .update(tiAgentRuns)
       .set({ retryCount: 1 })
-      .where(eq(piAgentRuns.id, piRun!.id));
+      .where(eq(tiAgentRuns.id, piRun!.id));
     const retry = { ...pi, processId: randomUUID(), attempt: 1 };
     assert.equal((await request(path, retry)).status, 200);
     const registeredPi: any = await (

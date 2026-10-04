@@ -102,8 +102,8 @@ usage reporting is not exposed through public tRPC mutations.
 | `GET /api/v1/agent-usage/runs?projectId=...` | Paginated process rows |
 | `GET /api/v1/agent-usage/runs/:processId?projectId=...` | One process in project scope |
 | `GET /api/v1/agent-usage/summary?projectId=...` | Unpaginated aggregate |
-| `POST /api/v1/pi-agent/runs/:runId/usage` | Register/update actual Ti process snapshot |
-| `POST /api/v1/pi-agent/runs/:runId/usage/:processId/finish` | Preserve latest totals while finalizing a local runner |
+| `POST /api/v1/ti/runs/:runId/usage` | Register/update actual Ti process snapshot |
+| `POST /api/v1/ti/runs/:runId/usage/:processId/finish` | Preserve latest totals while finalizing a local runner |
 
 Query filters: `requirementId`, `taskId`, `since`, `until`, `phase`, `completeness`,
 `limit` (1–100) and `offset`. The date range uses process start time, with inclusive

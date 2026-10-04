@@ -4,10 +4,10 @@ import { randomUUID, createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { eq } from "drizzle-orm";
 import { serve } from "@hono/node-server";
-import { createDb, runMigrations, projects, requirements, tasks, piAgentRuns } from "@task-weaver/db";
-import { apiKeyService, piAgentService } from "@task-weaver/core";
+import { createDb, runMigrations, projects, requirements, tasks, tiAgentRuns } from "@task-weaver/db";
+import { apiKeyService, tiAgentService } from "@task-weaver/core";
 import { createPartnersGatewayClient, type PartnersGatewayJob, type PartnersGatewayJobRequest, type PartnersGatewayEvent } from "@task-weaver/partners-gateway";
-import { PiAgentGatewayWorker } from "@task-weaver/partners-gateway/worker";
+import { TiAgentGatewayWorker } from "@task-weaver/partners-gateway/worker";
 import { createApiApplication } from "./application.js";
 
 const databaseUrl = process.env.TW_GATEWAY_E2E_DATABASE_URL;
@@ -138,21 +138,21 @@ test("live Partners Gateway executes Kubernetes jobs with real Core persistence"
       await new Promise<void>((resolve) => api.listening ? resolve() : api.once("listening", resolve));
       const address = api.address();
       assert.ok(address && typeof address !== "string");
-      const base = `http://127.0.0.1:${address.port}/api/v1/pi-agent`;
+      const base = `http://127.0.0.1:${address.port}/api/v1/ti`;
       const apiHeaders = { authorization: `Bearer ${key.rawKey}`, "content-type": "application/json" };
       try {
         assert.equal((await fetch(`${base}/policy`, { method: "PUT", headers: apiHeaders,
           body: JSON.stringify({ enabled: true, executionMode: "live" }) })).status, 200);
         const response = await fetch(`${base}/runs`, { method: "POST", headers: apiHeaders,
-          body: JSON.stringify({ taskId: task!.id, assignedAgentId: prefix, requestedPiProvider: "verification", requestedPiModel: "verification", maxRetries: 1 }) });
+          body: JSON.stringify({ taskId: task!.id, assignedAgentId: prefix, requestedProvider: "verification", requestedModel: "verification", maxRetries: 1 }) });
         assert.equal(response.status, 201);
         const run = await response.json() as { id: string };
-        const worker = new PiAgentGatewayWorker(db, client, config, { actor, assignedAgentId: prefix,
+        const worker = new TiAgentGatewayWorker(db, client, config, { actor, assignedAgentId: prefix,
           workerId: prefix, leaseDurationMinutes: 1, heartbeatIntervalMs: 100, progressFlushIntervalMs: 100,
           idlePollIntervalMs: 100, statusPollIntervalMs: 100, retryBaseDelayMs: 100, retryMaxDelayMs: 100 });
-        activeJobs.add(`tw_pi_${run.id}`);
+        activeJobs.add(`tw_ti_${run.id}`);
         assert.equal(await worker.runOnce(new AbortController().signal), true);
-        const done = await piAgentService.getRun(db, run.id);
+        const done = await tiAgentService.getRun(db, run.id);
         assert.equal(done.status, "succeeded");
         assert.equal(done.leaseOwnerId, null);
         assert.ok(done.completedAt);
@@ -160,13 +160,13 @@ test("live Partners Gateway executes Kubernetes jobs with real Core persistence"
         assert.ok(done.eventLog!.length > 0);
         assert.ok(Number(done.costMetadata?.gatewayArtifactCount) > 0);
         assert.equal((await fetch(`${base}/runs/${run.id}`, { headers: apiHeaders })).status, 200);
-        const before = await client.getJob(`tw_pi_${run.id}`);
-        await db.update(piAgentRuns).set({ status: "running", completedAt: null,
-          leaseOwnerId: "expired-live-worker", leaseExpiresAt: new Date(Date.now() - 60_000) }).where(eq(piAgentRuns.id, run.id));
+        const before = await client.getJob(`tw_ti_${run.id}`);
+        await db.update(tiAgentRuns).set({ status: "running", completedAt: null,
+          leaseOwnerId: "expired-live-worker", leaseExpiresAt: new Date(Date.now() - 60_000) }).where(eq(tiAgentRuns.id, run.id));
         assert.equal(await worker.runOnce(new AbortController().signal), true);
-        assert.equal((await piAgentService.getRun(db, run.id)).status, "succeeded");
+        assert.equal((await tiAgentService.getRun(db, run.id)).status, "succeeded");
         await delay(2_000);
-        assert.deepEqual(await client.getJob(`tw_pi_${run.id}`), before);
+        assert.deepEqual(await client.getJob(`tw_ti_${run.id}`), before);
         console.log(`Verified persisted Core run ${run.id} and expired lease recovery`);
       } finally {
         await application.stop();

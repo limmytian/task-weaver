@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Command } from "commander";
 
-import { registerPiAgent } from "./pi-agent";
+import { registerTiAgent } from "./ti";
 
 async function runTiCommand(args: string[], response: unknown) {
   const originalFetch = globalThis.fetch;
@@ -24,7 +24,7 @@ async function runTiCommand(args: string[], response: unknown) {
   const program = new Command();
   program.exitOverride();
   program.configureOutput({ writeOut() {}, writeErr() {} });
-  registerPiAgent(program);
+  registerTiAgent(program);
   try {
     await program.parseAsync(args, { from: "user" });
     return { calls, output: logs.join("\n") };
@@ -42,7 +42,7 @@ test("ti worker status reads the API-side worker status endpoint", async () => {
     running: true,
     workerId: "api:host:1",
   });
-  assert.deepEqual(result.calls, ["/api/v1/pi-agent/worker/status"]);
+  assert.deepEqual(result.calls, ["/api/v1/ti/worker/status"]);
   assert.equal(JSON.parse(result.output).workerId, "api:host:1");
 });
 
@@ -52,6 +52,6 @@ test("ti worker health reads the gateway health endpoint", async () => {
     enabled: true,
     gateway: { status: "ok" },
   });
-  assert.deepEqual(result.calls, ["/api/v1/pi-agent/worker/health"]);
+  assert.deepEqual(result.calls, ["/api/v1/ti/worker/health"]);
   assert.equal(JSON.parse(result.output).ok, true);
 });
