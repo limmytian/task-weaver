@@ -13,8 +13,8 @@ import { actorTypeEnum } from "./enums";
 import { scheduleRuns } from "./schedules";
 import { tasks } from "./tasks";
 
-export const piAgentModelConfigs = pgTable(
-  "pi_agent_model_configs",
+export const tiAgentModelConfigs = pgTable(
+  "ti_agent_model_configs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     ownerId: text("owner_id").notNull(),
@@ -28,7 +28,8 @@ export const piAgentModelConfigs = pgTable(
       enum: ["unknown", "valid", "invalid", "missing"],
     }).default("unknown").notNull(),
     enabled: boolean("enabled").default(true).notNull(),
-    isDefault: boolean("is_default").default(false).notNull(),
+    isDefaultChat: boolean("is_default_chat").default(false).notNull(),
+    isDefaultAgent: boolean("is_default_agent").default(false).notNull(),
     capabilities: text("capabilities").array(),
     costMetadata: jsonb("cost_metadata").$type<Record<string, unknown>>(),
     availabilityCheckedAt: timestamp("availability_checked_at", { withTimezone: true }),
@@ -36,26 +37,26 @@ export const piAgentModelConfigs = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("idx_pi_model_configs_owner_provider_model").on(
+    uniqueIndex("idx_ti_model_configs_owner_provider_model").on(
       table.ownerId,
       table.ownerType,
       table.provider,
       table.model,
     ),
-    index("idx_pi_model_configs_owner").on(table.ownerId, table.ownerType),
-    index("idx_pi_model_configs_enabled").on(table.enabled),
+    index("idx_ti_model_configs_owner").on(table.ownerId, table.ownerType),
+    index("idx_ti_model_configs_enabled").on(table.enabled),
   ],
 );
 
-export const piAgentRuns = pgTable(
-  "pi_agent_runs",
+export const tiAgentRuns = pgTable(
+  "ti_agent_runs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     taskId: uuid("task_id").references(() => tasks.id, { onDelete: "set null" }),
     scheduleRunId: uuid("schedule_run_id").references(() => scheduleRuns.id, {
       onDelete: "set null",
     }),
-    assignedAgentId: text("assigned_agent_id").notNull(),
+    assignedAgentId: text("assigned_agent_id").default("task-weaver:ti-agent").notNull(),
     assignedAgentType: actorTypeEnum("assigned_agent_type").default("agent").notNull(),
     status: text("status", {
       enum: ["queued", "running", "succeeded", "failed", "in_review", "cancelled"],
@@ -63,15 +64,19 @@ export const piAgentRuns = pgTable(
     leaseOwnerId: text("lease_owner_id"),
     leaseOwnerType: actorTypeEnum("lease_owner_type"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
-    requestedPiProvider: text("requested_pi_provider"),
-    requestedPiModel: text("requested_pi_model"),
-    actualPiProvider: text("actual_pi_provider"),
-    actualPiModel: text("actual_pi_model"),
+    requestedProvider: text("requested_provider"),
+    requestedModel: text("requested_model"),
+    actualProvider: text("actual_provider"),
+    actualModel: text("actual_model"),
     fallbackReason: text("fallback_reason"),
-    piSessionId: text("pi_session_id"),
+    sandboxSessionId: text("sandbox_session_id"),
+    workspacePolicy: text("workspace_policy", {
+      enum: ["ephemeral", "persistent_purged_on_finish"],
+    }).default("ephemeral").notNull(),
     eventLog: jsonb("event_log").$type<unknown[]>(),
     outputSummary: text("output_summary"),
     errorMessage: text("error_message"),
+    tokenUsageId: uuid("token_usage_id"),
     retryCount: integer("retry_count").default(0).notNull(),
     maxRetries: integer("max_retries").default(0).notNull(),
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
@@ -83,17 +88,17 @@ export const piAgentRuns = pgTable(
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
   (table) => [
-    index("idx_pi_agent_runs_task").on(table.taskId),
-    index("idx_pi_agent_runs_schedule_run").on(table.scheduleRunId),
-    index("idx_pi_agent_runs_assigned").on(table.assignedAgentId, table.assignedAgentType),
-    index("idx_pi_agent_runs_status").on(table.status),
-    index("idx_pi_agent_runs_lease").on(table.leaseExpiresAt),
-    index("idx_pi_agent_runs_retry").on(table.status, table.nextAttemptAt),
+    index("idx_ti_agent_runs_task").on(table.taskId),
+    index("idx_ti_agent_runs_schedule_run").on(table.scheduleRunId),
+    index("idx_ti_agent_runs_assigned").on(table.assignedAgentId, table.assignedAgentType),
+    index("idx_ti_agent_runs_status").on(table.status),
+    index("idx_ti_agent_runs_lease").on(table.leaseExpiresAt),
+    index("idx_ti_agent_runs_retry").on(table.status, table.nextAttemptAt),
   ],
 );
 
-export const piAgentPolicies = pgTable(
-  "pi_agent_policies",
+export const tiAgentPolicies = pgTable(
+  "ti_agent_policies",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     ownerId: text("owner_id").notNull(),
@@ -107,8 +112,10 @@ export const piAgentPolicies = pgTable(
     monthlyRunLimit: integer("monthly_run_limit").default(500).notNull(),
     runTimeoutSeconds: integer("run_timeout_seconds").default(600).notNull(),
     defaultMaxRetries: integer("default_max_retries").default(0).notNull(),
-    toolAllowlist: text("tool_allowlist").array(),
-    toolDenylist: text("tool_denylist").array(),
+    sandboxTemplate: text("sandbox_template"),
+    allowNetwork: boolean("allow_network").default(false).notNull(),
+    allowedTools: text("allowed_tools").array(),
+    deniedTools: text("denied_tools").array(),
     assistantAutoEnabled: boolean("assistant_auto_enabled").default(false).notNull(),
     assistantAutoMode: text("assistant_auto_mode", {
       enum: ["disabled", "dry_run", "live"],
@@ -122,7 +129,7 @@ export const piAgentPolicies = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("idx_pi_agent_policies_owner").on(table.ownerId, table.ownerType),
-    index("idx_pi_agent_policies_enabled").on(table.enabled),
+    uniqueIndex("idx_ti_agent_policies_owner").on(table.ownerId, table.ownerType),
+    index("idx_ti_agent_policies_enabled").on(table.enabled),
   ],
 );

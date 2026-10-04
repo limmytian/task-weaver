@@ -3,7 +3,7 @@ import {
   agentUsageRuns,
   projects,
   daemons,
-  piAgentRuns,
+  tiAgentRuns,
   requirementClaims,
   requirements,
   tasks,
@@ -16,7 +16,7 @@ import {
   type AgentUsageQuery,
   type AgentUsageSummary,
   type ReportAgentUsageInput,
-  type ReportPiAgentUsageInput,
+  type ReportTiAgentUsageInput,
 } from "@task-weaver/contracts";
 
 export type UsageRun = typeof agentUsageRuns.$inferSelect;
@@ -37,7 +37,7 @@ export function reconcileUsage(
     "requirementId",
     "taskId",
     "daemonId",
-    "piRunId",
+    "tiRunId",
     "attempt",
     "source",
     "agent",
@@ -208,7 +208,7 @@ export async function reportDaemonUsage(
   return persist(db, {
     ...input,
     taskId: null,
-    piRunId: null,
+    tiRunId: null,
     attempt: null,
     source: input.agent === "codex" ? "codex_jsonl" : "daemon_unknown",
     startedAt: new Date(input.startedAt),
@@ -218,14 +218,14 @@ export async function reportDaemonUsage(
   });
 }
 
-export async function reportPiUsage(
+export async function reportTiUsage(
   db: Database,
   runId: string,
-  input: ReportPiAgentUsageInput,
+  input: ReportTiAgentUsageInput,
   actor: Actor,
 ) {
-  const run = await db.query.piAgentRuns.findFirst({
-    where: eq(piAgentRuns.id, runId),
+  const run = await db.query.tiAgentRuns.findFirst({
+    where: eq(tiAgentRuns.id, runId),
   });
   if (!run) throw new NotFoundError("Ti run not found");
   if (actor.id !== run.assignedAgentId && actor.id !== run.createdBy)
@@ -250,7 +250,7 @@ export async function reportPiUsage(
       );
   } else if (
     existing.reportedBy !== actor.id ||
-    existing.piRunId !== runId ||
+    existing.tiRunId !== runId ||
     existing.attempt !== input.attempt
   ) {
     throw new ValidationError(
@@ -270,7 +270,7 @@ export async function reportPiUsage(
     requirementId: task.requirementId,
     taskId: task.id,
     daemonId: null,
-    piRunId: run.id,
+    tiRunId: run.id,
     attempt: input.attempt,
     source: "ti_runtime",
     agent: "ti",
@@ -283,6 +283,7 @@ export async function reportPiUsage(
     reportedBy: actor.id,
   });
 }
+export const reportPiUsage = reportTiUsage;
 
 function filters(input: AgentUsageQuery) {
   return and(
@@ -373,26 +374,26 @@ export async function summarizeUsage(db: Database, input: AgentUsageQuery) {
     .where(filters(input));
   const reportedAttempts = db
     .select({
-      piRunId: agentUsageRuns.piRunId,
+      tiRunId: agentUsageRuns.tiRunId,
       count: sql<number>`count(distinct ${agentUsageRuns.attempt})::int`.as(
         "reported_attempt_count",
       ),
     })
     .from(agentUsageRuns)
     .where(eq(agentUsageRuns.source, "ti_runtime"))
-    .groupBy(agentUsageRuns.piRunId)
+    .groupBy(agentUsageRuns.tiRunId)
     .as("reported_attempts");
   const [missing] = await db
     .select({
-      count: sql<number>`coalesce(sum(greatest(${piAgentRuns.retryCount} + case when ${piAgentRuns.status} = 'queued' then 0 else 1 end - coalesce(${reportedAttempts.count}, 0), 0)), 0)::int`,
+      count: sql<number>`coalesce(sum(greatest(${tiAgentRuns.retryCount} + case when ${tiAgentRuns.status} = 'queued' then 0 else 1 end - coalesce(${reportedAttempts.count}, 0), 0)), 0)::int`,
     })
-    .from(piAgentRuns)
-    .innerJoin(tasks, eq(piAgentRuns.taskId, tasks.id))
-    .leftJoin(reportedAttempts, eq(reportedAttempts.piRunId, piAgentRuns.id))
+    .from(tiAgentRuns)
+    .innerJoin(tasks, eq(tiAgentRuns.taskId, tasks.id))
+    .leftJoin(reportedAttempts, eq(reportedAttempts.tiRunId, tiAgentRuns.id))
     .where(
       and(
         eq(tasks.projectId, input.projectId),
-        isNotNull(piAgentRuns.startedAt),
+        isNotNull(tiAgentRuns.startedAt),
         input.requirementId
           ? eq(tasks.requirementId, input.requirementId)
           : undefined,
@@ -411,15 +412,15 @@ export async function summarizeUsage(db: Database, input: AgentUsageQuery) {
 }
 
 /** Finalize a registered Ti process without discarding reports sent during execution. */
-export async function finishPiUsage(
+export async function finishTiUsage(
   db: Database,
   runId: string,
   processId: string,
   input: { outcome: "succeeded" | "failed" | "cancelled"; endedAt: string },
   actor: Actor,
 ) {
-  const run = await db.query.piAgentRuns.findFirst({
-    where: eq(piAgentRuns.id, runId),
+  const run = await db.query.tiAgentRuns.findFirst({
+    where: eq(tiAgentRuns.id, runId),
   });
   if (!run) throw new NotFoundError("Ti run not found");
   if (actor.id !== run.assignedAgentId && actor.id !== run.createdBy)
@@ -433,7 +434,7 @@ export async function finishPiUsage(
       .where(
         and(
           eq(agentUsageRuns.processId, processId),
-          eq(agentUsageRuns.piRunId, runId),
+          eq(agentUsageRuns.tiRunId, runId),
         ),
       )
       .for("update");
@@ -457,3 +458,4 @@ export async function finishPiUsage(
     return updated!;
   });
 }
+export const finishPiUsage = finishTiUsage;

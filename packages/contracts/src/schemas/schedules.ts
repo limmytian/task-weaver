@@ -41,8 +41,8 @@ const scheduleBaseSchema = z.object({
   autoRun: z.boolean().default(false),
   assignedExecutor: z.string().optional(),
   assignedExecutorType: z.enum(["human", "agent"]).optional(),
-  requestedPiProvider: z.string().optional(),
-  requestedPiModel: z.string().optional(),
+  requestedProvider: z.string().optional(),
+  requestedModel: z.string().optional(),
 });
 
 const validateScheduleShape = (
@@ -88,10 +88,10 @@ export const createScheduleRunSchema = z.object({
   generatedTaskId: z.string().uuid().optional(),
   skippedReason: z.string().max(1000).optional(),
   errorMessage: z.string().max(4000).optional(),
-  requestedPiProvider: z.string().optional(),
-  requestedPiModel: z.string().optional(),
-  actualPiProvider: z.string().optional(),
-  actualPiModel: z.string().optional(),
+  requestedProvider: z.string().optional(),
+  requestedModel: z.string().optional(),
+  actualProvider: z.string().optional(),
+  actualModel: z.string().optional(),
 });
 
 export const updateScheduleRunSchema = z.object({
@@ -99,10 +99,10 @@ export const updateScheduleRunSchema = z.object({
   generatedTaskId: z.string().uuid().nullable().optional(),
   skippedReason: z.string().max(1000).nullable().optional(),
   errorMessage: z.string().max(4000).nullable().optional(),
-  requestedPiProvider: z.string().nullable().optional(),
-  requestedPiModel: z.string().nullable().optional(),
-  actualPiProvider: z.string().nullable().optional(),
-  actualPiModel: z.string().nullable().optional(),
+  requestedProvider: z.string().nullable().optional(),
+  requestedModel: z.string().nullable().optional(),
+  actualProvider: z.string().nullable().optional(),
+  actualModel: z.string().nullable().optional(),
   startedAt: z.coerce.date().nullable().optional(),
   completedAt: z.coerce.date().nullable().optional(),
 });

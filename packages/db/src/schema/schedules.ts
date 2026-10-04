@@ -50,8 +50,8 @@ export const schedules = pgTable(
     autoRun: boolean("auto_run").default(false).notNull(),
     assignedExecutor: text("assigned_executor"),
     assignedExecutorType: actorTypeEnum("assigned_executor_type"),
-    requestedPiProvider: text("requested_pi_provider"),
-    requestedPiModel: text("requested_pi_model"),
+    requestedProvider: text("requested_provider"),
+    requestedModel: text("requested_model"),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
@@ -82,10 +82,10 @@ export const scheduleRuns = pgTable(
     }),
     skippedReason: text("skipped_reason"),
     errorMessage: text("error_message"),
-    requestedPiProvider: text("requested_pi_provider"),
-    requestedPiModel: text("requested_pi_model"),
-    actualPiProvider: text("actual_pi_provider"),
-    actualPiModel: text("actual_pi_model"),
+    requestedProvider: text("requested_provider"),
+    requestedModel: text("requested_model"),
+    actualProvider: text("actual_provider"),
+    actualModel: text("actual_model"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

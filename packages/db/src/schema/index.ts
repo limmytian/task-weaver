@@ -13,7 +13,7 @@ export * from "./webhooks";
 export * from "./mcp-servers";
 export * from "./memories";
 export * from "./schedules";
-export * from "./pi-agent";
+export * from "./ti-agent";
 export * from "./assistant";
 export * from "./skill-packages";
 export * from "./relations";

@@ -3,7 +3,7 @@ import { type Database, activityLog } from "@task-weaver/db";
 
 export interface ListActivityLogInput {
   projectId?: string;
-  entityType?: "project" | "task" | "document" | "requirement" | "repository" | "daemon" | "schedule" | "pi_agent_model_config" | "pi_agent_policy" | "pi_agent_run" | "assistant_conversation" | "assistant_message" | "assistant_action";
+  entityType?: "project" | "task" | "document" | "requirement" | "repository" | "daemon" | "schedule" | "ti_agent_model_config" | "ti_agent_policy" | "ti_agent_run" | "assistant_conversation" | "assistant_message" | "assistant_action";
   entityId?: string;
   actorId?: string;
   actorType?: "human" | "agent";

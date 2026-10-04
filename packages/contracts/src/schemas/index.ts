@@ -13,7 +13,7 @@ export * from "./daemons";
 export * from "./observability";
 export * from "./daemon-state";
 export * from "./schedules";
-export * from "./pi-agent";
+export * from "./ti-agent";
 export * from "./assistant";
 export * from "./skill-packages";
 export * from "./plans";

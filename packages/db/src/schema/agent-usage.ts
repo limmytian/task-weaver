@@ -12,7 +12,7 @@ import { projects } from "./projects";
 import { requirements } from "./requirements";
 import { tasks } from "./tasks";
 import { daemons } from "./daemons";
-import { piAgentRuns } from "./pi-agent";
+import { tiAgentRuns } from "./ti-agent";
 
 /** One row per process, never one row per model call or usage event. */
 export const agentUsageRuns = pgTable(
@@ -31,7 +31,7 @@ export const agentUsageRuns = pgTable(
     daemonId: uuid("daemon_id").references(() => daemons.id, {
       onDelete: "set null",
     }),
-    piRunId: uuid("pi_run_id").references(() => piAgentRuns.id, {
+    tiRunId: uuid("ti_run_id").references(() => tiAgentRuns.id, {
       onDelete: "set null",
     }),
     attempt: integer("attempt"),
@@ -67,6 +67,6 @@ export const agentUsageRuns = pgTable(
     index("idx_agent_usage_project_time").on(t.projectId, t.startedAt),
     index("idx_agent_usage_requirement").on(t.requirementId),
     index("idx_agent_usage_task").on(t.taskId),
-    index("idx_agent_usage_pi_attempt").on(t.piRunId, t.attempt),
+    index("idx_agent_usage_ti_attempt").on(t.tiRunId, t.attempt),
   ],
 );

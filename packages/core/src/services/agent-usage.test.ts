@@ -21,7 +21,7 @@ const row: UsageRun = {
   requirementId: "req",
   taskId: null,
   daemonId: "daemon",
-  piRunId: null,
+  tiRunId: null,
   attempt: null,
   source: "codex_jsonl",
   agent: "codex",
@@ -62,7 +62,7 @@ test("scope, reporter, attempt and terminal identity are immutable", () => {
     "requirementId",
     "taskId",
     "reportedBy",
-    "piRunId",
+    "tiRunId",
     "daemonId",
   ])
     assert.throws(() =>

@@ -87,7 +87,7 @@ export const reportAgentUsageSchema = z
   })
   .strict()
   .superRefine(validateTimes);
-export const reportPiAgentUsageSchema = z
+export const reportTiAgentUsageSchema = z
   .object({
     processId: z.string().uuid(),
     workerId: z.string().min(1).max(160),
@@ -126,6 +126,8 @@ export const agentUsageQuerySchema = z
     (v) => !v.since || !v.until || Date.parse(v.since) <= Date.parse(v.until),
     "Invalid time range",
   );
+export const reportPiAgentUsageSchema = reportTiAgentUsageSchema;
 export type ReportAgentUsageInput = z.infer<typeof reportAgentUsageSchema>;
-export type ReportPiAgentUsageInput = z.infer<typeof reportPiAgentUsageSchema>;
+export type ReportTiAgentUsageInput = z.infer<typeof reportTiAgentUsageSchema>;
+export type ReportPiAgentUsageInput = ReportTiAgentUsageInput;
 export type AgentUsageQuery = z.infer<typeof agentUsageQuerySchema>;

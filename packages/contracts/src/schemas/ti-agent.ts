@@ -1,10 +1,9 @@
 import { z } from "zod";
 
 export const TI_SERVER_AGENT_ID = "task-weaver:ti-agent";
-export const PI_SERVER_AGENT_ID = TI_SERVER_AGENT_ID;
 
-export const piCredentialStatusSchema = z.enum(["unknown", "valid", "invalid", "missing"]);
-export const piAgentRunStatusSchema = z.enum([
+export const tiCredentialStatusSchema = z.enum(["unknown", "valid", "invalid", "missing"]);
+export const tiAgentRunStatusSchema = z.enum([
   "queued",
   "running",
   "succeeded",
@@ -12,53 +11,61 @@ export const piAgentRunStatusSchema = z.enum([
   "in_review",
   "cancelled",
 ]);
-export const piAgentExecutionModeSchema = z.enum(["disabled", "dry_run", "live"]);
+export const tiAgentExecutionModeSchema = z.enum(["disabled", "dry_run", "live"]);
+export const tiAgentWorkspacePolicySchema = z.enum([
+  "ephemeral",
+  "persistent_purged_on_finish",
+]);
 
 const ownerSchema = {
   ownerId: z.string().optional(),
   ownerType: z.enum(["human", "agent"]).optional(),
 };
 
-export const upsertPiModelConfigSchema = z.object({
+export const upsertTiModelConfigSchema = z.object({
   ...ownerSchema,
   provider: z.string().min(1).max(120),
   model: z.string().min(1).max(200),
   baseUrl: z.string().url().max(500).nullable().optional(),
   label: z.string().max(200).nullable().optional(),
   apiKeyRef: z.string().max(500).nullable().optional(),
-  credentialStatus: piCredentialStatusSchema.default("unknown"),
+  credentialStatus: tiCredentialStatusSchema.default("unknown"),
   enabled: z.boolean().default(true),
-  isDefault: z.boolean().default(false),
+  isDefaultChat: z.boolean().default(false),
+  isDefaultAgent: z.boolean().default(false),
   capabilities: z.array(z.string().min(1).max(100)).optional(),
   costMetadata: z.record(z.unknown()).nullable().optional(),
   availabilityCheckedAt: z.coerce.date().nullable().optional(),
 });
 
-export const listPiModelConfigsSchema = z.object({
+export const listTiModelConfigsSchema = z.object({
   ...ownerSchema,
   includeDisabled: z.coerce.boolean().default(false),
 });
 
-export const setDefaultPiModelSchema = z.object({
+export const setDefaultTiModelSchema = z.object({
   ownerId: z.string().optional(),
   ownerType: z.enum(["human", "agent"]).optional(),
   configId: z.string().uuid(),
+  target: z.enum(["chat", "agent", "both"]).default("agent"),
 });
 
-export const upsertPiAgentPolicySchema = z.object({
+export const upsertTiAgentPolicySchema = z.object({
   ownerId: z.string().optional(),
   ownerType: z.enum(["human", "agent"]).optional(),
   enabled: z.boolean().default(false),
-  executionMode: piAgentExecutionModeSchema.default("disabled"),
+  executionMode: tiAgentExecutionModeSchema.default("disabled"),
   maxConcurrentRuns: z.number().int().min(1).max(100).default(1),
-  dailyRunLimit: z.number().int().min(0).max(100000).default(25),
+  dailyRunLimit: z.number().int().min(0).max(100_000).default(25),
   monthlyRunLimit: z.number().int().min(0).max(1_000_000).default(500),
   runTimeoutSeconds: z.number().int().min(30).max(86_400).default(600),
   defaultMaxRetries: z.number().int().min(0).max(20).default(0),
-  toolAllowlist: z.array(z.string().min(1).max(200)).optional(),
-  toolDenylist: z.array(z.string().min(1).max(200)).optional(),
+  sandboxTemplate: z.string().max(200).nullable().optional(),
+  allowNetwork: z.boolean().default(false),
+  allowedTools: z.array(z.string().min(1).max(200)).optional(),
+  deniedTools: z.array(z.string().min(1).max(200)).optional(),
   assistantAutoEnabled: z.boolean().default(false),
-  assistantAutoMode: piAgentExecutionModeSchema.default("disabled"),
+  assistantAutoMode: tiAgentExecutionModeSchema.default("disabled"),
   assistantActionAllowlist: z.array(z.string().min(1).max(200)).default([]),
   assistantDailyActionLimit: z.number().int().min(0).max(100_000).default(10),
   assistantRunTimeoutSeconds: z.number().int().min(30).max(86_400).default(300),
@@ -81,19 +88,21 @@ export const upsertPiAgentPolicySchema = z.object({
   }
 });
 
-export const resolvePiModelSchema = z.object({
+export const resolveTiModelSchema = z.object({
   ...ownerSchema,
-  requestedPiProvider: z.string().min(1).max(120).nullable().optional(),
-  requestedPiModel: z.string().min(1).max(200).nullable().optional(),
+  requestedProvider: z.string().min(1).max(120).nullable().optional(),
+  requestedModel: z.string().min(1).max(200).nullable().optional(),
+  target: z.enum(["chat", "agent"]).default("agent"),
 });
 
-export const createPiAgentRunSchema = z.object({
+export const createTiAgentRunSchema = z.object({
   taskId: z.string().uuid().optional(),
   scheduleRunId: z.string().uuid().optional(),
   assignedAgentId: z.string().min(1).default(TI_SERVER_AGENT_ID),
   assignedAgentType: z.enum(["human", "agent"]).default("agent"),
-  requestedPiProvider: z.string().nullable().optional(),
-  requestedPiModel: z.string().nullable().optional(),
+  requestedProvider: z.string().nullable().optional(),
+  requestedModel: z.string().nullable().optional(),
+  workspacePolicy: tiAgentWorkspacePolicySchema.default("ephemeral"),
   maxRetries: z.number().int().min(0).max(20).optional(),
 }).superRefine((data, ctx) => {
   if (!data.taskId && !data.scheduleRunId) {
@@ -105,40 +114,42 @@ export const createPiAgentRunSchema = z.object({
   }
 });
 
-export const listPiAgentRunsSchema = z.object({
+export const listTiAgentRunsSchema = z.object({
   taskId: z.string().uuid().optional(),
   scheduleRunId: z.string().uuid().optional(),
   assignedAgentId: z.string().optional(),
-  status: piAgentRunStatusSchema.optional(),
+  status: tiAgentRunStatusSchema.optional(),
   limit: z.coerce.number().int().positive().max(100).default(50),
 });
 
-export const acquirePiAgentRunSchema = z.object({
+export const acquireTiAgentRunSchema = z.object({
   assignedAgentId: z.string().min(1).default(TI_SERVER_AGENT_ID),
   workerId: z.string().min(1),
   durationMinutes: z.number().int().min(1).max(1440).default(15),
 });
 
-export const completePiAgentRunSchema = z.object({
+export const completeTiAgentRunSchema = z.object({
   status: z.enum(["succeeded", "failed", "in_review", "cancelled"]),
-  actualPiProvider: z.string().nullable().optional(),
-  actualPiModel: z.string().nullable().optional(),
-  piSessionId: z.string().nullable().optional(),
+  actualProvider: z.string().nullable().optional(),
+  actualModel: z.string().nullable().optional(),
+  sandboxSessionId: z.string().nullable().optional(),
+  tokenUsageId: z.string().uuid().nullable().optional(),
   eventLog: z.array(z.unknown()).nullable().optional(),
   outputSummary: z.string().max(8000).nullable().optional(),
   errorMessage: z.string().max(8000).nullable().optional(),
   costMetadata: z.record(z.unknown()).nullable().optional(),
 });
 
-export type PiCredentialStatus = z.infer<typeof piCredentialStatusSchema>;
-export type PiAgentRunStatus = z.infer<typeof piAgentRunStatusSchema>;
-export type PiAgentExecutionMode = z.infer<typeof piAgentExecutionModeSchema>;
-export type UpsertPiModelConfigInput = z.infer<typeof upsertPiModelConfigSchema>;
-export type ListPiModelConfigsInput = z.infer<typeof listPiModelConfigsSchema>;
-export type SetDefaultPiModelInput = z.infer<typeof setDefaultPiModelSchema>;
-export type ResolvePiModelInput = z.infer<typeof resolvePiModelSchema>;
-export type UpsertPiAgentPolicyInput = z.infer<typeof upsertPiAgentPolicySchema>;
-export type CreatePiAgentRunInput = z.infer<typeof createPiAgentRunSchema>;
-export type ListPiAgentRunsInput = z.infer<typeof listPiAgentRunsSchema>;
-export type AcquirePiAgentRunInput = z.infer<typeof acquirePiAgentRunSchema>;
-export type CompletePiAgentRunInput = z.infer<typeof completePiAgentRunSchema>;
+export type TiCredentialStatus = z.infer<typeof tiCredentialStatusSchema>;
+export type TiAgentRunStatus = z.infer<typeof tiAgentRunStatusSchema>;
+export type TiAgentExecutionMode = z.infer<typeof tiAgentExecutionModeSchema>;
+export type TiAgentWorkspacePolicy = z.infer<typeof tiAgentWorkspacePolicySchema>;
+export type UpsertTiModelConfigInput = z.input<typeof upsertTiModelConfigSchema>;
+export type ListTiModelConfigsInput = z.input<typeof listTiModelConfigsSchema>;
+export type SetDefaultTiModelInput = z.input<typeof setDefaultTiModelSchema>;
+export type ResolveTiModelInput = z.input<typeof resolveTiModelSchema>;
+export type UpsertTiAgentPolicyInput = z.input<typeof upsertTiAgentPolicySchema>;
+export type CreateTiAgentRunInput = z.input<typeof createTiAgentRunSchema>;
+export type ListTiAgentRunsInput = z.input<typeof listTiAgentRunsSchema>;
+export type AcquireTiAgentRunInput = z.input<typeof acquireTiAgentRunSchema>;
+export type CompleteTiAgentRunInput = z.input<typeof completeTiAgentRunSchema>;

@@ -9,8 +9,8 @@ import {
   mcpServers,
   mcpTools,
   memories,
-  piAgentPolicies,
-  piAgentRuns,
+  tiAgentPolicies,
+  tiAgentRuns,
   projects,
   requirements,
   schedules,
@@ -24,12 +24,14 @@ import type {
   CreateAssistantActionInput,
   CreateAssistantConversationInput,
   CreateAssistantMessageInput,
+  ListAssistantConversationsInput,
+  RenameAssistantConversationInput,
   SendAssistantMessageInput,
   UpdateAssistantActionStatusInput,
 } from "@task-weaver/contracts";
 import type { TaskStatus } from "@task-weaver/contracts";
 import { createDocument } from "./documents";
-import { createRun, resolveModel } from "./pi-agent";
+import { createRun, resolveModel } from "./ti-agent";
 import { createSchedule, updateSchedule } from "./schedules";
 import {
   addTaskComment,
@@ -47,7 +49,7 @@ type RequirementRow = typeof requirements.$inferSelect;
 type TaskRow = typeof tasks.$inferSelect;
 type ScheduleRow = typeof schedules.$inferSelect;
 type AssistantActionRow = typeof assistantActions.$inferSelect;
-type ResolvedPiModel = Awaited<ReturnType<typeof resolveModel>>;
+type ResolvedTiModel = Awaited<ReturnType<typeof resolveModel>>;
 
 type ChatCompletionResponse = {
   choices?: Array<{
@@ -103,7 +105,7 @@ function buildModelPrompt(contextSnapshot: Record<string, unknown>, message: str
 }
 
 async function generateModelResponse(
-  resolved: ResolvedPiModel,
+  resolved: ResolvedTiModel,
   contextSnapshot: Record<string, unknown>,
   input: SendAssistantMessageInput,
 ) {
@@ -229,8 +231,8 @@ function compactSchedule(schedule: ScheduleRow | null, textChars: number) {
     autoRun: schedule.autoRun,
     assignedExecutor: schedule.assignedExecutor,
     assignedExecutorType: schedule.assignedExecutorType,
-    requestedPiProvider: schedule.requestedPiProvider,
-    requestedPiModel: schedule.requestedPiModel,
+    requestedProvider: schedule.requestedProvider,
+    requestedModel: schedule.requestedModel,
     updatedAt: schedule.updatedAt,
   };
 }
@@ -421,21 +423,21 @@ export async function buildAssistantContext(
       .limit(limits.mcpTools)
     : [];
 
-  const piPolicy = await db.query.piAgentPolicies.findFirst({
-    where: and(eq(piAgentPolicies.ownerId, actor.id), eq(piAgentPolicies.ownerType, actor.type)),
+  const tiPolicy = await db.query.tiAgentPolicies.findFirst({
+    where: and(eq(tiAgentPolicies.ownerId, actor.id), eq(tiAgentPolicies.ownerType, actor.type)),
   });
 
-  const piRunConditions = [inArray(piAgentRuns.status, ["failed", "in_review"])];
+  const tiRunConditions = [inArray(tiAgentRuns.status, ["failed", "in_review"])];
   if (taskRows.length > 0) {
-    piRunConditions.push(inArray(piAgentRuns.taskId, taskRows.map((row) => row.id)));
+    tiRunConditions.push(inArray(tiAgentRuns.taskId, taskRows.map((row) => row.id)));
   } else if (scope.task?.id) {
-    piRunConditions.push(eq(piAgentRuns.taskId, scope.task.id));
+    tiRunConditions.push(eq(tiAgentRuns.taskId, scope.task.id));
   }
-  const piRunRows = limits.piRuns > 0 && piRunConditions.length > 1
-    ? await db.query.piAgentRuns.findMany({
-      where: and(...piRunConditions),
+  const tiRunRows = limits.tiRuns > 0 && tiRunConditions.length > 1
+    ? await db.query.tiAgentRuns.findMany({
+      where: and(...tiRunConditions),
       orderBy: (run, { desc }) => [desc(run.updatedAt)],
-      limit: limits.piRuns,
+      limit: limits.tiRuns,
     })
     : [];
 
@@ -490,17 +492,17 @@ export async function buildAssistantContext(
       })),
       mcpTools: mcpRows,
     },
-    piAgent: {
-      policy: piPolicy ? redactValue(piPolicy) : null,
-      recentFailures: piRunRows.map((row) => ({
+    tiAgent: {
+      policy: tiPolicy ? redactValue(tiPolicy) : null,
+      recentFailures: tiRunRows.map((row) => ({
         id: row.id,
         taskId: row.taskId,
         scheduleRunId: row.scheduleRunId,
         status: row.status,
-        requestedPiProvider: row.requestedPiProvider,
-        requestedPiModel: row.requestedPiModel,
-        actualPiProvider: row.actualPiProvider,
-        actualPiModel: row.actualPiModel,
+        requestedProvider: row.requestedProvider,
+        requestedModel: row.requestedModel,
+        actualProvider: row.actualProvider,
+        actualModel: row.actualModel,
         outputSummary: truncate(row.outputSummary, limits.textChars),
         errorMessage: truncate(row.errorMessage, limits.textChars),
         updatedAt: row.updatedAt,
@@ -560,6 +562,149 @@ export async function createConversation(
   return conversation!;
 }
 
+export async function listConversations(
+  db: Database,
+  input: ListAssistantConversationsInput,
+  actor: Actor,
+) {
+  const conditions = [
+    eq(assistantConversations.createdBy, actor.id),
+    eq(assistantConversations.createdByType, actor.type),
+  ];
+
+  if (input.projectId !== undefined) {
+    conditions.push(
+      input.projectId === null
+        ? isNull(assistantConversations.projectId)
+        : eq(assistantConversations.projectId, input.projectId),
+    );
+  }
+  if (input.requirementId !== undefined) {
+    conditions.push(
+      input.requirementId === null
+        ? isNull(assistantConversations.requirementId)
+        : eq(assistantConversations.requirementId, input.requirementId),
+    );
+  }
+  if (input.taskId !== undefined) {
+    conditions.push(
+      input.taskId === null
+        ? isNull(assistantConversations.taskId)
+        : eq(assistantConversations.taskId, input.taskId),
+    );
+  }
+  if (input.scheduleId !== undefined) {
+    conditions.push(
+      input.scheduleId === null
+        ? isNull(assistantConversations.scheduleId)
+        : eq(assistantConversations.scheduleId, input.scheduleId),
+    );
+  }
+  if (input.contextKind) {
+    conditions.push(eq(assistantConversations.contextKind, input.contextKind));
+  }
+
+  return db.query.assistantConversations.findMany({
+    where: and(...conditions),
+    orderBy: (c, { desc }) => [desc(sql`COALESCE(${c.lastMessageAt}, ${c.createdAt})`)],
+    limit: input.limit,
+    offset: input.offset,
+  });
+}
+
+export async function getConversation(
+  db: Database,
+  id: string,
+  actor: Actor,
+) {
+  const conversation = await db.query.assistantConversations.findFirst({
+    where: and(
+      eq(assistantConversations.id, id),
+      eq(assistantConversations.createdBy, actor.id),
+      eq(assistantConversations.createdByType, actor.type),
+    ),
+  });
+  if (!conversation) throw new NotFoundError("Assistant conversation not found");
+
+  const messages = await db.query.assistantMessages.findMany({
+    where: eq(assistantMessages.conversationId, id),
+    orderBy: (m, { asc }) => [asc(m.createdAt)],
+  });
+
+  const actions = await db.query.assistantActions.findMany({
+    where: eq(assistantActions.conversationId, id),
+    orderBy: (a, { asc }) => [asc(a.createdAt)],
+  });
+
+  return {
+    conversation,
+    messages,
+    actions,
+  };
+}
+
+export async function renameConversation(
+  db: Database,
+  input: RenameAssistantConversationInput,
+  actor: Actor,
+) {
+  const conversation = await db.query.assistantConversations.findFirst({
+    where: and(
+      eq(assistantConversations.id, input.id),
+      eq(assistantConversations.createdBy, actor.id),
+      eq(assistantConversations.createdByType, actor.type),
+    ),
+  });
+  if (!conversation) throw new NotFoundError("Assistant conversation not found");
+
+  const [updated] = await db
+    .update(assistantConversations)
+    .set({ title: input.title, updatedAt: new Date() })
+    .where(eq(assistantConversations.id, input.id))
+    .returning();
+
+  await db.insert(activityLog).values({
+    entityType: "assistant_conversation",
+    entityId: input.id,
+    action: "updated",
+    actorId: actor.id,
+    actorType: actor.type,
+    metadata: { title: input.title },
+  });
+
+  return updated!;
+}
+
+export async function deleteConversation(
+  db: Database,
+  id: string,
+  actor: Actor,
+) {
+  const conversation = await db.query.assistantConversations.findFirst({
+    where: and(
+      eq(assistantConversations.id, id),
+      eq(assistantConversations.createdBy, actor.id),
+      eq(assistantConversations.createdByType, actor.type),
+    ),
+  });
+  if (!conversation) throw new NotFoundError("Assistant conversation not found");
+
+  await db
+    .delete(assistantConversations)
+    .where(eq(assistantConversations.id, id));
+
+  await db.insert(activityLog).values({
+    entityType: "assistant_conversation",
+    entityId: id,
+    action: "deleted",
+    actorId: actor.id,
+    actorType: actor.type,
+    metadata: { title: conversation.title },
+  });
+
+  return { success: true };
+}
+
 export async function createMessage(
   db: Database,
   input: CreateAssistantMessageInput,
@@ -578,7 +723,7 @@ export async function createMessage(
       role: input.role,
       content: input.content,
       contextSnapshot: input.contextSnapshot ?? null,
-      piAgentRunId: input.piAgentRunId ?? null,
+      tiAgentRunId: input.tiAgentRunId ?? null,
       provider: input.provider ?? null,
       model: input.model ?? null,
       metadata: input.metadata ?? null,
@@ -601,7 +746,7 @@ export async function createMessage(
     metadata: {
       conversationId: input.conversationId,
       role: input.role,
-      piAgentRunId: input.piAgentRunId ?? null,
+      tiAgentRunId: input.tiAgentRunId ?? null,
     },
   });
 
@@ -665,7 +810,7 @@ function targetForProposal(proposal: AssistantActionProposal) {
           : { targetType: null, targetId: null };
     case "pause_schedule":
       return { targetType: "schedule" as const, targetId: proposal.payload.scheduleId };
-    case "queue_pi_run":
+    case "queue_ti_run":
       return proposal.payload.taskId
         ? { targetType: "task" as const, targetId: proposal.payload.taskId }
         : proposal.payload.scheduleRunId
@@ -695,7 +840,7 @@ function previewForProposal(proposal: AssistantActionProposal) {
       return `Create ${proposal.payload.kind} schedule "${proposal.payload.title}".`;
     case "pause_schedule":
       return `Pause schedule ${proposal.payload.scheduleId}.`;
-    case "queue_pi_run":
+    case "queue_ti_run":
       return `Queue Ti agent run for ${proposal.payload.taskId ? `task ${proposal.payload.taskId}` : `schedule run ${proposal.payload.scheduleRunId}`}.`;
     case "add_comment":
       return `Add comment to task ${proposal.payload.taskId}.`;
@@ -810,9 +955,9 @@ async function executeActionPayload(
       const result = await updateSchedule(db, proposal.payload.scheduleId, { status: "paused" }, actor);
       return { entityType: "schedule", entityId: result.id, result };
     }
-    case "queue_pi_run": {
+    case "queue_ti_run": {
       const result = await createRun(db, proposal.payload, actor);
-      return { entityType: "pi_agent_run", entityId: result.id, result };
+      return { entityType: "ti_agent_run", entityId: result.id, result };
     }
     case "add_comment": {
       const result = await addTaskComment(db, proposal.payload.taskId, proposal.payload.content, actor);
@@ -899,7 +1044,7 @@ function getWorkflowPrompt(workflow: SendAssistantMessageInput["workflow"]) {
       return "Summarize project health, risks, blocked work, and next maintenance steps.";
     case "stale_tasks":
       return "Find stale or long-open tasks and suggest concrete follow-up actions.";
-    case "failed_pi_runs":
+    case "failed_ti_runs":
       return "Triage failed or in-review Ti agent runs and suggest recovery actions.";
     case "schedule_maintenance":
       return "Review schedules for paused, stale, missed, or risky automation settings.";
@@ -931,7 +1076,7 @@ function generateReadOnlyResponse(
   const current = getContextRecord(root.current);
   const projectState = getContextRecord(root.projectState);
   const retrieval = getContextRecord(root.retrieval);
-  const piAgent = getContextRecord(root.piAgent);
+  const tiAgent = getContextRecord(root.tiAgent);
 
   const project = getContextRecord(current.project);
   const requirement = getContextRecord(current.requirement);
@@ -943,7 +1088,7 @@ function generateReadOnlyResponse(
   const documentsList = asArray(retrieval.documents);
   const memoriesList = asArray(retrieval.memories);
   const mcpToolsList = asArray(retrieval.mcpTools);
-  const failedRuns = asArray(piAgent.recentFailures);
+  const failedRuns = asArray(tiAgent.recentFailures);
   const stale = staleTasks(tasksList);
 
   const focus = [
@@ -990,7 +1135,7 @@ function generateReadOnlyResponse(
     sections.push(`Requirement next step: review open tasks under "${String(requirement.title)}" and convert any ambiguous follow-up into an approved task proposal.`);
   }
 
-  if (workflow === "failed_pi_runs" && failedRuns.length === 0) {
+  if (workflow === "failed_ti_runs" && failedRuns.length === 0) {
     sections.push("No failed or in-review Ti runs were visible in the bounded context.");
   }
 
@@ -1008,12 +1153,12 @@ function workflowProposals(
 ): AssistantActionProposal[] {
   const current = getContextRecord(context.current);
   const projectState = getContextRecord(context.projectState);
-  const piAgent = getContextRecord(context.piAgent);
+  const tiAgent = getContextRecord(context.tiAgent);
   const project = getContextRecord(current.project);
   const requirement = getContextRecord(current.requirement);
   const task = getContextRecord(current.task);
   const tasksList = asArray(projectState.tasks);
-  const failedRuns = asArray(piAgent.recentFailures);
+  const failedRuns = asArray(tiAgent.recentFailures);
   const projectId = String(input.context.projectId ?? project.id ?? "");
   const requirementId = String(input.context.requirementId ?? requirement.id ?? task.requirementId ?? "");
 
@@ -1033,7 +1178,7 @@ function workflowProposals(
     }
   }
 
-  if (input.workflow === "failed_pi_runs" && projectId && requirementId && failedRuns.length > 0) {
+  if (input.workflow === "failed_ti_runs" && projectId && requirementId && failedRuns.length > 0) {
     proposals.push({
       actionType: "create_task",
       payload: {
@@ -1120,12 +1265,13 @@ export async function sendReadOnlyMessage(
     metadata: { readOnly: true },
   }, actor);
 
-  let model: ResolvedPiModel | null = null;
+  let model: ResolvedTiModel | null = null;
   let modelError: string | null = null;
   try {
     model = await resolveModel(db, {
-      requestedPiProvider: input.requestedPiProvider,
-      requestedPiModel: input.requestedPiModel,
+      requestedProvider: input.requestedProvider,
+      requestedModel: input.requestedModel,
+      target: "chat",
     }, actor);
   } catch (err) {
     modelError = err instanceof Error ? err.message : "Ti model resolution failed";
@@ -1145,16 +1291,16 @@ export async function sendReadOnlyMessage(
     conversationId: conversation.id,
     role: "assistant",
     content,
-    provider: model?.actualPiProvider ?? null,
-    model: model?.actualPiModel ?? null,
+    provider: model?.actualProvider ?? null,
+    model: model?.actualModel ?? null,
     metadata: {
       readOnly: true,
       workflow: input.workflow ?? null,
-      piBacked: modelError ? false : true,
-      requestedPiProvider: model?.requestedPiProvider ?? input.requestedPiProvider ?? null,
-      requestedPiModel: model?.requestedPiModel ?? input.requestedPiModel ?? null,
-      actualPiProvider: model?.actualPiProvider ?? null,
-      actualPiModel: model?.actualPiModel ?? null,
+      tiBacked: modelError ? false : true,
+      requestedProvider: model?.requestedProvider ?? input.requestedProvider ?? null,
+      requestedModel: model?.requestedModel ?? input.requestedModel ?? null,
+      actualProvider: model?.actualProvider ?? null,
+      actualModel: model?.actualModel ?? null,
       fallbackReason: model?.fallbackReason ?? null,
       modelError,
       actionExecutionAllowed: false,
@@ -1176,10 +1322,10 @@ export async function sendReadOnlyMessage(
     actions: proposedActions,
     model: model
       ? {
-        requestedPiProvider: model.requestedPiProvider,
-        requestedPiModel: model.requestedPiModel,
-        actualPiProvider: model.actualPiProvider,
-        actualPiModel: model.actualPiModel,
+        requestedProvider: model.requestedProvider,
+        requestedModel: model.requestedModel,
+        actualProvider: model.actualProvider,
+        actualModel: model.actualModel,
         fallbackReason: model.fallbackReason,
       }
       : null,

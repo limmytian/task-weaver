@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { docTypeSchema } from "./documents";
-import { TI_SERVER_AGENT_ID } from "./pi-agent";
+import { TI_SERVER_AGENT_ID } from "./ti-agent";
 import {
   scheduleCatchUpPolicySchema,
   scheduleKindSchema,
@@ -23,7 +23,7 @@ export const assistantActionTypeSchema = z.enum([
   "update_task",
   "create_schedule",
   "pause_schedule",
-  "queue_pi_run",
+  "queue_ti_run",
   "add_comment",
   "add_note",
   "draft_document",
@@ -41,7 +41,7 @@ export const assistantActionStatusSchema = z.enum([
 export const assistantWorkflowSchema = z.enum([
   "project_health",
   "stale_tasks",
-  "failed_pi_runs",
+  "failed_ti_runs",
   "schedule_maintenance",
   "requirement_next_steps",
   "personal_inbox_cleanup",
@@ -56,7 +56,7 @@ export const assistantContextLimitsSchema = z.object({
   documents: z.coerce.number().int().min(0).max(50).default(8),
   memories: z.coerce.number().int().min(0).max(50).default(8),
   mcpTools: z.coerce.number().int().min(0).max(50).default(12),
-  piRuns: z.coerce.number().int().min(0).max(50).default(8),
+  tiRuns: z.coerce.number().int().min(0).max(50).default(8),
   textChars: z.coerce.number().int().min(200).max(8000).default(1200),
 }).default({});
 
@@ -82,12 +82,27 @@ export const createAssistantConversationSchema = z.object({
   contextKind: assistantContextKindSchema.default("global"),
 });
 
+export const listAssistantConversationsSchema = z.object({
+  projectId: z.string().uuid().nullable().optional(),
+  requirementId: z.string().uuid().nullable().optional(),
+  taskId: z.string().uuid().nullable().optional(),
+  scheduleId: z.string().uuid().nullable().optional(),
+  contextKind: assistantContextKindSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+export const renameAssistantConversationSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string().min(1).max(500),
+});
+
 export const createAssistantMessageSchema = z.object({
   conversationId: z.string().uuid(),
   role: assistantMessageRoleSchema,
   content: z.string().min(1).max(100_000),
   contextSnapshot: z.record(z.unknown()).nullable().optional(),
-  piAgentRunId: z.string().uuid().nullable().optional(),
+  tiAgentRunId: z.string().uuid().nullable().optional(),
   provider: z.string().max(120).nullable().optional(),
   model: z.string().max(200).nullable().optional(),
   metadata: z.record(z.unknown()).nullable().optional(),
@@ -97,7 +112,7 @@ export const createAssistantActionSchema = z.object({
   conversationId: z.string().uuid(),
   messageId: z.string().uuid().nullable().optional(),
   actionType: assistantActionTypeSchema,
-  targetType: z.enum(["project", "requirement", "task", "schedule", "document", "pi_agent_run"]).nullable().optional(),
+  targetType: z.enum(["project", "requirement", "task", "schedule", "document", "ti_agent_run"]).nullable().optional(),
   targetId: z.string().uuid().nullable().optional(),
   payload: z.record(z.unknown()),
   preview: z.string().max(8000).nullable().optional(),
@@ -159,8 +174,8 @@ const createScheduleActionPayloadSchema = z.object({
   autoRun: z.boolean().default(false),
   assignedExecutor: z.string().optional(),
   assignedExecutorType: z.enum(["human", "agent"]).optional(),
-  requestedPiProvider: z.string().optional(),
-  requestedPiModel: z.string().optional(),
+  requestedProvider: z.string().optional(),
+  requestedModel: z.string().optional(),
 }).superRefine((value, ctx) => {
   if (value.targetScope === "project" && !value.projectId) {
     ctx.addIssue({
@@ -189,13 +204,14 @@ const pauseScheduleActionPayloadSchema = z.object({
   scheduleId: z.string().uuid(),
 });
 
-const queuePiRunActionPayloadSchema = z.object({
+const queueTiRunActionPayloadSchema = z.object({
   taskId: z.string().uuid().optional(),
   scheduleRunId: z.string().uuid().optional(),
   assignedAgentId: z.string().min(1).default(TI_SERVER_AGENT_ID),
   assignedAgentType: z.enum(["human", "agent"]).default("agent"),
-  requestedPiProvider: z.string().nullable().optional(),
-  requestedPiModel: z.string().nullable().optional(),
+  requestedProvider: z.string().nullable().optional(),
+  requestedModel: z.string().nullable().optional(),
+  workspacePolicy: z.enum(["ephemeral", "persistent_purged_on_finish"]).default("ephemeral"),
   maxRetries: z.number().int().min(0).max(20).optional(),
 }).superRefine((data, ctx) => {
   if (!data.taskId && !data.scheduleRunId) {
@@ -253,8 +269,8 @@ export const assistantActionProposalSchema = z.discriminatedUnion("actionType", 
     preview: z.string().max(8000).optional(),
   }),
   z.object({
-    actionType: z.literal("queue_pi_run"),
-    payload: queuePiRunActionPayloadSchema,
+    actionType: z.literal("queue_ti_run"),
+    payload: queueTiRunActionPayloadSchema,
     preview: z.string().max(8000).optional(),
   }),
   z.object({
@@ -278,8 +294,8 @@ export const sendAssistantMessageSchema = z.object({
   conversationId: z.string().uuid().optional(),
   context: buildAssistantContextSchema,
   message: z.string().min(1).max(20_000),
-  requestedPiProvider: z.string().min(1).max(120).nullable().optional(),
-  requestedPiModel: z.string().min(1).max(200).nullable().optional(),
+  requestedProvider: z.string().min(1).max(120).nullable().optional(),
+  requestedModel: z.string().min(1).max(200).nullable().optional(),
   workflow: assistantWorkflowSchema.optional(),
   proposedActions: z.array(assistantActionProposalSchema).max(8).default([]),
 });
@@ -296,6 +312,8 @@ export type AssistantWorkflow = z.infer<typeof assistantWorkflowSchema>;
 export type AssistantContextLimits = z.infer<typeof assistantContextLimitsSchema>;
 export type BuildAssistantContextInput = z.infer<typeof buildAssistantContextSchema>;
 export type CreateAssistantConversationInput = z.infer<typeof createAssistantConversationSchema>;
+export type ListAssistantConversationsInput = z.infer<typeof listAssistantConversationsSchema>;
+export type RenameAssistantConversationInput = z.infer<typeof renameAssistantConversationSchema>;
 export type CreateAssistantMessageInput = z.infer<typeof createAssistantMessageSchema>;
 export type CreateAssistantActionInput = z.infer<typeof createAssistantActionSchema>;
 export type UpdateAssistantActionStatusInput = z.infer<typeof updateAssistantActionStatusSchema>;

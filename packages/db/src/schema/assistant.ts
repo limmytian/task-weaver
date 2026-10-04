@@ -1,7 +1,7 @@
 import { index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { activityLog } from "./activity";
 import { actorTypeEnum } from "./enums";
-import { piAgentRuns } from "./pi-agent";
+import { tiAgentRuns } from "./ti-agent";
 import { projects } from "./projects";
 import { requirements } from "./requirements";
 import { schedules } from "./schedules";
@@ -49,7 +49,7 @@ export const assistantMessages = pgTable(
     }).notNull(),
     content: text("content").notNull(),
     contextSnapshot: jsonb("context_snapshot").$type<Record<string, unknown>>(),
-    piAgentRunId: uuid("pi_agent_run_id").references(() => piAgentRuns.id, {
+    tiAgentRunId: uuid("ti_agent_run_id").references(() => tiAgentRuns.id, {
       onDelete: "set null",
     }),
     provider: text("provider"),
@@ -61,7 +61,7 @@ export const assistantMessages = pgTable(
   },
   (table) => [
     index("idx_assistant_messages_conversation").on(table.conversationId),
-    index("idx_assistant_messages_pi_run").on(table.piAgentRunId),
+    index("idx_assistant_messages_ti_run").on(table.tiAgentRunId),
     index("idx_assistant_messages_created").on(table.createdAt),
   ],
 );
@@ -82,7 +82,7 @@ export const assistantActions = pgTable(
         "update_task",
         "create_schedule",
         "pause_schedule",
-        "queue_pi_run",
+        "queue_ti_run",
         "add_comment",
         "add_note",
         "draft_document",
@@ -92,7 +92,7 @@ export const assistantActions = pgTable(
       enum: ["proposed", "approved", "rejected", "executing", "succeeded", "failed", "cancelled"],
     }).default("proposed").notNull(),
     targetType: text("target_type", {
-      enum: ["project", "requirement", "task", "schedule", "document", "pi_agent_run"],
+      enum: ["project", "requirement", "task", "schedule", "document", "ti_agent_run"],
     }),
     targetId: uuid("target_id"),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),

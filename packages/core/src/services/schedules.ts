@@ -15,7 +15,7 @@ import type {
 } from "@task-weaver/contracts";
 import { NotFoundError, ValidationError } from "@task-weaver/contracts";
 import { createTask } from "./tasks";
-import { createRun } from "./pi-agent";
+import { createRun } from "./ti-agent";
 
 type ScheduleRow = typeof schedules.$inferSelect;
 
@@ -42,8 +42,8 @@ function toScheduleValues(input: CreateScheduleInput, actor: Actor) {
     autoRun: input.autoRun,
     assignedExecutor: input.assignedExecutor,
     assignedExecutorType: input.assignedExecutorType,
-    requestedPiProvider: input.requestedPiProvider,
-    requestedPiModel: input.requestedPiModel,
+    requestedProvider: input.requestedProvider,
+    requestedModel: input.requestedModel,
     createdBy: actor.id,
   };
 }
@@ -72,8 +72,8 @@ function toScheduleUpdateValues(input: UpdateScheduleInput) {
     autoRun: input.autoRun,
     assignedExecutor: input.assignedExecutor,
     assignedExecutorType: input.assignedExecutorType,
-    requestedPiProvider: input.requestedPiProvider,
-    requestedPiModel: input.requestedPiModel,
+    requestedProvider: input.requestedProvider,
+    requestedModel: input.requestedModel,
     updatedAt: new Date(),
   };
 }
@@ -276,8 +276,8 @@ async function processOccurrence(
       priority: schedule.taskPriority,
       assignee: schedule.assignedExecutor ?? undefined,
       assigneeType: schedule.assignedExecutorType ?? undefined,
-      requestedPiProvider: schedule.requestedPiProvider ?? undefined,
-      requestedPiModel: schedule.requestedPiModel ?? undefined,
+      requestedProvider: schedule.requestedProvider ?? undefined,
+      requestedModel: schedule.requestedModel ?? undefined,
       personalOwnerId: schedule.assignedExecutor ?? schedule.createdBy,
       personalOwnerType: schedule.assignedExecutorType ?? "human" as const,
       tags: ["generated:schedule", `schedule:${schedule.id}`, mode === "manual" ? "schedule:manual" : "schedule:auto"],
@@ -293,8 +293,8 @@ async function processOccurrence(
       priority: schedule.taskPriority,
       assignee: schedule.assignedExecutor ?? undefined,
       assigneeType: schedule.assignedExecutorType ?? undefined,
-      requestedPiProvider: schedule.requestedPiProvider ?? undefined,
-      requestedPiModel: schedule.requestedPiModel ?? undefined,
+      requestedProvider: schedule.requestedProvider ?? undefined,
+      requestedModel: schedule.requestedModel ?? undefined,
       tags: ["generated:schedule", `schedule:${schedule.id}`, mode === "manual" ? "schedule:manual" : "schedule:auto"],
       expectedAt: plannedFor,
     };
@@ -306,8 +306,8 @@ async function processOccurrence(
     .set({
       status: "created",
       generatedTaskId: task.id,
-      requestedPiProvider: schedule.requestedPiProvider,
-      requestedPiModel: schedule.requestedPiModel,
+      requestedProvider: schedule.requestedProvider,
+      requestedModel: schedule.requestedModel,
       completedAt: new Date(),
     })
     .where(eq(scheduleRuns.id, run.id))
@@ -327,8 +327,8 @@ async function processOccurrence(
       scheduleRunId: updated!.id,
       assignedAgentId: schedule.assignedExecutor,
       assignedAgentType: "agent",
-      requestedPiProvider: schedule.requestedPiProvider,
-      requestedPiModel: schedule.requestedPiModel,
+      requestedProvider: schedule.requestedProvider,
+      requestedModel: schedule.requestedModel,
     }, actor);
   }
 
@@ -342,8 +342,8 @@ async function ensurePendingRun(db: Database, schedule: ScheduleRow, plannedFor:
       scheduleId: schedule.id,
       plannedFor,
       status: "pending",
-      requestedPiProvider: schedule.requestedPiProvider,
-      requestedPiModel: schedule.requestedPiModel,
+      requestedProvider: schedule.requestedProvider,
+      requestedModel: schedule.requestedModel,
       createdAt: new Date(),
     })
     .onConflictDoNothing()

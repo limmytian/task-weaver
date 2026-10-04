@@ -36,7 +36,7 @@ import { daemons } from "./daemons";
 import { activityLog } from "./activity";
 import { mcpServers } from "./mcp-servers";
 import { scheduleRuns, schedules } from "./schedules";
-import { piAgentModelConfigs, piAgentPolicies, piAgentRuns } from "./pi-agent";
+import { tiAgentModelConfigs, tiAgentPolicies, tiAgentRuns } from "./ti-agent";
 import { assistantActions, assistantConversations, assistantMessages } from "./assistant";
 import { reviewChecks, reviewDecisions, reviewFindings, reviewPolicies, reviewRuns } from "./reviews";
 import {
@@ -548,22 +548,22 @@ export const scheduleRunsRelations = relations(scheduleRuns, ({ one }) => ({
     fields: [scheduleRuns.generatedTaskId],
     references: [tasks.id],
   }),
-  piAgentRun: one(piAgentRuns),
+  tiAgentRun: one(tiAgentRuns),
 }));
 
-// -- Ti server-agent / Pi engine relations --
+// -- Ti server-agent relations --
 
-export const piAgentModelConfigsRelations = relations(piAgentModelConfigs, () => ({}));
+export const tiAgentModelConfigsRelations = relations(tiAgentModelConfigs, () => ({}));
 
-export const piAgentPoliciesRelations = relations(piAgentPolicies, () => ({}));
+export const tiAgentPoliciesRelations = relations(tiAgentPolicies, () => ({}));
 
-export const piAgentRunsRelations = relations(piAgentRuns, ({ one }) => ({
+export const tiAgentRunsRelations = relations(tiAgentRuns, ({ one }) => ({
   task: one(tasks, {
-    fields: [piAgentRuns.taskId],
+    fields: [tiAgentRuns.taskId],
     references: [tasks.id],
   }),
   scheduleRun: one(scheduleRuns, {
-    fields: [piAgentRuns.scheduleRunId],
+    fields: [tiAgentRuns.scheduleRunId],
     references: [scheduleRuns.id],
   }),
 }));
@@ -601,9 +601,9 @@ export const assistantMessagesRelations = relations(
       fields: [assistantMessages.conversationId],
       references: [assistantConversations.id],
     }),
-    piAgentRun: one(piAgentRuns, {
-      fields: [assistantMessages.piAgentRunId],
-      references: [piAgentRuns.id],
+    tiAgentRun: one(tiAgentRuns, {
+      fields: [assistantMessages.tiAgentRunId],
+      references: [tiAgentRuns.id],
     }),
     actions: many(assistantActions),
   }),
