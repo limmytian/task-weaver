@@ -98,7 +98,7 @@ test('collection failures and unsupported sources do not alter execution results
   )
   assert.equal(result.status, 7)
   const controller = new AbortController()
-  setTimeout(() => controller.abort(), 100)
+  setTimeout(() => controller.abort(), 250)
   const reports: ReportAgentUsageInput[] = []
   await runMeteredAgent(
     process.execPath,
