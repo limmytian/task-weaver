@@ -4,6 +4,8 @@ import {
   check,
   foreignKey,
   index,
+  integer,
+  jsonb,
   text,
   timestamp,
   unique,
@@ -141,6 +143,10 @@ export const authSessions = twSchema.table(
     idleExpiresAt: time("idle_expires_at").notNull(),
     revokedAt: time("revoked_at"),
     lastSeenAt: time("last_seen_at"),
+    authenticatedAt: time("authenticated_at").notNull().defaultNow(),
+    idleTimeoutSeconds: integer("idle_timeout_seconds")
+      .notNull()
+      .default(86400),
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
     createdAt: time("created_at").notNull().defaultNow(),
@@ -150,6 +156,10 @@ export const authSessions = twSchema.table(
     check(
       "auth_sessions_lifetime_check",
       sql`isfinite(${table.absoluteExpiresAt}) AND isfinite(${table.idleExpiresAt}) AND isfinite(${table.expiresAt}) AND ${table.absoluteExpiresAt} > ${table.createdAt} AND ${table.idleExpiresAt} > ${table.createdAt} AND ${table.expiresAt} > ${table.createdAt} AND ${table.expiresAt} <= ${table.absoluteExpiresAt} AND ${table.idleExpiresAt} <= ${table.absoluteExpiresAt}`,
+    ),
+    check(
+      "auth_sessions_recency_check",
+      sql`isfinite(${table.authenticatedAt}) AND ${table.idleTimeoutSeconds} > 0`,
     ),
     index("auth_sessions_user_idx").on(table.userId, table.revokedAt),
     index("auth_sessions_expiry_idx").on(table.expiresAt),
@@ -277,3 +287,32 @@ export const betterAuthTables = {
   session: authSessions,
   verification: authVerifications,
 };
+
+/** Shared rate limits contain digest keys, never submitted identifiers or secrets. */
+export const authRateLimits = twSchema.table(
+  "auth_rate_limits",
+  {
+    id: text("id").primaryKey(),
+    count: integer("count").notNull(),
+    windowStartedAt: time("window_started_at").notNull(),
+  },
+  (table) => [check("auth_rate_limits_count_check", sql`${table.count} > 0`)],
+);
+
+/** Server-generated metadata is limited to non-secret policy decisions. */
+export const authAuditEvents = twSchema.table("auth_audit_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  action: text("action").notNull(),
+  actorId: uuid("actor_id").references(() => authActors.id, {
+    onDelete: "restrict",
+  }),
+  subjectActorId: uuid("subject_actor_id").references(() => authActors.id, {
+    onDelete: "restrict",
+  }),
+  entityId: uuid("entity_id"),
+  metadata: jsonb("metadata")
+    .$type<Record<string, string | number | boolean>>()
+    .notNull()
+    .default({}),
+  createdAt: time("created_at").notNull().defaultNow(),
+});

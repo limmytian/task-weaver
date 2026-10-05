@@ -56,13 +56,14 @@ try {
   for (const [packageName, testFile] of [
     ["@task-weaver/db", "src/auth.postgres-e2e.test.ts"],
     ["@task-weaver/core", "src/services/api-keys.postgres-e2e.test.ts"],
+    ["@task-weaver/core", "src/services/authentication.postgres-e2e.test.ts"],
   ]) {
     const result = spawnSync(
       "pnpm",
       ["--filter", packageName, "exec", "tsx", "--test", testFile],
       {
         encoding: "utf8",
-        timeout: 90_000,
+        timeout: 180_000,
         maxBuffer: 4 * 1024 * 1024,
         env: {
           ...process.env,

@@ -195,3 +195,52 @@ Credential rotation or agent replacement does not transfer existing data ownersh
 Any legacy agent-owned rows require explicit ownership migration rather than silent
 rewriting. Resource services adopt this owner resolution in the ordered isolation
 slices before runtime activation.
+
+## Account and session service lifecycle (A3)
+
+The core authentication factory keeps Better Auth's handler and raw provider
+responses private. Public registration and OIDC/SSO are disabled. Transport
+adapters in A4 must use the factory's guarded operations, never mount the
+provider handler directly. Account bootstrap requires an explicit Secret and a
+serialized instance initialization record. Administrator invitations and recovery
+use single-use, hashed activation tokens, defaulting to 24 hours.
+
+Better Auth 1.7.7 with its Drizzle adapter handles signed session cookies and
+maintained scrypt password hashing. Passwords require 12–128 characters on
+creation or change. Provider logging is disabled; service audit records contain
+stable IDs and policy outcomes, without passwords, cookie values, activation
+secrets, key material, or submitted email addresses.
+
+Sessions default to seven days absolute and 24 hours idle. A login can request
+30 days, 90 days, or another finite duration within the configured maximum
+(default one year; operators may configure a longer finite maximum). Every
+request reloads the database, checks all expiry deadlines and account/actor
+status, and updates the idle deadline without extending the absolute deadline.
+Cookie caching and provider refresh are disabled. Expired or logged-out sessions
+remain revoked tombstones rather than being physically deleted. Cookie lifetime
+matches the requested duration, including concurrent logins with different
+lifetimes. Idle duration can also be selected, bounded by the absolute duration. Sensitive account changes require a human session authenticated in
+the last 15 minutes; password reauthentication resets recency only.
+
+Anonymous login, initialization and activation, plus cookie-authenticated
+mutations, require an exact trusted Origin and a signed double-submit CSRF
+challenge. Cookies are HttpOnly, SameSite=Lax, host-only and Secure on HTTPS;
+HTTP is allowed only on loopback development origins. No credential resolves to
+an authentication error. Malformed Authorization headers, cookie/Bearer
+ambiguity, and caller-declared Actor headers cannot fall back to authentication.
+Adapters must supply a trusted direct client address for rate limiting and must
+not trust arbitrary forwarding headers. Shared database counters bound login,
+activation and password retries; their identifiers are digests.
+
+Recovery issuance invalidates the previous password until activation. Recovery
+and password change revoke existing sessions and keys, including keys
+bound to managed agents. Account disablement additionally revokes pending
+activation links. Re-enabling requires an explicit administrator-issued recovery
+activation; old credentials stay revoked. Last active human administrator and
+last active human project owner checks are serialized with account state changes.
+An instance administrator receives no automatic project membership.
+
+Provider references: [configuration](https://better-auth.com/docs/reference/options),
+[session management](https://better-auth.com/docs/concepts/session-management),
+[email/password](https://better-auth.com/docs/authentication/email-password), and
+[database hooks](https://better-auth.com/docs/concepts/database).

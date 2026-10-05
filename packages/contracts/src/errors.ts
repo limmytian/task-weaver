@@ -1,4 +1,7 @@
-import type { AuthenticationErrorCode, AuthorizationErrorCode } from "./schemas/auth";
+import type {
+  AuthenticationErrorCode,
+  AuthorizationErrorCode,
+} from "./schemas/auth";
 
 export class NotFoundError extends Error {
   constructor(message: string) {
@@ -41,5 +44,12 @@ export class AuthorizationError extends Error {
     super("Access denied");
     this.name = "AuthorizationError";
     this.code = code;
+  }
+}
+
+export class AuthenticationRateLimitError extends Error {
+  constructor(readonly retryAfterSeconds: number) {
+    super("Too many authentication attempts");
+    this.name = "AuthenticationRateLimitError";
   }
 }

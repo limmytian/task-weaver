@@ -351,6 +351,13 @@
       "when": 1791200000002,
       "tag": "0049_scoped_api_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1791200000003,
+      "tag": "0050_auth_lifecycle",
+      "breakpoints": true
     }
   ]
 }

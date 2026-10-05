@@ -184,6 +184,16 @@ async function currentAuthority(
     depth: 0,
   };
 }
+/** Safe live authority for lifecycle services; stored credentials never leave this module. */
+export async function getLiveRequestAuthority(
+  db: AuthDatabase,
+  context: VerifiedRequestContext,
+  now = new Date(),
+) {
+  const { actor, grants } = await currentAuthority(db, context, now);
+  return { actor, grants };
+}
+
 async function credentialManager(
   db: AuthDatabase,
   context: VerifiedRequestContext,
