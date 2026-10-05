@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   NotFoundError,
+  AuthenticationError,
+  AuthorizationError,
+  principalSchema,
   createTaskSchema,
   realtimeEventSchema,
   taskStatusSchema,
@@ -36,6 +39,9 @@ test("exports schemas, event contracts, and shared errors", () => {
     taskId: "00000000-0000-4000-8000-000000000003",
   }).type, "task_updated");
   assert.equal(new NotFoundError("missing").name, "NotFoundError");
+  assert.equal(new AuthenticationError().code, "authentication_required");
+  assert.equal(new AuthorizationError().code, "permission_denied");
+  assert.equal(principalSchema.safeParse({ id: "anonymous", type: "human" }).success, false);
 });
 
 test("declares a database-free dependency and export surface", () => {
