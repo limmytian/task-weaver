@@ -177,3 +177,21 @@ fixture. It checks clean and pre-0048 upgrades, repeat migration, preserved lega
 rows, constraints, scoped issuance, long/never expiry, live revocation/disable/role
 changes, manager boundaries, parent-preserving rotation, concurrent rotation,
 public secret exclusion and legacy isolation. No existing business database is used.
+
+## Human ownership and agent execution
+
+Personal data belongs to a human owner. Using a human-bound key authenticates that
+human regardless of the client process. Managed-agent credentials retain a separate
+executor actor; their explicitly granted personal scope targets the managing human,
+never an implicit agent-owned private space. `getPersonalResourceOwner` resolves the
+live human owner separately from the executor. An agent key with project grants
+alone gains no personal access, and agent management alone grants no access to
+personal content. Agents cannot administer human credentials or accounts.
+
+Project data belongs to its project. Initiator, executor, creator, credential and
+resource owner are separate records. A validated delegation/run establishes agent
+execution attribution; a human key alone cannot prove which agent operated it.
+Credential rotation or agent replacement does not transfer existing data ownership.
+Any legacy agent-owned rows require explicit ownership migration rather than silent
+rewriting. Resource services adopt this owner resolution in the ordered isolation
+slices before runtime activation.

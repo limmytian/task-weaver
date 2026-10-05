@@ -89,6 +89,19 @@ export function loadPrincipalForManagement(db: AuthDatabase, actorId: string) {
   return loadPrincipal(db, actorId, false);
 }
 
+/** Resolve the human owner independently of the actor that executes the operation. */
+export async function getPersonalResourceOwner(
+  db: AuthDatabase,
+  actorId: string,
+) {
+  const principal = await loadActivePrincipal(db, actorId);
+  return {
+    personalOwnerId:
+      principal.type === "human" ? principal.id : principal.managedByActorId,
+    personalOwnerType: "human" as const,
+  };
+}
+
 /** Live entitlements are separate from credential ceilings; admin does not imply project membership. */
 export async function loadPrincipalGrants(
   db: AuthDatabase,
@@ -98,8 +111,12 @@ export async function loadPrincipalGrants(
   const grants: AuthorizationGrant[] = [
     {
       scope: "personal",
-      actorId: principal.id,
-      permissions: [...AUTHORIZATION_SCOPE_PERMISSIONS.personal],
+      actorId:
+        principal.type === "human" ? principal.id : principal.managedByActorId,
+      permissions:
+        principal.type === "human"
+          ? [...AUTHORIZATION_SCOPE_PERMISSIONS.personal]
+          : ["resource.read", "resource.write", "mcp.manage", "mcp.invoke"],
     },
     {
       scope: "global",

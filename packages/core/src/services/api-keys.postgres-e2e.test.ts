@@ -22,6 +22,7 @@ import {
   type VerifiedRequestContext,
 } from "@task-weaver/contracts";
 import * as service from "./api-keys";
+import { getPersonalResourceOwner } from "./auth-principals";
 
 const databaseUrl = process.env.TW_AUTH_E2E_DATABASE_URL;
 test(
@@ -565,6 +566,62 @@ test(
         );
         assert.equal(agentContext.actor.id, agent!.id);
         assert.equal(agentContext.actor.type, "agent");
+        assert.deepEqual(await getPersonalResourceOwner(db, agent!.id), {
+          personalOwnerId: owner.actor.id,
+          personalOwnerType: "human",
+        });
+        assert.deepEqual(await getPersonalResourceOwner(db, owner.actor.id), {
+          personalOwnerId: owner.actor.id,
+          personalOwnerType: "human",
+        });
+        assert.ok(
+          agentContext.credential.kind === "api_key" &&
+            !agentContext.credential.grants.some(
+              (grant) => grant.scope === "personal",
+            ),
+          "Agent management alone does not grant personal access",
+        );
+        const personalAgentKey = await service.issueScopedApiKey(
+          db,
+          owner.context,
+          agent!.id,
+          {
+            name: "Personal delegate",
+            grants: [
+              {
+                scope: "personal",
+                actorId: owner.actor.id,
+                permissions: ["resource.read", "resource.write"],
+              },
+            ],
+            expiresAt: null,
+          },
+        );
+        const personalContext = await service.authenticateScopedApiKey(
+          db,
+          personalAgentKey.rawKey,
+        );
+        assert.equal(personalContext.actor.id, agent!.id);
+        assert.deepEqual(
+          personalContext.credential.kind === "api_key" &&
+            personalContext.credential.grants,
+          [
+            {
+              scope: "personal",
+              actorId: owner.actor.id,
+              permissions: ["resource.read", "resource.write"],
+            },
+          ],
+        );
+        await assert.rejects(
+          service.issueScopedApiKey(db, owner.context, agent!.id, {
+            name: "Credential administration",
+            grants: [personal],
+            expiresAt: null,
+          }),
+          AuthorizationError,
+        );
+
         await assert.rejects(
           service.issueScopedApiKey(db, owner.context, agent!.id, {
             name: "Agent personal read",

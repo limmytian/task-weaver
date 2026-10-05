@@ -192,6 +192,7 @@ async function credentialManager(
   allowDisabledSubject = false,
 ) {
   const authority = await currentAuthority(db, context, now);
+  if (authority.actor.type !== "human") throw new AuthorizationError();
   if (
     !grantsAreCovered(
       [
