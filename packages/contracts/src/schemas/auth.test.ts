@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  accountDtoSchema, apiKeyDtoSchema, authErrorDtoSchema, authorizationGrantSchema,
+  accountDtoSchema, accountLoginSchema, apiKeyDtoSchema, authErrorDtoSchema, authorizationGrantSchema,
   credentialGrantsSchema, issueScopedApiKeySchema, principalSchema, PROJECT_ROLE_PERMISSIONS,
   PROJECT_ROLE_GRANTABLE_PERMISSIONS,
   projectMembershipDtoSchema, requestIdentitySnapshotSchema, sessionDtoSchema,
@@ -74,6 +74,51 @@ test("browser session requires a live human subject; parsing does not attest ver
   // @ts-expect-error A structurally valid snapshot is not a server-verified context.
   const verified: VerifiedRequestContext = snapshot;
   void verified;
+});
+
+test("longer finite sessions are selectable while unbounded sessions remain invalid", () => {
+  for (const days of [7, 30, 90, 365]) {
+    assert.equal(accountLoginSchema.safeParse({
+      email: "user@example.com", password: "password", sessionDurationSeconds: days * 86400,
+    }).success, true);
+  }
+  for (const duration of [null, 0, -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal(accountLoginSchema.safeParse({
+      email: "user@example.com", password: "password", sessionDurationSeconds: duration,
+    }).success, false);
+  }
+  assert.equal(requestIdentitySnapshotSchema.safeParse({
+    ...keyContext, credential: { kind: "session", id: keyId, actorId, expiresAt: null },
+  }).success, false);
+});
+
+test("only API keys may explicitly select no time-based expiry", () => {
+  for (const expiry of [null, "2027-10-05T10:00:00Z"]) {
+    assert.equal(issueScopedApiKeySchema.safeParse({ name: "CLI", grants, expiresAt: expiry }).success, true);
+    assert.equal(apiKeyDtoSchema.safeParse({
+      id: keyId, actorId, issuedByActorId: actorId, name: "CLI", prefix: "tw_key",
+      grants, createdAt, expiresAt: expiry, lastUsedAt: null, revokedAt: null,
+    }).success, true);
+    assert.equal(requestIdentitySnapshotSchema.safeParse({
+      ...keyContext, credential: { ...keyContext.credential, expiresAt: expiry },
+    }).success, true);
+  }
+  for (const expiry of [undefined, "never", "", 0]) {
+    assert.equal(issueScopedApiKeySchema.safeParse({ name: "CLI", grants, expiresAt: expiry }).success, false);
+  }
+  assert.equal(requestIdentitySnapshotSchema.safeParse({
+    ...keyContext, credential: { ...keyContext.credential, expiresAt: null, actorId: otherId },
+  }).success, false);
+  assert.equal(requestIdentitySnapshotSchema.safeParse({
+    ...delegationContext, credential: { ...delegationContext.credential, expiresAt: null },
+  }).success, false);
+  assert.equal(requestIdentitySnapshotSchema.safeParse({
+    ...delegationContext,
+    credential: { ...delegationContext.credential, delegation: { ...delegationContext.credential.delegation, expiresAt: null } },
+  }).success, false);
+  assert.equal(sessionDtoSchema.safeParse({
+    id: keyId, actorId, createdAt, expiresAt: null, lastSeenAt: null, revokedAt: null,
+  }).success, false);
 });
 
 test("strict grants reject wildcard and ambiguous resource selectors", () => {

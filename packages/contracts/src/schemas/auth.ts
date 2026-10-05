@@ -125,7 +125,7 @@ export const apiKeyDtoSchema = z.object({
   prefix: z.string().min(1).max(32),
   grants: credentialGrantsSchema,
   createdAt: timestampSchema,
-  expiresAt: timestampSchema,
+  expiresAt: timestampSchema.nullable(),
   lastUsedAt: timestampSchema.nullable(),
   revokedAt: timestampSchema.nullable(),
 }).strict();
@@ -134,11 +134,14 @@ export const apiKeyDtoSchema = z.object({
 export const issueScopedApiKeySchema = z.object({
   name: z.string().trim().min(1).max(255),
   grants: credentialGrantsSchema,
-  expiresAt: timestampSchema,
+  // Explicit null selects no time-based expiry; omission must not do so implicitly.
+  expiresAt: timestampSchema.nullable(),
 }).strict();
 export const accountLoginSchema = z.object({
   email: z.string().email().max(320),
   password: z.string().min(1).max(1024),
+  // The server must validate this requested duration against configured session policy.
+  sessionDurationSeconds: z.number().int().positive().safe().optional(),
 }).strict();
 
 export const executionDelegationSchema = z.object({
@@ -160,7 +163,7 @@ export const executionDelegationSchema = z.object({
 const credentialIdentityFields = { id: idSchema, actorId: idSchema, expiresAt: timestampSchema };
 export const credentialIdentitySchema = z.discriminatedUnion("kind", [
   z.object({ ...credentialIdentityFields, kind: z.literal("session") }).strict(),
-  z.object({ ...credentialIdentityFields, kind: z.literal("api_key"), grants: credentialGrantsSchema }).strict(),
+  z.object({ ...credentialIdentityFields, kind: z.literal("api_key"), expiresAt: timestampSchema.nullable(), grants: credentialGrantsSchema }).strict(),
   z.object({
     ...credentialIdentityFields,
     kind: z.literal("delegation"),
@@ -181,7 +184,7 @@ export const requestIdentitySnapshotSchema = z.object({
   if (actor.id !== credential.actorId) {
     issue("Credential must be bound to the authenticated actor", ["credential", "actorId"]);
   }
-  if (Date.parse(credential.expiresAt) <= Date.parse(context.verifiedAt)) {
+  if (credential.expiresAt !== null && Date.parse(credential.expiresAt) <= Date.parse(context.verifiedAt)) {
     issue("Credential must be live at verification time", ["credential", "expiresAt"]);
   }
   if (credential.kind === "session" && actor.type !== "human") {

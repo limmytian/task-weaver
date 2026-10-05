@@ -29,7 +29,19 @@ header or a queue message. `resolveActor` is deprecated legacy attribution and
 cannot produce a verified context.
 
 Database sessions use current actor authority; API keys have explicit finite
-credential grants and expiry. `issueScopedApiKeySchema` contains no subject ID:
+credential grants and a chosen expiry. API keys may select a longer deadline or
+explicit `expiresAt: null` for no time-based expiry; the field cannot be omitted.
+Session and execution-delegation deadlines remain finite. Login may request
+`sessionDurationSeconds`; the resolver must apply the configured allowed duration
+options and session idle policy rather than trusting the request. A longer session
+does not bypass revocation or recent-login requirements for sensitive actions.
+
+Deleting an API key revokes it immediately, including keys without an expiry,
+and invalidates its dependent delegations. Preserve its audit reference/tombstone;
+deletion does not erase historical actor attribution. These lifecycle operations
+are enforced by credential services when implemented, not by shape validation.
+
+`issueScopedApiKeySchema` contains no subject ID:
 the authorized self/managed-agent route determines the subject. Requested grants,
 including personal owner IDs, are constraints to validate against server state,
 never proof of ownership. Existing authority, credential scopes and any execution
