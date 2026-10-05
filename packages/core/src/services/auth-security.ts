@@ -4,6 +4,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
+import { ZodError } from "zod";
 import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import {
   authAuditEvents,
@@ -13,6 +14,9 @@ import {
 } from "@task-weaver/db";
 import {
   AuthenticationRateLimitError,
+  AuthenticationError,
+  NotFoundError,
+  ValidationError,
   AuthorizationError,
   type AuthorizationGrant,
   type VerifiedRequestContext,
@@ -183,4 +187,38 @@ export function createCsrfPolicy(
         throw new AuthorizationError("csrf_rejected");
     },
   };
+}
+
+/** Database/provider exceptions may embed query parameters. Keep them inside the service boundary. */
+export function guardAuthenticationOperations<T extends object>(
+  operations: T,
+): T {
+  const reject = (error: unknown): never => {
+    if (
+      error instanceof AuthenticationError ||
+      error instanceof AuthorizationError ||
+      error instanceof AuthenticationRateLimitError ||
+      error instanceof NotFoundError ||
+      error instanceof ValidationError ||
+      error instanceof ZodError
+    )
+      throw error;
+    throw new Error("Authentication operation unavailable");
+  };
+  for (const [name, operation] of Object.entries(operations)) {
+    if (typeof operation !== "function") continue;
+    const call = operation as (...args: unknown[]) => unknown;
+    Object.defineProperty(operations, name, {
+      enumerable: true,
+      value: (...args: unknown[]) => {
+        try {
+          const result = call.apply(operations, args);
+          return result instanceof Promise ? result.catch(reject) : result;
+        } catch (error) {
+          return reject(error);
+        }
+      },
+    });
+  }
+  return operations;
 }

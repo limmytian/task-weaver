@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import {
   createDb,
@@ -44,7 +44,7 @@ test(
       trustedOrigins: ["http://127.0.0.1:3000"],
     };
     const service = createAuthenticationService(db, config);
-    const password = "fixture-only-long-password";
+    const password = randomBytes(24).toString("hex");
     const email = `${randomUUID()}@example.test`;
     const client = () => {
       const challenge = service.csrfChallenge();
@@ -72,11 +72,20 @@ test(
       );
       return next;
     };
-    const login = async (accountEmail: string, duration?: number) => {
+    const login = async (
+      accountEmail: string,
+      duration?: number,
+      idle?: number,
+    ) => {
       const headers = client();
       const result = await service.login(
         headers,
-        { email: accountEmail, password, sessionDurationSeconds: duration },
+        {
+          email: accountEmail,
+          password,
+          sessionDurationSeconds: duration,
+          sessionIdleSeconds: idle,
+        },
         `login-${randomUUID()}`,
       );
       return { headers: withSession(headers, result), result };
@@ -138,7 +147,7 @@ test(
       "provider login returns safe DTOs and configurable longer sessions",
       async () => {
         const results = await Promise.all([
-          login(email, 30 * 86400),
+          login(email, 30 * 86400, 7 * 86400),
           login(email, 90 * 86400),
         ]);
         for (const [index, result] of results.entries()) {
@@ -153,7 +162,7 @@ test(
           );
           assert.equal(
             session!.idleExpiresAt.getTime() - session!.createdAt.getTime(),
-            86400_000,
+            (index === 0 ? 7 : 1) * 86400_000,
           );
           assert.ok(
             result.result.headers
@@ -176,6 +185,106 @@ test(
             "policy",
           ),
           ValidationError,
+        );
+      },
+    );
+    await t.test(
+      "HTTPS cookies are secure and host-only; non-loopback HTTP configuration is rejected",
+      async () => {
+        assert.throws(
+          () =>
+            createAuthenticationService(db, {
+              ...config,
+              baseURL: "http://192.0.2.1:3001",
+            }),
+          ValidationError,
+        );
+        const secure = createAuthenticationService(db, {
+          ...config,
+          baseURL: "https://api.example.test",
+          trustedOrigins: ["https://app.example.test"],
+        });
+        const challenge = secure.csrfChallenge();
+        const headers = new Headers({
+          cookie: challenge.headers.getSetCookie()[0]!.split(";")[0]!,
+          origin: "https://app.example.test",
+          "x-csrf-token": challenge.csrfToken,
+        });
+        const logged = await secure.login(
+          headers,
+          { email, password },
+          "https-login",
+        );
+        const cookies = logged.headers.getSetCookie();
+        assert.ok(
+          cookies.some(
+            (cookie) =>
+              cookie.startsWith("__Secure-tw.session_token=") &&
+              cookie.includes("Secure") &&
+              cookie.includes("HttpOnly") &&
+              cookie.includes("SameSite=Lax"),
+          ),
+        );
+        assert.equal(
+          cookies.some((cookie) => /Domain=/i.test(cookie)),
+          false,
+        );
+        const authenticated = withSession(headers, logged);
+        assert.equal(
+          (await secure.resolve(authenticated)).actor.id,
+          administrator.result.account.actorId,
+        );
+      },
+    );
+    await t.test(
+      "idle expiry and owner-scoped session revocation preserve history without extending the absolute deadline",
+      async () => {
+        const logged = await login(email);
+        const before = (
+          await db
+            .select()
+            .from(authSessions)
+            .where(eq(authSessions.id, logged.result.session.id))
+        )[0]!;
+        await service.resolve(logged.headers);
+        const after = (
+          await db
+            .select()
+            .from(authSessions)
+            .where(eq(authSessions.id, before.id))
+        )[0]!;
+        assert.equal(
+          after.absoluteExpiresAt.getTime(),
+          before.absoluteExpiresAt.getTime(),
+        );
+        const listed = await service.listSessions(administrator.headers);
+        assert.ok(listed.some((session) => session.id === before.id));
+        assert.equal(JSON.stringify(listed).includes(before.token), false);
+        await service.revokeSession(administrator.headers, before.id);
+        await assert.rejects(
+          service.resolve(logged.headers),
+          AuthenticationError,
+        );
+        const idle = await login(email);
+        await db
+          .update(authSessions)
+          .set({
+            createdAt: new Date(Date.now() - 10000),
+            authenticatedAt: new Date(Date.now() - 10000),
+            idleExpiresAt: new Date(Date.now() - 1000),
+          })
+          .where(eq(authSessions.id, idle.result.session.id));
+        await assert.rejects(
+          service.resolve(idle.headers),
+          AuthenticationError,
+        );
+        assert.ok(
+          (
+            await db
+              .select()
+              .from(authSessions)
+              .where(eq(authSessions.id, idle.result.session.id))
+          )[0]!.revokedAt,
         );
       },
     );
@@ -356,28 +465,24 @@ test(
           .insert(projects)
           .values({ name: "Owned fixture", createdBy: member!.actorId })
           .returning();
-        await db
-          .insert(projectMemberships)
-          .values({
-            projectId: project!.id,
-            actorId: member!.actorId,
-            actorType: "human",
-            role: "owner",
-          });
+        await db.insert(projectMemberships).values({
+          projectId: project!.id,
+          actorId: member!.actorId,
+          actorType: "human",
+          role: "owner",
+        });
         await assert.rejects(
           service.setAccountState(administrator.headers, memberId, {
             status: "disabled",
           }),
           ValidationError,
         );
-        await db
-          .insert(projectMemberships)
-          .values({
-            projectId: project!.id,
-            actorId: administrator.result.account.actorId,
-            actorType: "human",
-            role: "owner",
-          });
+        await db.insert(projectMemberships).values({
+          projectId: project!.id,
+          actorId: administrator.result.account.actorId,
+          actorType: "human",
+          role: "owner",
+        });
         const memberLogin = await login(memberEmail);
         await assert.rejects(
           service.provision(memberLogin.headers, {
@@ -448,7 +553,7 @@ test(
           old.headers,
           {
             currentPassword: password,
-            newPassword: "new-fixture-password-123",
+            newPassword: randomBytes(24).toString("hex"),
           },
           "password-change",
         );

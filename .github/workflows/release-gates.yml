@@ -43,6 +43,8 @@ jobs:
         run: pnpm lint
       - name: Test all configured workspaces
         run: pnpm test
+      - name: Verify authentication with disposable PostgreSQL
+        run: pnpm test:auth-postgres
       - name: Check rollout and Web interaction safeguards
         run: |
           pnpm check:repository-rollout

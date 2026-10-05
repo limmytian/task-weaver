@@ -244,3 +244,55 @@ Provider references: [configuration](https://better-auth.com/docs/reference/opti
 [session management](https://better-auth.com/docs/concepts/session-management),
 [email/password](https://better-auth.com/docs/authentication/email-password), and
 [database hooks](https://better-auth.com/docs/concepts/database).
+
+## Owner, agent and membership lifecycle (A3)
+
+The identity management factory resolves incoming credentials itself. Adapters
+must not deserialize a `VerifiedRequestContext` or derive identity from Actor
+headers. Core token operations compose with the lifecycle transaction using
+savepoints, retaining standalone serializable behavior and rotation row locks.
+Raw key issue/rotation responses include `Cache-Control: no-store` headers;
+adapters must propagate response headers while returning only the public DTO.
+
+Every active human can create a project. The project and initial human owner
+membership are committed atomically. Owners administer membership and ownership;
+maintainers administer lower roles. Changing one's own role or explicit
+entitlements requires another eligible administrator's approval. Ownership
+changes require recent human authentication, and only an active human can own a
+project. Transfer promotes the target and demotes the former owner in one
+transaction. Account disablement, membership mutations and transfers share the
+instance lifecycle lock, preventing concurrent removal of the final active
+human owner. This coarse lock favors correctness over parallel mutation
+throughput in the initial implementation.
+
+An owner or maintainer may separately approve persisted execution/MCP
+entitlements without automatically receiving those execution rights. A scoped
+API key can approve or assign only rights within its own live ceiling; it cannot
+use membership administration to widen itself or another credential. A human
+session requires recent authentication for membership assignment and browser
+credential mutations. Explicit human-bound `credential.manage` API keys may
+create parent-bounded descendants, subject to live issuer/subject intersection.
+Agents cannot administer human credentials. Every mutation reloads current
+credentials, account status, project status and membership; no permission cache
+can retain removed entitlements.
+
+Managed agents have stable identities and managing humans, and never acquire a
+human login account. Personal resource ownership remains the managing human.
+Agent personal access requires a key explicitly scoped to that human space.
+Managing an agent never proves permission to access a project or private data.
+Disabling an agent retains its identity/audit trail and revokes bound keys.
+Instance administrators have a separately named agent-disable operation, which
+does not grant personal or project content access.
+
+Owner-scoped session listing and revocation never return cookie tokens. Account
+recovery/password change revoke existing credentials; recovery issuance also
+invalidates the old password until activation. Unexpected database/provider
+exceptions are replaced at the service boundary because their query parameters
+may contain secret material. Known domain errors remain safe, structured errors.
+
+A4 must wire REST, tRPC, SSR and GraphQL to these services, consistently enforce
+CSRF/CORS, map safe authentication/rate-limit errors and propagate no-store and
+Set-Cookie headers. Resource-specific enforcement, SSE/background revalidation,
+legacy ownership migration and trusted executor attribution remain in their
+existing later slices. These services do not activate any transport or confer
+review/merge eligibility beyond the existing review policy.

@@ -38,6 +38,7 @@ import { type AuthDatabase, loadActivePrincipal } from "./auth-principals";
 import { authenticateScopedApiKey, getLiveRequestAuthority } from "./api-keys";
 import {
   auditIdentity,
+  guardAuthenticationOperations,
   constantTimeEqual,
   createCsrfPolicy,
   digest,
@@ -136,16 +137,14 @@ export async function revokeAccountCredentials(
     )
     .returning({ id: apiKeys.id });
   if (revoked.length)
-    await db
-      .insert(apiKeyEvents)
-      .values(
-        revoked.map((key) => ({
-          action: "revoked" as const,
-          keyId: key.id,
-          actorId: byActorId,
-          createdAt: now,
-        })),
-      );
+    await db.insert(apiKeyEvents).values(
+      revoked.map((key) => ({
+        action: "revoked" as const,
+        keyId: key.id,
+        actorId: byActorId,
+        createdAt: now,
+      })),
+    );
 }
 
 /** Last-owner protection counts only persisted, active human accounts and actors. */
@@ -504,7 +503,7 @@ export function createAuthenticationService(
         "An active human instance administrator is required",
       );
   }
-  return {
+  return guardAuthenticationOperations({
     csrfChallenge: csrf.challenge,
     assertMutation: mutations,
     resolve,
@@ -540,14 +539,12 @@ export function createAuthenticationService(
             emailVerified: true,
           })
           .returning();
-        await tx
-          .insert(authAccounts)
-          .values({
-            userId: user!.id,
-            accountId: user!.id,
-            providerId: "credential",
-            password,
-          });
+        await tx.insert(authAccounts).values({
+          userId: user!.id,
+          accountId: user!.id,
+          providerId: "credential",
+          password,
+        });
         await tx
           .update(authInstanceState)
           .set({ initializedByUserId: user!.id, initializedAt: new Date() })
@@ -689,11 +686,12 @@ export function createAuthenticationService(
         context.credential.kind !== "session"
       )
         throw new AuthorizationError();
+      await limitAuthentication(db, "reauthenticate", context.actor.id, 10);
       await limitAuthentication(
         db,
-        "reauthenticate",
-        `${clientAddress}:${context.actor.id}`,
-        10,
+        "reauthenticate:address",
+        clientAddress,
+        30,
       );
       return db.transaction(async (tx) => {
         await lockIdentityLifecycle(tx);
@@ -726,11 +724,12 @@ export function createAuthenticationService(
       const context = await resolve(headers);
       if (context.actor.type !== "human") throw new AuthorizationError();
       await requireRecentSession(db, context);
+      await limitAuthentication(db, "password-change", context.actor.id, 10);
       await limitAuthentication(
         db,
-        "password-change",
-        `${clientAddress}:${context.actor.id}`,
-        10,
+        "password-change:address",
+        clientAddress,
+        30,
       );
       const password = await hashPassword(parsed.newPassword);
       const userId = context.actor.userId;
@@ -784,15 +783,13 @@ export function createAuthenticationService(
         const expiresAt = new Date(
           Date.now() + config.activationDurationSeconds * 1000,
         );
-        await tx
-          .insert(authActivations)
-          .values({
-            userId: user!.id,
-            issuedByUserId: actor.userId,
-            tokenHash: digest(token),
-            purpose: "invite",
-            expiresAt,
-          });
+        await tx.insert(authActivations).values({
+          userId: user!.id,
+          issuedByUserId: actor.userId,
+          tokenHash: digest(token),
+          purpose: "invite",
+          expiresAt,
+        });
         await auditIdentity(tx, "account.invited", actor.id, subject!.id);
         return {
           account: publicAccount(user!),
@@ -839,15 +836,13 @@ export function createAuthenticationService(
         const expiresAt = new Date(
           now.getTime() + config.activationDurationSeconds * 1000,
         );
-        await tx
-          .insert(authActivations)
-          .values({
-            userId,
-            issuedByUserId: actor.userId,
-            tokenHash: digest(token),
-            purpose: "recovery",
-            expiresAt,
-          });
+        await tx.insert(authActivations).values({
+          userId,
+          issuedByUserId: actor.userId,
+          tokenHash: digest(token),
+          purpose: "recovery",
+          expiresAt,
+        });
         await auditIdentity(
           tx,
           "account.recovery_issued",
@@ -940,6 +935,66 @@ export function createAuthenticationService(
         return { account: publicAccount(updated!), headers: noStore() };
       });
     },
+    async listAccounts(headers: Headers) {
+      const context = await resolve(headers);
+      await requireLivePermission(db, context, {
+        scope: "instance",
+        permissions: ["instance.manage"],
+      });
+      return (await db.select().from(authUsers)).map(publicAccount);
+    },
+    async listSessions(headers: Headers) {
+      const context = await resolve(headers);
+      const authority = await getLiveRequestAuthority(db, context);
+      if (authority.actor.type !== "human") throw new AuthorizationError();
+      await requireLivePermission(db, context, {
+        scope: "personal",
+        actorId: authority.actor.id,
+        permissions: ["credential.manage"],
+      });
+      const actorId = authority.actor.id;
+      return (
+        await db
+          .select()
+          .from(authSessions)
+          .where(eq(authSessions.userId, authority.actor.userId))
+      ).map((session) => safeSession(session, actorId));
+    },
+    async revokeSession(headers: Headers, sessionId: string) {
+      z.string().uuid().parse(sessionId);
+      mutations(headers);
+      const context = await resolve(headers);
+      return db.transaction(async (tx) => {
+        await lockIdentityLifecycle(tx);
+        await requireRecentSession(tx, context);
+        const authority = await getLiveRequestAuthority(tx, context);
+        if (authority.actor.type !== "human") throw new AuthorizationError();
+        await requireLivePermission(tx, context, {
+          scope: "personal",
+          actorId: authority.actor.id,
+          permissions: ["credential.manage"],
+        });
+        const [session] = await tx
+          .update(authSessions)
+          .set({ revokedAt: new Date() })
+          .where(
+            and(
+              eq(authSessions.id, sessionId),
+              eq(authSessions.userId, authority.actor.userId),
+            ),
+          )
+          .returning();
+        if (!session) throw new ValidationError("Session cannot be revoked");
+        await auditIdentity(
+          tx,
+          "session.revoked",
+          authority.actor.id,
+          authority.actor.id,
+          session.id,
+        );
+        return safeSession(session, authority.actor.id);
+      });
+    },
     async setAccountState(headers: Headers, userId: string, input: unknown) {
       z.string().uuid().parse(userId);
       const parsed = changeAccountStateSchema.parse(input);
@@ -1018,5 +1073,5 @@ export function createAuthenticationService(
         return publicAccount(updated!);
       });
     },
-  };
+  });
 }

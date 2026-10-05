@@ -23,3 +23,6 @@ CREATE TABLE task_weaver.auth_audit_events (
   metadata jsonb NOT NULL DEFAULT '{}',
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+--> statement-breakpoint
+CREATE INDEX auth_rate_limits_window_idx ON task_weaver.auth_rate_limits (window_started_at);

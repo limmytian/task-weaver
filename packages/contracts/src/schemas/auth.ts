@@ -542,3 +542,23 @@ export const changeAccountStateSchema = z
     (value) => value.status || value.instanceRole,
     "Account mutation is required",
   );
+
+export const createManagedAgentSchema = z
+  .object({ displayName: z.string().trim().min(1).max(255) })
+  .strict();
+export const setProjectMembershipSchema = z
+  .object({
+    role: projectRoleSchema,
+    explicitPermissions: explicitProjectPermissionsSchema.default([]),
+  })
+  .strict();
+export const managedAgentDtoSchema = z
+  .object({
+    id: idSchema,
+    type: z.literal("agent"),
+    managedByActorId: idSchema,
+    displayName: z.string().min(1).max(255),
+    status: principalStatusSchema,
+    createdAt: timestampSchema,
+  })
+  .strict();

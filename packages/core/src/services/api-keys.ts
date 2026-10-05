@@ -260,58 +260,65 @@ function enforceParentExpiry(expiresAt: Date | null, parent: StoredKey | null) {
     throw new AuthorizationError();
 }
 
+/** Compose lifecycle transactions without changing standalone serializable behavior. */
+async function withCredentialTransaction<T>(
+  db: AuthDatabase,
+  work: (tx: AuthDatabase) => Promise<T>,
+): Promise<T> {
+  return "$client" in db
+    ? db.transaction(work, { isolationLevel: "serializable" })
+    : db.transaction(work);
+}
+
 /** The subject parameter is a server-resolved self/managed-agent target, never a trusted body field. */
 export async function issueScopedApiKey(
-  db: Database,
+  db: AuthDatabase,
   context: VerifiedRequestContext,
   actorId: string,
   input: IssueScopedApiKey,
 ) {
   const parsed = issueScopedApiKeySchema.parse(input);
-  return db.transaction(
-    async (tx) => {
-      const now = new Date();
-      const authority = await credentialManager(tx, context, actorId, now);
-      if (
-        !grantsAreCovered(parsed.grants, authority.grants) ||
-        !grantsAreCovered(
-          parsed.grants,
-          await loadPrincipalGrants(tx, authority.subject.id),
-        )
+  return withCredentialTransaction(db, async (tx) => {
+    const now = new Date();
+    const authority = await credentialManager(tx, context, actorId, now);
+    if (
+      !grantsAreCovered(parsed.grants, authority.grants) ||
+      !grantsAreCovered(
+        parsed.grants,
+        await loadPrincipalGrants(tx, authority.subject.id),
       )
-        throw new AuthorizationError();
-      const expiresAt = expiryDate(parsed.expiresAt, now);
-      enforceParentExpiry(expiresAt, authority.key);
-      if (authority.depth >= 16)
-        throw new ValidationError("Maximum API key derivation depth exceeded");
-      const material = generateApiKey();
-      const [created] = await tx
-        .insert(apiKeys)
-        .values({
-          name: parsed.name,
-          actorId,
-          issuedByActorId: authority.actor.id,
-          grants: parsed.grants,
-          parentKeyId: authority.key?.id,
-          keyHash: material.hash,
-          keyPrefix: material.prefix,
-          expiresAt,
-          createdAt: now,
-        })
-        .returning();
-      await tx.insert(apiKeyEvents).values({
-        keyId: created!.id,
-        actorId: authority.actor.id,
-        action: "issued",
-      });
-      return { ...publicKey(created!), rawKey: material.raw };
-    },
-    { isolationLevel: "serializable" },
-  );
+    )
+      throw new AuthorizationError();
+    const expiresAt = expiryDate(parsed.expiresAt, now);
+    enforceParentExpiry(expiresAt, authority.key);
+    if (authority.depth >= 16)
+      throw new ValidationError("Maximum API key derivation depth exceeded");
+    const material = generateApiKey();
+    const [created] = await tx
+      .insert(apiKeys)
+      .values({
+        name: parsed.name,
+        actorId,
+        issuedByActorId: authority.actor.id,
+        grants: parsed.grants,
+        parentKeyId: authority.key?.id,
+        keyHash: material.hash,
+        keyPrefix: material.prefix,
+        expiresAt,
+        createdAt: now,
+      })
+      .returning();
+    await tx.insert(apiKeyEvents).values({
+      keyId: created!.id,
+      actorId: authority.actor.id,
+      action: "issued",
+    });
+    return { ...publicKey(created!), rawKey: material.raw };
+  });
 }
 
 export async function listScopedApiKeys(
-  db: Database,
+  db: AuthDatabase,
   context: VerifiedRequestContext,
   actorId: string,
 ) {
@@ -325,110 +332,104 @@ export async function listScopedApiKeys(
 }
 
 export async function revokeScopedApiKey(
-  db: Database,
+  db: AuthDatabase,
   context: VerifiedRequestContext,
   id: string,
 ) {
-  return db.transaction(
-    async (tx) => {
-      const [key] = await tx
-        .select()
-        .from(apiKeys)
-        .where(eq(apiKeys.id, id))
-        .limit(1)
-        .for("update");
-      if (!key?.actorId) throw new NotFoundError("API key not found");
-      const authority = await keyManager(
-        tx,
-        context,
-        key.actorId,
-        new Date(),
-        true,
-      );
-      if (key.revokedAt) return publicKey(key);
-      const [revoked] = await tx
-        .update(apiKeys)
-        .set({ revokedAt: new Date(), revokedByActorId: authority.actor.id })
-        .where(eq(apiKeys.id, id))
-        .returning();
-      await tx
-        .insert(apiKeyEvents)
-        .values({ keyId: id, actorId: authority.actor.id, action: "revoked" });
-      return publicKey(revoked!);
-    },
-    { isolationLevel: "serializable" },
-  );
+  return withCredentialTransaction(db, async (tx) => {
+    const [key] = await tx
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.id, id))
+      .limit(1)
+      .for("update");
+    if (!key?.actorId) throw new NotFoundError("API key not found");
+    const authority = await keyManager(
+      tx,
+      context,
+      key.actorId,
+      new Date(),
+      true,
+    );
+    if (key.revokedAt) return publicKey(key);
+    const [revoked] = await tx
+      .update(apiKeys)
+      .set({ revokedAt: new Date(), revokedByActorId: authority.actor.id })
+      .where(eq(apiKeys.id, id))
+      .returning();
+    await tx
+      .insert(apiKeyEvents)
+      .values({ keyId: id, actorId: authority.actor.id, action: "revoked" });
+    return publicKey(revoked!);
+  });
 }
 
 export async function rotateScopedApiKey(
-  db: Database,
+  db: AuthDatabase,
   context: VerifiedRequestContext,
   id: string,
 ) {
-  return db.transaction(
-    async (tx) => {
-      const now = new Date();
-      const [key] = await tx
-        .select()
-        .from(apiKeys)
-        .where(eq(apiKeys.id, id))
-        .limit(1)
-        .for("update");
-      if (!key?.actorId) throw new NotFoundError("API key not found");
-      const authority = await keyManager(tx, context, key.actorId, now);
-      const live = await liveKeyAuthority(tx, key, now);
-      const grants = intersectGrants(live.grants, authority.grants);
-      if (!grants.length) throw new AuthorizationError();
-      enforceParentExpiry(key.expiresAt, authority.key);
-      if (
-        authority.key &&
-        authority.key.id !== key.id &&
-        (authority.actor.id !== key.issuedByActorId ||
-          (key.parentKeyId && key.parentKeyId !== authority.key.id))
-      )
-        throw new AuthorizationError();
-      if (authority.key && authority.key.id !== key.id && authority.depth >= 16)
-        throw new ValidationError("Maximum API key derivation depth exceeded");
-      const material = generateApiKey();
-      const [created] = await tx
-        .insert(apiKeys)
-        .values({
-          name: key.name,
-          actorId: key.actorId,
-          issuedByActorId: key.issuedByActorId,
-          grants,
-          expiresAt: key.expiresAt,
-          createdAt: now,
-          parentKeyId:
-            authority.key?.id === key.id
-              ? key.parentKeyId
-              : (key.parentKeyId ?? authority.key?.id),
-          rotatedFromId: key.id,
-          keyHash: material.hash,
-          keyPrefix: material.prefix,
-        })
-        .returning();
-      await tx
-        .update(apiKeys)
-        .set({ revokedAt: now, revokedByActorId: authority.actor.id })
-        .where(eq(apiKeys.id, id));
-      await tx.insert(apiKeyEvents).values([
-        { keyId: id, actorId: authority.actor.id, action: "revoked" },
-        {
-          keyId: created!.id,
-          actorId: authority.actor.id,
-          action: "rotated",
-          previousKeyId: id,
-        },
-      ]);
-      return {
-        ...publicKey(created!),
-        rawKey: material.raw,
+  return withCredentialTransaction(db, async (tx) => {
+    const now = new Date();
+    const [key] = await tx
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.id, id))
+      .limit(1)
+      .for("update");
+    if (!key?.actorId) throw new NotFoundError("API key not found");
+    const authority = await keyManager(tx, context, key.actorId, now);
+    const live = await liveKeyAuthority(tx, key, now);
+    const grants = intersectGrants(live.grants, authority.grants);
+    if (!grants.length) throw new AuthorizationError();
+    enforceParentExpiry(key.expiresAt, authority.key);
+    if (
+      authority.key &&
+      authority.key.id !== key.id &&
+      (authority.actor.id !== key.issuedByActorId ||
+        (key.parentKeyId && key.parentKeyId !== authority.key.id))
+    )
+      throw new AuthorizationError();
+    if (authority.key && authority.key.id !== key.id && authority.depth >= 16)
+      throw new ValidationError("Maximum API key derivation depth exceeded");
+    const material = generateApiKey();
+    const [created] = await tx
+      .insert(apiKeys)
+      .values({
+        name: key.name,
+        actorId: key.actorId,
+        issuedByActorId: key.issuedByActorId,
+        grants,
+        expiresAt: key.expiresAt,
+        createdAt: now,
+        parentKeyId:
+          authority.key?.id === key.id
+            ? key.parentKeyId
+            : (key.parentKeyId ?? authority.key?.id),
+        rotatedFromId: key.id,
+        keyHash: material.hash,
+        keyPrefix: material.prefix,
+      })
+      .returning();
+    await tx
+      .update(apiKeys)
+      .set({ revokedAt: now, revokedByActorId: authority.actor.id })
+      .where(eq(apiKeys.id, id));
+    await tx.insert(apiKeyEvents).values([
+      { keyId: id, actorId: authority.actor.id, action: "revoked" },
+      {
+        keyId: created!.id,
+        actorId: authority.actor.id,
+        action: "rotated",
         previousKeyId: id,
-      };
-    },
-    { isolationLevel: "serializable" },
-  );
+      },
+    ]);
+    return {
+      ...publicKey(created!),
+      rawKey: material.raw,
+      previousKeyId: id,
+    };
+  });
 }
 
 /** @deprecated Legacy transport compatibility only; never creates a bound credential. Retire in A4. */

@@ -39,3 +39,4 @@ export * as agentUsageService from "./agent-usage";
 export * as authPrincipalService from "./auth-principals";
 
 export * from "./authentication";
+export * from "./identity-management";

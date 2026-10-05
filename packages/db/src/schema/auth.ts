@@ -296,7 +296,10 @@ export const authRateLimits = twSchema.table(
     count: integer("count").notNull(),
     windowStartedAt: time("window_started_at").notNull(),
   },
-  (table) => [check("auth_rate_limits_count_check", sql`${table.count} > 0`)],
+  (table) => [
+    check("auth_rate_limits_count_check", sql`${table.count} > 0`),
+    index("auth_rate_limits_window_idx").on(table.windowStartedAt),
+  ],
 );
 
 /** Server-generated metadata is limited to non-secret policy decisions. */
