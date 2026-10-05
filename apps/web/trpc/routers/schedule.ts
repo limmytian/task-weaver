@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, publicProcedure } from "../init";
+import { router, resourceProcedure } from "../init";
 import {
   acquireDueSchedulesSchema,
   createScheduleSchema,
@@ -9,35 +9,35 @@ import {
 } from "@task-weaver/core";
 
 export const scheduleRouter = router({
-  list: publicProcedure
+  list: resourceProcedure
     .input(listSchedulesSchema)
     .query(async ({ ctx, input }) => scheduleService.listSchedules(ctx.db, input)),
 
-  get: publicProcedure
+  get: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => scheduleService.getSchedule(ctx.db, input.id)),
 
-  create: publicProcedure
+  create: resourceProcedure
     .input(createScheduleSchema)
     .mutation(async ({ ctx, input }) => scheduleService.createSchedule(ctx.db, input, ctx.actor)),
 
-  update: publicProcedure
+  update: resourceProcedure
     .input(z.object({ id: z.string().uuid(), data: updateScheduleSchema }))
     .mutation(async ({ ctx, input }) => scheduleService.updateSchedule(ctx.db, input.id, input.data, ctx.actor)),
 
-  archive: publicProcedure
+  archive: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => scheduleService.archiveSchedule(ctx.db, input.id, ctx.actor)),
 
-  runNow: publicProcedure
+  runNow: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => scheduleService.runScheduleNow(ctx.db, input.id, ctx.actor)),
 
-  runs: publicProcedure
+  runs: resourceProcedure
     .input(z.object({ scheduleId: z.string().uuid() }))
     .query(async ({ ctx, input }) => scheduleService.listScheduleRuns(ctx.db, input.scheduleId)),
 
-  acquireDue: publicProcedure
+  acquireDue: resourceProcedure
     .input(acquireDueSchedulesSchema)
     .mutation(async ({ ctx, input }) => scheduleService.acquireDueSchedules(ctx.db, input, ctx.actor)),
 });

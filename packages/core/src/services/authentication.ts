@@ -555,7 +555,8 @@ export function createAuthenticationService(
       );
   }
   return guardAuthenticationOperations({
-    csrfChallenge: csrf.challenge,
+    csrfChallenge: (headers?: Headers) =>
+      headers ? csrf.challengeForRequest(headers) : csrf.challenge(),
     assertMutation: mutations,
     resolve,
     async bootstrap(headers: Headers, input: unknown, clientAddress: string) {

@@ -1,21 +1,45 @@
 import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { RealtimeProvider } from "@/components/realtime-provider";
 import { AssistantDialog } from "@/components/assistant-dialog";
 import { WebIdentityProvider } from "@/components/web-identity-provider";
 import { navigation } from "@/lib/navigation";
-import { resolveActor } from "@task-weaver/contracts";
+import {
+  AuthenticationError,
+  AuthorizationError,
+} from "@task-weaver/contracts";
+import { resolveWebSession } from "@/lib/authenticated-session";
+import { getWebAuthenticationRuntime } from "@/trpc/init";
 
 export default async function ProjectsLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [cookieStore, requestHeaders] = await Promise.all([cookies(), headers()]);
-  const actor = resolveActor(Object.fromEntries(requestHeaders.entries()));
+  const [cookieStore, requestHeaders] = await Promise.all([
+    cookies(),
+    headers(),
+  ]);
+  const actor = await (async () => {
+    try {
+      return await resolveWebSession(
+        new Headers(requestHeaders),
+        getWebAuthenticationRuntime().auth,
+      );
+    } catch (error) {
+      if (
+        error instanceof AuthenticationError ||
+        error instanceof AuthorizationError
+      )
+        redirect("/login");
+      throw new Error("Sign-in is unavailable");
+    }
+  })();
   const sidebarState = cookieStore.get("sidebar_state")?.value;
-  const defaultSidebarOpen = sidebarState == null ? true : sidebarState === "true";
+  const defaultSidebarOpen =
+    sidebarState == null ? true : sidebarState === "true";
 
   return (
     <WebIdentityProvider actor={actor}>
@@ -25,7 +49,11 @@ export default async function ProjectsLayout({
           <RealtimeProvider>
             {children}
             <div className="fixed right-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-40 md:right-4 md:bottom-4">
-              <AssistantDialog contextKind="global" label="Chat" triggerClassName="shadow-md" />
+              <AssistantDialog
+                contextKind="global"
+                label="Chat"
+                triggerClassName="shadow-md"
+              />
             </div>
           </RealtimeProvider>
         </SidebarInset>

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, publicProcedure } from "../init";
+import { router, resourceProcedure } from "../init";
 import {
   createEmbeddingProfileSchema,
   embeddingJobKindSchema,
@@ -22,82 +22,82 @@ function providerForProfile(profile: Awaited<ReturnType<typeof embeddingService.
 }
 
 export const embeddingRouter = router({
-  list: publicProcedure
+  list: resourceProcedure
     .query(async ({ ctx }) => embeddingService.listEmbeddingProfiles(ctx.db)),
 
-  get: publicProcedure
+  get: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => embeddingService.getEmbeddingProfile(ctx.db, input.id)),
 
-  create: publicProcedure
+  create: resourceProcedure
     .input(createEmbeddingProfileSchema)
     .mutation(async ({ ctx, input }) => embeddingService.createEmbeddingProfile(ctx.db, input, ctx.actor)),
 
-  update: publicProcedure
+  update: resourceProcedure
     .input(z.object({ id: z.string().uuid(), data: updateEmbeddingProfileSchema }))
     .mutation(async ({ ctx, input }) => embeddingService.updateEmbeddingProfile(ctx.db, input.id, input.data, ctx.actor)),
 
-  test: publicProcedure
+  test: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const profile = await embeddingService.getEmbeddingProfile(ctx.db, input.id);
       return { ok: true, capabilities: await providerForProfile(profile).validateConfiguration() };
     }),
 
-  enable: publicProcedure
+  enable: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const profile = await embeddingService.getEmbeddingProfile(ctx.db, input.id);
       return embeddingService.enableEmbeddingProfile(ctx.db, profile.id, ctx.actor, providerForProfile(profile));
     }),
 
-  disable: publicProcedure
+  disable: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => embeddingService.setEmbeddingProfileStatus(ctx.db, input.id, "disabled", ctx.actor)),
 
-  preview: publicProcedure
+  preview: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => embeddingService.previewEmbeddingRebuild(ctx.db, input.id)),
 
-  usage: publicProcedure
+  usage: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => embeddingService.getEmbeddingUsage(ctx.db, input.id)),
 
-  generations: publicProcedure
+  generations: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => embeddingService.listEmbeddingGenerations(ctx.db, input.id)),
 
-  activateGeneration: publicProcedure
+  activateGeneration: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => embeddingService.markEmbeddingGenerationActive(ctx.db, input.id, ctx.actor)),
 
-  rebuild: publicProcedure
+  rebuild: resourceProcedure
     .input(z.object({ id: z.string().uuid(), kind: embeddingJobKindSchema.exclude(["incremental"]).default("full") }))
     .mutation(async ({ ctx, input }) => embeddingService.startEmbeddingRebuild(ctx.db, input.id, input.kind, ctx.actor)),
 
-  cleanup: publicProcedure
+  cleanup: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => ({
       deletedGenerations: await embeddingService.cleanupRetiredEmbeddingGenerations(ctx.db, input.id),
     })),
 
-  job: publicProcedure
+  job: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => embeddingService.getEmbeddingJob(ctx.db, input.id)),
 
-  jobItems: publicProcedure
+  jobItems: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => embeddingService.listEmbeddingJobItems(ctx.db, input.id)),
 
-  cancelJob: publicProcedure
+  cancelJob: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => embeddingService.requestEmbeddingJobCancellation(ctx.db, input.id, ctx.actor.id)),
 
-  resumeJob: publicProcedure
+  resumeJob: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => embeddingService.resumeEmbeddingJob(ctx.db, input.id, ctx.actor.id)),
 
-  retryFailed: publicProcedure
+  retryFailed: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => embeddingService.retryFailedEmbeddingJobItems(ctx.db, input.id, ctx.actor.id)),
 });

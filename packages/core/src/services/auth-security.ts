@@ -147,6 +147,11 @@ export function readCookies(headers: Headers) {
 }
 
 /** Signed double-submit challenge also protects anonymous login/bootstrap/activation. */
+export interface CsrfChallenge {
+  csrfToken: string;
+  expiresAt: string;
+  headers: Headers;
+}
 export function createCsrfPolicy(
   secret: string,
   origins: readonly string[],
@@ -155,17 +160,37 @@ export function createCsrfPolicy(
   const cookieName = secure ? "__Host-tw.csrf" : "tw.csrf";
   const sign = (value: string) =>
     createHmac("sha256", secret).update(`tw.csrf:${value}`).digest("hex");
+  const challenge = (now = new Date()): CsrfChallenge => {
+    const payload = `${now.getTime()}.${randomBytes(32).toString("hex")}`;
+    const token = `${payload}.${sign(payload)}`;
+    return {
+      csrfToken: token,
+      expiresAt: new Date(now.getTime() + 3_600_000).toISOString(),
+      headers: new Headers({
+        "set-cookie": `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600${secure ? "; Secure" : ""}`,
+        "cache-control": "no-store",
+      }),
+    };
+  };
   return {
-    challenge(now = new Date()): { csrfToken: string; headers: Headers } {
-      const payload = `${now.getTime()}.${randomBytes(32).toString("hex")}`;
-      const token = `${payload}.${sign(payload)}`;
-      return {
-        csrfToken: token,
-        headers: new Headers({
-          "set-cookie": `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600${secure ? "; Secure" : ""}`,
-          "cache-control": "no-store",
-        }),
-      };
+    challenge,
+    challengeForRequest(headers: Headers, now = new Date()): CsrfChallenge {
+      const token = readCookies(headers).get(cookieName) ?? "";
+      const match = /^(\d{13})\.([0-9a-f]{64})\.([0-9a-f]{64})$/.exec(token);
+      const issuedAt = Number(match?.[1]);
+      // Preserve a still-valid browser challenge across REST, Next and tabs without extending its lifetime.
+      if (
+        match &&
+        issuedAt <= now.getTime() &&
+        now.getTime() - issuedAt < 3_540_000 &&
+        constantTimeEqual(match[3]!, sign(`${match[1]}.${match[2]}`))
+      )
+        return {
+          csrfToken: token,
+          expiresAt: new Date(issuedAt + 3_600_000).toISOString(),
+          headers: new Headers({ "cache-control": "no-store" }),
+        };
+      return challenge(now);
     },
     assert(headers: Headers, now = new Date()) {
       const origin = headers.get("origin");

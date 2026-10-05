@@ -6,10 +6,10 @@ import {
   requirementService,
   taskService,
 } from "@task-weaver/core";
-import { router, publicProcedure } from "../init";
+import { router, resourceProcedure } from "../init";
 // Read access follows the existing instance Web boundary; reporting is REST API-key only.
 export const agentUsageRouter = router({
-  scopes: publicProcedure
+  scopes: resourceProcedure
     .input(
       z.object({
         kind: z.enum(["project", "requirement", "task"]),
@@ -57,13 +57,13 @@ export const agentUsageRouter = router({
         .parse(result.items)
         .map((item) => ({ id: item.id, label: item.title }));
     }),
-  runs: publicProcedure
+  runs: resourceProcedure
     .input(agentUsageQuerySchema)
     .query(({ ctx, input }) => agentUsageService.listUsage(ctx.db, input)),
-  summary: publicProcedure
+  summary: resourceProcedure
     .input(agentUsageQuerySchema)
     .query(({ ctx, input }) => agentUsageService.summarizeUsage(ctx.db, input)),
-  run: publicProcedure
+  run: resourceProcedure
     .input(
       z.object({ projectId: z.string().uuid(), processId: z.string().uuid() }),
     )

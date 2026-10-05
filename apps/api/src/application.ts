@@ -1,15 +1,22 @@
 import { Hono } from "hono";
 import type { Database } from "@task-weaver/db";
-import { initRealtime, shutdown as shutdownRealtime, subscribe } from "@task-weaver/realtime";
+import {
+  initRealtime,
+  shutdown as shutdownRealtime,
+  subscribe,
+} from "@task-weaver/realtime";
 import type { RealtimeEvent } from "@task-weaver/realtime";
 import {
   skillPackageStorageService,
   skillPresetService,
-  webhookService,
+  authenticationConfiguration,
+  createAuthenticationRuntime,
+  authenticationFailure,
 } from "@task-weaver/core";
 import { resolve } from "node:path";
-import { actorMiddleware, type Env } from "./middleware/actor.js";
-import { apiKeyMiddleware } from "./middleware/api-key.js";
+import type { Env } from "./middleware/actor.js";
+import { authenticationMiddleware } from "./middleware/authentication.js";
+import authenticationRoutes from "./routes/authentication.js";
 import agentUsageRoutes from "./routes/agent-usage.js";
 import activityRoutes from "./routes/activity.js";
 import apiKeyRoutes from "./routes/api-keys.js";
@@ -44,12 +51,36 @@ interface ApplicationLogger {
   warn(message: string, details?: Record<string, unknown>): void;
   error(message: string, error?: unknown): void;
 }
-interface ApiRuntimeContext { db: Database; logger: ApplicationLogger; signal: AbortSignal }
+interface ApiRuntimeContext {
+  db: Database;
+  logger: ApplicationLogger;
+  signal: AbortSignal;
+}
 interface ApplicationServices {
-  apiRoutes: Array<{ id: string; method: string; path: string; mountPath?: string; route: Hono<any> }>;
-  workers: Array<{ id: string; start(context: ApiRuntimeContext): void | Promise<void>; stop?(context: ApiRuntimeContext): Promise<void> }>;
-  eventSubscribers: Array<{ id: string; eventTypes: readonly RealtimeEvent["type"][]; handle(event: RealtimeEvent, context: ApiRuntimeContext): void | Promise<void> }>;
-  healthChecks: Array<{ id: string; check(): { status: "healthy" | "degraded" } }>;
+  apiRoutes: Array<{
+    id: string;
+    method: string;
+    path: string;
+    mountPath?: string;
+    route: Hono<any>;
+  }>;
+  workers: Array<{
+    id: string;
+    start(context: ApiRuntimeContext): void | Promise<void>;
+    stop?(context: ApiRuntimeContext): Promise<void>;
+  }>;
+  eventSubscribers: Array<{
+    id: string;
+    eventTypes: readonly RealtimeEvent["type"][];
+    handle(
+      event: RealtimeEvent,
+      context: ApiRuntimeContext,
+    ): void | Promise<void>;
+  }>;
+  healthChecks: Array<{
+    id: string;
+    check(): { status: "healthy" | "degraded" };
+  }>;
 }
 export interface ApiApplicationOptions {
   db: Database;
@@ -81,42 +112,152 @@ const consoleLogger: ApplicationLogger = {
 function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
   return {
     apiRoutes: [
-      { id: "agent-usage", method: "GET", path: "/api/v1/agent-usage", route: agentUsageRoutes },
-      { id: "version", method: "GET", path: "/api/v1/version", route: versionRoutes },
-      { id: "projects", method: "GET", path: "/api/v1/projects", route: projectRoutes },
-      { id: "tasks", method: "GET", path: "/api/v1/tasks", mountPath: "/api/v1", route: taskRoutes },
-      { id: "documents", method: "GET", path: "/api/v1/documents", route: documentRoutes },
-      { id: "search", method: "GET", path: "/api/v1/search", route: searchRoutes },
-      { id: "requirements", method: "GET", path: "/api/v1/requirements", mountPath: "/api/v1", route: requirementRoutes },
-      { id: "activity", method: "GET", path: "/api/v1/activity", route: activityRoutes },
-      { id: "api-keys", method: "GET", path: "/api/v1/api-keys", route: apiKeyRoutes },
-      { id: "webhooks", method: "GET", path: "/api/v1/webhooks", route: webhookRoutes },
-      { id: "context", method: "GET", path: "/api/v1/context", route: contextRoutes },
+      {
+        id: "agent-usage",
+        method: "GET",
+        path: "/api/v1/agent-usage",
+        route: agentUsageRoutes,
+      },
+      {
+        id: "version",
+        method: "GET",
+        path: "/api/v1/version",
+        route: versionRoutes,
+      },
+      {
+        id: "projects",
+        method: "GET",
+        path: "/api/v1/projects",
+        route: projectRoutes,
+      },
+      {
+        id: "tasks",
+        method: "GET",
+        path: "/api/v1/tasks",
+        mountPath: "/api/v1",
+        route: taskRoutes,
+      },
+      {
+        id: "documents",
+        method: "GET",
+        path: "/api/v1/documents",
+        route: documentRoutes,
+      },
+      {
+        id: "search",
+        method: "GET",
+        path: "/api/v1/search",
+        route: searchRoutes,
+      },
+      {
+        id: "requirements",
+        method: "GET",
+        path: "/api/v1/requirements",
+        mountPath: "/api/v1",
+        route: requirementRoutes,
+      },
+      {
+        id: "activity",
+        method: "GET",
+        path: "/api/v1/activity",
+        route: activityRoutes,
+      },
+      {
+        id: "api-keys",
+        method: "GET",
+        path: "/api/v1/api-keys",
+        route: apiKeyRoutes,
+      },
+      {
+        id: "webhooks",
+        method: "GET",
+        path: "/api/v1/webhooks",
+        route: webhookRoutes,
+      },
+      {
+        id: "context",
+        method: "GET",
+        path: "/api/v1/context",
+        route: contextRoutes,
+      },
       { id: "mcp", method: "GET", path: "/api/v1/mcp", route: mcpRoutes },
-      { id: "memories", method: "GET", path: "/api/v1/memories", route: memoryRoutes },
-      { id: "schedules", method: "GET", path: "/api/v1/schedules", mountPath: "/api/v1", route: scheduleRoutes },
+      {
+        id: "memories",
+        method: "GET",
+        path: "/api/v1/memories",
+        route: memoryRoutes,
+      },
+      {
+        id: "schedules",
+        method: "GET",
+        path: "/api/v1/schedules",
+        mountPath: "/api/v1",
+        route: scheduleRoutes,
+      },
       { id: "ti-agent", method: "GET", path: "/api/v1/ti", route: tiRoutes },
-      { id: "assistant", method: "GET", path: "/api/v1/assistant", route: assistantRoutes },
+      {
+        id: "assistant",
+        method: "GET",
+        path: "/api/v1/assistant",
+        route: assistantRoutes,
+      },
       { id: "plans", method: "POST", path: "/api/v1/plans", route: planRoutes },
-      { id: "graphql", method: "POST", path: "/api/v1/graphql", route: graphqlRoutes },
-      { id: "daemons", method: "GET", path: "/api/v1/daemons", route: daemonRoutes },
-      { id: "observability", method: "GET", path: "/api/v1/observability", route: observabilityRoutes },
-      { id: "repositories", method: "GET", path: "/api/v1/repositories", mountPath: "/api/v1", route: repositoryRoutes },
-      { id: "reviews", method: "POST", path: "/api/v1/reviews", mountPath: "/api/v1", route: reviewRoutes },
-      { id: "embeddings", method: "GET", path: "/api/v1/embeddings", route: embeddingRoutes },
+      {
+        id: "graphql",
+        method: "POST",
+        path: "/api/v1/graphql",
+        route: graphqlRoutes,
+      },
+      {
+        id: "daemons",
+        method: "GET",
+        path: "/api/v1/daemons",
+        route: daemonRoutes,
+      },
+      {
+        id: "observability",
+        method: "GET",
+        path: "/api/v1/observability",
+        route: observabilityRoutes,
+      },
+      {
+        id: "repositories",
+        method: "GET",
+        path: "/api/v1/repositories",
+        mountPath: "/api/v1",
+        route: repositoryRoutes,
+      },
+      {
+        id: "reviews",
+        method: "POST",
+        path: "/api/v1/reviews",
+        mountPath: "/api/v1",
+        route: reviewRoutes,
+      },
+      {
+        id: "embeddings",
+        method: "GET",
+        path: "/api/v1/embeddings",
+        route: embeddingRoutes,
+      },
     ],
     workers: [
       {
         id: "skill-preset-sync",
         start: async (context: ApiRuntimeContext) => {
           if (env.TW_PRESET_SKILLS_SYNC === "disabled") return;
-          const storageDirectory = env.SKILL_PACKAGE_STORAGE_DIR
-            ?? resolve(process.cwd(), "data", "skill-packages");
+          const storageDirectory =
+            env.SKILL_PACKAGE_STORAGE_DIR ??
+            resolve(process.cwd(), "data", "skill-packages");
           const result = await skillPresetService.syncGitManagedSkillPackages(
             context.db,
-            new skillPackageStorageService.LocalSkillPackageStorageAdapter(storageDirectory),
+            new skillPackageStorageService.LocalSkillPackageStorageAdapter(
+              storageDirectory,
+            ),
           );
-          context.logger.info("Git-managed skill presets synchronized", { ...result });
+          context.logger.info("Git-managed skill presets synchronized", {
+            ...result,
+          });
         },
       },
       {
@@ -128,27 +269,17 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
         },
       },
     ],
-    eventSubscribers: [{
-      id: "webhook-delivery",
-      eventTypes: [
-        "task_created", "task_updated", "task_status_changed", "task_commented",
-        "task_deleted", "task_claimed", "task_released", "document_created",
-        "document_updated", "document_deleted", "document_linked", "document_unlinked",
-        "document_task_linked", "document_task_unlinked", "requirement_created",
-        "requirement_updated", "requirement_deleted", "requirement_claimed",
-        "requirement_released", "repository_retry_requested", "daemon_status_changed",
-        "daemon_progress_updated", "schedule_created", "schedule_updated",
-        "schedule_run_created",
-      ],
-      handle: async (event, context: ApiRuntimeContext) => {
-        await webhookService.deliverEvent(context.db, event);
-      },
-    }],
-    healthChecks: [{ id: "core-api", check: () => ({ status: "healthy" as const }) }],
+    // B3 must authorize persisted webhook delivery before restoring subscriptions.
+    eventSubscribers: [],
+    healthChecks: [
+      { id: "core-api", check: () => ({ status: "healthy" as const }) },
+    ],
   };
 }
 
-export function createApiApplication(options: ApiApplicationOptions): ApiApplication {
+export function createApiApplication(
+  options: ApiApplicationOptions,
+): ApiApplication {
   const logger = options.logger ?? consoleLogger;
   const runtimeDependencies: ApiRuntimeDependencies = {
     initRealtime,
@@ -157,14 +288,18 @@ export function createApiApplication(options: ApiApplicationOptions): ApiApplica
     ...options.runtimeDependencies,
   };
   const env = options.env ?? process.env;
+  const auth = createAuthenticationRuntime(
+    options.db,
+    authenticationConfiguration(env),
+  );
   const services = applicationServices(env);
   const gateway = createPartnersGatewayRuntime(options.db, env);
   services.apiRoutes.push(...gateway.apiRoutes);
-  services.workers.push(...gateway.workers);
-  services.eventSubscribers.push(...gateway.eventSubscribers);
+  // C2 must bind persisted Gateway work to live execution authority before it can start.
+  // Mounting its routes does not enable workers or outbound event delivery during A4 staging.
   services.healthChecks.push(...gateway.healthChecks);
   const controller = new AbortController();
-  const startedWorkers: typeof services.workers[number][] = [];
+  const startedWorkers: (typeof services.workers)[number][] = [];
   const unsubscribe: Array<() => void> = [];
   let started = false;
   let stopped = false;
@@ -176,31 +311,47 @@ export function createApiApplication(options: ApiApplicationOptions): ApiApplica
   const app = new Hono<Env>();
   app.use("*", async (requestContext, next) => {
     requestContext.set("db", options.db);
+    requestContext.set("auth", auth);
     await next();
   });
-  app.use("*", apiKeyMiddleware);
-  app.use("*", actorMiddleware);
+  app.use("*", authenticationMiddleware);
+  app.onError((error, c) => {
+    const failure = authenticationFailure(error);
+    c.header("cache-control", "no-store");
+    if ("retryAfterSeconds" in failure)
+      c.header("retry-after", String(failure.retryAfterSeconds));
+    return c.json({ error: failure.error, code: failure.code }, failure.status);
+  });
+  app.notFound((c) =>
+    c.json({ error: "Resource not found", code: "not_found" }, 404),
+  );
+  app.route("/api/v1/auth", authenticationRoutes);
   app.get("/health", async (requestContext) => {
-    const checks = await Promise.all(services.healthChecks.map(async (healthCheck) => {
-      try {
-        return { id: healthCheck.id, ...await healthCheck.check() };
-      } catch (error) {
-        return {
-          id: healthCheck.id,
-          status: "unhealthy" as const,
-          message: error instanceof Error ? error.message : String(error),
-        };
-      }
-    }));
+    const checks = await Promise.all(
+      services.healthChecks.map(async (healthCheck) => {
+        try {
+          return { id: healthCheck.id, ...(await healthCheck.check()) };
+        } catch {
+          return {
+            id: healthCheck.id,
+            status: "unhealthy" as const,
+            message: "Health check unavailable",
+          };
+        }
+      }),
+    );
     const status = checks.some((check) => check.status === "unhealthy")
       ? "unhealthy"
-      : checks.some((check) => check.status === "degraded") ? "degraded" : "ok";
+      : checks.some((check) => check.status === "degraded")
+        ? "degraded"
+        : "ok";
     return requestContext.json(
       { status, timestamp: new Date().toISOString(), checks },
       status === "unhealthy" ? 503 : 200,
     );
   });
-  for (const route of services.apiRoutes) app.route(route.mountPath ?? route.path, route.route);
+  for (const route of services.apiRoutes)
+    app.route(route.mountPath ?? route.path, route.route);
 
   async function stopRuntime(): Promise<void> {
     controller.abort();
@@ -221,26 +372,35 @@ export function createApiApplication(options: ApiApplicationOptions): ApiApplica
     }
     started = false;
     stopped = true;
-    if (errors.length > 0) throw new AggregateError(errors, "API runtime shutdown failed");
+    if (errors.length > 0)
+      throw new AggregateError(errors, "API runtime shutdown failed");
   }
 
   return {
     app,
     async start() {
       if (started) return;
-      if (stopped) throw new Error("API application cannot restart after shutdown");
+      if (stopped)
+        throw new Error("API application cannot restart after shutdown");
       try {
         await runtimeDependencies.initRealtime(options.databaseUrl);
       } catch (error) {
         logger.error("Failed to initialize realtime (PG NOTIFY)", error);
       }
       for (const subscriber of services.eventSubscribers) {
-        unsubscribe.push(runtimeDependencies.subscribe((event) => {
-          if (!subscriber.eventTypes.includes(event.type)) return;
-          Promise.resolve(subscriber.handle(event, context)).catch((error: unknown) => {
-            logger.error(`Event subscriber '${subscriber.id}' failed`, error);
-          });
-        }));
+        unsubscribe.push(
+          runtimeDependencies.subscribe((event) => {
+            if (!subscriber.eventTypes.includes(event.type)) return;
+            Promise.resolve(subscriber.handle(event, context)).catch(
+              (error: unknown) => {
+                logger.error(
+                  `Event subscriber '${subscriber.id}' failed`,
+                  error,
+                );
+              },
+            );
+          }),
+        );
       }
       try {
         for (const worker of services.workers) {

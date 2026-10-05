@@ -248,6 +248,15 @@ export const issueScopedApiKeySchema = z
     expiresAt: timestampSchema.nullable(),
   })
   .strict();
+export const credentialSubjectSchema = z
+  .object({ actorId: idSchema.optional() })
+  .strict();
+export const issueOwnedApiKeySchema = issueScopedApiKeySchema.extend({
+  actorId: idSchema.optional(),
+});
+export const transferProjectOwnershipSchema = z
+  .object({ actorId: idSchema })
+  .strict();
 export const accountLoginSchema = z
   .object({
     email: z.string().email().max(320),

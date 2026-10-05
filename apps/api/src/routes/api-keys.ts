@@ -1,86 +1,64 @@
 import { Hono } from "hono";
-import { apiKeyService, NotFoundError } from "@task-weaver/core";
-import type { Env } from "../middleware/actor.js";
+import { bodyLimit } from "hono/body-limit";
+import {
+  issueOwnedApiKeySchema,
+  credentialSubjectSchema,
+  takeAuthenticationResult,
+} from "@task-weaver/core";
 import { z } from "zod";
+import type { Env } from "../middleware/actor.js";
 
-const apiKeysRouter = new Hono<Env>();
-
-const createApiKeySchema = z.object({
-  name: z.string().min(1).max(255),
-  permissions: z.record(z.boolean()).optional(),
-  expiresAt: z.string().datetime().optional(),
+const apiKeys = new Hono<Env>();
+apiKeys.use("*", bodyLimit({ maxSize: 32_768 }));
+const query = credentialSubjectSchema;
+const issue = issueOwnedApiKeySchema;
+apiKeys.get("/", async (c) => {
+  const { actorId } = query.parse(c.req.query());
+  return c.json(
+    await c
+      .get("auth")
+      .identity.listKeys(
+        c.req.raw.headers,
+        actorId ?? c.get("identity").actor.id,
+      ),
+  );
 });
-
-const rotateApiKeySchema = z.object({
-  name: z.string().min(1).max(255).optional(),
-  expiresAt: z.string().datetime().optional(),
+apiKeys.post("/", async (c) => {
+  const { actorId, ...input } = issue.parse(await c.req.json());
+  const result = await c
+    .get("auth")
+    .identity.issueKey(
+      c.req.raw.headers,
+      actorId ?? c.get("identity").actor.id,
+      input,
+    );
+  return c.json(takeAuthenticationResult(result, new Headers()), 201);
 });
-
-// GET / - List all API keys (never returns raw key)
-apiKeysRouter.get("/", async (c) => {
-  const db = c.get("db");
-  const keys = await apiKeyService.listApiKeys(db);
-  return c.json(keys);
+apiKeys.post("/:id/rotate", async (c) => {
+  const { actorId } = query.parse(c.req.query());
+  // Rotation preserves grants and expiry; changes require explicit issuance rather than silent widening.
+  z.object({})
+    .strict()
+    .parse(await c.req.json());
+  const result = await c
+    .get("auth")
+    .identity.rotateKey(
+      c.req.raw.headers,
+      actorId ?? c.get("identity").actor.id,
+      c.req.param("id"),
+    );
+  return c.json(takeAuthenticationResult(result, new Headers()));
 });
-
-// POST / - Create a new API key (returns raw key once)
-apiKeysRouter.post("/", async (c) => {
-  const db = c.get("db");
-  const body = await c.req.json();
-  const parsed = createApiKeySchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
-  }
-
-  const result = await apiKeyService.createApiKey(db, {
-    name: parsed.data.name,
-    permissions: parsed.data.permissions,
-    expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : undefined,
-  });
-
-  return c.json(result, 201);
+apiKeys.delete("/:id", async (c) => {
+  const { actorId } = query.parse(c.req.query());
+  return c.json(
+    await c
+      .get("auth")
+      .identity.revokeKey(
+        c.req.raw.headers,
+        actorId ?? c.get("identity").actor.id,
+        c.req.param("id"),
+      ),
+  );
 });
-
-// POST /:id/rotate - Rotate an API key (revoke old, create new atomically)
-apiKeysRouter.post("/:id/rotate", async (c) => {
-  const db = c.get("db");
-  const id = c.req.param("id");
-  const body = await c.req.json().catch(() => ({}));
-  const parsed = rotateApiKeySchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
-  }
-
-  try {
-    const result = await apiKeyService.rotateApiKey(db, id, {
-      name: parsed.data.name,
-      expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : undefined,
-    });
-    return c.json(result);
-  } catch (err) {
-    if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
-    }
-    throw err;
-  }
-});
-
-// DELETE /:id - Revoke an API key
-apiKeysRouter.delete("/:id", async (c) => {
-  const db = c.get("db");
-  const id = c.req.param("id");
-
-  try {
-    const result = await apiKeyService.revokeApiKey(db, id);
-    return c.json(result);
-  } catch (err) {
-    if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
-    }
-    throw err;
-  }
-});
-
-export default apiKeysRouter;
+export default apiKeys;

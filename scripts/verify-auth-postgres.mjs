@@ -57,11 +57,22 @@ try {
     ["@task-weaver/db", "src/auth.postgres-e2e.test.ts"],
     ["@task-weaver/core", "src/services/api-keys.postgres-e2e.test.ts"],
     ["@task-weaver/core", "src/services/authentication.postgres-e2e.test.ts"],
-    ["@task-weaver/core", "src/services/identity-management.postgres-e2e.test.ts"],
+    [
+      "@task-weaver/core",
+      "src/services/identity-management.postgres-e2e.test.ts",
+    ],
+    ["@task-weaver/api", "src/authentication.postgres-e2e.test.ts"],
+    [null, "scripts/auth-transports.postgres-e2e.test.ts"],
   ]) {
     const result = spawnSync(
       "pnpm",
-      ["--filter", packageName, "exec", "tsx", "--test", testFile],
+      [
+        ...(packageName ? ["--filter", packageName] : []),
+        "exec",
+        "tsx",
+        "--test",
+        testFile,
+      ],
       {
         encoding: "utf8",
         timeout: 180_000,

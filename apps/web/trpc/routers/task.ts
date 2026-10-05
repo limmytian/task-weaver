@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, publicProcedure } from "../init";
+import { router, resourceProcedure } from "../init";
 import {
   taskService,
   createTaskSchema,
@@ -13,25 +13,25 @@ import {
 } from "@task-weaver/core";
 
 export const taskRouter = router({
-  list: publicProcedure
+  list: resourceProcedure
     .input(listTasksSchema)
     .query(async ({ ctx, input }) => {
       return taskService.listTasks(ctx.db, input);
     }),
 
-  get: publicProcedure
+  get: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       return taskService.getTaskDetail(ctx.db, input.id);
     }),
 
-  create: publicProcedure
+  create: resourceProcedure
     .input(createTaskSchema)
     .mutation(async ({ ctx, input }) => {
       return taskService.createTask(ctx.db, input, ctx.actor);
     }),
 
-  listPersonal: publicProcedure
+  listPersonal: resourceProcedure
     .input(z.object({
       personalOwnerId: z.string().optional(),
       personalOwnerType: z.enum(["human", "agent"]).optional(),
@@ -50,19 +50,19 @@ export const taskRouter = router({
       });
     }),
 
-  createPersonal: publicProcedure
+  createPersonal: resourceProcedure
     .input(createPersonalTaskSchema)
     .mutation(async ({ ctx, input }) => {
       return taskService.createPersonalTask(ctx.db, input, ctx.actor);
     }),
 
-  update: publicProcedure
+  update: resourceProcedure
     .input(z.object({ id: z.string().uuid(), data: updateTaskSchema }))
     .mutation(async ({ ctx, input }) => {
       return taskService.updateTask(ctx.db, input.id, input.data, ctx.actor);
     }),
 
-  updateStatus: publicProcedure
+  updateStatus: resourceProcedure
     .input(z.object({ id: z.string().uuid() }).merge(updateTaskStatusSchema))
     .mutation(async ({ ctx, input }) => {
       return taskService.updateTaskStatus(
@@ -74,25 +74,25 @@ export const taskRouter = router({
       );
     }),
 
-  delete: publicProcedure
+  delete: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return taskService.deleteTask(ctx.db, input.id, ctx.actor);
     }),
 
-  removeDependency: publicProcedure
+  removeDependency: resourceProcedure
     .input(z.object({ depId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return taskService.removeTaskDependency(ctx.db, input.depId);
     }),
 
-  addComment: publicProcedure
+  addComment: resourceProcedure
     .input(z.object({ taskId: z.string().uuid() }).merge(createTaskCommentSchema))
     .mutation(async ({ ctx, input }) => {
       return taskService.addTaskComment(ctx.db, input.taskId, input.content, ctx.actor);
     }),
 
-  addNote: publicProcedure
+  addNote: resourceProcedure
     .input(z.object({ taskId: z.string().uuid() }).merge(createTaskNoteSchema))
     .mutation(async ({ ctx, input }) => {
       return taskService.addTaskNote(
@@ -104,7 +104,7 @@ export const taskRouter = router({
       );
     }),
 
-  addDependency: publicProcedure
+  addDependency: resourceProcedure
     .input(z.object({ taskId: z.string().uuid() }).merge(createTaskDependencySchema))
     .mutation(async ({ ctx, input }) => {
       return taskService.addTaskDependency(
@@ -117,7 +117,7 @@ export const taskRouter = router({
       );
     }),
 
-  board: publicProcedure
+  board: resourceProcedure
     .input(z.object({
       projectId: z.string().uuid(),
       includeTerminal: z.boolean().optional(),
@@ -130,13 +130,13 @@ export const taskRouter = router({
       });
     }),
 
-  gantt: publicProcedure
+  gantt: resourceProcedure
     .input(z.object({ projectId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       return taskService.getGanttChart(ctx.db, input.projectId);
     }),
 
-  dependencyGraph: publicProcedure
+  dependencyGraph: resourceProcedure
     .input(z.object({ requirementId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       return taskService.getRequirementTaskDependencyGraph(ctx.db, input.requirementId);

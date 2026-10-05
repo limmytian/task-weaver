@@ -42,7 +42,7 @@ task-weaver/
 AI agents can interact with Task Weaver through these channels:
 
 - **`tw` CLI** (`apps/cli/`): The primary interface for AI agents — invoke via the Bash tool. Wraps the REST API and shares its data/auth. Add `--json` to any command for machine-readable output.
-- **REST API** (`apps/api/`): HTTP/JSON at `/api/v1/`. Authenticated via `Authorization: Bearer <api-key>` header. Actor identity via `X-Actor-Id` / `X-Actor-Type` headers.
+- **REST API** (`apps/api/`): HTTP/JSON at `/api/v1/`. Authentication uses a revocable browser session or a subject-bound scoped API key (`Authorization: Bearer <api-key>`). Actor identity comes from the verified credential; `X-Actor-Id` / `X-Actor-Type` headers are not trusted.
 - **Skills** (`skills/`): Standard `SKILL.md` format skill that teaches AI agents how to use the platform.
 
 ### Autonomous Task Daemon

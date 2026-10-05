@@ -5,6 +5,7 @@
  * Resolvers delegate to existing core services — no direct DB access.
  */
 import { createSchema } from "graphql-yoga";
+import { GraphQLError, defaultFieldResolver, isObjectType } from "graphql";
 import type { Database } from "@task-weaver/db";
 import {
   projectService,
@@ -12,13 +13,26 @@ import {
   documentService,
   requirementService,
   recommendationService,
+  authenticationFailure,
+  AuthenticationError,
+  requireResourceAuthorization,
+  type AuthenticationRuntime,
+  type VerifiedRequestContext,
 } from "@task-weaver/core";
 
 export interface GraphQLContext {
   db: Database;
+  auth: AuthenticationRuntime;
+  headers: Headers;
+  identity: VerifiedRequestContext;
 }
 
 const typeDefs = /* GraphQL */ `
+  type AuthenticatedActor {
+    id: ID!
+    type: ActorType!
+    status: String!
+  }
   # ---- Enums ----
 
   enum ProjectStatus {
@@ -84,8 +98,15 @@ const typeDefs = /* GraphQL */ `
     createdAt: String!
     updatedAt: String!
 
-    requirements(status: RequirementStatus, priority: RequirementPriority): [Requirement!]!
-    tasks(status: TaskStatus, assignee: String, priority: TaskPriority): [Task!]!
+    requirements(
+      status: RequirementStatus
+      priority: RequirementPriority
+    ): [Requirement!]!
+    tasks(
+      status: TaskStatus
+      assignee: String
+      priority: TaskPriority
+    ): [Task!]!
     documents(docType: DocumentType): [Document!]!
     stats: ProjectStats!
   }
@@ -251,25 +272,50 @@ const typeDefs = /* GraphQL */ `
   # ---- Queries ----
 
   type Query {
+    currentActor: AuthenticatedActor!
     project(id: ID!): Project
     projects(status: ProjectStatus): [Project!]!
 
     task(id: ID!): Task
-    tasks(projectId: ID!, status: TaskStatus, assignee: String, priority: TaskPriority): [Task!]!
+    tasks(
+      projectId: ID!
+      status: TaskStatus
+      assignee: String
+      priority: TaskPriority
+    ): [Task!]!
 
     requirement(id: ID!): Requirement
-    requirements(projectId: ID!, status: RequirementStatus, priority: RequirementPriority): [Requirement!]!
+    requirements(
+      projectId: ID!
+      status: RequirementStatus
+      priority: RequirementPriority
+    ): [Requirement!]!
 
     document(id: ID!): Document
-    documents(projectId: ID, docType: DocumentType, includeGlobal: Boolean): [Document!]!
+    documents(
+      projectId: ID
+      docType: DocumentType
+      includeGlobal: Boolean
+    ): [Document!]!
 
-    searchDocuments(query: String!, mode: String, projectId: ID, limit: Int): [Document!]!
+    searchDocuments(
+      query: String!
+      mode: String
+      projectId: ID
+      limit: Int
+    ): [Document!]!
   }
 `;
 
 const resolvers = {
   Query: {
-    project: async (_: unknown, { id }: { id: string }, ctx: GraphQLContext) => {
+    currentActor: async (_: unknown, _args: unknown, ctx: GraphQLContext) =>
+      (await ctx.auth.verify(ctx.headers)).actor,
+    project: async (
+      _: unknown,
+      { id }: { id: string },
+      ctx: GraphQLContext,
+    ) => {
       try {
         return await projectService.getProject(ctx.db, id);
       } catch {
@@ -295,7 +341,12 @@ const resolvers = {
 
     tasks: async (
       _: unknown,
-      args: { projectId: string; status?: string; assignee?: string; priority?: string },
+      args: {
+        projectId: string;
+        status?: string;
+        assignee?: string;
+        priority?: string;
+      },
       ctx: GraphQLContext,
     ) => {
       return taskService.listTasks(ctx.db, {
@@ -307,7 +358,11 @@ const resolvers = {
       });
     },
 
-    requirement: async (_: unknown, { id }: { id: string }, ctx: GraphQLContext) => {
+    requirement: async (
+      _: unknown,
+      { id }: { id: string },
+      ctx: GraphQLContext,
+    ) => {
       try {
         return await requirementService.getRequirement(ctx.db, id);
       } catch {
@@ -327,7 +382,11 @@ const resolvers = {
       });
     },
 
-    document: async (_: unknown, { id }: { id: string }, ctx: GraphQLContext) => {
+    document: async (
+      _: unknown,
+      { id }: { id: string },
+      ctx: GraphQLContext,
+    ) => {
       try {
         return await documentService.getDocumentDetail(ctx.db, id);
       } catch {
@@ -350,7 +409,12 @@ const resolvers = {
 
     searchDocuments: async (
       _: unknown,
-      args: { query: string; mode?: string; projectId?: string; limit?: number },
+      args: {
+        query: string;
+        mode?: string;
+        projectId?: string;
+        limit?: number;
+      },
       ctx: GraphQLContext,
     ) => {
       const results = await documentService.searchDocuments(ctx.db, {
@@ -421,11 +485,7 @@ const resolvers = {
       return projectService.getProject(ctx.db, req.projectId);
     },
 
-    tasks: async (
-      req: any,
-      args: { status?: string },
-      ctx: GraphQLContext,
-    ) => {
+    tasks: async (req: any, args: { status?: string }, ctx: GraphQLContext) => {
       // If already loaded
       if (req.tasks && !args.status) return req.tasks;
       return taskService.listTasks(ctx.db, {
@@ -508,7 +568,11 @@ const resolvers = {
       return (detail as any).taskLinks ?? [];
     },
 
-    linkedRequirements: async (doc: any, _args: unknown, ctx: GraphQLContext) => {
+    linkedRequirements: async (
+      doc: any,
+      _args: unknown,
+      ctx: GraphQLContext,
+    ) => {
       if (doc.requirementLinks) return doc.requirementLinks;
       const detail = await documentService.getDocumentDetail(ctx.db, doc.id);
       return (detail as any).requirementLinks ?? [];
@@ -542,10 +606,12 @@ const resolvers = {
     },
     byPriority: (stats: any) => {
       if (Array.isArray(stats.byPriority)) return stats.byPriority;
-      return Object.entries(stats.byPriority ?? {}).map(([priority, count]) => ({
-        priority,
-        count,
-      }));
+      return Object.entries(stats.byPriority ?? {}).map(
+        ([priority, count]) => ({
+          priority,
+          count,
+        }),
+      );
     },
   },
 
@@ -553,7 +619,10 @@ const resolvers = {
     sourceDoc: async (link: any, _args: unknown, ctx: GraphQLContext) => {
       if (link.sourceDoc) return link.sourceDoc;
       try {
-        return await documentService.getDocumentDetail(ctx.db, link.sourceDocId);
+        return await documentService.getDocumentDetail(
+          ctx.db,
+          link.sourceDocId,
+        );
       } catch {
         return null;
       }
@@ -561,7 +630,10 @@ const resolvers = {
     targetDoc: async (link: any, _args: unknown, ctx: GraphQLContext) => {
       if (link.targetDoc) return link.targetDoc;
       try {
-        return await documentService.getDocumentDetail(ctx.db, link.targetDocId);
+        return await documentService.getDocumentDetail(
+          ctx.db,
+          link.targetDocId,
+        );
       } catch {
         return null;
       }
@@ -599,7 +671,10 @@ const resolvers = {
     requirement: async (link: any, _args: unknown, ctx: GraphQLContext) => {
       if (link.requirement) return link.requirement;
       try {
-        return await requirementService.getRequirement(ctx.db, link.requirementId);
+        return await requirementService.getRequirement(
+          ctx.db,
+          link.requirementId,
+        );
       } catch {
         return null;
       }
@@ -619,3 +694,30 @@ const resolvers = {
 };
 
 export const schema = createSchema<GraphQLContext>({ typeDefs, resolvers });
+
+// Guard explicit AND default nested resolvers. A cached context or caller-supplied root value is not authority.
+for (const type of Object.values(schema.getTypeMap())) {
+  if (!isObjectType(type) || type.name.startsWith("__")) continue;
+  for (const [name, field] of Object.entries(type.getFields())) {
+    const resolve = field.resolve ?? defaultFieldResolver;
+    field.resolve = async (source, args, context: GraphQLContext, info) => {
+      try {
+        if (!context?.auth || !(context.headers instanceof Headers))
+          throw new AuthenticationError();
+        context.auth.assertOrigin(context.headers);
+        await context.auth.verify(context.headers);
+        if (
+          !(type.name === "Query" && name === "currentActor") &&
+          type.name !== "AuthenticatedActor"
+        )
+          requireResourceAuthorization();
+        return await resolve(source, args, context, info);
+      } catch (error) {
+        const failure = authenticationFailure(error);
+        throw new GraphQLError(failure.error, {
+          extensions: { code: failure.code, http: { status: failure.status } },
+        });
+      }
+    };
+  }
+}

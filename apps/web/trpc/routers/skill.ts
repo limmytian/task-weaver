@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, publicProcedure } from "../init";
+import { router, resourceProcedure } from "../init";
 import {
   contextService,
   documentService,
@@ -29,7 +29,7 @@ function createSkillPackageStorage() {
 }
 
 export const skillRouter = router({
-  list: publicProcedure
+  list: resourceProcedure
     .input(
       z.object({
         tags: z.array(z.string()).optional(),
@@ -49,19 +49,19 @@ export const skillRouter = router({
       });
     }),
 
-  get: publicProcedure
+  get: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       return documentService.getDocument(ctx.db, input.id);
     }),
 
-  create: publicProcedure
+  create: resourceProcedure
     .input(importSkillSchema)
     .mutation(async ({ ctx, input }) => {
       return contextService.importSkill(ctx.db, input, ctx.actor);
     }),
 
-  update: publicProcedure
+  update: resourceProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -89,25 +89,25 @@ export const skillRouter = router({
       );
     }),
 
-  delete: publicProcedure
+  delete: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return documentService.deleteDocument(ctx.db, input.id, ctx.actor);
     }),
 
-  packageList: publicProcedure
+  packageList: resourceProcedure
     .input(listSkillPackagesSchema)
     .query(async ({ ctx, input }) => {
       return skillPackageService.listPackages(ctx.db, input);
     }),
 
-  packageGet: publicProcedure
+  packageGet: resourceProcedure
     .input(getSkillPackageSchema)
     .query(async ({ ctx, input }) => {
       return skillPackageService.getPackage(ctx.db, input.packageId);
     }),
 
-  packageRegister: publicProcedure
+  packageRegister: resourceProcedure
     .input(registerSkillPackageSchema)
     .mutation(async ({ ctx, input }) => {
       return skillPackageService.registerPackage(
@@ -118,13 +118,13 @@ export const skillRouter = router({
       );
     }),
 
-  packageFiles: publicProcedure
+  packageFiles: resourceProcedure
     .input(listSkillPackageFilesSchema)
     .query(async ({ ctx, input }) => {
       return skillPackageService.listPackageFiles(ctx.db, input);
     }),
 
-  packageRead: publicProcedure
+  packageRead: resourceProcedure
     .input(readSkillPackageFileSchema)
     .query(async ({ ctx, input }) => {
       return skillPackageService.readPackageTextFile(
@@ -134,7 +134,7 @@ export const skillRouter = router({
       );
     }),
 
-  packageDownload: publicProcedure
+  packageDownload: resourceProcedure
     .input(downloadSkillPackageSchema)
     .query(async ({ ctx, input }) => {
       return skillPackageService.downloadPackage(
@@ -144,7 +144,7 @@ export const skillRouter = router({
       );
     }),
 
-  packageHealth: publicProcedure
+  packageHealth: resourceProcedure
     .input(verifySkillPackageStorageSchema)
     .query(async ({ ctx, input }) => {
       return skillPackageService.verifyPackageStorage(
@@ -154,7 +154,7 @@ export const skillRouter = router({
       );
     }),
 
-  packageReindex: publicProcedure
+  packageReindex: resourceProcedure
     .input(reindexSkillPackageSchema)
     .mutation(async ({ ctx, input }) => {
       return skillPackageService.reindexPackageTextFiles(
@@ -165,13 +165,13 @@ export const skillRouter = router({
       );
     }),
 
-  packageUpdate: publicProcedure
+  packageUpdate: resourceProcedure
     .input(updateSkillPackageMetadataSchema)
     .mutation(async ({ ctx, input }) => {
       return skillPackageService.updatePackageMetadata(ctx.db, input, ctx.actor);
     }),
 
-  packageVersionStatus: publicProcedure
+  packageVersionStatus: resourceProcedure
     .input(updateSkillPackageVersionStatusSchema)
     .mutation(async ({ ctx, input }) => {
       return skillPackageService.updatePackageVersionStatus(ctx.db, input, ctx.actor);

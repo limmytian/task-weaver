@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, publicProcedure } from "../init";
+import { router, resourceProcedure } from "../init";
 import {
   requirementService,
   createRequirementSchema,
@@ -12,43 +12,43 @@ import {
 } from "@task-weaver/core";
 
 export const requirementRouter = router({
-  list: publicProcedure
+  list: resourceProcedure
     .input(listRequirementsSchema)
     .query(async ({ ctx, input }) => {
       return requirementService.listRequirements(ctx.db, input);
     }),
 
-  get: publicProcedure
+  get: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       return requirementService.getRequirement(ctx.db, input.id);
     }),
 
-  create: publicProcedure
+  create: resourceProcedure
     .input(createRequirementSchema)
     .mutation(async ({ ctx, input }) => {
       return requirementService.createRequirement(ctx.db, input, ctx.actor);
     }),
 
-  update: publicProcedure
+  update: resourceProcedure
     .input(z.object({ id: z.string().uuid(), data: updateRequirementSchema }))
     .mutation(async ({ ctx, input }) => {
       return requirementService.updateRequirement(ctx.db, input.id, input.data, ctx.actor);
     }),
 
-  delete: publicProcedure
+  delete: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return requirementService.deleteRequirement(ctx.db, input.id, ctx.actor);
     }),
 
-  unlinkDocument: publicProcedure
+  unlinkDocument: resourceProcedure
     .input(z.object({ linkId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return requirementService.unlinkDocumentFromRequirement(ctx.db, input.linkId);
     }),
 
-  linkDocument: publicProcedure
+  linkDocument: resourceProcedure
     .input(
       z.object({ requirementId: z.string().uuid() }).merge(linkDocumentToRequirementSchema),
     )
@@ -62,13 +62,13 @@ export const requirementRouter = router({
       );
     }),
 
-  listDependencies: publicProcedure
+  listDependencies: resourceProcedure
     .input(z.object({ requirementId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       return requirementService.listRequirementDependencies(ctx.db, input.requirementId);
     }),
 
-  addDependency: publicProcedure
+  addDependency: resourceProcedure
     .input(
       z.object({ requirementId: z.string().uuid() }).merge(createRequirementDependencySchema),
     )
@@ -83,38 +83,38 @@ export const requirementRouter = router({
       );
     }),
 
-  removeDependency: publicProcedure
+  removeDependency: resourceProcedure
     .input(z.object({ depId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return requirementService.removeRequirementDependency(ctx.db, input.depId, ctx.actor);
     }),
 
-  burndown: publicProcedure
+  burndown: resourceProcedure
     .input(z.object({ id: z.string().uuid(), days: z.number().int().min(1).max(365).optional() }))
     .query(async ({ ctx, input }) => {
       return requirementService.getRequirementBurndown(ctx.db, input.id);
     }),
 
-  listSlices: publicProcedure
+  listSlices: resourceProcedure
     .input(z.object({ requirementId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       return requirementService.listExecutionSlices(ctx.db, input.requirementId);
     }),
 
-  createSlice: publicProcedure
+  createSlice: resourceProcedure
     .input(z.object({ requirementId: z.string().uuid() }).merge(createExecutionSliceSchema))
     .mutation(async ({ ctx, input }) => {
       const { requirementId, ...data } = input;
       return requirementService.createExecutionSlice(ctx.db, requirementId, data, ctx.actor);
     }),
 
-  updateSlice: publicProcedure
+  updateSlice: resourceProcedure
     .input(z.object({ id: z.string().uuid(), data: updateExecutionSliceSchema }))
     .mutation(async ({ ctx, input }) => {
       return requirementService.updateExecutionSlice(ctx.db, input.id, input.data, ctx.actor);
     }),
 
-  deleteSlice: publicProcedure
+  deleteSlice: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return requirementService.deleteExecutionSlice(ctx.db, input.id, ctx.actor);

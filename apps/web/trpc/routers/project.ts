@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, publicProcedure } from "../init";
+import { router, resourceProcedure } from "../init";
 import {
   projectService,
   requirementService,
@@ -9,72 +9,72 @@ import {
 } from "@task-weaver/core";
 
 export const projectRouter = router({
-  list: publicProcedure
+  list: resourceProcedure
     .input(listProjectsSchema.optional())
     .query(async ({ ctx, input }) => {
       return projectService.listProjects(ctx.db, input);
     }),
 
-  get: publicProcedure
+  get: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       return projectService.getProject(ctx.db, input.id);
     }),
 
-  create: publicProcedure
+  create: resourceProcedure
     .input(createProjectSchema)
     .mutation(async ({ ctx, input }) => {
       return projectService.createProject(ctx.db, input, ctx.actor);
     }),
 
-  update: publicProcedure
+  update: resourceProcedure
     .input(z.object({ id: z.string().uuid(), data: updateProjectSchema }))
     .mutation(async ({ ctx, input }) => {
       return projectService.updateProject(ctx.db, input.id, input.data, ctx.actor);
     }),
 
-  delete: publicProcedure
+  delete: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return projectService.deleteProject(ctx.db, input.id, ctx.actor);
     }),
 
-  counts: publicProcedure
+  counts: resourceProcedure
     .input(z.object({ projectIds: z.array(z.string().uuid()).min(1).max(100) }))
     .query(async ({ ctx, input }) => {
       return projectService.getProjectCounts(ctx.db, input.projectIds);
     }),
 
-  stats: publicProcedure
+  stats: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       return projectService.getProjectStats(ctx.db, input.id);
     }),
 
-  health: publicProcedure
+  health: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       return projectService.getProjectHealthDashboard(ctx.db, input.id);
     }),
 
-  knowledgeGraph: publicProcedure
+  knowledgeGraph: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       return projectService.getKnowledgeGraph(ctx.db, input.id);
     }),
 
-  heatmap: publicProcedure
+  heatmap: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       return requirementService.getRequirementHeatmap(ctx.db, input.id);
     }),
 
-  pinned: publicProcedure
+  pinned: resourceProcedure
     .query(async ({ ctx }) => {
       return projectService.listPinnedProjects(ctx.db);
     }),
 
-  togglePin: publicProcedure
+  togglePin: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return projectService.togglePin(ctx.db, input.id);

@@ -74,3 +74,34 @@ test("authentication boundaries redact unexpected provider/database errors while
   );
   assert.ok(operations.challenge().headers instanceof Headers);
 });
+
+test("browser challenge refresh preserves its signed lifetime across transports", () => {
+  const policy = createCsrfPolicy(
+    "fixture-only-secret".repeat(3),
+    ["https://app.example.test"],
+    true,
+  );
+  const now = new Date();
+  const first = policy.challenge(now);
+  const headers = new Headers({
+    cookie: first.headers.getSetCookie()[0]!.split(";")[0]!,
+  });
+  const refreshed = policy.challengeForRequest(
+    headers,
+    new Date(now.getTime() + 60_000),
+  );
+  assert.equal(refreshed.csrfToken, first.csrfToken);
+  assert.equal(refreshed.expiresAt, first.expiresAt);
+  assert.equal(refreshed.headers.getSetCookie().length, 0);
+  const expired = policy.challengeForRequest(
+    headers,
+    new Date(now.getTime() + 3_600_001),
+  );
+  assert.notEqual(expired.csrfToken, first.csrfToken);
+  assert.ok(expired.headers.getSetCookie().length);
+  headers.set("cookie", "__Host-tw.csrf=invalid");
+  assert.notEqual(
+    policy.challengeForRequest(headers, now).csrfToken,
+    first.csrfToken,
+  );
+});

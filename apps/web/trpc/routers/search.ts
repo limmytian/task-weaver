@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, publicProcedure } from "../init";
+import { router, resourceProcedure } from "../init";
 import {
   documentService,
   repositoryService,
@@ -30,7 +30,7 @@ type DocumentSearchItem = {
 };
 
 export const searchRouter = router({
-  all: publicProcedure
+  all: resourceProcedure
     .input(searchInputSchema)
     .query(async ({ ctx, input }) => {
       const [matchedTasks, matchedDocs, matchedRequirements, matchedRepositories] =

@@ -318,3 +318,83 @@ including removal of non-owner members. Scoped API keys still require explicit
 membership administration within their live credential ceiling; removing an owner
 additionally requires a recently authenticated human session and another active
 human owner.
+
+## A4 transport adapters and staged activation
+
+REST, Next tRPC, human SSR and GraphQL use `createAuthenticationRuntime` and the
+same persisted provider/session/key state. Each protected invocation reloads live
+authority; cached caller context and Actor headers cannot authenticate a request.
+Human-bound keys remain human. Managed-Agent keys remain their stable Agent
+subjects and cannot become browser sessions. GraphQL guards explicit and default
+nested resolvers, including contexts with stale identity metadata. tRPC checks
+each procedure in a batch and supports separately protected administrator
+procedures requiring a recent human session.
+
+The API and Next server must share the following Secret/configuration settings:
+
+| Variable                       | Meaning                                                        |
+| ------------------------------ | -------------------------------------------------------------- |
+| `TW_AUTH_SECRET`               | Deployment Secret, at least 32 characters; mandatory           |
+| `TW_AUTH_BASE_URL`             | Public provider URL; HTTPS outside loopback; mandatory         |
+| `TW_AUTH_TRUSTED_ORIGINS`      | Comma-separated exact origins; defaults to the base URL origin |
+| `TW_AUTH_BOOTSTRAP_SECRET`     | Optional one-time first-administrator deployment Secret        |
+| `TW_AUTH_SESSION_SECONDS`      | Default finite absolute lifetime, default 604800               |
+| `TW_AUTH_SESSION_IDLE_SECONDS` | Default finite idle lifetime, default 86400                    |
+| `TW_AUTH_MAX_SESSION_SECONDS`  | Configurable finite maximum, default 31536000                  |
+| `TW_AUTH_ACTIVATION_SECONDS`   | One-time activation lifetime, default 86400                    |
+
+No absent configuration selects an anonymous mode. Use a single public browser
+origin/reverse proxy with host-only cookies; Next browser calls use same-origin
+`/api/trpc` and `/api/auth/csrf`. REST sends credentialed CORS headers only for an
+exact configured origin and validates requested preflight methods/headers. Next
+does not enable cross-origin browser CORS. Both validate supplied Origin and
+signed CSRF for cookie mutations; GraphQL POST and tRPC POST also require CSRF.
+API retry buckets use direct socket metadata only; Next has no direct address in
+its Web Request interface and uses a conservative shared address bucket. No
+forwarded address/actor header is trusted. Verified proxy-address support belongs
+to a future explicitly configured ingress boundary, not a permissive fallback.
+
+The exact REST public entry points are GET `/health`, GET `/api/v1/version`
+(including its trailing slash), GET `/api/v1/auth/csrf`, and POST
+`/api/v1/auth/bootstrap`, `/api/v1/auth/login`, `/api/v1/auth/activate`.
+Configured-origin OPTIONS preflights return no business data. tRPC public
+procedures are only query `version.info`, query `auth.csrf`, and mutations
+`auth.bootstrap`, `auth.login`, `auth.activate`; other procedures default to
+protection. Public endpoints never discard an Authorization header. A new login
+may accept an expired browser cookie, so an expired session cannot prevent
+reauthentication; malformed bearer or mixed bearer/session credentials fail
+closed. The Better Auth handler and public signup are not mounted.
+POST `/api/v1/version/check` and tRPC mutation `version.check` require verified
+authentication and browser CSRF; version metadata does not confer resource access.
+
+Protected `/api/v1/auth/*` endpoints expose current actor, logout, reauthentication,
+password changes, owner-scoped sessions, administrator account lifecycle,
+managed agents and explicitly guarded project creation/membership/ownership.
+`/api/v1/api-keys` uses the shared strict scoped-key schema; optional `actorId`
+selects only an authorized self/managed-Agent subject. Expiry/null and grants are
+explicit; rotation preserves grants/expiry, and deletion retains revocation
+history. tRPC `auth` and `apiKey` expose the same guarded services. The existing
+key form receives only the minimum compatibility update to select an explicit
+expiry and a human-owned personal read grant; full account/project/Agent UX
+remains in the planned D slices.
+
+Authentication responses preserve multiple Set-Cookie values, use no-store, and
+return safe errors: 401 for missing/invalid/revoked credentials, 403 for forbidden
+actions/CSRF, 400 for invalid inputs, 429 plus Retry-After for bounded attempts,
+and a generic unavailable error for unexpected failures. tRPC additionally
+returns safe `authCode` metadata and strips server stacks. GraphQL uses matching
+safe error codes/status extensions. Refreshing a still-valid signed CSRF
+challenge preserves its original deadline and cookie across REST/Next/tabs;
+near-expired or invalid challenges are replaced. The browser uses a single-flight
+challenge and refreshes before its returned deadline.
+
+This is an authentication-only staging build. Unconverted data/retrieval/execution
+REST routes and tRPC resource procedures reject access even for administrators.
+GraphQL exposes only verified current-actor data while all legacy resource fields
+remain closed. Next SSE emits no event, count or resume metadata; persisted
+Gateway execution workers and outbound webhook/runtime subscriptions are paused.
+B1-B4 and C1-C3 must replace each staging guard with resource/runtime authorization
+before reopening its surface. There is no environment flag to enable the old
+unrestricted paths. D must complete login/onboarding/recovery UX, legacy
+credential/ownership migration and upgrade/runtime acceptance before production
+activation. Authentication alone is not completed multi-user resource isolation.

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, publicProcedure } from "../init";
+import { router, resourceProcedure } from "../init";
 import {
   mcpRegistryService,
   registerMcpServerSchema,
@@ -7,7 +7,7 @@ import {
 } from "@task-weaver/core";
 
 export const mcpRouter = router({
-  list: publicProcedure
+  list: resourceProcedure
     .input(z.object({
       projectId: z.string().uuid().optional(),
       includeGlobal: z.boolean().default(true),
@@ -23,7 +23,7 @@ export const mcpRouter = router({
       });
     }),
 
-  get: publicProcedure
+  get: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       const server = await mcpRegistryService.getServer(ctx.db, input.id);
@@ -33,19 +33,19 @@ export const mcpRouter = router({
       return { server, tools };
     }),
 
-  create: publicProcedure
+  create: resourceProcedure
     .input(registerMcpServerSchema)
     .mutation(async ({ ctx, input }) => {
       return mcpRegistryService.registerServer(ctx.db, input, ctx.actor);
     }),
 
-  update: publicProcedure
+  update: resourceProcedure
     .input(z.object({ id: z.string().uuid(), data: updateMcpServerSchema }))
     .mutation(async ({ ctx, input }) => {
       return mcpRegistryService.updateServer(ctx.db, input.id, input.data, ctx.actor);
     }),
 
-  delete: publicProcedure
+  delete: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const apiUrl = process.env.TW_API_URL || "http://localhost:3001";
@@ -59,7 +59,7 @@ export const mcpRouter = router({
       return mcpRegistryService.deleteServer(ctx.db, input.id, ctx.actor);
     }),
 
-  sync: publicProcedure
+  sync: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input }) => {
       const apiUrl = process.env.TW_API_URL || "http://localhost:3001";

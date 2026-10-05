@@ -24,16 +24,54 @@ export function TRPCProvider({ children }: { children: React.ReactNode }) {
       }),
   );
 
-  const [trpcClient] = useState(() =>
-    trpc.createClient({
+  const [trpcClient] = useState(() => {
+    let challenge: Promise<string> | undefined;
+    let challengeExpires = 0;
+    return trpc.createClient({
       links: [
         httpBatchLink({
           url: `${getBaseUrl()}/api/trpc`,
           transformer: superjson,
+          async fetch(url, options) {
+            const headers = new Headers(options?.headers);
+            if (options?.method === "POST") {
+              if (!challenge || Date.now() >= challengeExpires) {
+                challengeExpires = Date.now() + 30 * 60_000;
+                challenge = fetch(`${getBaseUrl()}/api/auth/csrf`, {
+                  credentials: "same-origin",
+                  cache: "no-store",
+                })
+                  .then(async (response) => {
+                    if (!response.ok)
+                      throw new Error("Sign-in protection is unavailable");
+                    const body = (await response.json()) as {
+                      csrfToken: string;
+                      expiresAt: string;
+                    };
+                    challengeExpires = Math.min(
+                      challengeExpires,
+                      Date.parse(body.expiresAt) - 60_000,
+                    );
+                    return body.csrfToken;
+                  })
+                  .catch((error) => {
+                    challenge = undefined;
+                    throw error;
+                  });
+              }
+              headers.set("x-csrf-token", await challenge);
+            }
+            return fetch(url, {
+              ...options,
+              headers,
+              credentials: "same-origin",
+              cache: "no-store",
+            });
+          },
         }),
       ],
-    }),
-  );
+    });
+  });
 
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>

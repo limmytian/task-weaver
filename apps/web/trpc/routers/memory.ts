@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, publicProcedure } from "../init";
+import { router, resourceProcedure } from "../init";
 import {
   memoryService,
   recordMemorySchema,
@@ -9,7 +9,7 @@ import {
 } from "@task-weaver/core";
 
 export const memoryRouter = router({
-  list: publicProcedure
+  list: resourceProcedure
     .input(listMemoriesSchema.default({}))
     .query(async ({ ctx, input }) => {
       return memoryService.listMemories(ctx.db, {
@@ -19,31 +19,31 @@ export const memoryRouter = router({
       });
     }),
 
-  get: publicProcedure
+  get: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       return memoryService.getMemory(ctx.db, input.id);
     }),
 
-  create: publicProcedure
+  create: resourceProcedure
     .input(recordMemorySchema)
     .mutation(async ({ ctx, input }) => {
       return memoryService.recordMemory(ctx.db, input, ctx.actor);
     }),
 
-  update: publicProcedure
+  update: resourceProcedure
     .input(z.object({ id: z.string().uuid(), data: updateMemorySchema }))
     .mutation(async ({ ctx, input }) => {
       return memoryService.updateMemory(ctx.db, input.id, input.data, ctx.actor);
     }),
 
-  delete: publicProcedure
+  delete: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return memoryService.forgetMemory(ctx.db, input.id, ctx.actor);
     }),
 
-  search: publicProcedure
+  search: resourceProcedure
     .input(searchMemorySchema)
     .query(async ({ ctx, input }) => {
       return memoryService.searchMemories(ctx.db, {

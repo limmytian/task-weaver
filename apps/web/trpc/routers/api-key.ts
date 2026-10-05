@@ -1,27 +1,52 @@
 import { z } from "zod";
-import { router, publicProcedure } from "../init";
-import { apiKeyService } from "@task-weaver/core";
-
+import {
+  issueOwnedApiKeySchema,
+  credentialSubjectSchema,
+  takeAuthenticationResult,
+} from "@task-weaver/core";
+import { router, protectedProcedure } from "../init";
+const reference = credentialSubjectSchema.extend({ id: z.string().uuid() });
 export const apiKeyRouter = router({
-  list: publicProcedure.query(async ({ ctx }) => {
-    return apiKeyService.listApiKeys(ctx.db);
-  }),
-
-  create: publicProcedure
-    .input(
-      z.object({
-        name: z.string().min(1).max(100),
-        permissions: z.record(z.boolean()).optional(),
-        expiresAt: z.coerce.date().optional(),
-      }),
-    )
+  list: protectedProcedure
+    .input(credentialSubjectSchema.optional())
+    .query(({ ctx, input }) =>
+      ctx.auth.identity.listKeys(
+        ctx.req.headers,
+        input?.actorId ?? ctx.identity.actor.id,
+      ),
+    ),
+  create: protectedProcedure
+    .input(issueOwnedApiKeySchema)
     .mutation(async ({ ctx, input }) => {
-      return apiKeyService.createApiKey(ctx.db, input);
+      const { actorId, ...key } = input;
+      return takeAuthenticationResult(
+        await ctx.auth.identity.issueKey(
+          ctx.req.headers,
+          actorId ?? ctx.identity.actor.id,
+          key,
+        ),
+        ctx.responseHeaders,
+      );
     }),
-
-  revoke: publicProcedure
-    .input(z.object({ id: z.string().uuid() }))
-    .mutation(async ({ ctx, input }) => {
-      return apiKeyService.revokeApiKey(ctx.db, input.id);
-    }),
+  revoke: protectedProcedure
+    .input(reference)
+    .mutation(({ ctx, input }) =>
+      ctx.auth.identity.revokeKey(
+        ctx.req.headers,
+        input.actorId ?? ctx.identity.actor.id,
+        input.id,
+      ),
+    ),
+  rotate: protectedProcedure
+    .input(reference)
+    .mutation(async ({ ctx, input }) =>
+      takeAuthenticationResult(
+        await ctx.auth.identity.rotateKey(
+          ctx.req.headers,
+          input.actorId ?? ctx.identity.actor.id,
+          input.id,
+        ),
+        ctx.responseHeaders,
+      ),
+    ),
 });

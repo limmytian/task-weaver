@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { router, publicProcedure } from "../init";
+import { router, resourceProcedure } from "../init";
 import { activityLogService } from "@task-weaver/core";
 
 export const activityRouter = router({
-  list: publicProcedure
+  list: resourceProcedure
     .input(
       z.object({
         projectId: z.string().uuid().optional(),
