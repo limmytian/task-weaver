@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomBytes, randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   createDb,
   runMigrations,
@@ -288,6 +288,79 @@ test(
         );
       },
     );
+    const poolEmail = `${randomUUID()}@example.test`;
+    const poolInvitation = await service.provision(administrator.headers, {
+      email: poolEmail,
+      displayName: "Pool fixture",
+    });
+    await service.activate(
+      client(),
+      { token: poolInvitation.activationToken, password },
+      "pool-activation",
+    );
+    await t.test(
+      "provider session creation rolls back when the login audit fails",
+      async () => {
+        const before = (
+          await db
+            .select()
+            .from(authSessions)
+            .where(eq(authSessions.userId, poolInvitation.account.id))
+        ).length;
+        await db.execute(
+          sql`CREATE FUNCTION task_weaver.reject_fixture_login_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action = 'session.created' THEN RAISE EXCEPTION 'Fixture audit failure'; END IF; RETURN NEW; END $$`,
+        );
+        await db.execute(
+          sql`CREATE TRIGGER reject_fixture_login_audit BEFORE INSERT ON task_weaver.auth_audit_events FOR EACH ROW EXECUTE FUNCTION task_weaver.reject_fixture_login_audit()`,
+        );
+        try {
+          await assert.rejects(
+            service.login(
+              client(),
+              { email: poolEmail, password },
+              "audit-failure",
+            ),
+            AuthenticationError,
+          );
+          const after = (
+            await db
+              .select()
+              .from(authSessions)
+              .where(eq(authSessions.userId, poolInvitation.account.id))
+          ).length;
+          assert.equal(
+            after,
+            before,
+            "A failed login must not commit an unaudited provider session",
+          );
+        } finally {
+          await db.execute(
+            sql`DROP TRIGGER reject_fixture_login_audit ON task_weaver.auth_audit_events`,
+          );
+          await db.execute(
+            sql`DROP FUNCTION task_weaver.reject_fixture_login_audit()`,
+          );
+        }
+      },
+    );
+    await t.test(
+      "login reuses its transaction even with a one-connection pool",
+      { timeout: 5000 },
+      async (subtest) => {
+        const constrained = createDb(databaseUrl!, { maxConnections: 1 });
+        subtest.after(() => constrained.$client.end({ timeout: 1 }));
+        const constrainedService = createAuthenticationService(
+          constrained,
+          config,
+        );
+        const result = await constrainedService.login(
+          client(),
+          { email: poolEmail, password },
+          "single-connection",
+        );
+        assert.equal(result.account.id, poolInvitation.account.id);
+      },
+    );
     await t.test(
       "origin/CSRF checks protect anonymous authentication and cookie mutations",
       async () => {
@@ -501,6 +574,93 @@ test(
       },
     );
     await t.test(
+      "issuer recovery, disablement and demotion revoke links permanently",
+      async () => {
+        const email = `${randomUUID()}@example.test`;
+        const invited = await service.provision(administrator.headers, {
+          email,
+          displayName: "Issuer fixture",
+        });
+        await service.activate(
+          client(),
+          { token: invited.activationToken, password },
+          "issuer-activation",
+        );
+        await service.setAccountState(
+          administrator.headers,
+          invited.account.id,
+          { instanceRole: "admin" },
+        );
+        let issuer = await login(email);
+        const invite = () =>
+          service.provision(issuer.headers, {
+            email: `${randomUUID()}@example.test`,
+            displayName: "Outstanding fixture",
+          });
+        const recoveryVictim = await invite();
+        const recovery = await service.recover(
+          administrator.headers,
+          invited.account.id,
+        );
+        await assert.rejects(
+          service.activate(
+            client(),
+            { token: recoveryVictim.activationToken, password },
+            "issuer-recovery-replay",
+          ),
+          AuthenticationError,
+        );
+        await service.activate(
+          client(),
+          { token: recovery.activationToken, password },
+          "issuer-recovery",
+        );
+        issuer = await login(email);
+        const demotionVictim = await invite();
+        await service.setAccountState(
+          administrator.headers,
+          invited.account.id,
+          { instanceRole: "user" },
+        );
+        await service.setAccountState(
+          administrator.headers,
+          invited.account.id,
+          { instanceRole: "admin" },
+        );
+        await assert.rejects(
+          service.activate(
+            client(),
+            { token: demotionVictim.activationToken, password },
+            "issuer-demotion-replay",
+          ),
+          AuthenticationError,
+        );
+        const disableVictim = await invite();
+        await service.setAccountState(
+          administrator.headers,
+          invited.account.id,
+          { status: "disabled" },
+        );
+        const enable = await service.recover(
+          administrator.headers,
+          invited.account.id,
+        );
+        await service.activate(
+          client(),
+          { token: enable.activationToken, password },
+          "issuer-reactivate",
+        );
+        await assert.rejects(
+          service.activate(
+            client(),
+            { token: disableVictim.activationToken, password },
+            "issuer-enable-replay",
+          ),
+          AuthenticationError,
+        );
+      },
+    );
+    await t.test(
       "login retries are bounded with generic errors and secret-free audit data",
       async () => {
         for (let attempt = 0; attempt < 10; attempt++)
@@ -549,6 +709,10 @@ test(
           AuthorizationError,
         );
         await service.reauthenticate(old.headers, { password }, "reauth");
+        const pending = await service.provision(old.headers, {
+          email: `${randomUUID()}@example.test`,
+          displayName: "Pending fixture",
+        });
         await service.changePassword(
           old.headers,
           {
@@ -556,6 +720,14 @@ test(
             newPassword: randomBytes(24).toString("hex"),
           },
           "password-change",
+        );
+        await assert.rejects(
+          service.activate(
+            client(),
+            { token: pending.activationToken, password },
+            "revoked-issuer",
+          ),
+          AuthenticationError,
         );
         await assert.rejects(service.resolve(old.headers), AuthenticationError);
         await assert.rejects(

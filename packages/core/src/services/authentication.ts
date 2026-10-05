@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
-import { and, eq, gt, inArray, isNull } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import {
   type Database,
@@ -105,6 +105,41 @@ const safeSession = (
     revokedAt: session.revokedAt?.toISOString() ?? null,
   });
 
+/** Security resets invalidate outstanding activation authority as subject and as issuer. */
+async function revokePendingActivations(
+  db: AuthDatabase,
+  userId: string,
+  byActorId: string,
+  now: Date,
+  issuedOnly = false,
+) {
+  const revoked = await db
+    .update(authActivations)
+    .set({ revokedAt: now })
+    .where(
+      and(
+        issuedOnly
+          ? eq(authActivations.issuedByUserId, userId)
+          : or(
+              eq(authActivations.userId, userId),
+              eq(authActivations.issuedByUserId, userId),
+            ),
+        isNull(authActivations.consumedAt),
+        isNull(authActivations.revokedAt),
+      ),
+    )
+    .returning({ id: authActivations.id });
+  if (revoked.length)
+    await auditIdentity(
+      db,
+      "activation.links_revoked",
+      byActorId,
+      null,
+      userId,
+      { count: revoked.length, issuedOnly },
+    );
+}
+
 /** Serialize account state with membership/owner changes. Revocation never erases credential history. */
 export async function revokeAccountCredentials(
   db: AuthDatabase,
@@ -113,6 +148,7 @@ export async function revokeAccountCredentials(
   byActorId: string,
   now: Date,
 ) {
+  await revokePendingActivations(db, userId, byActorId, now);
   await db
     .update(authSessions)
     .set({ revokedAt: now, updatedAt: now })
@@ -213,6 +249,15 @@ export function createAuthenticationService(
   const secure = base.protocol === "https:";
   const sessionCookie = `${secure ? "__Secure-" : ""}tw.session_token`;
   const csrf = createCsrfPolicy(config.secret, config.trustedOrigins, secure);
+  const loginTransaction = new AsyncLocalStorage<AuthDatabase>();
+  // The provider and its hooks must share the held transaction, even when the pool has one connection.
+  const providerDatabase = new Proxy(db, {
+    get(target, property) {
+      const current = loginTransaction.getStore() ?? target;
+      const value = Reflect.get(current, property, current);
+      return typeof value === "function" ? value.bind(current) : value;
+    },
+  });
   const requestedDuration = new AsyncLocalStorage<{
     duration: number;
     idle: number;
@@ -221,7 +266,10 @@ export function createAuthenticationService(
     secret: config.secret,
     baseURL: config.baseURL,
     trustedOrigins: config.trustedOrigins,
-    database: drizzleAdapter(db, { provider: "pg", schema: betterAuthTables }),
+    database: drizzleAdapter(providerDatabase, {
+      provider: "pg",
+      schema: betterAuthTables,
+    }),
     emailAndPassword: {
       enabled: true,
       disableSignUp: true,
@@ -301,11 +349,14 @@ export function createAuthenticationService(
       session: {
         create: {
           before: async (session) => {
-            const [user] = await db
+            const [user] = await providerDatabase
               .select()
               .from(authUsers)
               .where(eq(authUsers.id, session.userId));
-            if (!user || !(await loadActivePrincipal(db, user.actorId)))
+            if (
+              !user ||
+              !(await loadActivePrincipal(providerDatabase, user.actorId))
+            )
               return false;
             const createdAt = session.createdAt;
             const duration =
@@ -333,7 +384,7 @@ export function createAuthenticationService(
         // Better Auth otherwise physically removes expired sessions. Keep TW tombstones instead.
         delete: {
           before: async (session) => {
-            await db
+            await providerDatabase
               .update(authSessions)
               .set({ revokedAt: new Date(), updatedAt: new Date() })
               .where(
@@ -573,31 +624,33 @@ export function createAuthenticationService(
       try {
         return await db.transaction(async (tx) => {
           await lockIdentityLifecycle(tx);
-          const result = await requestedDuration.run({ duration, idle }, () =>
-            provider.api.signInEmail({
-              headers,
-              body: {
-                email: parsed.email.toLowerCase(),
-                password: parsed.password,
-                rememberMe: true,
-              },
-              returnHeaders: true,
-            }),
+          const result = await loginTransaction.run(tx, () =>
+            requestedDuration.run({ duration, idle }, () =>
+              provider.api.signInEmail({
+                headers,
+                body: {
+                  email: parsed.email.toLowerCase(),
+                  password: parsed.password,
+                  rememberMe: true,
+                },
+                returnHeaders: true,
+              }),
+            ),
           );
-          const [user] = await db
+          const [user] = await tx
             .select()
             .from(authUsers)
             .where(eq(authUsers.id, result.response.user.id));
           if (!user) throw new AuthenticationError("invalid_credential");
-          const [session] = await db
+          const [session] = await tx
             .select()
             .from(authSessions)
             .where(eq(authSessions.token, result.response.token!));
           if (!session) throw new AuthenticationError("invalid_credential");
           await getLiveRequestAuthority(
-            db,
+            tx,
             requestIdentitySnapshotSchema.parse({
-              actor: await loadActivePrincipal(db, user.actorId),
+              actor: await loadActivePrincipal(tx, user.actorId),
               credential: {
                 kind: "session",
                 id: session.id,
@@ -904,6 +957,10 @@ export function createAuthenticationService(
             target: [authAccounts.userId, authAccounts.providerId],
             set: { password, updatedAt: now },
           });
+        await tx
+          .update(authActivations)
+          .set({ consumedAt: now })
+          .where(eq(authActivations.id, activation.id));
         await revokeAccountCredentials(
           tx,
           user.id,
@@ -920,10 +977,6 @@ export function createAuthenticationService(
           .set({ status: "active", emailVerified: true, updatedAt: now })
           .where(eq(authUsers.id, user.id))
           .returning();
-        await tx
-          .update(authActivations)
-          .set({ consumedAt: now })
-          .where(eq(authActivations.id, activation.id));
         await auditIdentity(
           tx,
           "account.activated",
@@ -1053,6 +1106,15 @@ export function createAuthenticationService(
                 isNull(authActivations.revokedAt),
               ),
             );
+        }
+        if (user.instanceRole === "admin" && parsed.instanceRole === "user") {
+          await revokePendingActivations(
+            tx,
+            userId,
+            actor.id,
+            new Date(),
+            true,
+          );
         }
         const [updated] = await tx
           .update(authUsers)

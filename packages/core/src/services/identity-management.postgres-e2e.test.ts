@@ -459,10 +459,23 @@ test(
           }),
           AuthorizationError,
         );
+        await assert.rejects(
+          identity.removeMembership(
+            outsider.headers,
+            transferProject.id,
+            owner.account.actorId,
+          ),
+          AuthorizationError,
+        );
         await auth.reauthenticate(
           outsider.headers,
           { password },
           "identity-reauth",
+        );
+        await identity.removeMembership(
+          outsider.headers,
+          transferProject.id,
+          owner.account.actorId,
         );
       },
     );

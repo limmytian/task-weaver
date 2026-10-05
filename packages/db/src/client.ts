@@ -7,8 +7,15 @@ import * as schema from "./schema/index";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export function createDb(connectionString: string) {
+export function createDb(
+  connectionString: string,
+  options: { maxConnections?: number } = {},
+) {
+  const max = options.maxConnections ?? 10;
+  if (!Number.isInteger(max) || max <= 0)
+    throw new Error("Maximum database connections must be a positive integer");
   const client = postgres(connectionString, {
+    max,
     connection: { search_path: "task_weaver,public" },
   });
   return drizzle(client, { schema });
@@ -23,7 +30,11 @@ export async function runMigrations(connectionString: string) {
   try {
     await client`CREATE SCHEMA IF NOT EXISTS task_weaver`;
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder, migrationsTable: "__drizzle_migrations", migrationsSchema: "task_weaver" });
+    await migrate(db, {
+      migrationsFolder,
+      migrationsTable: "__drizzle_migrations",
+      migrationsSchema: "task_weaver",
+    });
   } finally {
     await client.end();
   }

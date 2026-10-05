@@ -269,7 +269,7 @@ An owner or maintainer may separately approve persisted execution/MCP
 entitlements without automatically receiving those execution rights. A scoped
 API key can approve or assign only rights within its own live ceiling; it cannot
 use membership administration to widen itself or another credential. A human
-session requires recent authentication for membership assignment and browser
+session requires recent authentication for membership assignment, removal and browser
 credential mutations. Explicit human-bound `credential.manage` API keys may
 create parent-bounded descendants, subject to live issuer/subject intersection.
 Agents cannot administer human credentials. Every mutation reloads current
@@ -296,3 +296,25 @@ Set-Cookie headers. Resource-specific enforcement, SSE/background revalidation,
 legacy ownership migration and trusted executor attribution remain in their
 existing later slices. These services do not activate any transport or confer
 review/merge eligibility beyond the existing review policy.
+
+## A3 review corrections
+
+Login holds the lifecycle lock and routes both Better Auth's adapter queries and
+session hooks through the same Drizzle transaction, using request-local async
+context. Provider sessions and their audit event commit or roll back together;
+a one-connection pool cannot deadlock by opening a second connection inside the
+locked login transaction. Database connections remain configurable, with the
+existing default of ten.
+
+Password change, recovery and disablement revoke pending activation links both
+owned by the subject and previously issued by that subject. Administrator
+demotion also permanently revokes outstanding issuer links. Restoring an account
+or administrator role never revives these links. Activation consumes its current
+link before revoking other outstanding authority, all within the locked
+transaction, so a valid administrator recovery link remains usable exactly once.
+
+Browser membership removal requires the same recent authentication as assignment,
+including removal of non-owner members. Scoped API keys still require explicit
+membership administration within their live credential ceiling; removing an owner
+additionally requires a recently authenticated human session and another active
+human owner.

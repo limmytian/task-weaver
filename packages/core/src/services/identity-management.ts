@@ -359,6 +359,8 @@ export function createIdentityManagementService(
           context,
           projectId,
         );
+        if (context.credential.kind === "session")
+          await requireRecentSession(tx, context);
         const [existing] = await tx
           .select()
           .from(projectMemberships)
