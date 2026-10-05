@@ -106,3 +106,30 @@ authority. Cookie-authenticated mutations require Origin and CSRF validation.
 Contract validation tests cover structural failures and export compatibility.
 Runtime revocation, ownership filtering, transport/SSE isolation, credential
 storage and migration require integration/security tests when implemented.
+
+## Identity storage
+
+The additive `0048_auth_principals` migration creates stable actors, human users,
+local login accounts, revocable sessions, memberships, one-time activation
+records and a bootstrap singleton. Existing attribution and API keys are retained;
+no implicit identity mapping or project ownership is granted. Actors, accounts and
+memberships use restrictive foreign keys so disabling a principal preserves its
+history. Only human actors can own a project or manage an agent. Account email
+uniqueness is case insensitive. New actors/users default to disabled.
+
+`betterAuthTables` maps the four provider models to their Drizzle tables using the
+[Better Auth core schema](https://better-auth.com/docs/concepts/database) and
+[Drizzle adapter](https://better-auth.com/docs/adapters/drizzle). Provider token and
+password fields are private storage, never public DTOs. A3 must configure UUID IDs,
+closed registration, server-only identity fields and hooks that supply finite
+absolute/idle session deadlines before enabling the provider. Cookie caching must
+be disabled. This storage change does not enable login or transport authentication.
+
+Bootstrap must lock the seeded singleton and validate the deployment Secret;
+the migration neither creates an administrator nor persists that Secret. Recovery
+uses administrator-issued, finite, hashed one-time activations. A3 must serialize
+account/ownership mutations and protect the last active human administrator and
+project owner; additive storage cannot impose those cross-row invariants on legacy
+projects before their explicit ownership migration. Membership removal is recorded
+with `removedAt`; rejoining reuses the unique project/actor record and preserves
+history through the activity log. No runtime account lifecycle is enabled here.

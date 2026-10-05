@@ -337,6 +337,13 @@
       "when": 1791200000000,
       "tag": "0047_ti_agent_overhaul",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1791200000001,
+      "tag": "0048_auth_principals",
+      "breakpoints": true
     }
   ]
 }

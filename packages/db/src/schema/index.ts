@@ -19,3 +19,4 @@ export * from "./skill-packages";
 export * from "./relations";
 export * from "./daemons";
 export * from "./agent-usage";
+export * from "./auth";
