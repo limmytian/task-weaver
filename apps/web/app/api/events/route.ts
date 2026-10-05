@@ -10,7 +10,7 @@ export async function GET(request: Request) {
     const auth = getWebAuthenticationRuntime().auth;
     auth.assertOrigin(request.headers);
     await auth.verify(request.headers);
-    // B3 must filter subscriptions and revalidate authority before any event or resume metadata is exposed.
+    // B4 must filter subscriptions and revalidate authority before any event or resume metadata is exposed.
     requireResourceAuthorization();
   } catch (error) {
     const failure = authenticationFailure(error);

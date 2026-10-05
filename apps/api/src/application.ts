@@ -269,7 +269,7 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
         },
       },
     ],
-    // B3 must authorize persisted webhook delivery before restoring subscriptions.
+    // B4 must authorize persisted webhook delivery before restoring subscriptions.
     eventSubscribers: [],
     healthChecks: [
       { id: "core-api", check: () => ({ status: "healthy" as const }) },
