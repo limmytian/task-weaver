@@ -31,7 +31,8 @@
     "check:ce-artifacts": "node scripts/check-ce-artifact-compatibility.mjs",
     "test:gateway-postgres": "node scripts/verify-partners-gateway-postgres.mjs",
     "test:gateway-live": "node scripts/verify-partners-gateway-postgres.mjs --live",
-    "test:agent-usage-postgres": "node scripts/verify-agent-usage-postgres.mjs"
+    "test:agent-usage-postgres": "node scripts/verify-agent-usage-postgres.mjs",
+    "test:auth-postgres": "node scripts/verify-auth-postgres.mjs"
   },
   "devDependencies": {
     "dotenv-cli": "^11.0.0",

@@ -133,3 +133,47 @@ project owner; additive storage cannot impose those cross-row invariants on lega
 projects before their explicit ownership migration. Membership removal is recorded
 with `removedAt`; rejoining reuses the unique project/actor record and preserves
 history through the activity log. No runtime account lifecycle is enabled here.
+
+## Scoped API key storage and services
+
+`0049_scoped_api_keys` adds nullable stable subject/issuer bindings, explicit scoped
+JSON grants, parent/rotation links and revocation metadata without remapping any
+legacy key. Only complete bound records can enter the new trusted resolver.
+Generated keys use 256 random bits; only SHA-256 verifiers and display prefixes are
+stored. Creation and rotation return the new raw value once. Public projections,
+revocation responses and credential audit events exclude verifiers and secrets.
+
+The scoped service accepts a server-verified context, rechecks its persisted
+credential, subject/account/manager state and current memberships, and intersects
+live entitlements with stored ceilings. It never accepts actor headers. Sessions
+can issue longer or explicitly non-expiring keys; API-key issuers cannot extend
+beyond their own finite lifetime or grant scope. Derived keys retain a parent link
+and a bounded ancestry depth. Every authentication walks that live ancestry:
+revoking or rotating a parent invalidates descendants. Future execution delegation
+resolvers must likewise recheck their parent credential on each protected operation;
+A2 does not create delegations, runners or revocation caches.
+
+Issuance targets the caller or its managed agent and requires credential-management
+authority. Grants must be covered by both issuer and subject rights; managing an
+agent does not grant its private content to the manager. Instance admins obtain
+neither project membership nor another actor's personal grants. Live membership
+reduction and project archival narrow project grants. Rotation preserves the
+stable subject, issuer, parent restriction and expiry, narrows grants to current
+authority, atomically revokes the previous key and retains both IDs in audit.
+Unrelated API-key parents cannot replace an existing ancestry. Serializable writes,
+row locking and a unique rotation link prevent concurrent duplicate rotations.
+Revocation remains available to an authorized manager for a disabled managed agent.
+
+Legacy compatibility functions now exclude hashes, retain revoked tombstones and
+hide bound keys from legacy listing, authentication and mutation. They are explicitly
+deprecated until A4 replaces the old transport routes coherently after A3. Unbound
+legacy keys remain historical compatibility credentials, cannot construct a new
+verified context and receive no implicit project membership or stable identity.
+This foundation does not make the current transports a secure multi-user release.
+The ordered A3/A4 and resource/execution slices must complete before activation.
+
+Run `pnpm test:auth-postgres` for a disposable loopback-only pgvector PostgreSQL
+fixture. It checks clean and pre-0048 upgrades, repeat migration, preserved legacy
+rows, constraints, scoped issuance, long/never expiry, live revocation/disable/role
+changes, manager boundaries, parent-preserving rotation, concurrent rotation,
+public secret exclusion and legacy isolation. No existing business database is used.

@@ -36,3 +36,4 @@ export * from "./daemon-metrics";
 export * from "./daemon-release-gate";
 export * from "./version";
 export * as agentUsageService from "./agent-usage";
+export * as authPrincipalService from "./auth-principals";

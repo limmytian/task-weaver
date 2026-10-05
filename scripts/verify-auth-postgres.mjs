@@ -53,29 +53,31 @@ try {
   const port = JSON.parse(docker("inspect", name))[0].NetworkSettings.Ports[
     "5432/tcp"
   ][0].HostPort;
-  const result = spawnSync(
-    "pnpm",
-    [
-      "--filter",
-      "@task-weaver/db",
-      "exec",
-      "tsx",
-      "--test",
-      "src/auth.postgres-e2e.test.ts",
-    ],
-    {
-      encoding: "utf8",
-      timeout: 90_000,
-      maxBuffer: 4 * 1024 * 1024,
-      env: {
-        ...process.env,
-        PGOPTIONS: "-c client_min_messages=warning",
-        TW_AUTH_E2E_DATABASE_URL: `postgres://fixture:fixture-only@127.0.0.1:${port}/tw_auth_e2e`,
+  for (const [packageName, testFile] of [
+    ["@task-weaver/db", "src/auth.postgres-e2e.test.ts"],
+    ["@task-weaver/core", "src/services/api-keys.postgres-e2e.test.ts"],
+  ]) {
+    const result = spawnSync(
+      "pnpm",
+      ["--filter", packageName, "exec", "tsx", "--test", testFile],
+      {
+        encoding: "utf8",
+        timeout: 90_000,
+        maxBuffer: 4 * 1024 * 1024,
+        env: {
+          ...process.env,
+          PGOPTIONS: "-c client_min_messages=warning",
+          TW_AUTH_E2E_DATABASE_URL: `postgres://fixture:fixture-only@127.0.0.1:${port}/tw_auth_e2e`,
+        },
       },
-    },
-  );
-  process.stdout.write(`${result.stdout ?? ""}${result.stderr ?? ""}`);
-  assert.equal(result.status, 0, "Authentication PostgreSQL verification failed");
+    );
+    process.stdout.write(`${result.stdout ?? ""}${result.stderr ?? ""}`);
+    assert.equal(
+      result.status,
+      0,
+      "Authentication PostgreSQL verification failed",
+    );
+  }
 } finally {
   docker("rm", "-f", name);
 }

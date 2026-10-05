@@ -344,6 +344,13 @@
       "when": 1791200000001,
       "tag": "0048_auth_principals",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1791200000002,
+      "tag": "0049_scoped_api_keys",
+      "breakpoints": true
     }
   ]
 }
