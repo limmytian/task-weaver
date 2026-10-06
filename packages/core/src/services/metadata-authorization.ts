@@ -1,7 +1,7 @@
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { agentUsageRuns, reviewRuns, requirementRepositories, repositories, tasks, documents, requirements, projects, activityLog, tiAgentRuns, tiAgentModelConfigs, tiAgentPolicies, schedules, scheduleRuns, type Database } from "@task-weaver/db";
 import { AuthorizationError, NotFoundError, ValidationError, activityQuerySchema } from "@task-weaver/contracts";
-import { requireScope, taskResourcePredicate, resourcePredicate, projectPredicate, requireResource, type ResourceAuthority } from "./resource-authorization";
+import { validateAssignee, requireScope, taskResourcePredicate, resourcePredicate, projectPredicate, requireResource, type ResourceAuthority } from "./resource-authorization";
 import { repositoryPredicate, requireRepository } from "./repository-authorization";
 
 import { metadataReadScope } from "./metadata-read-scope";
@@ -173,8 +173,8 @@ function schedulePredicate(authority: ResourceAuthority) {
     (${schedules.targetScope} = 'personal' AND ${schedules.projectId} IS NULL AND ${schedules.requirementId} IS NULL AND ${schedules.personalOwnerType} = 'human')
     OR (${schedules.targetScope} = 'project' AND ${schedules.projectId} IS NOT NULL AND ${schedules.personalOwnerId} IS NULL AND ${schedules.personalOwnerType} IS NULL AND EXISTS (SELECT 1 FROM requirements r WHERE r.id = ${schedules.requirementId} AND r.project_id = ${schedules.projectId}))
   ) AND NOT EXISTS (SELECT 1 FROM schedule_runs sr JOIN tasks t ON t.id = sr.generated_task_id WHERE sr.schedule_id = ${schedules.id} AND NOT (
-    (t.scope = 'project' AND t.project_id = ${schedules.projectId} AND t.requirement_id = ${schedules.requirementId} AND ${schedules.targetScope} = 'project')
-    OR (t.scope = 'personal' AND t.project_id IS NULL AND t.requirement_id IS NULL AND t.personal_owner_id = ${schedules.personalOwnerId} AND t.personal_owner_type = ${schedules.personalOwnerType} AND ${schedules.targetScope} = 'personal')
+    (t.scope = 'project' AND t.project_id = ${schedules.projectId} AND t.requirement_id = ${schedules.requirementId} AND t.personal_owner_id IS NULL AND t.personal_owner_type IS NULL AND (t.execution_slice_id IS NULL OR EXISTS (SELECT 1 FROM execution_slices xs WHERE xs.id = t.execution_slice_id AND xs.requirement_id = t.requirement_id)) AND ${schedules.targetScope} = 'project')
+    OR (t.scope = 'personal' AND t.project_id IS NULL AND t.requirement_id IS NULL AND t.execution_slice_id IS NULL AND t.personal_owner_id = ${schedules.personalOwnerId} AND t.personal_owner_type = ${schedules.personalOwnerType} AND ${schedules.targetScope} = 'personal')
   ))`);
 }
 
@@ -191,6 +191,7 @@ async function authorizeScheduleInput(db: Database, authority: ResourceAuthority
     const requirement = await requireResource(db, authority, "requirement", input.requirementId);
     if (requirement.projectId !== input.projectId) throw new ValidationError("Schedule requirement must belong to the same project");
   }
+  await validateAssignee(db, authority, input, input.assignedExecutor, input.assignedExecutorType);
   if (input.autoRun) {
     if (!input.projectId) throw new AuthorizationError();
     requireScope(authority, input, "execution.run");

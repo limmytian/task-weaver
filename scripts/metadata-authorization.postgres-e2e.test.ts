@@ -157,6 +157,7 @@ test("metadata authorization rejects cross-scope reads and forged attribution", 
     const agentRow = await service.scheduleService.createSchedule(db, input, { id: agent.id, type: "agent" });
     assert.equal(agentRow.personalOwnerId, owner.actor.id); assert.equal(agentRow.createdBy, agent.id);
     await assert.rejects(service.scheduleService.acquireDueSchedules(db, {}, { id: agent.id, type: "agent" }), AuthorizationError);
+    await assert.rejects(owner.service.scheduleService.createSchedule(db, { ...input, assignedExecutor: outsider.actor.id, assignedExecutorType: "human" }, owner.actor));
     const projectSchedule = await owner.service.scheduleService.createSchedule(db, createScheduleSchema.parse({ ...input, targetScope: "project", projectId: project.id, requirementId: requirement.id }), owner.actor);
     await assert.rejects(owner.service.scheduleService.updateSchedule(db, projectSchedule.id, { requirementId: otherRequirement.id }, owner.actor));
     const moved = await owner.service.scheduleService.updateSchedule(db, projectSchedule.id, { targetScope: "personal", projectId: null, requirementId: null }, owner.actor);
