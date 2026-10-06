@@ -60,8 +60,12 @@ export function useRealtime() {
         retryRef.current = 0;
         setConnectionState("live");
         try {
-          const data = JSON.parse(event.data) as { lastEventId?: string | null };
-          if (data.lastEventId) lastEventIdRef.current = data.lastEventId;
+          const data = JSON.parse(event.data) as { resume?: string };
+          if (data.resume === "resync") {
+            lastEventIdRef.current = null;
+            lastSequenceRef.current = 0;
+            utils.invalidate();
+          }
         } catch {
           // Legacy connected payloads are intentionally ignored.
         }
@@ -76,6 +80,7 @@ export function useRealtime() {
             utils.task.board.invalidate({ projectId: data.projectId });
             utils.task.list.invalidate({ projectId: data.projectId });
           }
+          if (!data.projectId) utils.task.list.invalidate();
           if (data.taskId) utils.task.get.invalidate({ id: data.taskId });
           scheduleDaemonRefresh();
           utils.activity.list.invalidate();
@@ -115,6 +120,12 @@ export function useRealtime() {
         // normal burst is coalesced to one invalidation window.
         scheduleDaemonRefresh();
       });
+
+      for (const evt of ["schedule_created", "schedule_updated", "schedule_run_created"]) {
+        es.addEventListener(evt, (event: MessageEvent) => {
+          if (acceptEvent(event)) utils.invalidate();
+        });
+      }
 
       es.onerror = () => {
         es?.close();

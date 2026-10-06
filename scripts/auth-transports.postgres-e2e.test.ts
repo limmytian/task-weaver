@@ -204,9 +204,12 @@ test(
         const events = await nextEvents(
           new Request(`${origin}/api/events`, { headers: forged }),
         );
-        assert.equal(events.status, 403);
+        assert.equal(events.status, 200);
         assert.equal(events.headers.get("cache-control"), "no-store");
-        assert.equal((await events.json()).code, "permission_denied");
+        const reader = events.body!.getReader();
+        assert.ok(new TextDecoder().decode((await reader.read()).value).includes("resync"));
+        await reader.cancel();
+        await webRequire("@task-weaver/realtime").shutdown();
       },
     );
     await t.test(

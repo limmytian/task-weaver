@@ -51,3 +51,5 @@ export * from "./identity-management";
 
 export { createResourceServices } from "./resource-services";
 export * from "./resource-authorization";
+
+export * from "./realtime-authorization";

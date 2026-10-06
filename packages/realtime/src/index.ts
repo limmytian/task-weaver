@@ -12,6 +12,7 @@ type Listener = (event: RealtimeEvent) => void;
 const listeners = new Set<Listener>();
 let sql: postgres.Sql | null = null;
 let initialized = false;
+let initialization: Promise<void> | null = null;
 let sequence = 0;
 
 /**
@@ -21,7 +22,16 @@ let sequence = 0;
  */
 export async function initRealtime(connectionString: string): Promise<void> {
   if (initialized) return;
+  if (initialization) return initialization;
+  initialization = initializeTransport(connectionString).catch(async error => {
+    if (sql) await sql.end({ timeout: 1 });
+    sql = null;
+    throw error;
+  }).finally(() => { initialization = null; });
+  return initialization;
+}
 
+async function initializeTransport(connectionString: string): Promise<void> {
   sql = postgres(connectionString, {
     max: 2,
     idle_timeout: 0,
@@ -121,6 +131,7 @@ export function serializeRealtimeEvent(event: RealtimeEvent) {
  * Shut down the realtime system and close the PG connection.
  */
 export async function shutdown(): Promise<void> {
+  await initialization?.catch(() => {});
   if (sql) {
     await sql.end();
     sql = null;

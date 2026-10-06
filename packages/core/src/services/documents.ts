@@ -449,6 +449,7 @@ export async function deleteDocument(db: Database, id: string, actor: Actor) {
     entityType: "document",
     entityId: id,
     action: "deleted",
+    metadata: { deletedResourceScope: { projectId: current.projectId, personalOwnerId: current.personalOwnerId, personalOwnerType: current.personalOwnerType } },
     actorId: actor.id,
     actorType: actor.type,
   });
@@ -520,7 +521,7 @@ export async function unlinkDocuments(db: Database, linkId: string, _expectedPar
     .where(eq(documentLinks.id, linkId))
     .returning();
   if (!deleted) throw new NotFoundError("Document link not found");
-  emit({ type: "document_unlinked", linkId });
+  emit({ type: "document_unlinked", linkId, sourceDocId: deleted.sourceDocId, targetDocId: deleted.targetDocId });
   return deleted;
 }
 
@@ -530,7 +531,7 @@ export async function unlinkDocumentFromTask(db: Database, linkId: string, _expe
     .where(eq(documentTaskLinks.id, linkId))
     .returning();
   if (!deleted) throw new NotFoundError("Document-task link not found");
-  emit({ type: "document_task_unlinked", linkId });
+  emit({ type: "document_task_unlinked", linkId, documentId: deleted.documentId, taskId: deleted.taskId });
   return deleted;
 }
 

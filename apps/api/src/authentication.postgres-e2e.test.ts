@@ -226,7 +226,7 @@ test(
         ]) {
           assert.equal(
             (await call(path, admin.headers)).response.status,
-            403,
+            path === "daemons/events" ? 404 : 403,
             path,
           );
           assert.equal(

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
-import { streamSSE } from "hono/streaming";
 import {
+  createAuthorizedEventStream,
   daemonService,
   daemonProgressService,
   daemonSloService,
@@ -26,7 +26,6 @@ import {
   applyMergeSchema,
   getDaemonConfig,
 } from "@task-weaver/core";
-import { serializeRealtimeEvent, subscribe } from "@task-weaver/realtime";
 import type { Env } from "../middleware/actor.js";
 
 const daemonsRouter = new Hono<Env>();
@@ -452,51 +451,7 @@ daemonsRouter.get("/events", async (c) => {
     return c.json({ error: "SSE mode is not enabled on this server. Set TW_DAEMON_MODE=sse to enable." }, 404);
   }
 
-  return streamSSE(c, async (stream) => {
-    const requestedRole = c.req.query("role");
-    const lastEventId = c.req.header("Last-Event-ID");
-    const lastSequence = lastEventId?.match(/-(\d+)$/)?.[1]
-      ? Number(lastEventId.match(/-(\d+)$/)?.[1])
-      : null;
-    const unsubscribe = subscribe((event) => {
-      if (lastSequence !== null && event.sequence !== undefined && event.sequence <= lastSequence) return;
-      if (
-        event.type === "task_created" ||
-        event.type === "task_released" ||
-        event.type === "requirement_created" ||
-        event.type === "requirement_released" ||
-        (event.type === "repository_retry_requested" &&
-          (!requestedRole || event.targetRole === requestedRole))
-      ) {
-        stream.writeSSE({
-          id: event.eventId,
-          event: event.type,
-          data: serializeRealtimeEvent(event),
-        }).catch(() => {});
-      }
-    });
-
-    await stream.writeSSE({
-      event: "connected",
-      data: JSON.stringify({
-        serverTime: new Date().toISOString(),
-        lastEventId: lastEventId ?? null,
-        resume: lastEventId ? "best_effort" : "fresh",
-      }),
-    });
-
-    const heartbeat = setInterval(() => {
-      stream.writeSSE({ event: "heartbeat", data: "" }).catch(() => {});
-    }, 30_000);
-
-    stream.onAbort(() => {
-      unsubscribe();
-      clearInterval(heartbeat);
-    });
-
-    // Keep stream alive until client disconnects
-    await new Promise(() => {});
-  });
+  return createAuthorizedEventStream(c.get("db"), c.get("identity"), c.req.raw, { daemon: true });
 });
 
 export default daemonsRouter;

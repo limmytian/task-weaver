@@ -109,5 +109,6 @@ const ordinaryRoutes: Array<[string, RegExp]> = [
   ["GET", new RegExp("^/api/v1/memories/[0-9a-fA-F-]{36}/?$")],
 ];
 export function isOrdinaryResourceRoute(method: string, path: string) {
+  if (method === "GET" && path === "/api/v1/daemons/events") return true;
   return ordinaryRoutes.some(([verb, pattern]) => verb === method && pattern.test(path));
 }

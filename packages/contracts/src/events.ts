@@ -50,6 +50,8 @@ const realtimeEventPayloadSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("document_unlinked"),
+    sourceDocId: z.string().uuid().optional(),
+    targetDocId: z.string().uuid().optional(),
     linkId: z.string().uuid(),
   }),
   z.object({
@@ -59,6 +61,8 @@ const realtimeEventPayloadSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("document_task_unlinked"),
+    documentId: z.string().uuid().optional(),
+    taskId: z.string().uuid().optional(),
     linkId: z.string().uuid(),
   }),
   z.object({

@@ -52,3 +52,12 @@ Ti personal owner overrides require live personal grants; instance administrator
 Activity lists/exports select visible entities before pagination. Project audit requires `audit.read`; personal activity follows the human owner's resource access. Arbitrary audit metadata is omitted from these administration surfaces. Observability, queues, history and metrics use scoped requirement/progress/history SQL, quarantine invalid task/slice/dependency/catalog relationships, and ignore untrusted raw worker-state payloads. Read-only queue inspection performs no daemon cleanup. An administrator with no project membership sees no project queue, worker or history data. Daemon lifecycle/control/progress writes and unconverted SLO surfaces remain closed.
 
 There is no generic global settings endpoint. Existing identity instance controls and embedding provider controls retain their explicit instance administrator policies. Background workers, SSE and integration execution remain staged closed; B3 does not implement the subsequent delegation or event-stream slices.
+
+
+## Realtime resource boundaries
+
+Web SSE and optional daemon SSE resolve verified session/key identity and share core event authorization. Every emission and one-second heartbeat checks live credential and actor authority under the identity lifecycle lock. Changed grants close the connection; heartbeat never refreshes session lifetime. Lifecycle/acquisition/control/reporting and background execution remain closed.
+
+Streams contain scoped invalidation hints, not raw event payloads, attributes, titles, host details, worker state, messages or global sequence metadata. Task/document/requirement IDs are checked against current resources; links require both endpoints. Document deletion uses the deletion audit's persisted scope snapshot; legacy deletions without that snapshot are suppressed. Schedule and daemon events use the existing scoped metadata predicates. Connection queues are bounded and cancelled readers unsubscribe.
+
+There is no replay buffer. Every reconnect announces `resume=resync`; clients reset their connection-local sequence and refetch current authorized data. Old cursor/query/Last-Event-ID values are neither echoed nor used to recover old authority. Event IDs and sequence counters belong only to the current connection. PostgreSQL listener initialization is shared across concurrent Web connections.
