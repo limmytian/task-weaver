@@ -1,4 +1,4 @@
-import { and, eq, or, sql, inArray } from "drizzle-orm";
+import { and, eq, or, sql, inArray, isNull, type SQL } from "drizzle-orm";
 import { type Database, mcpServers, mcpTools, mcpToolCalls } from "@task-weaver/db";
 import type { Actor } from "@task-weaver/contracts";
 import type {
@@ -6,7 +6,7 @@ import type {
   UpdateMcpServerInput,
   SearchMcpToolsInput,
 } from "@task-weaver/contracts";
-import { NotFoundError, ConflictError } from "@task-weaver/contracts";
+import { NotFoundError, ConflictError, ValidationError, mcpServerStdioConfigSchema, mcpServerHttpConfigSchema } from "@task-weaver/contracts";
 
 export interface McpPoolClient {
   listTools(): Promise<{ tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }> }>;
@@ -14,9 +14,18 @@ export interface McpPoolClient {
 }
 
 export interface McpPool {
-  getOrConnect(server: { id: string; name: string; transport: string; config: unknown }): Promise<McpPoolClient>;
+  getOrConnect(server: { id: string; name: string; transport: string; config: unknown; authorizationPartition?: string }): Promise<McpPoolClient>;
   disconnect(serverId: string): Promise<void>;
   isConnected(serverId: string): boolean;
+}
+
+function validateConfig(transport: string, config: unknown) {
+  const schema = transport === "stdio" ? mcpServerStdioConfigSchema : mcpServerHttpConfigSchema;
+  if (!schema.safeParse(config).success) throw new ValidationError("MCP config does not match its transport");
+  if (transport !== "stdio") {
+    const url = new URL((config as { url: string }).url);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new ValidationError("MCP endpoint must be HTTP(S) without URL credentials");
+  }
 }
 
 // -- Server CRUD --
@@ -24,10 +33,12 @@ export interface McpPool {
 export async function registerServer(
   db: Database,
   input: RegisterMcpServerInput,
-  _actor: Actor,
+  actor: Actor,
+  credentialId?: string,
 ) {
+  validateConfig(input.transport, input.config);
   const existing = await db.query.mcpServers.findFirst({
-    where: eq(mcpServers.name, input.name),
+    where: and(eq(mcpServers.name, input.name), input.projectId ? eq(mcpServers.projectId, input.projectId) : isNull(mcpServers.projectId), input.personalOwnerId ? eq(mcpServers.personalOwnerId, input.personalOwnerId) : isNull(mcpServers.personalOwnerId)),
   });
   if (existing) {
     throw new ConflictError(`MCP server with name "${input.name}" already exists`, 0);
@@ -36,6 +47,8 @@ export async function registerServer(
   const [server] = await db
     .insert(mcpServers)
     .values({
+      registeredBy: actor.id,
+      registeredCredentialId: credentialId,
       name: input.name,
       description: input.description,
       projectId: input.projectId ?? null,
@@ -49,7 +62,7 @@ export async function registerServer(
       nodeId: input.nodeId,
       scope: input.transport === "stdio" ? (input.scope ?? "private") : null,
       ttl: input.ttl,
-      expiresAt: input.clientId ? new Date(Date.now() + (input.ttl ?? 60) * 1000) : null,
+      expiresAt: input.transport === "stdio" ? new Date(Date.now() + (input.ttl ?? 60) * 1000) : null,
     })
     .returning();
 
@@ -100,8 +113,9 @@ export async function listServers(
     personalOwnerId?: string;
     personalOwnerType?: "human" | "agent";
   },
+  authorizedPredicate?: SQL,
 ) {
-  const conditions = [];
+  const conditions = [authorizedPredicate];
   if (filters?.active !== undefined) {
     conditions.push(eq(mcpServers.active, filters.active));
   }
@@ -125,6 +139,7 @@ export async function updateServer(
   const existing = await getServer(db, id);
   const { localScopeConsent: _localScopeConsent, ...updates } = input;
   const finalTransport = updates.transport ?? existing.transport;
+  validateConfig(finalTransport, updates.config ?? existing.config);
   const finalScope = updates.scope ?? existing.scope;
   const finalNodeId = updates.nodeId ?? existing.nodeId;
   const isEnablingLocalScope = finalTransport === "stdio"
@@ -140,7 +155,7 @@ export async function updateServer(
 
   const [updated] = await db
     .update(mcpServers)
-    .set({ ...updates, updatedAt: new Date() })
+    .set({ ...updates, expiresAt: finalTransport === "stdio" ? new Date(Date.now() + (updates.ttl ?? existing.ttl) * 1000) : null, updatedAt: new Date() })
     .where(eq(mcpServers.id, id))
     .returning();
 
@@ -164,16 +179,16 @@ export async function syncTools(
 
   try {
     client = await pool.getOrConnect(server as Parameters<McpPool["getOrConnect"]>[0]);
-  } catch (err) {
+  } catch {
     await db
       .update(mcpServers)
       .set({
         status: "error",
-        statusMessage: err instanceof Error ? err.message : String(err),
+        statusMessage: "MCP connection failed",
         updatedAt: new Date(),
       })
       .where(eq(mcpServers.id, serverId));
-    throw err;
+    throw new Error("MCP connection failed");
   }
 
   await db
@@ -295,9 +310,9 @@ export async function uploadTools(
 
 // -- Tool Search --
 
-export async function searchTools(db: Database, input: SearchMcpToolsInput) {
-  const likePattern = `%${input.intent}%`;
-  const conditions = [];
+export async function searchTools(db: Database, input: SearchMcpToolsInput, authorizedServerPredicate?: SQL) {
+  const likePattern = input.intent === "*" ? "%" : `%${input.intent}%`;
+  const conditions = [authorizedServerPredicate ? inArray(mcpTools.serverId, db.select({ id: mcpServers.id }).from(mcpServers).where(authorizedServerPredicate)) : undefined];
 
   conditions.push(
     or(
@@ -467,32 +482,29 @@ export async function callTool(
       toolId: tool.id,
       serverId: server.id,
       toolName: tool.name,
-      input: args ?? null,
+      input: null,
       status: "error",
-      errorMessage: err instanceof Error ? err.message : String(err),
+      errorMessage: "MCP tool call failed",
       durationMs: Date.now() - startTime,
       calledBy: actor.id,
       calledByType: actor.type,
     });
-    throw err;
+    return { isError: true, content: [{ type: "text", text: "MCP tool call failed" }] };
   }
 
   try {
     const result = await client.callTool({ name: tool.name, arguments: args });
     const durationMs = Date.now() - startTime;
     const isError = Boolean((result as { isError?: boolean }).isError);
-    const content = (result as { content?: Array<{ type: string; text?: string }> }).content;
 
     await db.insert(mcpToolCalls).values({
       toolId: tool.id,
       serverId: server.id,
       toolName: tool.name,
-      input: args ?? null,
-      output: result as Record<string, unknown>,
+      input: null,
+      output: null,
       status: isError ? "error" : "success",
-      errorMessage: isError && content
-        ? content.filter((b) => b.type === "text").map((b) => b.text).join("\n")
-        : null,
+      errorMessage: isError ? "MCP tool reported an error" : null,
       durationMs,
       calledBy: actor.id,
       calledByType: actor.type,
@@ -504,13 +516,17 @@ export async function callTool(
       toolId: tool.id,
       serverId: server.id,
       toolName: tool.name,
-      input: args ?? null,
+      input: null,
       status: "error",
-      errorMessage: err instanceof Error ? err.message : String(err),
+      errorMessage: "MCP tool call failed",
       durationMs: Date.now() - startTime,
       calledBy: actor.id,
       calledByType: actor.type,
     });
-    throw err;
+    return { isError: true, content: [{ type: "text", text: "MCP tool call failed" }] };
   }
+}
+
+export async function listServerTools(db: Database, serverId: string) {
+  return db.query.mcpTools.findMany({ where: eq(mcpTools.serverId, serverId) });
 }

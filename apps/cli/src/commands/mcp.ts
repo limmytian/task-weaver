@@ -8,7 +8,7 @@ import { loadConfig } from '../config.js'
 
 async function confirmLocalScopeShare(serverId: string): Promise<void> {
   if (!process.stdin.isTTY || !process.stderr.isTTY) {
-    process.stderr.write('Error: --shared exposes this local MCP server to other agents on this machine. Re-run with --yes to confirm.\n')
+    process.stderr.write('Error: --shared exposes this local MCP server to other clients using this registration credential. Re-run with --yes to confirm.\n')
     process.exit(1)
   }
 
@@ -18,7 +18,7 @@ async function confirmLocalScopeShare(serverId: string): Promise<void> {
   })
   try {
     const answer = await rl.question(
-      `Share MCP server ${serverId} with other agents on this machine? Type "yes" to continue: `,
+      `Share MCP server ${serverId} with other clients using this registration credential? Type "yes" to continue: `,
     )
     if (answer.trim().toLowerCase() !== 'yes') {
       process.stderr.write('Aborted.\n')
@@ -150,7 +150,7 @@ export function registerMcp(program: Command): void {
     .option('--args <args>', 'JSON array of arguments', '[]')
     .option('--env <env>', 'JSON object of env variables', '{}')
     .option('--project <id>', 'scope this local MCP server to a project')
-    .option('--shared', 'make this server visible to all agents on this machine (scope=local), default is process-private')
+    .option('--shared', 'share within the authenticated registration credential (scope=local)')
     .option('--yes', 'confirm local scope sharing without an interactive prompt')
     .action(async (opts) => {
       const serverId = opts.server
@@ -188,13 +188,13 @@ export function registerMcp(program: Command): void {
         process.exit(1)
       }
 
-      console.log(`Connecting to local stdio MCP server: ${command} ${parsedArgs.join(' ')}`)
+      console.log(`Connecting to local stdio MCP server`)
 
       const client = new Client({ name: 'task-weaver-cli-host', version: '1.0.0' })
       const transport = new StdioClientTransport({
         command,
         args: parsedArgs,
-        env: { ...process.env, ...parsedEnv } as Record<string, string>,
+        env: parsedEnv,
       })
 
       try {
@@ -226,7 +226,6 @@ export function registerMcp(program: Command): void {
           config: {
             command,
             args: parsedArgs,
-            env: parsedEnv,
           },
           clientId,
           nodeId: config.nodeId,
@@ -249,15 +248,39 @@ export function registerMcp(program: Command): void {
         try {
           await post(`/api/v1/mcp/servers/${serverId}/heartbeat`, { clientId })
           console.log(`[${new Date().toLocaleTimeString()}] Heartbeat sent successfully.`)
-        } catch (err) {
-          console.error(`[${new Date().toLocaleTimeString()}] Heartbeat failed: ${err instanceof Error ? err.message : String(err)}`)
+        } catch {
+          console.error("MCP heartbeat failed")
         }
       }
 
       await sendHeartbeat()
       const interval = setInterval(sendHeartbeat, 20000)
+      let stopping = false
+      const processRequests = async () => {
+        while (!stopping) {
+          try {
+            const { items } = await post<{ items: Array<{ id: string; toolName: string; arguments: Record<string, unknown>; leaseToken: string; expiresAt: string }> }>(`/api/v1/mcp/servers/${serverId}/poll`, {})
+            for (const item of items) {
+              if (Date.parse(item.expiresAt) <= Date.now()) continue
+              let result: Record<string, unknown>
+              try {
+                result = await client.callTool({ name: item.toolName, arguments: item.arguments }, undefined, { timeout: Math.max(1, Date.parse(item.expiresAt) - Date.now()) }) as Record<string, unknown>
+              } catch {
+                result = { isError: true, content: [{ type: 'text', text: 'Local MCP tool call failed' }] }
+              }
+              await post(`/api/v1/mcp/requests/${item.id}/result`, { leaseToken: item.leaseToken, result })
+            }
+          } catch {
+            // Do not print request arguments, tool outputs, credentials or provider errors.
+            process.stderr.write('Local MCP request polling failed; check registration and credentials.\n')
+          }
+          await new Promise(resolve => setTimeout(resolve, 500))
+        }
+      }
+      void processRequests()
 
       const cleanup = async () => {
+        stopping = true
         console.log('\nStopping heartbeat loop and shutting down...')
         clearInterval(interval)
         try {

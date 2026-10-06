@@ -66,6 +66,7 @@ try {
     [null, "scripts/resource-authorization.postgres-e2e.test.ts"],
     [null, "scripts/retrieval-authorization.postgres-e2e.test.ts"],
     [null, "scripts/asset-authorization.postgres-e2e.test.ts"],
+    [null, "scripts/mcp-authorization.postgres-e2e.test.ts"],
   ]) {
     const result = spawnSync(
       "pnpm",

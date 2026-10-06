@@ -1,6 +1,9 @@
 import { Hono } from "hono";
 import {
-  mcpRegistryService,
+  createResourceServices,
+  personalResourceOwnerId,
+  uploadMcpToolsSchema,
+  completeLocalMcpRequestSchema,
   registerMcpServerSchema,
   updateMcpServerSchema,
   searchMcpToolsSchema,
@@ -27,7 +30,7 @@ mcp.post("/servers", async (c) => {
   }
 
   try {
-    const server = await mcpRegistryService.registerServer(db, parsed.data, actor);
+    const server = await createResourceServices(c.get("identity")).mcpRegistryService.registerServer(db, parsed.data, actor);
     return c.json(server, 201);
   } catch (err) {
     if (err instanceof ConflictError) {
@@ -40,21 +43,20 @@ mcp.post("/servers", async (c) => {
 // GET /servers - List servers
 mcp.get("/servers", async (c) => {
   const db = c.get("db");
-  const actor = c.get("actor");
   const active = c.req.query("active");
   const tags = c.req.query("tags")?.split(",");
   const projectId = c.req.query("projectId");
   const includeGlobal = c.req.query("includeGlobal");
   const includePersonal = c.req.query("includePersonal");
 
-  const servers = await mcpRegistryService.listServers(db, {
+  const servers = await createResourceServices(c.get("identity")).mcpRegistryService.listServers(db, {
     active: active === "true" ? true : active === "false" ? false : undefined,
     tags,
     projectId: projectId || undefined,
     includeGlobal: includeGlobal === "false" ? false : true,
     includePersonal: includePersonal === "true",
-    personalOwnerId: c.req.query("personalOwnerId") ?? actor.id,
-    personalOwnerType: (c.req.query("personalOwnerType") as "human" | "agent" | undefined) ?? actor.type,
+    personalOwnerId: c.req.query("personalOwnerId") ?? personalResourceOwnerId(c.get("identity")),
+    personalOwnerType: (c.req.query("personalOwnerType") as "human" | "agent" | undefined) ?? "human",
   });
 
   return c.json({ items: servers });
@@ -66,7 +68,7 @@ mcp.get("/servers/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const server = await mcpRegistryService.getServer(db, id);
+    const server = await createResourceServices(c.get("identity")).mcpRegistryService.getServer(db, id);
     return c.json(server);
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
@@ -87,7 +89,7 @@ mcp.patch("/servers/:id", async (c) => {
   }
 
   try {
-    const server = await mcpRegistryService.updateServer(db, id, parsed.data, actor);
+    const server = await createResourceServices(c.get("identity")).mcpRegistryService.updateServer(db, id, parsed.data, actor);
     return c.json(server);
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
@@ -103,8 +105,8 @@ mcp.delete("/servers/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
+    await createResourceServices(c.get("identity")).mcpRegistryService.deleteServer(db, id, actor);
     await mcpPool.disconnect(id);
-    await mcpRegistryService.deleteServer(db, id, actor);
     return c.json({ success: true });
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
@@ -118,11 +120,11 @@ mcp.post("/servers/:id/sync", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const tools = await mcpRegistryService.syncTools(db, id, mcpPool);
+    const tools = await createResourceServices(c.get("identity")).mcpRegistryService.syncTools(db, id, mcpPool);
     return c.json({ items: tools, count: tools.length });
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
-    return c.json({ error: err instanceof Error ? err.message : "Sync failed" }, 502);
+    throw err;
   }
 });
 
@@ -147,7 +149,7 @@ mcp.post("/servers/:id/heartbeat", async (c) => {
   }
 
   try {
-    const server = await mcpRegistryService.heartbeatServer(db, id, clientId);
+    const server = await createResourceServices(c.get("identity")).mcpRegistryService.heartbeatServer(db, id, clientId);
     return c.json({ success: true, expiresAt: server.expiresAt });
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
@@ -162,12 +164,11 @@ mcp.post("/servers/:id/upload-tools", async (c) => {
   const id = c.req.param("id");
   const body = await c.req.json().catch(() => null);
 
-  if (!body || !Array.isArray(body.tools)) {
-    return c.json({ error: "Invalid body. Expected JSON object with 'tools' array." }, 400);
-  }
+  const parsed = uploadMcpToolsSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
 
   try {
-    const results = await mcpRegistryService.uploadTools(db, id, body.tools);
+    const results = await createResourceServices(c.get("identity")).mcpRegistryService.uploadTools(db, id, parsed.data.tools);
     return c.json({ items: results, count: results.length });
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
@@ -180,7 +181,6 @@ mcp.post("/servers/:id/upload-tools", async (c) => {
 // GET /tools/search - Search tools by intent
 mcp.get("/tools/search", async (c) => {
   const db = c.get("db");
-  const actor = c.get("actor");
   const query = c.req.query();
 
   const parsed = searchMcpToolsSchema.safeParse({
@@ -190,8 +190,8 @@ mcp.get("/tools/search", async (c) => {
     projectId: query.projectId,
     includeGlobal: query.includeGlobal,
     includePersonal: query.includePersonal,
-    personalOwnerId: query.personalOwnerId ?? actor.id,
-    personalOwnerType: query.personalOwnerType ?? actor.type,
+    personalOwnerId: query.personalOwnerId ?? personalResourceOwnerId(c.get("identity")),
+    personalOwnerType: query.personalOwnerType ?? "human",
     clientId: query.clientId || c.req.header("X-Client-Id"),
     nodeId: query.nodeId || c.req.header("X-Node-Id"),
     limit: query.limit,
@@ -201,7 +201,7 @@ mcp.get("/tools/search", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
 
-  const results = await mcpRegistryService.searchTools(db, parsed.data);
+  const results = await createResourceServices(c.get("identity")).mcpRegistryService.searchTools(db, parsed.data);
   return c.json({ items: results });
 });
 
@@ -211,7 +211,7 @@ mcp.get("/tools/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const tool = await mcpRegistryService.getToolDetail(db, id);
+    const tool = await createResourceServices(c.get("identity")).mcpRegistryService.getToolDetail(db, id);
     return c.json(tool);
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
@@ -232,7 +232,7 @@ mcp.post("/tools/:id/call", async (c) => {
   }
 
   try {
-    const result = await mcpRegistryService.callTool(
+    const result = await createResourceServices(c.get("identity")).mcpRegistryService.callTool(
       db,
       id,
       parsed.data.arguments,
@@ -243,8 +243,19 @@ mcp.post("/tools/:id/call", async (c) => {
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
     if (err instanceof ConflictError) return c.json({ error: err.message }, 409);
-    return c.json({ error: err instanceof Error ? err.message : "Tool call failed" }, 502);
+    throw err;
   }
+});
+
+mcp.post("/servers/:id/poll", async c => {
+  const items = await createResourceServices(c.get("identity")).mcpRegistryService.pollLocalToolRequests(c.get("db"), c.req.param("id"));
+  return c.json({ items });
+});
+
+mcp.post("/requests/:id/result", async c => {
+  const parsed = completeLocalMcpRequestSchema.safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
+  return c.json(await createResourceServices(c.get("identity")).mcpRegistryService.completeLocalToolRequest(c.get("db"), c.req.param("id"), parsed.data));
 });
 
 export default mcp;

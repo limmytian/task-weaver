@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull, isNotNull, or, sql, type AnyColumn, type SQL, getTableName } from "drizzle-orm";
 import {
   type Database, projects, tasks, requirements, documents, memories,
-  executionSlices, authActors, projectMemberships, skillPackages, embeddingProfiles,
+  executionSlices, authActors, mcpServers, projectMemberships, skillPackages, embeddingProfiles,
 } from "@task-weaver/db";
 import {
   AuthorizationError, NotFoundError, ValidationError, AuthenticationError, stableActorReferenceSchema,
@@ -10,7 +10,7 @@ import {
 import { getLiveRequestAuthority } from "./api-keys";
 import { grantsAreCovered, loadActivePrincipal, type AuthDatabase } from "./auth-principals";
 
-export type ResourceKind = "project" | "requirement" | "task" | "document" | "memory" | "slice" | "package" | "profile";
+export type ResourceKind = "project" | "requirement" | "task" | "document" | "memory" | "slice" | "package" | "profile" | "mcp";
 export type ResourceScope = {
   projectId?: string | null;
   personalOwnerId?: string | null;
@@ -101,8 +101,13 @@ export async function requireResource(db: Database, authority: ResourceAuthority
       : kind === "document" ? await db.query.documents.findFirst({ where: eq(documents.id, id) })
       : kind === "package" ? await db.query.skillPackages.findFirst({ where: eq(skillPackages.id, id) })
       : kind === "profile" ? await db.query.embeddingProfiles.findFirst({ where: eq(embeddingProfiles.id, id) })
+      : kind === "mcp" ? await db.query.mcpServers.findFirst({ where: eq(mcpServers.id, id) })
       : await db.query.memories.findFirst({ where: eq(memories.id, id) });
     scope = row;
+    if (kind === "mcp" && row && "registeredBy" in row) {
+      const creator = row.registeredBy ? await db.query.authActors.findFirst({ where: sql`${authActors.id}::text = ${row.registeredBy}` }) : undefined;
+      if (!creator) scope = undefined;
+    }
     if (kind === "profile" && row && "scope" in row) {
       const expected = row.projectId ? "project" : row.personalOwnerId ? "personal" : "global";
       if (row.scope !== expected) scope = undefined;

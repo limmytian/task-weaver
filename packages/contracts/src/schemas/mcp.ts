@@ -100,7 +100,7 @@ export const searchMcpToolsSchema = z.object({
 });
 
 export const callMcpToolSchema = z.object({
-  arguments: z.record(z.unknown()).optional(),
+  arguments: z.record(z.unknown()).refine(value => JSON.stringify(value).length <= 1_048_576, "MCP arguments exceed size limit").optional(),
 });
 
 export type McpTransport = z.infer<typeof mcpTransportSchema>;
@@ -109,3 +109,16 @@ export type RegisterMcpServerInput = z.infer<typeof registerMcpServerSchema>;
 export type UpdateMcpServerInput = z.infer<typeof updateMcpServerSchema>;
 export type SearchMcpToolsInput = z.infer<typeof searchMcpToolsSchema>;
 export type CallMcpToolInput = z.infer<typeof callMcpToolSchema>;
+
+export const uploadMcpToolsSchema = z.object({
+  tools: z.array(z.object({
+    name: z.string().min(1).max(255),
+    description: z.string().max(16_384).optional(),
+    inputSchema: z.record(z.unknown()).optional(),
+  }).strict()).max(1000),
+}).strict();
+
+export const completeLocalMcpRequestSchema = z.object({
+  leaseToken: z.string().regex(/^[a-f0-9]{64}$/),
+  result: z.record(z.unknown()).refine(value => JSON.stringify(value).length <= 1_048_576, "MCP result exceeds size limit"),
+}).strict();

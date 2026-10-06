@@ -358,6 +358,13 @@
       "when": 1791200000003,
       "tag": "0050_auth_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1791200000004,
+      "tag": "0051_mcp_registration_identity",
+      "breakpoints": true
     }
   ]
 }

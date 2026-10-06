@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import {
   type Database, projects, requirements, tasks, documents, memories, executionSlices,
-  skillPackages, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
+  mcpTools, mcpLocalRequests, skillPackages, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
   documentRequirementLinks, projectMemberships, activityLog,
 } from "@task-weaver/db";
 import {
@@ -16,22 +16,25 @@ import * as documentImplementation from "./documents";
 import * as memoryImplementation from "./memory";
 import * as recommendationImplementation from "./recommendations";
 import * as contextImplementation from "./context";
+import { invokeMcpTool, pollLocalToolRequests, completeLocalToolRequest } from "./mcp-local";
+import { mcpServerPredicate, requireMcpServer, requireLocalHost, credentialBinding } from "./mcp-authorization";
+import * as mcpImplementation from "./mcp-registry";
 import * as embeddingImplementation from "./embeddings/index";
 import { testEmbeddingProfile, embeddingProvider } from "./embedding-configuration";
 import * as packageImplementation from "./skill-packages";
 import { packageResourcePredicate, requirePackage, profileResourcePredicate, requireProfile, requireProfileManagement, canManageProvider } from "./asset-authorization";
 import { auditIdentity, lockIdentityLifecycle } from "./auth-security";
 import {
-  labelledResourcePredicate, qualifiedScopeColumns, taskResourcePredicate, memoryResourcePredicate, resourceAuthority, requireResource, requireScope, resourcePredicate, projectPredicate,
+  canAccessResource, labelledResourcePredicate, qualifiedScopeColumns, taskResourcePredicate, memoryResourcePredicate, resourceAuthority, requireResource, requireScope, resourcePredicate, projectPredicate,
   validateAssignee, type ResourceAuthority, type ResourceKind, type ResourceScope,
 } from "./resource-authorization";
 
-type Group = "project" | "requirement" | "task" | "claim" | "document" | "memory" | "recommendation" | "context" | "package" | "embedding";
+type Group = "project" | "requirement" | "task" | "claim" | "document" | "memory" | "recommendation" | "context" | "package" | "embedding" | "mcp";
 type Input = Record<string, any>;
 const sources = {
   project: projectImplementation, requirement: requirementImplementation, task: taskImplementation,
   claim: claimImplementation, document: documentImplementation, memory: memoryImplementation,
-  recommendation: recommendationImplementation, context: contextImplementation, package: packageImplementation, embedding: { ...embeddingImplementation, testEmbeddingProfile },
+  recommendation: recommendationImplementation, context: contextImplementation, package: packageImplementation, embedding: { ...embeddingImplementation, testEmbeddingProfile }, mcp: { ...mcpImplementation, pollLocalToolRequests, completeLocalToolRequest },
 };
 const readById: Record<string, ResourceKind> = {
   getProject: "project", getRequirement: "requirement", getTask: "task", getTaskDetail: "task",
@@ -67,6 +70,7 @@ function bindServices(context?: VerifiedRequestContext) {
       return [name, async (...args: any[]) => {
         if (!context) throw new AuthorizationError();
         const db = args[0] as Database;
+        if (group === "mcp" && name === "callTool") return invokeMcpTool(db, context, args[1], args[2], args[3], args[4]);
         return db.transaction(async tx => {
           // Serialize policy mutations with resource operations, including reads and nested relations.
           await lockIdentityLifecycle(tx);
@@ -80,7 +84,7 @@ function bindServices(context?: VerifiedRequestContext) {
           }
           const call = [...args];
           call[0] = txDb;
-          await authorizeOperation(txDb, authority, group, name, call);
+          await authorizeOperation(txDb, authority, group, name, call, context);
           let result: any;
           if (name === "createProject") {
             if (authority.actor.type !== "human" || !authority.grants.some(g => g.scope === "instance" && g.permissions.includes("project.create"))) throw new AuthorizationError();
@@ -107,6 +111,7 @@ function bindServices(context?: VerifiedRequestContext) {
             if (group === "memory") await auditIdentity(tx, `memory.${name}`, actor.id, actor.id, entityId);
             else await tx.insert(activityLog).values({ entityType: group === "claim" ? "task" : group as "project" | "requirement" | "task" | "document", entityId, action: name, actorId: actor.id, actorType: actor.type });
           }
+          if (group === "mcp" && name !== "callTool") result = redactMcpResult(authority, result);
           if (group === "embedding") result = redactEmbeddingResult(authority, result);
           return pruneRelations(txDb, authority, result);
         });
@@ -117,12 +122,12 @@ function bindServices(context?: VerifiedRequestContext) {
     projectService: bind("project", sources.project), requirementService: bind("requirement", sources.requirement),
     taskService: bind("task", sources.task), claimService: bind("claim", sources.claim),
     documentService: bind("document", sources.document), memoryService: bind("memory", sources.memory),
-    recommendationService: bind("recommendation", sources.recommendation), contextService: bind("context", sources.context), skillPackageService: bind("package", sources.package), embeddingService: bind("embedding", sources.embedding),
+    recommendationService: bind("recommendation", sources.recommendation), contextService: bind("context", sources.context), skillPackageService: bind("package", sources.package), embeddingService: bind("embedding", sources.embedding), mcpRegistryService: bind("mcp", sources.mcp),
   };
 }
 
 /** Compatibility names compile for staged adapters but cannot authorize a caller. */
-export const { projectService, requirementService, taskService, claimService, documentService, memoryService, recommendationService, contextService, skillPackageService, embeddingService } = bindServices();
+export const { projectService, requirementService, taskService, claimService, documentService, memoryService, recommendationService, contextService, skillPackageService, embeddingService, mcpRegistryService } = bindServices();
 
 async function checkTaskInput(db: Database, authority: ResourceAuthority, input: Input, current?: ResourceScope) {
   const scope: ResourceScope = current ?? (input.scope === "personal" ? {
@@ -155,8 +160,50 @@ async function checkMemoryEntity(db: Database, authority: ResourceAuthority, inp
   await requireResource(db, authority, input.entityType, input.entityId);
 }
 
-async function authorizeOperation(db: Database, authority: ResourceAuthority, group: Group, name: string, call: any[]) {
+async function authorizeOperation(db: Database, authority: ResourceAuthority, group: Group, name: string, call: any[], context: VerifiedRequestContext) {
   const id = call[1];
+  if (group === "mcp") {
+    if (name === "registerServer") { requireScope(authority, id, "mcp.manage"); call[3] = credentialBinding(context); return; }
+    if (name === "listServers" || name === "searchTools") {
+      if (id?.projectId) await requireResource(db, authority, "project", id.projectId);
+      if (id?.includePersonal && (id.personalOwnerId || id.personalOwnerType)) requireScope(authority, id, "resource.read");
+      const predicate = mcpServerPredicate(authority, context);
+      call[2] = predicate; return;
+    }
+    let serverId = id;
+    if (name === "completeLocalToolRequest") {
+      const request = await db.query.mcpLocalRequests.findFirst({ where: eq(mcpLocalRequests.id, id) });
+      if (!request) throw new NotFoundError("Resource not found");
+      serverId = request.serverId;
+    }
+    if (["getToolDetail", "callTool"].includes(name)) {
+      const tool = await db.query.mcpTools.findFirst({ where: eq(mcpTools.id, id) });
+      if (!tool) throw new NotFoundError("Resource not found");
+      serverId = tool.serverId;
+    }
+    const permission = ["updateServer", "deleteServer", "syncTools", "uploadTools", "heartbeatServer", "pollLocalToolRequests", "completeLocalToolRequest"].includes(name) ? "mcp.manage" : name === "callTool" ? "mcp.invoke" : "resource.read";
+    if (!["getServer", "listServerTools", "getToolDetail", "callTool", "updateServer", "deleteServer", "syncTools", "uploadTools", "heartbeatServer", "pollLocalToolRequests", "completeLocalToolRequest"].includes(name)) throw new AuthorizationError();
+    const server = await requireMcpServer(db, authority, context, serverId, permission);
+    if (["heartbeatServer", "uploadTools", "pollLocalToolRequests", "completeLocalToolRequest"].includes(name)) requireLocalHost(server, context);
+    if (["getToolDetail", "listServerTools", "callTool", "syncTools", "pollLocalToolRequests", "completeLocalToolRequest"].includes(name)
+      && (!server!.active || server!.expiresAt && server!.expiresAt <= new Date())) throw new NotFoundError("Resource not found");
+    if (name === "callTool" || name === "syncTools") {
+      const poolIndex = name === "callTool" ? 4 : 2;
+      const pool = call[poolIndex] as mcpImplementation.McpPool;
+      const partition = authority.actor.id + ":" + context.credential.kind + ":" + context.credential.id;
+      call[poolIndex] = {
+        getOrConnect: (record: Parameters<mcpImplementation.McpPool["getOrConnect"]>[0]) => pool.getOrConnect({ ...record, authorizationPartition: partition }),
+        disconnect: (serverId: string) => pool.disconnect(serverId),
+        isConnected: (serverId: string) => pool.isConnected(serverId),
+      };
+    }
+    if (name === "syncTools" && server.transport === "stdio") throw new ValidationError("Client-hosted MCP tools must be uploaded by their registered client");
+    if (name === "updateServer") {
+      if (call[2].transport && call[2].transport !== server.transport) throw new ValidationError("Transport changes require a new MCP registration");
+      requireScope(authority, { ...server, ...call[2] }, "mcp.manage");
+    }
+    return;
+  }
   if (group === "embedding") {
     if (name === "listEmbeddingProfiles") { call[1] = profileResourcePredicate(authority); return; }
     if (name === "createEmbeddingProfile") {
@@ -436,5 +483,23 @@ function redactEmbeddingResult(authority: ResourceAuthority, value: any): any {
   for (const key of ["lastErrorSummary", "errorSummary", "leaseOwner", "leaseToken", "requestReason"]) if (key in result) result[key] = null;
   if (!("secretRef" in result) && "baseUrl" in result) result.baseUrl = "";
   for (const [key, child] of Object.entries(result)) if (child && typeof child === "object" && !(child instanceof Date)) result[key] = redactEmbeddingResult(authority, child);
+  return result;
+}
+
+function redactMcpResult(authority: ResourceAuthority, value: any): any {
+  if (Array.isArray(value)) return value.map(item => redactMcpResult(authority, item));
+  if (!value || typeof value !== "object" || value instanceof Date) return value;
+  const result = { ...value };
+  if ("registeredBy" in result && "transport" in result) {
+    const config = result.config;
+    result.config = canAccessResource(authority, result, "mcp.manage")
+      ? result.transport === "stdio" ? { command: config.command, args: config.args }
+        : { url: config.url }
+      : result.transport === "stdio" ? { command: "" } : { url: "" };
+    result.statusMessage = null;
+    delete result.registeredCredentialId;
+    delete result.clientId; delete result.nodeId;
+  }
+  for (const [key, child] of Object.entries(result)) if (child && typeof child === "object" && !(child instanceof Date)) result[key] = redactMcpResult(authority, child);
   return result;
 }

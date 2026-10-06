@@ -8,7 +8,7 @@ export * from "./embeddings/provider";
 export * from "./embeddings/openai-compatible";
 export * from "./embeddings/chunking";
 export { contextService } from "./resource-services";
-export * as mcpRegistryService from "./mcp-registry";
+export { mcpRegistryService } from "./resource-services";
 export { memoryService } from "./resource-services";
 export { requirementService } from "./resource-services";
 export * as repositoryService from "./repositories";

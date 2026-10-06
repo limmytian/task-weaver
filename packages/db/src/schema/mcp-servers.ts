@@ -9,6 +9,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { actorTypeEnum } from "./enums";
 import { projects } from "./projects";
 
@@ -37,6 +38,8 @@ export const mcpServers = pgTable(
     transport: text("transport", {
       enum: ["stdio", "sse", "streamable-http"],
     }).notNull(),
+    registeredBy: text("registered_by"),
+    registeredCredentialId: text("registered_credential_id"),
     config: jsonb("config").notNull().$type<McpServerConfig>(),
     active: boolean("active").notNull().default(true),
     status: text("status", {
@@ -58,7 +61,7 @@ export const mcpServers = pgTable(
       .notNull(),
   },
   (table) => [
-    uniqueIndex("idx_mcp_servers_name").on(table.name),
+    uniqueIndex("idx_mcp_servers_scope_name").on(table.name, sql`coalesce(${table.projectId}::text, '')`, sql`coalesce(${table.personalOwnerId}, '')`),
     index("idx_mcp_servers_active").on(table.active),
     index("idx_mcp_servers_project").on(table.projectId),
     index("idx_mcp_servers_personal_owner").on(table.personalOwnerId, table.personalOwnerType),
@@ -116,3 +119,20 @@ export const mcpToolCalls = pgTable(
     index("idx_mcp_tool_calls_created").on(table.createdAt),
   ],
 );
+
+/** Ephemeral client-hosted invocation mailbox; payloads are cleared after delivery/expiry. */
+export const mcpLocalRequests = pgTable("mcp_local_requests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  serverId: uuid("server_id").notNull().references(() => mcpServers.id, { onDelete: "cascade" }),
+  toolId: uuid("tool_id").references(() => mcpTools.id, { onDelete: "set null" }),
+  toolName: text("tool_name").notNull(),
+  callerContext: jsonb("caller_context").notNull().$type<Record<string, unknown>>(),
+  calledBy: text("called_by").notNull(),
+  calledByType: actorTypeEnum("called_by_type").notNull(),
+  arguments: jsonb("arguments").$type<Record<string, unknown>>(),
+  result: jsonb("result").$type<Record<string, unknown>>(),
+  status: text("status", { enum: ["queued", "running", "completed", "cancelled"] }).notNull().default("queued"),
+  leaseHash: text("lease_hash"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [index("idx_mcp_local_requests_server").on(table.serverId, table.status)]);

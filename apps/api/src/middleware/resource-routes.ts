@@ -1,5 +1,9 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
+  ["GET", new RegExp("^/api/v1/mcp/(?:servers(?:/[0-9a-fA-F-]{36})?|tools/(?:search|[0-9a-fA-F-]{36}))/?$")],
+  ["POST", new RegExp("^/api/v1/mcp/(?:servers|servers/[0-9a-fA-F-]{36}/(?:sync|heartbeat|upload-tools|poll)|tools/[0-9a-fA-F-]{36}/call|requests/[0-9a-fA-F-]{36}/result)/?$")],
+  ["PATCH", new RegExp("^/api/v1/mcp/servers/[0-9a-fA-F-]{36}/?$")],
+  ["DELETE", new RegExp("^/api/v1/mcp/servers/[0-9a-fA-F-]{36}/?$")],
   ["GET", new RegExp("^/api/v1/context/packages(?:/[0-9a-fA-F-]{36}(?:/(?:files|download|health|read))?)?/?$")],
   ["POST", new RegExp("^/api/v1/context/(?:packages/register|packages/[0-9a-fA-F-]{36}/reindex|import(?:/batch)?)/?$")],
   ["PATCH", new RegExp("^/api/v1/context/packages/[0-9a-fA-F-]{36}(?:/versions/[^/]+)?/?$")],

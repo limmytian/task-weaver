@@ -243,7 +243,7 @@ Default retrieval behavior:
 - Project assets must not leak into other projects or projectless discovery.
 - Personal assets must not leak across owners or into shared project retrieval unless explicitly requested.
 - Project-scoped results rank ahead of global results when relevance is otherwise similar.
-- Stdio MCP visibility composes with project scope: `scope=private` also requires matching `clientId`; `scope=local` also requires matching `nodeId`; expired stdio servers are hidden.
+- Stdio MCP visibility composes with project scope: `scope=private` also requires matching `clientId`; `scope=local` also requires matching `nodeId`; expired stdio servers are hidden. Both modes also require the verified registration actor and credential; these supplied IDs are discovery constraints rather than identity proof.
 - Sharing a local stdio MCP server with `scope=local` requires explicit consent (`localScopeConsent=true` in REST/API calls or `tw mcp register-local --shared --yes` for non-interactive CLI use).
 
 Asset-specific mapping:
@@ -576,9 +576,11 @@ Tools are returned based on your identity — you never need to filter manually:
 
 | Server type | Registered via | Visible to |
 |-------------|---------------|------------|
-| **Global** | `sse` / `streamable-http` transport | Everyone |
-| **Local-shared** | stdio + `--shared` flag | All agents on the same machine (`nodeId` match) |
-| **Private** | stdio (default) | Only the registering process (`clientId` match) |
+| **Global** | `sse` / `streamable-http` transport | Verified actors whose credential grants allow global reads |
+| **Local-shared** | stdio + `--shared` flag | Registered actor and credential, with matching `nodeId` |
+| **Private** | stdio (default) | Registered actor and credential, with matching `clientId` |
+
+Local stdio commands execute on the authenticated `register-local` client. The API queues authorized calls and accepts one leased response; it never starts these commands. Local environment variables stay on that client. Cross-identity node sharing requires trusted node enrollment and is currently closed. Server management requires `mcp.manage` and invocation requires `mcp.invoke` in the live resource scope. Instance administration grants no implicit content access.
 
 Your `clientId` and `nodeId` are auto-generated on first run and stored in `~/.config/tw/config.json`. They are passed automatically on every `tw mcp search` call — you don't need to supply them.
 
@@ -601,7 +603,7 @@ tw mcp servers --json
 # Host a local stdio MCP server — private (default, only this process can use it)
 tw mcp register-local --server <id> --command "npx -y @modelcontextprotocol/server-filesystem" --args '["/tmp"]'
 
-# Host a local stdio MCP server — shared with all agents on this machine
+# Host a local stdio MCP server — shared within its authenticated registration
 tw mcp register-local --server <id> --command "npx -y @modelcontextprotocol/server-filesystem" --args '["/tmp"]' --shared
 ```
 
