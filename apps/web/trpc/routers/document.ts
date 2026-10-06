@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { router, resourceProcedure } from "../init";
+import { router, ordinaryResourceProcedure as resourceProcedure } from "../init";
 import {
-  documentService,
+  createResourceServices,
   createDocumentSchema,
   updateDocumentSchema,
   listDocumentsSchema,
@@ -12,63 +12,63 @@ export const documentRouter = router({
   list: resourceProcedure
     .input(listDocumentsSchema)
     .query(async ({ ctx, input }) => {
-      return documentService.listDocuments(ctx.db, {
+      return createResourceServices(ctx.identity).documentService.listDocuments(ctx.db, {
         ...input,
-        personalOwnerId: input.personalOwnerId ?? ctx.actor.id,
-        personalOwnerType: input.personalOwnerType ?? ctx.actor.type,
+        personalOwnerId: input.personalOwnerId ?? (ctx.identity.actor.type === "human" ? ctx.identity.actor.id : ctx.identity.actor.managedByActorId),
+        personalOwnerType: input.personalOwnerType ?? "human",
       });
     }),
 
   get: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
-      return documentService.getDocumentDetail(ctx.db, input.id);
+      return createResourceServices(ctx.identity).documentService.getDocumentDetail(ctx.db, input.id);
     }),
 
   create: resourceProcedure
     .input(createDocumentSchema)
     .mutation(async ({ ctx, input }) => {
-      return documentService.createDocument(ctx.db, input, ctx.actor);
+      return createResourceServices(ctx.identity).documentService.createDocument(ctx.db, input, ctx.actor);
     }),
 
   update: resourceProcedure
     .input(z.object({ id: z.string().uuid(), data: updateDocumentSchema }))
     .mutation(async ({ ctx, input }) => {
-      return documentService.updateDocument(ctx.db, input.id, input.data, ctx.actor);
+      return createResourceServices(ctx.identity).documentService.updateDocument(ctx.db, input.id, input.data, ctx.actor);
     }),
 
   delete: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      return documentService.deleteDocument(ctx.db, input.id, ctx.actor);
+      return createResourceServices(ctx.identity).documentService.deleteDocument(ctx.db, input.id, ctx.actor);
     }),
 
   unlinkDocuments: resourceProcedure
     .input(z.object({ linkId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      return documentService.unlinkDocuments(ctx.db, input.linkId);
+      return createResourceServices(ctx.identity).documentService.unlinkDocuments(ctx.db, input.linkId);
     }),
 
   unlinkFromTask: resourceProcedure
     .input(z.object({ linkId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      return documentService.unlinkDocumentFromTask(ctx.db, input.linkId);
+      return createResourceServices(ctx.identity).documentService.unlinkDocumentFromTask(ctx.db, input.linkId);
     }),
 
   search: resourceProcedure
     .input(searchDocumentsSchema)
     .query(async ({ ctx, input }) => {
-      return documentService.searchDocuments(ctx.db, {
+      return createResourceServices(ctx.identity).documentService.searchDocuments(ctx.db, {
         ...input,
-        personalOwnerId: input.personalOwnerId ?? ctx.actor.id,
-        personalOwnerType: input.personalOwnerType ?? ctx.actor.type,
+        personalOwnerId: input.personalOwnerId ?? (ctx.identity.actor.type === "human" ? ctx.identity.actor.id : ctx.identity.actor.managedByActorId),
+        personalOwnerType: input.personalOwnerType ?? "human",
       });
     }),
 
   resolveWikiLinks: resourceProcedure
     .input(z.object({ titles: z.array(z.string().min(1)).min(1).max(50) }))
     .query(async ({ ctx, input }) => {
-      return documentService.resolveDocumentTitles(ctx.db, input.titles);
+      return createResourceServices(ctx.identity).documentService.resolveDocumentTitles(ctx.db, input.titles);
     }),
 
   linkToTask: resourceProcedure
@@ -80,7 +80,7 @@ export const documentRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      return documentService.linkDocumentToTask(
+      return createResourceServices(ctx.identity).documentService.linkDocumentToTask(
         ctx.db,
         input.documentId,
         input.taskId,
@@ -98,8 +98,7 @@ export const documentRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { requirementService } = await import("@task-weaver/core");
-      return requirementService.linkDocumentToRequirement(
+      return createResourceServices(ctx.identity).requirementService.linkDocumentToRequirement(
         ctx.db,
         input.requirementId,
         input.documentId,
@@ -111,24 +110,24 @@ export const documentRouter = router({
   versions: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
-      return documentService.listDocumentVersions(ctx.db, { documentId: input.id, limit: 50, offset: 0 });
+      return createResourceServices(ctx.identity).documentService.listDocumentVersions(ctx.db, { documentId: input.id, limit: 50, offset: 0 });
     }),
 
   version: resourceProcedure
     .input(z.object({ id: z.string().uuid(), version: z.number().int().min(1) }))
     .query(async ({ ctx, input }) => {
-      return documentService.getDocumentVersion(ctx.db, input.id, input.version);
+      return createResourceServices(ctx.identity).documentService.getDocumentVersion(ctx.db, input.id, input.version);
     }),
 
   compareVersions: resourceProcedure
     .input(z.object({ id: z.string().uuid(), from: z.number().int().min(1), to: z.number().int().min(1) }))
     .query(async ({ ctx, input }) => {
-      return documentService.compareDocumentVersions(ctx.db, { documentId: input.id, from: input.from, to: input.to });
+      return createResourceServices(ctx.identity).documentService.compareDocumentVersions(ctx.db, { documentId: input.id, from: input.from, to: input.to });
     }),
 
   revertVersion: resourceProcedure
     .input(z.object({ id: z.string().uuid(), version: z.number().int().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      return documentService.revertDocument(ctx.db, input.id, { version: input.version }, ctx.actor);
+      return createResourceServices(ctx.identity).documentService.revertDocument(ctx.db, input.id, { version: input.version }, ctx.actor);
     }),
 });

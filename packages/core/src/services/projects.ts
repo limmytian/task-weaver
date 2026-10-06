@@ -1,3 +1,4 @@
+import type { SQL } from "drizzle-orm";
 import { eq, sql, and, gte, inArray, or } from "drizzle-orm";
 import {
   type Database,
@@ -62,18 +63,21 @@ type PagedProjectList = {
 export function listProjects(
   db: Database,
   filters: ListProjectsInput & { view: "summary" | "full" },
+  authorizedPredicate?: SQL,
 ): Promise<PagedProjectList>
 
 export function listProjects(
   db: Database,
   filters?: ListProjectsInput,
+  authorizedPredicate?: SQL,
 ): Promise<Array<typeof projects.$inferSelect>>
 
 export async function listProjects(
   db: Database,
   filters: ListProjectsInput = {},
+  authorizedPredicate?: SQL,
 ): Promise<PagedProjectList | Array<typeof projects.$inferSelect>> {
-  const conditions = [];
+  const conditions = [authorizedPredicate];
   if (filters.status) {
     conditions.push(eq(projects.status, filters.status));
   }
@@ -169,16 +173,18 @@ export async function updateProject(
 export async function getProjectCounts(
   db: Database,
   projectIds: string[],
+  authorizedPredicate?: SQL,
+  authorizedTaskPredicate?: SQL,
 ) {
   if (projectIds.length === 0) return [];
   const rows = await db
     .select({
       projectId: projects.id,
-      taskCount: sql<number>`(SELECT count(*)::int FROM tasks WHERE tasks.project_id = "projects"."id")`.as("task_count"),
+      taskCount: sql<number>`(SELECT count(*)::int FROM tasks WHERE tasks.project_id = "projects"."id" AND ${authorizedTaskPredicate ?? sql`true`})`.as("task_count"),
       requirementCount: sql<number>`(SELECT count(*)::int FROM requirements WHERE requirements.project_id = "projects"."id")`.as("requirement_count"),
     })
     .from(projects)
-    .where(inArray(projects.id, projectIds));
+    .where(and(inArray(projects.id, projectIds), authorizedPredicate));
   return rows;
 }
 
@@ -732,10 +738,13 @@ export async function togglePin(db: Database, id: string) {
   return updated!;
 }
 
-export async function listPinnedProjects(db: Database) {
+export async function listPinnedProjects(db: Database,
+  authorizedPredicate?: SQL,
+) {
   return db.query.projects.findMany({
     where: and(
       eq(projects.status, "active"),
+      authorizedPredicate,
       sql`${projects.pinnedAt} IS NOT NULL`,
     ),
     orderBy: (p, { desc }) => [desc(p.pinnedAt)],

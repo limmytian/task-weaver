@@ -1,3 +1,5 @@
+import type { SQL } from "drizzle-orm";
+import { qualifiedColumn } from "./resource-authorization";
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import {
   type Database,
@@ -188,13 +190,13 @@ export async function getTaskClaim(db: Database, taskId: string) {
 export async function listActiveClaims(
   db: Database,
   filters?: { projectId?: string; claimedBy?: string },
+  authorizedPredicate?: SQL,
 ) {
   const now = new Date();
 
-  // Clean all expired claims
-  await db.delete(taskClaims).where(lt(taskClaims.expiresAt, now));
 
-  const conditions = [gt(taskClaims.expiresAt, now)];
+
+  const conditions = [gt(taskClaims.expiresAt, now), authorizedPredicate ? sql`${taskClaims.taskId} IN (SELECT ${qualifiedColumn(tasks.id)} FROM ${tasks} WHERE ${authorizedPredicate})` : undefined];
 
   if (filters?.claimedBy) {
     conditions.push(eq(taskClaims.claimedBy, filters.claimedBy));
@@ -484,12 +486,13 @@ export async function getRequirementClaim(db: Database, requirementId: string) {
 export async function listActiveRequirementClaims(
   db: Database,
   filters?: { projectId?: string; claimedBy?: string },
+  authorizedPredicate?: SQL,
 ) {
   const now = new Date();
 
-  await db.delete(requirementClaims).where(lt(requirementClaims.expiresAt, now));
 
-  const conditions = [gt(requirementClaims.expiresAt, now)];
+
+  const conditions = [gt(requirementClaims.expiresAt, now), authorizedPredicate ? sql`${requirementClaims.requirementId} IN (SELECT ${qualifiedColumn(requirements.id)} FROM ${requirements} WHERE ${authorizedPredicate})` : undefined];
 
   if (filters?.claimedBy) {
     conditions.push(eq(requirementClaims.claimedBy, filters.claimedBy));

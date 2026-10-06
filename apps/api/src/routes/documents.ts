@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import {
-  documentService,
+  createResourceServices,
+  personalResourceOwnerId,
   recommendationService,
   createDocumentSchema,
   updateDocumentSchema,
@@ -20,20 +21,19 @@ const documents = new Hono<Env>();
 // GET / - List documents with optional filters
 documents.get("/", async (c) => {
   const db = c.get("db");
-  const actor = c.get("actor");
   const query = c.req.query();
 
   const parsed = listDocumentsSchema.safeParse({
     ...query,
-    personalOwnerId: query.personalOwnerId ?? actor.id,
-    personalOwnerType: query.personalOwnerType ?? actor.type,
+    personalOwnerId: query.personalOwnerId ?? personalResourceOwnerId(c.get("identity")),
+    personalOwnerType: query.personalOwnerType ?? "human",
   });
 
   if (!parsed.success) {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
 
-  const result = await documentService.listDocuments(db, parsed.data);
+  const result = await createResourceServices(c.get("identity")).documentService.listDocuments(db, parsed.data);
   return c.json(result);
 });
 
@@ -50,11 +50,11 @@ documents.post("/", async (c) => {
   }
 
   try {
-    const doc = await documentService.createDocument(db, parsed.data, actor);
+    const doc = await createResourceServices(c.get("identity")).documentService.createDocument(db, parsed.data, actor);
     return c.json(doc, 201);
   } catch (err) {
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -66,11 +66,11 @@ documents.get("/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const doc = await documentService.getDocumentDetail(db, id);
+    const doc = await createResourceServices(c.get("identity")).documentService.getDocumentDetail(db, id);
     return c.json(doc);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -90,14 +90,14 @@ documents.patch("/:id", async (c) => {
   }
 
   try {
-    const doc = await documentService.updateDocument(db, id, parsed.data, actor);
+    const doc = await createResourceServices(c.get("identity")).documentService.updateDocument(db, id, parsed.data, actor);
     return c.json(doc);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -110,11 +110,11 @@ documents.delete("/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
-    await documentService.deleteDocument(db, id, actor);
+    await createResourceServices(c.get("identity")).documentService.deleteDocument(db, id, actor);
     return c.json({ success: true });
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -133,11 +133,11 @@ documents.get("/:id/versions", async (c) => {
   }
 
   try {
-    const versions = await documentService.listDocumentVersions(db, parsed.data);
+    const versions = await createResourceServices(c.get("identity")).documentService.listDocumentVersions(db, parsed.data);
     return c.json(versions);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -156,11 +156,11 @@ documents.get("/:id/versions/compare", async (c) => {
   }
 
   try {
-    const result = await documentService.compareDocumentVersions(db, parsed.data);
+    const result = await createResourceServices(c.get("identity")).documentService.compareDocumentVersions(db, parsed.data);
     return c.json(result);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -177,11 +177,11 @@ documents.get("/:id/versions/:version", async (c) => {
   }
 
   try {
-    const result = await documentService.getDocumentVersion(db, id, version);
+    const result = await createResourceServices(c.get("identity")).documentService.getDocumentVersion(db, id, version);
     return c.json(result);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -201,11 +201,11 @@ documents.post("/:id/revert", async (c) => {
   }
 
   try {
-    const doc = await documentService.revertDocument(db, id, parsed.data, actor);
+    const doc = await createResourceServices(c.get("identity")).documentService.revertDocument(db, id, parsed.data, actor);
     return c.json(doc);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -216,7 +216,7 @@ documents.get("/:id/backlinks", async (c) => {
   const db = c.get("db");
   const id = c.req.param("id");
 
-  const backlinks = await documentService.getBacklinks(db, id);
+  const backlinks = await createResourceServices(c.get("identity")).documentService.getBacklinks(db, id);
   return c.json(backlinks);
 });
 
@@ -234,7 +234,7 @@ documents.post("/:id/links", async (c) => {
   }
 
   try {
-    const link = await documentService.linkDocuments(
+    const link = await createResourceServices(c.get("identity")).documentService.linkDocuments(
       db,
       id,
       parsed.data.targetDocId,
@@ -245,10 +245,10 @@ documents.post("/:id/links", async (c) => {
     return c.json(link, 201);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -268,7 +268,7 @@ documents.post("/:id/task-links", async (c) => {
   }
 
   try {
-    const link = await documentService.linkDocumentToTask(
+    const link = await createResourceServices(c.get("identity")).documentService.linkDocumentToTask(
       db,
       id,
       parsed.data.taskId,
@@ -278,10 +278,10 @@ documents.post("/:id/task-links", async (c) => {
     return c.json(link, 201);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -292,11 +292,11 @@ documents.delete("/:id/links/:linkId", async (c) => {
   const linkId = c.req.param("linkId");
 
   try {
-    const deleted = await documentService.unlinkDocuments(c.get("db"), linkId);
+    const deleted = await createResourceServices(c.get("identity")).documentService.unlinkDocuments(c.get("db"), linkId, c.req.param("id"));
     return c.json(deleted);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -307,11 +307,11 @@ documents.delete("/:id/task-links/:linkId", async (c) => {
   const linkId = c.req.param("linkId");
 
   try {
-    const deleted = await documentService.unlinkDocumentFromTask(c.get("db"), linkId);
+    const deleted = await createResourceServices(c.get("identity")).documentService.unlinkDocumentFromTask(c.get("db"), linkId, c.req.param("id"));
     return c.json(deleted);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -338,7 +338,7 @@ documents.get("/:id/recommendations", async (c) => {
     return c.json(result);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }

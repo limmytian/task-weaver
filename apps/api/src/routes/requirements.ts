@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import {
-  claimService,
-  requirementService,
+  createResourceServices,
   createRequirementSchema,
   updateRequirementSchema,
   listRequirementsSchema,
@@ -40,7 +39,7 @@ requirements.get("/projects/:projectId/requirements", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
 
-  const result = await requirementService.listRequirements(db, parsed.data);
+  const result = await createResourceServices(c.get("identity")).requirementService.listRequirements(db, parsed.data);
   return c.json(result);
 });
 
@@ -49,7 +48,7 @@ requirements.get("/projects/:projectId/requirements/heatmap", async (c) => {
   const db = c.get("db");
   const projectId = c.req.param("projectId");
 
-  const heatmap = await requirementService.getRequirementHeatmap(db, projectId);
+  const heatmap = await createResourceServices(c.get("identity")).requirementService.getRequirementHeatmap(db, projectId);
   return c.json(heatmap);
 });
 
@@ -66,11 +65,11 @@ requirements.post("/projects/:projectId/requirements", async (c) => {
   }
 
   try {
-    const requirement = await requirementService.createRequirement(db, parsed.data, actor);
+    const requirement = await createResourceServices(c.get("identity")).requirementService.createRequirement(db, parsed.data, actor);
     return c.json(requirement, 201);
   } catch (err) {
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -88,11 +87,11 @@ requirements.post("/requirements/batch", async (c) => {
   }
 
   try {
-    const results = await requirementService.batchCreateRequirements(db, parsed.data, actor);
+    const results = await createResourceServices(c.get("identity")).requirementService.batchCreateRequirements(db, parsed.data, actor);
     return c.json(results, 201);
   } catch (err) {
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -104,11 +103,11 @@ requirements.get("/requirements/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const requirement = await requirementService.getRequirement(db, id);
+    const requirement = await createResourceServices(c.get("identity")).requirementService.getRequirement(db, id);
     return c.json(requirement);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -127,14 +126,14 @@ requirements.patch("/requirements/:id", async (c) => {
   }
 
   try {
-    const requirement = await requirementService.updateRequirement(db, id, parsed.data, actor);
+    const requirement = await createResourceServices(c.get("identity")).requirementService.updateRequirement(db, id, parsed.data, actor);
     return c.json(requirement);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -147,11 +146,11 @@ requirements.delete("/requirements/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const requirement = await requirementService.deleteRequirement(db, id, actor);
+    const requirement = await createResourceServices(c.get("identity")).requirementService.deleteRequirement(db, id, actor);
     return c.json(requirement);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -170,7 +169,7 @@ requirements.post("/requirements/:id/claim", async (c) => {
   }
 
   try {
-    const claim = await claimService.claimRequirement(
+    const claim = await createResourceServices(c.get("identity")).claimService.claimRequirement(
       db,
       id,
       actor,
@@ -183,7 +182,7 @@ requirements.post("/requirements/:id/claim", async (c) => {
     return c.json(claim, 201);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
       return c.json({ error: err.message }, 409);
@@ -205,7 +204,7 @@ requirements.post("/requirements/:id/release", async (c) => {
   }
 
   try {
-    const result = await claimService.releaseRequirement(
+    const result = await createResourceServices(c.get("identity")).claimService.releaseRequirement(
       db,
       id,
       actor,
@@ -216,10 +215,10 @@ requirements.post("/requirements/:id/release", async (c) => {
     return c.json(result);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -238,7 +237,7 @@ requirements.post("/requirements/:id/heartbeat", async (c) => {
   }
 
   try {
-    const claim = await claimService.heartbeatRequirementClaim(
+    const claim = await createResourceServices(c.get("identity")).claimService.heartbeatRequirementClaim(
       db,
       id,
       actor,
@@ -249,10 +248,10 @@ requirements.post("/requirements/:id/heartbeat", async (c) => {
     return c.json(claim);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -263,7 +262,7 @@ requirements.get("/requirements/:id/claim", async (c) => {
   const db = c.get("db");
   const id = c.req.param("id");
 
-  const claim = await claimService.getRequirementClaim(db, id);
+  const claim = await createResourceServices(c.get("identity")).claimService.getRequirementClaim(db, id);
   return c.json(claim ?? { claimed: false });
 });
 
@@ -272,7 +271,7 @@ requirements.get("/requirement-claims", async (c) => {
   const db = c.get("db");
   const query = c.req.query();
 
-  const claims = await claimService.listActiveRequirementClaims(db, {
+  const claims = await createResourceServices(c.get("identity")).claimService.listActiveRequirementClaims(db, {
     projectId: query.projectId,
     claimedBy: query.claimedBy,
   });
@@ -285,11 +284,11 @@ requirements.get("/requirements/:id/dependencies", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const result = await requirementService.listRequirementDependencies(db, id);
+    const result = await createResourceServices(c.get("identity")).requirementService.listRequirementDependencies(db, id);
     return c.json(result);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -301,11 +300,11 @@ requirements.get("/requirements/:id/slices", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const result = await requirementService.listExecutionSlices(db, id);
+    const result = await createResourceServices(c.get("identity")).requirementService.listExecutionSlices(db, id);
     return c.json({ items: result });
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -324,14 +323,14 @@ requirements.post("/requirements/:id/slices", async (c) => {
   }
 
   try {
-    const slice = await requirementService.createExecutionSlice(db, id, parsed.data, actor);
+    const slice = await createResourceServices(c.get("identity")).requirementService.createExecutionSlice(db, id, parsed.data, actor);
     return c.json(slice, 201);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -350,14 +349,14 @@ requirements.patch("/execution-slices/:id", async (c) => {
   }
 
   try {
-    const slice = await requirementService.updateExecutionSlice(db, id, parsed.data, actor);
+    const slice = await createResourceServices(c.get("identity")).requirementService.updateExecutionSlice(db, id, parsed.data, actor);
     return c.json(slice);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -370,11 +369,11 @@ requirements.delete("/execution-slices/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const deleted = await requirementService.deleteExecutionSlice(db, id, actor);
+    const deleted = await createResourceServices(c.get("identity")).requirementService.deleteExecutionSlice(db, id, actor);
     return c.json(deleted);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -393,7 +392,7 @@ requirements.post("/requirements/:id/dependencies", async (c) => {
   }
 
   try {
-    const dep = await requirementService.addRequirementDependency(
+    const dep = await createResourceServices(c.get("identity")).requirementService.addRequirementDependency(
       db,
       id,
       parsed.data.dependsOnRequirementId,
@@ -404,10 +403,10 @@ requirements.post("/requirements/:id/dependencies", async (c) => {
     return c.json(dep, 201);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -420,11 +419,11 @@ requirements.delete("/requirements/:id/dependencies/:depId", async (c) => {
   const depId = c.req.param("depId");
 
   try {
-    const deleted = await requirementService.removeRequirementDependency(db, depId, actor);
+    const deleted = await createResourceServices(c.get("identity")).requirementService.removeRequirementDependency(db, depId, actor, c.req.param("id"));
     return c.json(deleted);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -443,7 +442,7 @@ requirements.post("/requirements/:id/document-links", async (c) => {
   }
 
   try {
-    const link = await requirementService.linkDocumentToRequirement(
+    const link = await createResourceServices(c.get("identity")).requirementService.linkDocumentToRequirement(
       db,
       requirementId,
       parsed.data.documentId,
@@ -453,7 +452,7 @@ requirements.post("/requirements/:id/document-links", async (c) => {
     return c.json(link, 201);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -465,11 +464,11 @@ requirements.get("/requirements/:id/burndown", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const burndown = await requirementService.getRequirementBurndown(db, id);
+    const burndown = await createResourceServices(c.get("identity")).requirementService.getRequirementBurndown(db, id);
     return c.json(burndown);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -480,11 +479,11 @@ requirements.delete("/requirements/:id/document-links/:linkId", async (c) => {
   const linkId = c.req.param("linkId");
 
   try {
-    const deleted = await requirementService.unlinkDocumentFromRequirement(c.get("db"), linkId);
+    const deleted = await createResourceServices(c.get("identity")).requirementService.unlinkDocumentFromRequirement(c.get("db"), linkId, c.req.param("id"));
     return c.json(deleted);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }

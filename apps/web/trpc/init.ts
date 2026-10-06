@@ -165,6 +165,7 @@ export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
   });
   return next();
 });
+export const ordinaryResourceProcedure = protectedProcedure;
 export const resourceProcedure = protectedProcedure.use(() =>
   requireResourceAuthorization(),
 );

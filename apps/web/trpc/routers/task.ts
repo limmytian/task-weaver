@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { router, resourceProcedure } from "../init";
+import { router, ordinaryResourceProcedure as resourceProcedure } from "../init";
 import {
-  taskService,
+  createResourceServices,
   createTaskSchema,
   createPersonalTaskSchema,
   updateTaskSchema,
@@ -16,19 +16,19 @@ export const taskRouter = router({
   list: resourceProcedure
     .input(listTasksSchema)
     .query(async ({ ctx, input }) => {
-      return taskService.listTasks(ctx.db, input);
+      return createResourceServices(ctx.identity).taskService.listTasks(ctx.db, input);
     }),
 
   get: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
-      return taskService.getTaskDetail(ctx.db, input.id);
+      return createResourceServices(ctx.identity).taskService.getTaskDetail(ctx.db, input.id);
     }),
 
   create: resourceProcedure
     .input(createTaskSchema)
     .mutation(async ({ ctx, input }) => {
-      return taskService.createTask(ctx.db, input, ctx.actor);
+      return createResourceServices(ctx.identity).taskService.createTask(ctx.db, input, ctx.actor);
     }),
 
   listPersonal: resourceProcedure
@@ -42,30 +42,30 @@ export const taskRouter = router({
       completedWithinDays: z.number().int().min(0).optional(),
     }).optional())
     .query(async ({ ctx, input }) => {
-      return taskService.listTasks(ctx.db, {
+      return createResourceServices(ctx.identity).taskService.listTasks(ctx.db, {
         ...(input ?? {}),
         scope: "personal",
-        personalOwnerId: input?.personalOwnerId ?? ctx.actor.id,
-        personalOwnerType: input?.personalOwnerType ?? ctx.actor.type,
+        personalOwnerId: input?.personalOwnerId ?? (ctx.identity.actor.type === "human" ? ctx.identity.actor.id : ctx.identity.actor.managedByActorId),
+        personalOwnerType: input?.personalOwnerType ?? "human",
       });
     }),
 
   createPersonal: resourceProcedure
     .input(createPersonalTaskSchema)
     .mutation(async ({ ctx, input }) => {
-      return taskService.createPersonalTask(ctx.db, input, ctx.actor);
+      return createResourceServices(ctx.identity).taskService.createPersonalTask(ctx.db, input, ctx.actor);
     }),
 
   update: resourceProcedure
     .input(z.object({ id: z.string().uuid(), data: updateTaskSchema }))
     .mutation(async ({ ctx, input }) => {
-      return taskService.updateTask(ctx.db, input.id, input.data, ctx.actor);
+      return createResourceServices(ctx.identity).taskService.updateTask(ctx.db, input.id, input.data, ctx.actor);
     }),
 
   updateStatus: resourceProcedure
     .input(z.object({ id: z.string().uuid() }).merge(updateTaskStatusSchema))
     .mutation(async ({ ctx, input }) => {
-      return taskService.updateTaskStatus(
+      return createResourceServices(ctx.identity).taskService.updateTaskStatus(
         ctx.db,
         input.id,
         input.status,
@@ -77,25 +77,25 @@ export const taskRouter = router({
   delete: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      return taskService.deleteTask(ctx.db, input.id, ctx.actor);
+      return createResourceServices(ctx.identity).taskService.deleteTask(ctx.db, input.id, ctx.actor);
     }),
 
   removeDependency: resourceProcedure
     .input(z.object({ depId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      return taskService.removeTaskDependency(ctx.db, input.depId);
+      return createResourceServices(ctx.identity).taskService.removeTaskDependency(ctx.db, input.depId);
     }),
 
   addComment: resourceProcedure
     .input(z.object({ taskId: z.string().uuid() }).merge(createTaskCommentSchema))
     .mutation(async ({ ctx, input }) => {
-      return taskService.addTaskComment(ctx.db, input.taskId, input.content, ctx.actor);
+      return createResourceServices(ctx.identity).taskService.addTaskComment(ctx.db, input.taskId, input.content, ctx.actor);
     }),
 
   addNote: resourceProcedure
     .input(z.object({ taskId: z.string().uuid() }).merge(createTaskNoteSchema))
     .mutation(async ({ ctx, input }) => {
-      return taskService.addTaskNote(
+      return createResourceServices(ctx.identity).taskService.addTaskNote(
         ctx.db,
         input.taskId,
         input.content,
@@ -107,7 +107,7 @@ export const taskRouter = router({
   addDependency: resourceProcedure
     .input(z.object({ taskId: z.string().uuid() }).merge(createTaskDependencySchema))
     .mutation(async ({ ctx, input }) => {
-      return taskService.addTaskDependency(
+      return createResourceServices(ctx.identity).taskService.addTaskDependency(
         ctx.db,
         input.taskId,
         input.dependsOnTaskId,
@@ -124,7 +124,7 @@ export const taskRouter = router({
       completedWithinDays: z.number().int().min(0).optional(),
     }))
     .query(async ({ ctx, input }) => {
-      return taskService.getKanbanBoard(ctx.db, input.projectId, {
+      return createResourceServices(ctx.identity).taskService.getKanbanBoard(ctx.db, input.projectId, {
         includeTerminal: input.includeTerminal,
         completedWithinDays: input.completedWithinDays,
       });
@@ -133,12 +133,12 @@ export const taskRouter = router({
   gantt: resourceProcedure
     .input(z.object({ projectId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
-      return taskService.getGanttChart(ctx.db, input.projectId);
+      return createResourceServices(ctx.identity).taskService.getGanttChart(ctx.db, input.projectId);
     }),
 
   dependencyGraph: resourceProcedure
     .input(z.object({ requirementId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
-      return taskService.getRequirementTaskDependencyGraph(ctx.db, input.requirementId);
+      return createResourceServices(ctx.identity).taskService.getRequirementTaskDependencyGraph(ctx.db, input.requirementId);
     }),
 });

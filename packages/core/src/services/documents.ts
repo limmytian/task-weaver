@@ -1,3 +1,4 @@
+import type { SQL } from "drizzle-orm";
 import { and, eq, or, isNull, sql, inArray, desc } from "drizzle-orm";
 import {
   type Database,
@@ -186,6 +187,7 @@ export async function createDocument(
   db: Database,
   input: CreateDocumentInput,
   actor: Actor,
+  authorizedPredicate?: SQL,
 ) {
   const normalizedContent = normalizeMarkdown(input.content);
   const docType = input.docType ?? inferDocType(input.title, normalizedContent);
@@ -235,7 +237,7 @@ export async function createDocument(
   });
 
   // Sync wiki-links (with context extraction)
-  await syncDocumentLinks(db, doc!.id, normalizedContent);
+  await syncDocumentLinks(db, doc!.id, normalizedContent, authorizedPredicate);
 
   // Embedding is opt-in. This only records coverage and queues durable work for enabled profiles;
   // it never calls a provider from the document write path.
@@ -282,18 +284,21 @@ type PagedDocumentList = {
 export function listDocuments(
   db: Database,
   input: ListDocumentsInput & { view: "summary" | "full" },
+  authorizedPredicate?: SQL,
 ): Promise<PagedDocumentList>
 
 export function listDocuments(
   db: Database,
   input: ListDocumentsInput,
+  authorizedPredicate?: SQL,
 ): Promise<Array<typeof documents.$inferSelect>>
 
 export async function listDocuments(
   db: Database,
   input: ListDocumentsInput,
+  authorizedPredicate?: SQL,
 ): Promise<PagedDocumentList | Array<typeof documents.$inferSelect>> {
-  const conditions = [];
+  const conditions = [authorizedPredicate];
 
   conditions.push(buildDocumentScopeCondition(input));
 
@@ -377,6 +382,7 @@ export async function updateDocument(
   id: string,
   input: UpdateDocumentInput,
   actor: Actor,
+  authorizedPredicate?: SQL,
 ) {
   const current = await getDocument(db, id);
 
@@ -408,7 +414,7 @@ export async function updateDocument(
 
   // Re-sync wiki-links if content changed
   if (input.content) {
-    await syncDocumentLinks(db, id, updates.content as string);
+    await syncDocumentLinks(db, id, updates.content as string, authorizedPredicate);
   }
 
   await runEmbeddingReconciliationBestEffort(id, "upsert", () => (
@@ -507,7 +513,7 @@ export async function linkDocumentToTask(
   return link!;
 }
 
-export async function unlinkDocuments(db: Database, linkId: string) {
+export async function unlinkDocuments(db: Database, linkId: string, _expectedParentId?: string) {
   const [deleted] = await db
     .delete(documentLinks)
     .where(eq(documentLinks.id, linkId))
@@ -517,7 +523,7 @@ export async function unlinkDocuments(db: Database, linkId: string) {
   return deleted;
 }
 
-export async function unlinkDocumentFromTask(db: Database, linkId: string) {
+export async function unlinkDocumentFromTask(db: Database, linkId: string, _expectedParentId?: string) {
   const [deleted] = await db
     .delete(documentTaskLinks)
     .where(eq(documentTaskLinks.id, linkId))
@@ -555,6 +561,7 @@ async function syncDocumentLinks(
   db: Database,
   docId: string,
   content: string,
+  authorizedPredicate?: SQL,
 ) {
   const parsed = parseWikiLinks(content);
   if (parsed.length === 0) {
@@ -571,7 +578,7 @@ async function syncDocumentLinks(
   const targetDocs = await db
     .select({ id: documents.id, title: documents.title })
     .from(documents)
-    .where(inArray(documents.title, targetTitles));
+    .where(and(inArray(documents.title, targetTitles), authorizedPredicate));
 
   const titleToId = new Map(targetDocs.map((d) => [d.title, d.id]));
   // Build context map: targetDocId -> context string
@@ -749,6 +756,7 @@ export async function revertDocument(
   documentId: string,
   input: RevertDocumentInput,
   actor: Actor,
+  authorizedPredicate?: SQL,
 ) {
   const current = await getDocument(db, documentId);
   const targetVersion = await getDocumentVersion(db, documentId, input.version);
@@ -787,7 +795,7 @@ export async function revertDocument(
     metadata: { toVersion: input.version },
   });
 
-  await syncDocumentLinks(db, documentId, normalizedContent);
+  await syncDocumentLinks(db, documentId, normalizedContent, authorizedPredicate);
 
   await reconcileDocumentEmbeddingCoverage(db, updated!, actor);
 

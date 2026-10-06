@@ -1,3 +1,4 @@
+import type { SQL } from "drizzle-orm";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import {
   type Database,
@@ -109,18 +110,21 @@ type LegacyRequirementList = RequirementListItem[]
 export function listRequirements(
   db: Database,
   input: ListRequirementsInput & { view: "summary" | "full" },
+  authorizedPredicate?: SQL,
 ): Promise<PagedRequirementList>
 
 export function listRequirements(
   db: Database,
   input: ListRequirementsInput,
+  authorizedPredicate?: SQL,
 ): Promise<LegacyRequirementList>
 
 export async function listRequirements(
   db: Database,
   input: ListRequirementsInput,
+  authorizedPredicate?: SQL,
 ): Promise<PagedRequirementList | LegacyRequirementList> {
-  const conditions = [eq(requirements.projectId, input.projectId)];
+  const conditions = [eq(requirements.projectId, input.projectId), authorizedPredicate];
 
   if (input.status) {
     conditions.push(eq(requirements.status, input.status));
@@ -409,6 +413,7 @@ export async function linkDocumentToRequirement(
 export async function unlinkDocumentFromRequirement(
   db: Database,
   linkId: string,
+  _expectedParentId?: string,
 ) {
   const [deleted] = await db
     .delete(documentRequirementLinks)
@@ -684,6 +689,7 @@ export async function removeRequirementDependency(
   db: Database,
   depId: string,
   actor?: Actor,
+  _expectedParentId?: string,
 ) {
   const [deleted] = await db
     .delete(requirementDependencies)

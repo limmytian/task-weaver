@@ -243,26 +243,25 @@ test(
       },
     );
     await t.test(
-      "unguarded tRPC and GraphQL resource fields reject administrators and batch bypass",
+      "ordinary project lists filter administrators while discovery remains closed",
       async () => {
         assert.equal(
           (await trpc("project.list", adminHeaders)).response.status,
-          403,
+          200,
         );
         const graph = await graphql(
           adminHeaders,
           "{ projects { id name tasks { id title } } }",
         );
-        assert.equal(graph.response.status, 403, JSON.stringify(graph.body));
-        assert.equal(graph.body.errors[0].extensions.code, "permission_denied");
-        assert.equal(graph.body.data, null);
+        assert.equal(graph.response.status, 200, JSON.stringify(graph.body));
+        assert.deepEqual(graph.body.data.projects, []);
         const batch = await trpc(
           "auth.current,project.list?batch=1",
           adminHeaders,
         );
-        assert.equal(batch.response.status, 207);
+        assert.equal(batch.response.status, 200);
         assert.equal(batch.body[0].result.data.json.actor.id, actorId);
-        assert.equal(batch.body[1].error.json.data.code, "FORBIDDEN");
+        assert.deepEqual(batch.body[1].result.data.json, []);
       },
     );
   await t.test(

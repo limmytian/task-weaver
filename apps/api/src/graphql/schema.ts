@@ -8,13 +8,11 @@ import { createSchema } from "graphql-yoga";
 import { GraphQLError, defaultFieldResolver, isObjectType } from "graphql";
 import type { Database } from "@task-weaver/db";
 import {
-  projectService,
-  taskService,
-  documentService,
-  requirementService,
+  createResourceServices,
   recommendationService,
   authenticationFailure,
   AuthenticationError,
+  NotFoundError,
   requireResourceAuthorization,
   type AuthenticationRuntime,
   type VerifiedRequestContext,
@@ -157,8 +155,11 @@ const typeDefs = /* GraphQL */ `
 
   type Task {
     id: ID!
-    projectId: ID!
-    requirementId: ID!
+    projectId: ID
+    requirementId: ID
+    scope: String!
+    personalOwnerId: String
+    personalOwnerType: ActorType
     title: String!
     description: String
     status: TaskStatus!
@@ -172,8 +173,8 @@ const typeDefs = /* GraphQL */ `
     createdAt: String!
     updatedAt: String!
 
-    project: Project!
-    requirement: Requirement!
+    project: Project
+    requirement: Requirement
     comments: [Comment!]!
     notes: [Note!]!
     dependencies: [TaskDependency!]!
@@ -317,9 +318,10 @@ const resolvers = {
       ctx: GraphQLContext,
     ) => {
       try {
-        return await projectService.getProject(ctx.db, id);
-      } catch {
-        return null;
+        return await createResourceServices(ctx.identity).projectService.getProject(ctx.db, id);
+      } catch (error) {
+        if (error instanceof NotFoundError) return null;
+        throw error;
       }
     },
 
@@ -328,14 +330,15 @@ const resolvers = {
       { status }: { status?: string },
       ctx: GraphQLContext,
     ) => {
-      return projectService.listProjects(ctx.db, { status: status as any });
+      return createResourceServices(ctx.identity).projectService.listProjects(ctx.db, { status: status as any });
     },
 
     task: async (_: unknown, { id }: { id: string }, ctx: GraphQLContext) => {
       try {
-        return await taskService.getTaskDetail(ctx.db, id);
-      } catch {
-        return null;
+        return await createResourceServices(ctx.identity).taskService.getTaskDetail(ctx.db, id);
+      } catch (error) {
+        if (error instanceof NotFoundError) return null;
+        throw error;
       }
     },
 
@@ -349,7 +352,7 @@ const resolvers = {
       },
       ctx: GraphQLContext,
     ) => {
-      return taskService.listTasks(ctx.db, {
+      return createResourceServices(ctx.identity).taskService.listTasks(ctx.db, {
         scope: "project",
         projectId: args.projectId,
         status: args.status as any,
@@ -364,9 +367,10 @@ const resolvers = {
       ctx: GraphQLContext,
     ) => {
       try {
-        return await requirementService.getRequirement(ctx.db, id);
-      } catch {
-        return null;
+        return await createResourceServices(ctx.identity).requirementService.getRequirement(ctx.db, id);
+      } catch (error) {
+        if (error instanceof NotFoundError) return null;
+        throw error;
       }
     },
 
@@ -375,7 +379,7 @@ const resolvers = {
       args: { projectId: string; status?: string; priority?: string },
       ctx: GraphQLContext,
     ) => {
-      return requirementService.listRequirements(ctx.db, {
+      return createResourceServices(ctx.identity).requirementService.listRequirements(ctx.db, {
         projectId: args.projectId,
         status: args.status as any,
         priority: args.priority as any,
@@ -388,9 +392,10 @@ const resolvers = {
       ctx: GraphQLContext,
     ) => {
       try {
-        return await documentService.getDocumentDetail(ctx.db, id);
-      } catch {
-        return null;
+        return await createResourceServices(ctx.identity).documentService.getDocumentDetail(ctx.db, id);
+      } catch (error) {
+        if (error instanceof NotFoundError) return null;
+        throw error;
       }
     },
 
@@ -399,7 +404,7 @@ const resolvers = {
       args: { projectId?: string; docType?: string; includeGlobal?: boolean },
       ctx: GraphQLContext,
     ) => {
-      return documentService.listDocuments(ctx.db, {
+      return createResourceServices(ctx.identity).documentService.listDocuments(ctx.db, {
         projectId: args.projectId,
         docType: args.docType as any,
         includeGlobal: args.includeGlobal ?? true,
@@ -417,7 +422,7 @@ const resolvers = {
       },
       ctx: GraphQLContext,
     ) => {
-      const results = await documentService.searchDocuments(ctx.db, {
+      const results = await createResourceServices(ctx.identity).documentService.searchDocuments(ctx.db, {
         query: args.query,
         mode: (args.mode as any) ?? "keyword",
         projectId: args.projectId,
@@ -439,7 +444,7 @@ const resolvers = {
       args: { status?: string; priority?: string },
       ctx: GraphQLContext,
     ) => {
-      return requirementService.listRequirements(ctx.db, {
+      return createResourceServices(ctx.identity).requirementService.listRequirements(ctx.db, {
         projectId: project.id,
         status: args.status as any,
         priority: args.priority as any,
@@ -451,7 +456,7 @@ const resolvers = {
       args: { status?: string; assignee?: string; priority?: string },
       ctx: GraphQLContext,
     ) => {
-      return taskService.listTasks(ctx.db, {
+      return createResourceServices(ctx.identity).taskService.listTasks(ctx.db, {
         scope: "project",
         projectId: project.id,
         status: args.status as any,
@@ -465,7 +470,7 @@ const resolvers = {
       args: { docType?: string },
       ctx: GraphQLContext,
     ) => {
-      return documentService.listDocuments(ctx.db, {
+      return createResourceServices(ctx.identity).documentService.listDocuments(ctx.db, {
         projectId: project.id,
         docType: args.docType as any,
         includeGlobal: false,
@@ -474,7 +479,7 @@ const resolvers = {
     },
 
     stats: async (project: any, _args: unknown, ctx: GraphQLContext) => {
-      return projectService.getProjectStats(ctx.db, project.id);
+      return createResourceServices(ctx.identity).projectService.getProjectStats(ctx.db, project.id);
     },
   },
 
@@ -482,13 +487,13 @@ const resolvers = {
     project: async (req: any, _args: unknown, ctx: GraphQLContext) => {
       // If already loaded (from getRequirement with `with: { project }`)
       if (req.project) return req.project;
-      return projectService.getProject(ctx.db, req.projectId);
+      return createResourceServices(ctx.identity).projectService.getProject(ctx.db, req.projectId);
     },
 
     tasks: async (req: any, args: { status?: string }, ctx: GraphQLContext) => {
       // If already loaded
       if (req.tasks && !args.status) return req.tasks;
-      return taskService.listTasks(ctx.db, {
+      return createResourceServices(ctx.identity).taskService.listTasks(ctx.db, {
         scope: "project",
         projectId: req.projectId,
         requirementId: req.id,
@@ -498,43 +503,45 @@ const resolvers = {
 
     linkedDocuments: async (req: any, _args: unknown, ctx: GraphQLContext) => {
       if (req.documentLinks) return req.documentLinks;
-      const full = await requirementService.getRequirement(ctx.db, req.id);
+      const full = await createResourceServices(ctx.identity).requirementService.getRequirement(ctx.db, req.id);
       return (full as any).documentLinks ?? [];
     },
   },
 
   Task: {
     project: async (task: any, _args: unknown, ctx: GraphQLContext) => {
+      if (!task.projectId) return null;
       if (task.project) return task.project;
-      return projectService.getProject(ctx.db, task.projectId);
+      return createResourceServices(ctx.identity).projectService.getProject(ctx.db, task.projectId);
     },
 
     requirement: async (task: any, _args: unknown, ctx: GraphQLContext) => {
+      if (!task.requirementId) return null;
       if (task.requirement) return task.requirement;
-      return requirementService.getRequirement(ctx.db, task.requirementId);
+      return createResourceServices(ctx.identity).requirementService.getRequirement(ctx.db, task.requirementId);
     },
 
     comments: async (task: any, _args: unknown, ctx: GraphQLContext) => {
       if (task.comments) return task.comments;
-      const detail = await taskService.getTaskDetail(ctx.db, task.id);
+      const detail = await createResourceServices(ctx.identity).taskService.getTaskDetail(ctx.db, task.id);
       return (detail as any).comments ?? [];
     },
 
     notes: async (task: any, _args: unknown, ctx: GraphQLContext) => {
       if (task.notes) return task.notes;
-      const detail = await taskService.getTaskDetail(ctx.db, task.id);
+      const detail = await createResourceServices(ctx.identity).taskService.getTaskDetail(ctx.db, task.id);
       return (detail as any).notes ?? [];
     },
 
     dependencies: async (task: any, _args: unknown, ctx: GraphQLContext) => {
       if (task.dependencies) return task.dependencies;
-      const detail = await taskService.getTaskDetail(ctx.db, task.id);
+      const detail = await createResourceServices(ctx.identity).taskService.getTaskDetail(ctx.db, task.id);
       return (detail as any).dependencies ?? [];
     },
 
     linkedDocuments: async (task: any, _args: unknown, ctx: GraphQLContext) => {
       if (task.documentLinks) return task.documentLinks;
-      const detail = await taskService.getTaskDetail(ctx.db, task.id);
+      const detail = await createResourceServices(ctx.identity).taskService.getTaskDetail(ctx.db, task.id);
       return (detail as any).documentLinks ?? [];
     },
   },
@@ -544,27 +551,28 @@ const resolvers = {
       if (doc.project) return doc.project;
       if (!doc.projectId) return null;
       try {
-        return await projectService.getProject(ctx.db, doc.projectId);
-      } catch {
-        return null;
+        return await createResourceServices(ctx.identity).projectService.getProject(ctx.db, doc.projectId);
+      } catch (error) {
+        if (error instanceof NotFoundError) return null;
+        throw error;
       }
     },
 
     outgoingLinks: async (doc: any, _args: unknown, ctx: GraphQLContext) => {
       if (doc.outgoingLinks) return doc.outgoingLinks;
-      const detail = await documentService.getDocumentDetail(ctx.db, doc.id);
+      const detail = await createResourceServices(ctx.identity).documentService.getDocumentDetail(ctx.db, doc.id);
       return (detail as any).outgoingLinks ?? [];
     },
 
     incomingLinks: async (doc: any, _args: unknown, ctx: GraphQLContext) => {
       if (doc.incomingLinks) return doc.incomingLinks;
-      const detail = await documentService.getDocumentDetail(ctx.db, doc.id);
+      const detail = await createResourceServices(ctx.identity).documentService.getDocumentDetail(ctx.db, doc.id);
       return (detail as any).incomingLinks ?? [];
     },
 
     linkedTasks: async (doc: any, _args: unknown, ctx: GraphQLContext) => {
       if (doc.taskLinks) return doc.taskLinks;
-      const detail = await documentService.getDocumentDetail(ctx.db, doc.id);
+      const detail = await createResourceServices(ctx.identity).documentService.getDocumentDetail(ctx.db, doc.id);
       return (detail as any).taskLinks ?? [];
     },
 
@@ -574,7 +582,7 @@ const resolvers = {
       ctx: GraphQLContext,
     ) => {
       if (doc.requirementLinks) return doc.requirementLinks;
-      const detail = await documentService.getDocumentDetail(ctx.db, doc.id);
+      const detail = await createResourceServices(ctx.identity).documentService.getDocumentDetail(ctx.db, doc.id);
       return (detail as any).requirementLinks ?? [];
     },
 
@@ -619,23 +627,25 @@ const resolvers = {
     sourceDoc: async (link: any, _args: unknown, ctx: GraphQLContext) => {
       if (link.sourceDoc) return link.sourceDoc;
       try {
-        return await documentService.getDocumentDetail(
+        return await createResourceServices(ctx.identity).documentService.getDocumentDetail(
           ctx.db,
           link.sourceDocId,
         );
-      } catch {
-        return null;
+      } catch (error) {
+        if (error instanceof NotFoundError) return null;
+        throw error;
       }
     },
     targetDoc: async (link: any, _args: unknown, ctx: GraphQLContext) => {
       if (link.targetDoc) return link.targetDoc;
       try {
-        return await documentService.getDocumentDetail(
+        return await createResourceServices(ctx.identity).documentService.getDocumentDetail(
           ctx.db,
           link.targetDocId,
         );
-      } catch {
-        return null;
+      } catch (error) {
+        if (error instanceof NotFoundError) return null;
+        throw error;
       }
     },
   },
@@ -644,17 +654,19 @@ const resolvers = {
     document: async (link: any, _args: unknown, ctx: GraphQLContext) => {
       if (link.document) return link.document;
       try {
-        return await documentService.getDocumentDetail(ctx.db, link.documentId);
-      } catch {
-        return null;
+        return await createResourceServices(ctx.identity).documentService.getDocumentDetail(ctx.db, link.documentId);
+      } catch (error) {
+        if (error instanceof NotFoundError) return null;
+        throw error;
       }
     },
     task: async (link: any, _args: unknown, ctx: GraphQLContext) => {
       if (link.task) return link.task;
       try {
-        return await taskService.getTaskDetail(ctx.db, link.taskId);
-      } catch {
-        return null;
+        return await createResourceServices(ctx.identity).taskService.getTaskDetail(ctx.db, link.taskId);
+      } catch (error) {
+        if (error instanceof NotFoundError) return null;
+        throw error;
       }
     },
   },
@@ -663,20 +675,22 @@ const resolvers = {
     document: async (link: any, _args: unknown, ctx: GraphQLContext) => {
       if (link.document) return link.document;
       try {
-        return await documentService.getDocumentDetail(ctx.db, link.documentId);
-      } catch {
-        return null;
+        return await createResourceServices(ctx.identity).documentService.getDocumentDetail(ctx.db, link.documentId);
+      } catch (error) {
+        if (error instanceof NotFoundError) return null;
+        throw error;
       }
     },
     requirement: async (link: any, _args: unknown, ctx: GraphQLContext) => {
       if (link.requirement) return link.requirement;
       try {
-        return await requirementService.getRequirement(
+        return await createResourceServices(ctx.identity).requirementService.getRequirement(
           ctx.db,
           link.requirementId,
         );
-      } catch {
-        return null;
+      } catch (error) {
+        if (error instanceof NotFoundError) return null;
+        throw error;
       }
     },
   },
@@ -685,9 +699,10 @@ const resolvers = {
     dependsOn: async (dep: any, _args: unknown, ctx: GraphQLContext) => {
       if (dep.dependsOn) return dep.dependsOn;
       try {
-        return await taskService.getTaskDetail(ctx.db, dep.dependsOnTaskId);
-      } catch {
-        return null;
+        return await createResourceServices(ctx.identity).taskService.getTaskDetail(ctx.db, dep.dependsOnTaskId);
+      } catch (error) {
+        if (error instanceof NotFoundError) return null;
+        throw error;
       }
     },
   },
@@ -705,13 +720,33 @@ for (const type of Object.values(schema.getTypeMap())) {
         if (!context?.auth || !(context.headers instanceof Headers))
           throw new AuthenticationError();
         context.auth.assertOrigin(context.headers);
-        await context.auth.verify(context.headers);
-        if (
-          !(type.name === "Query" && name === "currentActor") &&
-          type.name !== "AuthenticatedActor"
-        )
-          requireResourceAuthorization();
-        return await resolve(source, args, context, info);
+        const identity = await context.auth.verify(context.headers);
+        const liveContext = { ...context, identity };
+        const services = createResourceServices(identity);
+        if (type.name === "Query") {
+          if (!["currentActor", "project", "projects", "task", "tasks", "requirement", "requirements", "document", "documents"].includes(name)) requireResourceAuthorization();
+        } else if (type.name === "Project") {
+          if (name === "stats") requireResourceAuthorization();
+          await services.projectService.getProject(context.db, source.id);
+        } else if (type.name === "Task") {
+          await services.taskService.getTask(context.db, source.id);
+        } else if (type.name === "Requirement") {
+          await services.requirementService.getRequirement(context.db, source.id);
+        } else if (type.name === "Document") {
+          if (name === "recommendations") requireResourceAuthorization();
+          await services.documentService.getDocument(context.db, source.id);
+        } else if (["Comment", "Note", "TaskDependency"].includes(type.name)) {
+          await services.taskService.getTask(context.db, source.taskId);
+          if (source.dependsOnTaskId) await services.taskService.getTask(context.db, source.dependsOnTaskId);
+        } else if (type.name === "DocumentLink") {
+          await services.documentService.getDocument(context.db, source.sourceDocId);
+          await services.documentService.getDocument(context.db, source.targetDocId);
+        } else if (["DocumentTaskLink", "DocumentRequirementLink"].includes(type.name)) {
+          await services.documentService.getDocument(context.db, source.documentId);
+          if (source.taskId) await services.taskService.getTask(context.db, source.taskId);
+          if (source.requirementId) await services.requirementService.getRequirement(context.db, source.requirementId);
+        } else if (type.name !== "AuthenticatedActor") requireResourceAuthorization();
+        return await resolve(source, args, liveContext, info);
       } catch (error) {
         const failure = authenticationFailure(error);
         throw new GraphQLError(failure.error, {

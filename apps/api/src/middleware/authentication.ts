@@ -5,6 +5,8 @@ import {
 } from "@task-weaver/core";
 import { actorMiddleware, type Env } from "./actor.js";
 
+import { isOrdinaryResourceRoute } from "./resource-routes.js";
+
 const publicRoutes = new Set([
   "GET /health",
   "GET /api/v1/version",
@@ -73,7 +75,7 @@ export async function authenticationMiddleware(c: Context<Env>, next: Next) {
   await actorMiddleware(c, async () => {
     if (!["GET", "HEAD"].includes(c.req.method))
       c.get("auth").authentication.assertMutation(headers);
-    if (!guardedLifecycle(c.req.path)) requireResourceAuthorization();
+    if (!guardedLifecycle(c.req.path) && !isOrdinaryResourceRoute(c.req.method, c.req.path)) requireResourceAuthorization();
     await next();
   });
 }

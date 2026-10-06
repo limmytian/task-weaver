@@ -63,6 +63,7 @@ try {
     ],
     ["@task-weaver/api", "src/authentication.postgres-e2e.test.ts"],
     [null, "scripts/auth-transports.postgres-e2e.test.ts"],
+    [null, "scripts/resource-authorization.postgres-e2e.test.ts"],
   ]) {
     const result = spawnSync(
       "pnpm",

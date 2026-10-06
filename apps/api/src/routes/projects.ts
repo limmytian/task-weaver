@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import {
-  projectService,
+  createResourceServices,
   createProjectSchema,
   updateProjectSchema,
   listProjectsSchema,
@@ -21,7 +21,7 @@ projects.get("/", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
 
-  const result = await projectService.listProjects(db, parsed.data);
+  const result = await createResourceServices(c.get("identity")).projectService.listProjects(db, parsed.data);
   return c.json(result);
 });
 
@@ -37,11 +37,11 @@ projects.post("/", async (c) => {
   }
 
   try {
-    const project = await projectService.createProject(db, parsed.data, actor);
+    const project = await createResourceServices(c.get("identity")).projectService.createProject(db, parsed.data, actor);
     return c.json(project, 201);
   } catch (err) {
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -53,11 +53,11 @@ projects.get("/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const project = await projectService.getProject(db, id);
+    const project = await createResourceServices(c.get("identity")).projectService.getProject(db, id);
     return c.json(project);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -76,14 +76,14 @@ projects.patch("/:id", async (c) => {
   }
 
   try {
-    const project = await projectService.updateProject(db, id, parsed.data, actor);
+    const project = await createResourceServices(c.get("identity")).projectService.updateProject(db, id, parsed.data, actor);
     return c.json(project);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -95,11 +95,11 @@ projects.get("/:id/stats", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const stats = await projectService.getProjectStats(db, id);
+    const stats = await createResourceServices(c.get("identity")).projectService.getProjectStats(db, id);
     return c.json(stats);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -111,11 +111,11 @@ projects.get("/:id/health", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const health = await projectService.getProjectHealthDashboard(db, id);
+    const health = await createResourceServices(c.get("identity")).projectService.getProjectHealthDashboard(db, id);
     return c.json(health);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -127,11 +127,11 @@ projects.get("/:id/knowledge-graph", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const graph = await projectService.getKnowledgeGraph(db, id);
+    const graph = await createResourceServices(c.get("identity")).projectService.getKnowledgeGraph(db, id);
     return c.json(graph);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -144,11 +144,11 @@ projects.delete("/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const project = await projectService.deleteProject(db, id, actor);
+    const project = await createResourceServices(c.get("identity")).projectService.deleteProject(db, id, actor);
     return c.json(project);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }

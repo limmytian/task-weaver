@@ -1,13 +1,13 @@
-export * as projectService from "./projects";
-export * as taskService from "./tasks";
-export * as claimService from "./claims";
-export * as documentService from "./documents";
+export { projectService } from "./resource-services";
+export { taskService } from "./resource-services";
+export { claimService } from "./resource-services";
+export { documentService } from "./resource-services";
 export * as embeddingService from "./embeddings/index";
 export * from "./embeddings/index";
 export * as contextService from "./context";
 export * as mcpRegistryService from "./mcp-registry";
-export * as memoryService from "./memory";
-export * as requirementService from "./requirements";
+export { memoryService } from "./resource-services";
+export { requirementService } from "./resource-services";
 export * as repositoryService from "./repositories";
 export * as forgeSyncService from "./forge-sync";
 export * as reviewService from "./reviews";
@@ -41,3 +41,6 @@ export * as authPrincipalService from "./auth-principals";
 export * from "./authentication";
 export * from "./auth-runtime";
 export * from "./identity-management";
+
+export { createResourceServices } from "./resource-services";
+export * from "./resource-authorization";

@@ -1,3 +1,4 @@
+import type { SQL } from "drizzle-orm";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   type Database,
@@ -189,19 +190,22 @@ type TaskListItem = typeof tasks.$inferSelect & {
 export function listTasks(
   db: Database,
   input: ListTasksInput & { view: "summary" | "full" },
+  authorizedPredicate?: SQL,
 ): Promise<PagedTaskList>
 
 export function listTasks(
   db: Database,
   input: ListTasksInput,
+  authorizedPredicate?: SQL,
 ): Promise<Array<TaskListItem>>
 
 export async function listTasks(
   db: Database,
   input: ListTasksInput,
+  authorizedPredicate?: SQL,
 ): Promise<PagedTaskList | Array<TaskListItem>> {
   const taskScope = input.scope ?? "project";
-  const conditions = [eq(tasks.scope, taskScope)];
+  const conditions = [eq(tasks.scope, taskScope), authorizedPredicate];
 
   if (taskScope === "project") {
     if (!input.projectId) throw new ValidationError("Project task listing requires projectId");
@@ -769,7 +773,7 @@ export async function deleteTask(
   return updated!;
 }
 
-export async function removeTaskDependency(db: Database, depId: string) {
+export async function removeTaskDependency(db: Database, depId: string, _expectedParentId?: string) {
   const [deleted] = await db
     .delete(taskDependencies)
     .where(eq(taskDependencies.id, depId))

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import {
-  taskService,
-  claimService,
+  createResourceServices,
+  personalResourceOwnerId,
   recommendationService,
   createTaskSchema,
   createPersonalTaskSchema,
@@ -55,11 +55,11 @@ tasks.get("/projects/:projectId/tasks", async (c) => {
   }
 
   try {
-    const result = await taskService.listTasks(db, parsed.data);
+    const result = await createResourceServices(c.get("identity")).taskService.listTasks(db, parsed.data);
     return c.json(result);
   } catch (err) {
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -79,11 +79,11 @@ tasks.post("/projects/:projectId/tasks", async (c) => {
   }
 
   try {
-    const task = await taskService.createTask(db, parsed.data, actor);
+    const task = await createResourceServices(c.get("identity")).taskService.createTask(db, parsed.data, actor);
     return c.json(task, 201);
   } catch (err) {
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -92,13 +92,12 @@ tasks.post("/projects/:projectId/tasks", async (c) => {
 // GET /personal/tasks - List personal tasks for the current actor
 tasks.get("/personal/tasks", async (c) => {
   const db = c.get("db");
-  const actor = c.get("actor");
   const query = c.req.query();
 
   const parsed = listTasksSchema.safeParse({
     scope: "personal",
-    personalOwnerId: query.ownerId ?? actor.id,
-    personalOwnerType: query.ownerType ?? actor.type,
+    personalOwnerId: query.ownerId ?? personalResourceOwnerId(c.get("identity")),
+    personalOwnerType: query.ownerType ?? "human",
     status: query.status,
     assignee: query.assignee,
     priority: query.priority,
@@ -117,11 +116,11 @@ tasks.get("/personal/tasks", async (c) => {
   }
 
   try {
-    const result = await taskService.listTasks(db, parsed.data);
+    const result = await createResourceServices(c.get("identity")).taskService.listTasks(db, parsed.data);
     return c.json(result);
   } catch (err) {
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -139,7 +138,7 @@ tasks.post("/personal/tasks", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
 
-  const task = await taskService.createPersonalTask(db, parsed.data, actor);
+  const task = await createResourceServices(c.get("identity")).taskService.createPersonalTask(db, parsed.data, actor);
   return c.json(task, 201);
 });
 
@@ -153,7 +152,7 @@ tasks.get("/projects/:projectId/board", async (c) => {
     : undefined;
   const includeTerminal = query.includeTerminal === "true" || query.includeTerminal === "1";
 
-  const board = await taskService.getKanbanBoard(db, projectId, { includeTerminal, completedWithinDays });
+  const board = await createResourceServices(c.get("identity")).taskService.getKanbanBoard(db, projectId, { includeTerminal, completedWithinDays });
   return c.json(board);
 });
 
@@ -162,7 +161,7 @@ tasks.get("/projects/:projectId/gantt", async (c) => {
   const db = c.get("db");
   const projectId = c.req.param("projectId");
 
-  const gantt = await taskService.getGanttChart(db, projectId);
+  const gantt = await createResourceServices(c.get("identity")).taskService.getGanttChart(db, projectId);
   return c.json(gantt);
 });
 
@@ -181,11 +180,11 @@ tasks.post("/tasks/batch", async (c) => {
   }
 
   try {
-    const results = await taskService.batchCreateTasks(db, parsed.data, actor);
+    const results = await createResourceServices(c.get("identity")).taskService.batchCreateTasks(db, parsed.data, actor);
     return c.json(results, 201);
   } catch (err) {
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -204,14 +203,14 @@ tasks.patch("/tasks/batch", async (c) => {
   }
 
   try {
-    const results = await taskService.batchUpdateTasks(db, parsed.data, actor);
+    const results = await createResourceServices(c.get("identity")).taskService.batchUpdateTasks(db, parsed.data, actor);
     return c.json(results);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -225,11 +224,11 @@ tasks.get("/tasks/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const task = await taskService.getTaskDetail(db, id);
+    const task = await createResourceServices(c.get("identity")).taskService.getTaskDetail(db, id);
     return c.json(task);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -249,17 +248,17 @@ tasks.patch("/tasks/:id", async (c) => {
   }
 
   try {
-    const task = await taskService.updateTask(db, id, parsed.data, actor);
+    const task = await createResourceServices(c.get("identity")).taskService.updateTask(db, id, parsed.data, actor);
     return c.json(task);
   } catch (err) {
     if (err instanceof ConflictError) {
       return c.json({ error: err.message, currentVersion: err.currentVersion }, 409);
     }
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -279,7 +278,7 @@ tasks.patch("/tasks/:id/status", async (c) => {
   }
 
   try {
-    const task = await taskService.updateTaskStatus(
+    const task = await createResourceServices(c.get("identity")).taskService.updateTaskStatus(
       db,
       id,
       parsed.data.status,
@@ -294,10 +293,10 @@ tasks.patch("/tasks/:id/status", async (c) => {
     return c.json(task);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -310,14 +309,14 @@ tasks.delete("/tasks/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const task = await taskService.deleteTask(db, id, actor);
+    const task = await createResourceServices(c.get("identity")).taskService.deleteTask(db, id, actor);
     return c.json(task);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -337,11 +336,11 @@ tasks.post("/tasks/:id/comments", async (c) => {
   }
 
   try {
-    const comment = await taskService.addTaskComment(db, id, parsed.data.content, actor);
+    const comment = await createResourceServices(c.get("identity")).taskService.addTaskComment(db, id, parsed.data.content, actor);
     return c.json(comment, 201);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -361,7 +360,7 @@ tasks.post("/tasks/:id/notes", async (c) => {
   }
 
   try {
-    const note = await taskService.addTaskNote(
+    const note = await createResourceServices(c.get("identity")).taskService.addTaskNote(
       db,
       id,
       parsed.data.content,
@@ -371,7 +370,7 @@ tasks.post("/tasks/:id/notes", async (c) => {
     return c.json(note, 201);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -391,7 +390,7 @@ tasks.post("/tasks/:id/dependencies", async (c) => {
   }
 
   try {
-    const dep = await taskService.addTaskDependency(
+    const dep = await createResourceServices(c.get("identity")).taskService.addTaskDependency(
       db,
       id,
       parsed.data.dependsOnTaskId,
@@ -402,10 +401,10 @@ tasks.post("/tasks/:id/dependencies", async (c) => {
     return c.json(dep, 201);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -417,11 +416,11 @@ tasks.delete("/tasks/:id/dependencies/:depId", async (c) => {
   const depId = c.req.param("depId");
 
   try {
-    const deleted = await taskService.removeTaskDependency(db, depId);
+    const deleted = await createResourceServices(c.get("identity")).taskService.removeTaskDependency(db, depId, c.req.param("id"));
     return c.json(deleted);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }
@@ -441,11 +440,11 @@ tasks.post("/tasks/:id/claim", async (c) => {
   }
 
   try {
-    const claim = await claimService.claimTask(db, id, actor, parsed.data.durationMinutes);
+    const claim = await createResourceServices(c.get("identity")).claimService.claimTask(db, id, actor, parsed.data.durationMinutes);
     return c.json(claim, 201);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
       return c.json({ error: err.message }, 409);
@@ -468,14 +467,14 @@ tasks.post("/tasks/:id/release", async (c) => {
   }
 
   try {
-    const result = await claimService.releaseTask(db, id, actor, parsed.data.reason);
+    const result = await createResourceServices(c.get("identity")).claimService.releaseTask(db, id, actor, parsed.data.reason);
     return c.json(result);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -491,14 +490,14 @@ tasks.post("/tasks/:id/heartbeat", async (c) => {
   const extendMinutes = typeof body.extendMinutes === "number" ? body.extendMinutes : 30;
 
   try {
-    const claim = await claimService.heartbeatClaim(db, id, actor, extendMinutes);
+    const claim = await createResourceServices(c.get("identity")).claimService.heartbeatClaim(db, id, actor, extendMinutes);
     return c.json(claim);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: "Invalid request" }, 400);
     }
     throw err;
   }
@@ -509,7 +508,7 @@ tasks.get("/tasks/:id/claim", async (c) => {
   const db = c.get("db");
   const id = c.req.param("id");
 
-  const claim = await claimService.getTaskClaim(db, id);
+  const claim = await createResourceServices(c.get("identity")).claimService.getTaskClaim(db, id);
   return c.json(claim ?? { claimed: false });
 });
 
@@ -518,7 +517,7 @@ tasks.get("/claims", async (c) => {
   const db = c.get("db");
   const query = c.req.query();
 
-  const claims = await claimService.listActiveClaims(db, {
+  const claims = await createResourceServices(c.get("identity")).claimService.listActiveClaims(db, {
     projectId: query.projectId,
     claimedBy: query.claimedBy,
   });
@@ -538,7 +537,7 @@ tasks.post("/claims/batch", async (c) => {
   }
 
   try {
-    const claims = await claimService.batchClaimTasks(
+    const claims = await createResourceServices(c.get("identity")).claimService.batchClaimTasks(
       db,
       parsed.data.taskIds,
       actor,
@@ -574,7 +573,7 @@ tasks.get("/tasks/:id/recommendations", async (c) => {
     return c.json(result);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      return c.json({ error: err.message }, 404);
+      return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
   }

@@ -1,3 +1,4 @@
+import type { SQL } from "drizzle-orm";
 import { and, eq, isNull, or, sql, desc } from "drizzle-orm";
 import { type Database, memories } from "@task-weaver/db";
 import type { Actor } from "@task-weaver/contracts";
@@ -146,7 +147,7 @@ export async function updateMemory(
   db: Database,
   id: string,
   input: UpdateMemoryInput,
-  actor: Actor,
+  _actor: Actor,
 ) {
   await getMemory(db, id);
 
@@ -160,18 +161,18 @@ export async function updateMemory(
   const [updated] = await db
     .update(memories)
     .set(updates)
-    .where(and(eq(memories.id, id), eq(memories.createdBy, actor.id)))
+    .where(eq(memories.id, id))
     .returning();
 
   if (!updated) throw new NotFoundError("Memory not found or not owned by actor");
   return updated;
 }
 
-export async function forgetMemory(db: Database, id: string, actor: Actor) {
+export async function forgetMemory(db: Database, id: string, _actor: Actor) {
   await getMemory(db, id);
   const result = await db
     .delete(memories)
-    .where(and(eq(memories.id, id), eq(memories.createdBy, actor.id)))
+    .where(eq(memories.id, id))
     .returning({ id: memories.id });
 
   if (result.length === 0) throw new NotFoundError("Memory not found or not owned by actor");
@@ -250,8 +251,10 @@ export async function searchMemories(db: Database, input: SearchMemoryInput) {
 
 // -- List --
 
-export async function listMemories(db: Database, input: ListMemoriesInput) {
-  const conditions = [];
+export async function listMemories(db: Database, input: ListMemoriesInput,
+  authorizedPredicate?: SQL,
+) {
+  const conditions = [authorizedPredicate];
 
   conditions.push(buildMemoryScopeCondition(input));
 
@@ -276,9 +279,11 @@ export async function getMemoriesForEntity(
   db: Database,
   entityType: string,
   entityId: string,
+  authorizedPredicate?: SQL,
 ) {
   return db.query.memories.findMany({
     where: and(
+      authorizedPredicate,
       eq(memories.entityType, entityType as "project" | "requirement" | "task" | "document"),
       eq(memories.entityId, entityId),
       notExpired()!,

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import {
-  memoryService,
+  createResourceServices,
+  personalResourceOwnerId,
   recordMemorySchema,
   updateMemorySchema,
   searchMemorySchema,
@@ -22,7 +23,7 @@ memory.post("/", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
 
-  const result = await memoryService.recordMemory(db, parsed.data, actor);
+  const result = await createResourceServices(c.get("identity")).memoryService.recordMemory(db, parsed.data, actor);
   return c.json(result, 201);
 });
 
@@ -36,36 +37,35 @@ memory.get("/search", async (c) => {
     ...query,
     tags: query.tags ? query.tags.split(",") : undefined,
     preferredActorId: query.preferredActorId ?? actor.id,
-    personalOwnerId: query.personalOwnerId ?? actor.id,
-    personalOwnerType: query.personalOwnerType ?? actor.type,
+    personalOwnerId: query.personalOwnerId ?? personalResourceOwnerId(c.get("identity")),
+    personalOwnerType: query.personalOwnerType ?? "human",
   });
 
   if (!parsed.success) {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
 
-  const results = await memoryService.searchMemories(db, parsed.data);
+  const results = await createResourceServices(c.get("identity")).memoryService.searchMemories(db, parsed.data);
   return c.json({ items: results });
 });
 
 // GET / — List memories with filters
 memory.get("/", async (c) => {
   const db = c.get("db");
-  const actor = c.get("actor");
   const query = c.req.query();
 
   const parsed = listMemoriesSchema.safeParse({
     ...query,
     tags: query.tags ? query.tags.split(",") : undefined,
-    personalOwnerId: query.personalOwnerId ?? actor.id,
-    personalOwnerType: query.personalOwnerType ?? actor.type,
+    personalOwnerId: query.personalOwnerId ?? personalResourceOwnerId(c.get("identity")),
+    personalOwnerType: query.personalOwnerType ?? "human",
   });
 
   if (!parsed.success) {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
 
-  const results = await memoryService.listMemories(db, parsed.data);
+  const results = await createResourceServices(c.get("identity")).memoryService.listMemories(db, parsed.data);
   return c.json({ items: results });
 });
 
@@ -75,7 +75,7 @@ memory.get("/entity/:entityType/:entityId", async (c) => {
   const entityType = c.req.param("entityType");
   const entityId = c.req.param("entityId");
 
-  const results = await memoryService.getMemoriesForEntity(db, entityType, entityId);
+  const results = await createResourceServices(c.get("identity")).memoryService.getMemoriesForEntity(db, entityType, entityId);
   return c.json({ items: results });
 });
 
@@ -92,10 +92,10 @@ memory.patch("/:id", async (c) => {
   }
 
   try {
-    const result = await memoryService.updateMemory(db, id, parsed.data, actor);
+    const result = await createResourceServices(c.get("identity")).memoryService.updateMemory(db, id, parsed.data, actor);
     return c.json(result);
   } catch (err) {
-    if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
+    if (err instanceof NotFoundError) return c.json({ error: "Resource not found" }, 404);
     throw err;
   }
 });
@@ -107,10 +107,10 @@ memory.delete("/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
-    await memoryService.forgetMemory(db, id, actor);
+    await createResourceServices(c.get("identity")).memoryService.forgetMemory(db, id, actor);
     return c.json({ success: true });
   } catch (err) {
-    if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
+    if (err instanceof NotFoundError) return c.json({ error: "Resource not found" }, 404);
     throw err;
   }
 });
@@ -121,10 +121,10 @@ memory.get("/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const result = await memoryService.getMemory(db, id);
+    const result = await createResourceServices(c.get("identity")).memoryService.getMemory(db, id);
     return c.json(result);
   } catch (err) {
-    if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
+    if (err instanceof NotFoundError) return c.json({ error: "Resource not found" }, 404);
     throw err;
   }
 });

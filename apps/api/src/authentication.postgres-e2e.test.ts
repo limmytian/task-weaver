@@ -215,12 +215,10 @@ test(
       },
     );
     await t.test(
-      "unguarded resources and execution remain closed even to an instance administrator",
+      "discovery and execution remain closed even to an instance administrator",
       async () => {
         for (const path of [
-          "projects",
           "tasks",
-          "documents",
           "search?q=test",
           "daemons/events",
           "ti/worker/status",
