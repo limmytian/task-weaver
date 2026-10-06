@@ -18,6 +18,7 @@ import {
   projectMemberships,
   projects,
   apiKeys,
+  webhooks,
 } from "./schema/index";
 
 const databaseUrl = process.env.TW_AUTH_E2E_DATABASE_URL;
@@ -72,6 +73,7 @@ test(
     await db.execute(
       sql`INSERT INTO task_weaver.api_keys (name, key_hash, key_prefix) VALUES ('legacy', ${"a".repeat(64)}, 'tw_legacy')`,
     );
+    await db.execute(sql`INSERT INTO task_weaver.webhooks (project_id, url, events, secret, active) VALUES (${legacyProject!.id}, 'https://legacy.example.test', '["task.created"]'::jsonb, 'legacy-fixture-secret-only', true)`);
     await runMigrations(databaseUrl!);
     await runMigrations(databaseUrl!);
     assert.equal(
@@ -84,6 +86,10 @@ test(
       "unmapped-human",
     );
     assert.equal((await db.select().from(apiKeys))[0]!.keyHash, "a".repeat(64));
+    const [legacyHook] = await db.select().from(webhooks);
+    assert.equal(legacyHook!.active, false);
+    assert.equal(legacyHook!.ownerActorId, null);
+    assert.equal(legacyHook!.bindingId, null);
     assert.equal((await db.select().from(projectMemberships)).length, 0);
     assert.equal((await db.select().from(authActors)).length, 0);
 

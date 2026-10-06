@@ -117,8 +117,8 @@ test("first-party lifecycle starts once and releases realtime subscriptions", as
   await f.application.start();
   assert.equal(
     f.listeners.length,
-    0,
-    "Unconverted outbound/runtime subscriptions must stay closed",
+    1,
+    "Only the authorized webhook subscriber is enabled",
   );
   await f.application.stop();
   assert.equal(f.listeners.length, 0);

@@ -53,3 +53,5 @@ export { createResourceServices } from "./resource-services";
 export * from "./resource-authorization";
 
 export * from "./realtime-authorization";
+
+export { createWebhookService } from "./webhooks";

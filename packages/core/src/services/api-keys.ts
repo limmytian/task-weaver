@@ -145,7 +145,7 @@ export async function authenticateScopedApiKey(
 /** Re-read the credential instead of trusting a stale context's role, grants or expiry. */
 async function currentAuthority(
   db: AuthDatabase,
-  context: VerifiedRequestContext,
+  context: { actor: { id: string }; credential: { kind: string; id: string; actorId: string } },
   now: Date,
 ) {
   const actor = await loadActivePrincipal(db, context.actor.id);
@@ -184,6 +184,15 @@ async function currentAuthority(
     depth: 0,
   };
 }
+/** Internal persisted integrations resolve credential bindings through the same live authority. */
+export async function getBoundCredentialAuthority(db: AuthDatabase, binding: { actorId: string; credentialId: string; credentialKind: string }) {
+  const { actor, grants } = await currentAuthority(db, {
+    actor: { id: binding.actorId },
+    credential: { id: binding.credentialId, kind: binding.credentialKind, actorId: binding.actorId },
+  }, new Date());
+  return { actor, grants };
+}
+
 /** Safe live authority for lifecycle services; stored credentials never leave this module. */
 export async function getLiveRequestAuthority(
   db: AuthDatabase,

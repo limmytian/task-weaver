@@ -7,6 +7,7 @@ import {
 } from "@task-weaver/realtime";
 import type { RealtimeEvent } from "@task-weaver/realtime";
 import {
+  webhookService,
   skillPackageStorageService,
   skillPresetService,
   authenticationConfiguration,
@@ -110,6 +111,8 @@ const consoleLogger: ApplicationLogger = {
 };
 
 function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
+  let webhookQueue = Promise.resolve();
+  let pendingWebhooks = 0;
   return {
     apiRoutes: [
       {
@@ -269,8 +272,20 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
         },
       },
     ],
-    // B4 must authorize persisted webhook delivery before restoring subscriptions.
-    eventSubscribers: [],
+    eventSubscribers: [{
+      id: "authorized-webhooks",
+      eventTypes: ["task_created", "task_updated", "task_status_changed", "task_commented", "task_deleted", "requirement_created", "requirement_updated", "requirement_deleted", "document_created", "document_updated", "document_deleted", "document_linked", "document_unlinked", "document_task_linked", "document_task_unlinked"],
+      handle(event, context) {
+        if (context.signal.aborted) return;
+        if (pendingWebhooks >= 64) throw new Error("Webhook event queue is full");
+        pendingWebhooks++;
+        const delivery = webhookQueue.then(async () => {
+          if (!context.signal.aborted) await webhookService.deliverEvent(context.db, event);
+        }).finally(() => { pendingWebhooks--; });
+        webhookQueue = delivery.catch(() => {});
+        return delivery;
+      },
+    }],
     healthChecks: [
       { id: "core-api", check: () => ({ status: "healthy" as const }) },
     ],

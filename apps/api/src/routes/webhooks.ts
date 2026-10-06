@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { webhookService, NotFoundError } from "@task-weaver/core";
+import { createWebhookService, NotFoundError } from "@task-weaver/core";
 import {
   createWebhookSchema,
   updateWebhookSchema,
@@ -24,7 +24,7 @@ webhooksRouter.post("/", async (c) => {
     );
   }
 
-  const webhook = await webhookService.createWebhook(db, parsed.data, actor);
+  const webhook = await createWebhookService(c.get("identity")).createWebhook(db, parsed.data, actor);
   return c.json(webhook, 201);
 });
 
@@ -41,7 +41,7 @@ webhooksRouter.get("/", async (c) => {
     );
   }
 
-  const list = await webhookService.listWebhooks(db, parsed.data);
+  const list = await createWebhookService(c.get("identity")).listWebhooks(db, parsed.data);
   return c.json(list);
 });
 
@@ -51,7 +51,7 @@ webhooksRouter.get("/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const webhook = await webhookService.getWebhook(db, id);
+    const webhook = await createWebhookService(c.get("identity")).getWebhook(db, id);
     return c.json(webhook);
   } catch (err) {
     if (err instanceof NotFoundError) {
@@ -77,7 +77,7 @@ webhooksRouter.patch("/:id", async (c) => {
   }
 
   try {
-    const webhook = await webhookService.updateWebhook(
+    const webhook = await createWebhookService(c.get("identity")).updateWebhook(
       db,
       id,
       parsed.data,
@@ -99,7 +99,7 @@ webhooksRouter.delete("/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
-    await webhookService.deleteWebhook(db, id, actor);
+    await createWebhookService(c.get("identity")).deleteWebhook(db, id, actor);
     return c.json({ deleted: true });
   } catch (err) {
     if (err instanceof NotFoundError) {
@@ -124,7 +124,7 @@ webhooksRouter.get("/:id/deliveries", async (c) => {
   }
 
   try {
-    const deliveries = await webhookService.listWebhookDeliveries(
+    const deliveries = await createWebhookService(c.get("identity")).listWebhookDeliveries(
       db,
       webhookId,
       parsed.data,
@@ -144,7 +144,7 @@ webhooksRouter.post("/:id/test", async (c) => {
   const webhookId = c.req.param("id");
 
   try {
-    const delivery = await webhookService.sendTestEvent(db, webhookId);
+    const delivery = await createWebhookService(c.get("identity")).sendTestEvent(db, webhookId);
     return c.json(delivery);
   } catch (err) {
     if (err instanceof NotFoundError) {
@@ -152,6 +152,11 @@ webhooksRouter.post("/:id/test", async (c) => {
     }
     throw err;
   }
+});
+
+// POST /:id/deliveries/:deliveryId/retry — Retry under the current bound authority.
+webhooksRouter.post("/:id/deliveries/:deliveryId/retry", async (c) => {
+  return c.json(await createWebhookService(c.get("identity")).retryWebhookDelivery(c.get("db"), c.req.param("id"), c.req.param("deliveryId")));
 });
 
 export default webhooksRouter;
