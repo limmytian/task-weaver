@@ -11,7 +11,7 @@ export { contextService } from "./resource-services";
 export { mcpRegistryService } from "./resource-services";
 export { memoryService } from "./resource-services";
 export { requirementService } from "./resource-services";
-export * as repositoryService from "./repositories";
+export { repositoryService } from "./resource-services";
 export * as forgeSyncService from "./forge-sync";
 export * as reviewService from "./reviews";
 export * as activityLogService from "./activity-log";

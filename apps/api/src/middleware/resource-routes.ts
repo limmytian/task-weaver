@@ -1,5 +1,7 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
+  ["GET", new RegExp("^/api/v1/repositories(?:/[0-9a-fA-F-]{36}(?:/readiness)?)?/?$")],
+  ["GET", new RegExp("^/api/v1/(?:requirements|tasks)/[0-9a-fA-F-]{36}/repositories/?$")],
   ["GET", new RegExp("^/api/v1/mcp/(?:servers(?:/[0-9a-fA-F-]{36})?|tools/(?:search|[0-9a-fA-F-]{36}))/?$")],
   ["POST", new RegExp("^/api/v1/mcp/(?:servers|servers/[0-9a-fA-F-]{36}/(?:sync|heartbeat|upload-tools|poll)|tools/[0-9a-fA-F-]{36}/call|requests/[0-9a-fA-F-]{36}/result)/?$")],
   ["PATCH", new RegExp("^/api/v1/mcp/servers/[0-9a-fA-F-]{36}/?$")],
@@ -10,7 +12,7 @@ const ordinaryRoutes: Array<[string, RegExp]> = [
   ["GET", new RegExp("^/api/v1/embeddings/(?:profiles(?:/[0-9a-fA-F-]{36}(?:/(?:preview|usage|generations))?)?|jobs/[0-9a-fA-F-]{36}(?:/items)?)/?$")],
   ["POST", new RegExp("^/api/v1/embeddings/(?:profiles|profiles/[0-9a-fA-F-]{36}/(?:test|enable|disable|rebuild|cleanup)|jobs/[0-9a-fA-F-]{36}/(?:cancel|resume|retry-failed)|generations/[0-9a-fA-F-]{36}/activate)/?$")],
   ["PATCH", new RegExp("^/api/v1/embeddings/profiles/[0-9a-fA-F-]{36}/?$")],
-  ["GET", new RegExp("^/api/v1/search/(?:documents(?:/fulltext)?|tasks|requirements|all)/?$")],
+  ["GET", new RegExp("^/api/v1/search/(?:documents(?:/fulltext)?|tasks|requirements|repositories|all)/?$")],
   ["POST", new RegExp("^/api/v1/search/resolve-titles/?$")],
   ["GET", new RegExp("^/api/v1/context/(?:search|list|bootstrap)/?$")],
   ["GET", new RegExp("^/api/v1/context/[0-9a-fA-F-]{36}/?$")],

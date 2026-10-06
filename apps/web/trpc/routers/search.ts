@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { router, ordinaryResourceProcedure as resourceProcedure } from "../init";
-import { createResourceServices, personalResourceOwnerId, type repositoryService } from "@task-weaver/core";
+import { createResourceServices, personalResourceOwnerId } from "@task-weaver/core";
 
 const searchInputSchema = z.object({
   query: z.string().min(1),
@@ -55,7 +55,7 @@ export const searchRouter = router({
             projectId: input.projectId,
             limit: input.limit,
           }),
-          Promise.resolve({ items: [] as Awaited<ReturnType<typeof repositoryService.listRepositories>>["items"] }),
+          createResourceServices(ctx.identity).repositoryService.listRepositories(ctx.db, { query: input.query, sort: "relevance", page: 1, pageSize: input.limit }, ctx.actor),
         ]);
 
       return {

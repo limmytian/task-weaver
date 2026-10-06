@@ -18,6 +18,8 @@ import * as recommendationImplementation from "./recommendations";
 import * as contextImplementation from "./context";
 import { invokeMcpTool, pollLocalToolRequests, completeLocalToolRequest } from "./mcp-local";
 import { mcpServerPredicate, requireMcpServer, requireLocalHost, credentialBinding } from "./mcp-authorization";
+import * as repositoryImplementation from "./repositories";
+import { repositoryPredicate, requireRepository } from "./repository-authorization";
 import * as mcpImplementation from "./mcp-registry";
 import * as embeddingImplementation from "./embeddings/index";
 import { testEmbeddingProfile, embeddingProvider } from "./embedding-configuration";
@@ -29,10 +31,10 @@ import {
   validateAssignee, type ResourceAuthority, type ResourceKind, type ResourceScope,
 } from "./resource-authorization";
 
-type Group = "project" | "requirement" | "task" | "claim" | "document" | "memory" | "recommendation" | "context" | "package" | "embedding" | "mcp";
+type Group = "project" | "requirement" | "task" | "claim" | "document" | "memory" | "recommendation" | "context" | "package" | "embedding" | "mcp" | "repository";
 type Input = Record<string, any>;
 const sources = {
-  project: projectImplementation, requirement: requirementImplementation, task: taskImplementation,
+  repository: repositoryImplementation, project: projectImplementation, requirement: requirementImplementation, task: taskImplementation,
   claim: claimImplementation, document: documentImplementation, memory: memoryImplementation,
   recommendation: recommendationImplementation, context: contextImplementation, package: packageImplementation, embedding: { ...embeddingImplementation, testEmbeddingProfile }, mcp: { ...mcpImplementation, pollLocalToolRequests, completeLocalToolRequest },
 };
@@ -113,13 +115,14 @@ function bindServices(context?: VerifiedRequestContext) {
           }
           if (group === "mcp" && name !== "callTool") result = redactMcpResult(authority, result);
           if (group === "embedding") result = redactEmbeddingResult(authority, result);
+          if (group === "repository") result = redactRepositoryResult(result);
           return pruneRelations(txDb, authority, result);
         });
       }];
     })) as T;
   }
   return {
-    projectService: bind("project", sources.project), requirementService: bind("requirement", sources.requirement),
+    repositoryService: bind("repository", sources.repository), projectService: bind("project", sources.project), requirementService: bind("requirement", sources.requirement),
     taskService: bind("task", sources.task), claimService: bind("claim", sources.claim),
     documentService: bind("document", sources.document), memoryService: bind("memory", sources.memory),
     recommendationService: bind("recommendation", sources.recommendation), contextService: bind("context", sources.context), skillPackageService: bind("package", sources.package), embeddingService: bind("embedding", sources.embedding), mcpRegistryService: bind("mcp", sources.mcp),
@@ -127,7 +130,7 @@ function bindServices(context?: VerifiedRequestContext) {
 }
 
 /** Compatibility names compile for staged adapters but cannot authorize a caller. */
-export const { projectService, requirementService, taskService, claimService, documentService, memoryService, recommendationService, contextService, skillPackageService, embeddingService, mcpRegistryService } = bindServices();
+export const { projectService, requirementService, taskService, claimService, documentService, memoryService, recommendationService, contextService, skillPackageService, embeddingService, mcpRegistryService, repositoryService } = bindServices();
 
 async function checkTaskInput(db: Database, authority: ResourceAuthority, input: Input, current?: ResourceScope) {
   const scope: ResourceScope = current ?? (input.scope === "personal" ? {
@@ -162,6 +165,22 @@ async function checkMemoryEntity(db: Database, authority: ResourceAuthority, inp
 
 async function authorizeOperation(db: Database, authority: ResourceAuthority, group: Group, name: string, call: any[], context: VerifiedRequestContext) {
   const id = call[1];
+  if (group === "repository") {
+    const visibility = repositoryPredicate(authority);
+    const predicates = { requirements: resourcePredicate(authority, requirements), tasks: taskResourcePredicate(authority) };
+    if (name === "listRepositories") { call[3] = visibility; call[4] = predicates.requirements; return; }
+    if (name === "getRepository" || name === "getRepositoryReadiness") {
+      await requireRepository(db, authority, id); call[4] = visibility;
+      if (name === "getRepository") call[5] = predicates;
+      return;
+    }
+    if (name === "listRequirementRepositories" || name === "listTaskRepositories") {
+      await requireResource(db, authority, name === "listTaskRepositories" ? "task" : "requirement", id);
+      call[3] = visibility; return;
+    }
+    // Catalog management and delivery stay closed until their scoped policies are installed.
+    throw new AuthorizationError();
+  }
   if (group === "mcp") {
     if (name === "registerServer") { requireScope(authority, id, "mcp.manage"); call[3] = credentialBinding(context); return; }
     if (name === "listServers" || name === "searchTools") {
@@ -502,4 +521,19 @@ function redactMcpResult(authority: ResourceAuthority, value: any): any {
   }
   for (const [key, child] of Object.entries(result)) if (child && typeof child === "object" && !(child instanceof Date)) result[key] = redactMcpResult(authority, child);
   return result;
+}
+
+
+function redactRepositoryResult(result: any): any {
+  if (Array.isArray(result)) return result.map(redactRepositoryResult);
+  if (!result || typeof result !== "object" || result instanceof Date) return result;
+  const copy = { ...result };
+  if (copy.authPolicy) {
+    copy.authPolicy = { ...copy.authPolicy };
+    delete copy.authPolicy.credentialProfileRef;
+    delete copy.authPolicy.hostKeyPolicyRef;
+  }
+  for (const [key, value] of Object.entries(copy))
+    if (value && typeof value === "object" && !(value instanceof Date)) copy[key] = redactRepositoryResult(value);
+  return copy;
 }

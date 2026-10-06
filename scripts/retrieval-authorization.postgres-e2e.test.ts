@@ -136,7 +136,7 @@ test("retrieval authorization filters before ranking, aggregates and relation ex
     assert.ok(!graph.body.errors, JSON.stringify(graph.body));
     assert.equal(graph.body.data.project.stats.totalTasks, 1);
     assert.equal(graph.body.data.searchDocuments[0].id, doc.id);
-    assert.equal((await rest("search/repositories?q=fixture", owner.headers)).status, 403);
+    assert.equal((await rest("search/repositories?q=fixture", owner.headers)).status, 200);
     assert.equal((await rest("daemons/events", owner.headers)).status, 403);
   });
   await t.test("semantic candidates exclude invisible vectors before the candidate limit", async () => {

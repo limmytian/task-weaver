@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import {
   createResourceServices,
   personalResourceOwnerId,
-  repositoryService,
   searchDocumentsSchema,
   ValidationError,
 } from "@task-weaver/core";
@@ -127,7 +126,7 @@ search.get("/repositories", async (c) => {
     return c.json({ error: "Query parameter 'q' is required" }, 400);
   }
   const pageSize = Math.min(Number(c.req.query("limit") ?? "20"), 100);
-  const result = await repositoryService.listRepositories(c.get("db"), {
+  const result = await createResourceServices(c.get("identity")).repositoryService.listRepositories(c.get("db"), {
     query: q,
     sort: "relevance",
     page: 1,

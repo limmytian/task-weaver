@@ -9,7 +9,7 @@ import {
   NotFoundError,
   repositoryReadinessInputSchema,
   reopenRequirementRepositoryDeliverySchema,
-  repositoryService,
+  createResourceServices,
   syncRequirementRepositoryForgeStateSchema,
   updateRepositorySchema,
   updateRequirementRepositoryDeliverySchema,
@@ -41,7 +41,7 @@ repositoryRoutes.get("/repositories", async (c) => {
   });
   if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   try {
-    return c.json(await repositoryService.listRepositories(c.get("db"), parsed.data, c.get("actor")));
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.listRepositories(c.get("db"), parsed.data, c.get("actor")));
   } catch (error) {
     return serviceError(c, error);
   }
@@ -51,7 +51,7 @@ repositoryRoutes.post("/repositories", async (c) => {
   const parsed = createRepositorySchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   try {
-    const repository = await repositoryService.createRepository(c.get("db"), parsed.data, c.get("actor"));
+    const repository = await createResourceServices(c.get("identity")).repositoryService.createRepository(c.get("db"), parsed.data, c.get("actor"));
     return c.json(repository, 201);
   } catch (error) {
     return serviceError(c, error);
@@ -66,7 +66,7 @@ repositoryRoutes.get("/repositories/:id", async (c) => {
   });
   if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   try {
-    return c.json(await repositoryService.getRepository(
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.getRepository(
       c.get("db"), c.req.param("id"), c.get("actor"), parsed.data,
     ));
   } catch (error) {
@@ -78,7 +78,7 @@ repositoryRoutes.patch("/repositories/:id", async (c) => {
   const parsed = updateRepositorySchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   try {
-    return c.json(await repositoryService.updateRepository(
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.updateRepository(
       c.get("db"), c.req.param("id"), parsed.data, c.get("actor"),
     ));
   } catch (error) {
@@ -88,7 +88,7 @@ repositoryRoutes.patch("/repositories/:id", async (c) => {
 
 repositoryRoutes.delete("/repositories/:id", async (c) => {
   try {
-    return c.json(await repositoryService.archiveRepository(c.get("db"), c.req.param("id"), c.get("actor")));
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.archiveRepository(c.get("db"), c.req.param("id"), c.get("actor")));
   } catch (error) {
     return serviceError(c, error);
   }
@@ -102,7 +102,7 @@ repositoryRoutes.get("/repositories/:id/readiness", async (c) => {
   });
   if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   try {
-    return c.json(await repositoryService.getRepositoryReadiness(
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.getRepositoryReadiness(
       c.get("db"), c.req.param("id"), c.get("actor"), parsed.data,
     ));
   } catch (error) {
@@ -112,7 +112,7 @@ repositoryRoutes.get("/repositories/:id/readiness", async (c) => {
 
 repositoryRoutes.get("/requirements/:id/repositories", async (c) => {
   try {
-    return c.json(await repositoryService.listRequirementRepositories(
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.listRequirementRepositories(
       c.get("db"), c.req.param("id"), c.get("actor"),
     ));
   } catch (error) {
@@ -124,7 +124,7 @@ repositoryRoutes.post("/requirements/:id/repositories", async (c) => {
   const parsed = addRequirementRepositorySchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   try {
-    return c.json(await repositoryService.addRequirementRepository(
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.addRequirementRepository(
       c.get("db"), c.req.param("id"), parsed.data, c.get("actor"),
     ), 201);
   } catch (error) {
@@ -134,7 +134,7 @@ repositoryRoutes.post("/requirements/:id/repositories", async (c) => {
 
 repositoryRoutes.delete("/requirements/:id/repositories/:repositoryId", async (c) => {
   try {
-    return c.json(await repositoryService.removeRequirementRepository(
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.removeRequirementRepository(
       c.get("db"), c.req.param("id"), c.req.param("repositoryId"), c.get("actor"),
     ));
   } catch (error) {
@@ -147,7 +147,7 @@ repositoryRoutes.post("/requirement-repositories/:id/retry", async (c) => {
     .safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   try {
-    return c.json(await repositoryService.retryRequirementRepositoryDelivery(
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.retryRequirementRepositoryDelivery(
       c.get("db"), c.req.param("id"), c.get("actor"), parsed.data.reason,
     ));
   } catch (error) {
@@ -160,7 +160,7 @@ repositoryRoutes.post("/requirement-repositories/:id/manual-handoff", async (c) 
     .safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   try {
-    return c.json(await repositoryService.handoffRequirementRepositoryDelivery(
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.handoffRequirementRepositoryDelivery(
       c.get("db"), c.req.param("id"), parsed.data.reason, c.get("actor"),
     ));
   } catch (error) {
@@ -172,7 +172,7 @@ repositoryRoutes.post("/requirement-repositories/:id/reopen", async (c) => {
   const parsed = reopenRequirementRepositoryDeliverySchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   try {
-    return c.json(await repositoryService.reopenRequirementRepositoryDelivery(
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.reopenRequirementRepositoryDelivery(
       c.get("db"), c.req.param("id"), parsed.data, c.get("actor"),
     ));
   } catch (error) {
@@ -184,7 +184,7 @@ repositoryRoutes.patch("/requirement-repositories/:id/delivery", async (c) => {
   const parsed = updateRequirementRepositoryDeliverySchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   try {
-    return c.json(await repositoryService.updateRequirementRepositoryDelivery(
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.updateRequirementRepositoryDelivery(
       c.get("db"), c.req.param("id"), parsed.data, c.get("actor"),
     ));
   } catch (error) {
@@ -196,7 +196,7 @@ repositoryRoutes.post("/requirement-repositories/:id/forge-sync", async (c) => {
   const parsed = syncRequirementRepositoryForgeStateSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   try {
-    return c.json(await repositoryService.syncRequirementRepositoryForgeState(
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.syncRequirementRepositoryForgeState(
       c.get("db"), c.req.param("id"), parsed.data, c.get("actor"),
     ));
   } catch (error) {
@@ -206,7 +206,7 @@ repositoryRoutes.post("/requirement-repositories/:id/forge-sync", async (c) => {
 
 repositoryRoutes.get("/tasks/:id/repositories", async (c) => {
   try {
-    return c.json(await repositoryService.listTaskRepositories(
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.listTaskRepositories(
       c.get("db"), c.req.param("id"), c.get("actor"),
     ));
   } catch (error) {
@@ -218,7 +218,7 @@ repositoryRoutes.post("/tasks/:id/repositories", async (c) => {
   const parsed = addTaskRepositorySchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   try {
-    return c.json(await repositoryService.addTaskRepository(
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.addTaskRepository(
       c.get("db"), c.req.param("id"), parsed.data, c.get("actor"),
     ), 201);
   } catch (error) {
@@ -228,7 +228,7 @@ repositoryRoutes.post("/tasks/:id/repositories", async (c) => {
 
 repositoryRoutes.delete("/tasks/:id/repositories/:repositoryId", async (c) => {
   try {
-    return c.json(await repositoryService.removeTaskRepository(
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.removeTaskRepository(
       c.get("db"), c.req.param("id"), c.req.param("repositoryId"), c.get("actor"),
     ));
   } catch (error) {

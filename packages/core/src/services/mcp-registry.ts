@@ -201,7 +201,9 @@ export async function syncTools(
     })
     .where(eq(mcpServers.id, serverId));
 
-  const { tools } = await client.listTools();
+  let tools: Awaited<ReturnType<McpPoolClient["listTools"]>>["tools"];
+  try { ({ tools } = await client.listTools()); }
+  catch { throw new Error("MCP tool synchronization failed"); }
 
   // Remove tools no longer present on server
   const currentToolNames = tools.map((t) => t.name);

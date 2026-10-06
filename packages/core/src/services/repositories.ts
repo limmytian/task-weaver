@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import {
   type Database,
   activityLog,
@@ -211,16 +211,20 @@ export async function getRepository(
   id: string,
   actor: Actor,
   readinessInput: RepositoryReadinessInput = { operation: "read" },
+  visibility?: SQL,
+  predicates?: { requirements: SQL; tasks: SQL },
 ) {
-  await getVisibleRepositoryRow(db, id, actor);
+  if (!visibility) await getVisibleRepositoryRow(db, id, actor);
   const repository = await db.query.repositories.findFirst({
     where: eq(repositories.id, id),
     with: {
       requirements: {
+        where: predicates ? inArray(requirementRepositories.requirementId, db.select({ id: requirements.id }).from(requirements).where(predicates.requirements)) : undefined,
         with: { requirement: { with: { project: true } } },
         orderBy: (link, { desc: orderDesc }) => [orderDesc(link.updatedAt)],
       },
       tasks: {
+        where: predicates ? inArray(taskRepositories.taskId, db.select({ id: tasks.id }).from(tasks).where(predicates.tasks)) : undefined,
         with: { task: { with: { requirement: true } } },
         orderBy: (link, { desc: orderDesc }) => [orderDesc(link.createdAt)],
       },
@@ -228,12 +232,12 @@ export async function getRepository(
   });
   return {
     ...repository!,
-    readiness: await getRepositoryReadiness(db, id, actor, readinessInput),
+    readiness: await getRepositoryReadiness(db, id, actor, readinessInput, visibility),
   };
 }
 
-export async function listRepositories(db: Database, input: ListRepositoriesInput, actor: Actor) {
-  const conditions = [visibilityCondition(actor)];
+export async function listRepositories(db: Database, input: ListRepositoriesInput, actor: Actor, visibility?: SQL, requirementPredicate?: SQL) {
+  const conditions = [visibility ?? visibilityCondition(actor)];
   if (input.provider) conditions.push(eq(repositories.provider, input.provider.toLowerCase()));
   if (input.host) conditions.push(eq(repositories.host, input.host.toLowerCase()));
   if (input.status) conditions.push(eq(repositories.status, input.status));
@@ -256,7 +260,8 @@ export async function listRepositories(db: Database, input: ListRepositoriesInpu
 
   const usageCount = sql<number>`(
     SELECT count(*)::int FROM requirement_repositories rr
-    WHERE rr.repository_id = ${repositories.id}
+    WHERE rr.repository_id = ${sql.identifier("repositories")}.${sql.identifier("id")}
+    AND ${requirementPredicate ? sql`rr.requirement_id IN (${db.select({ id: requirements.id }).from(requirements).where(requirementPredicate)})` : sql`true`}
   )`;
   const relevance = query
     ? sql<number>`CASE
@@ -368,14 +373,14 @@ export async function archiveRepository(db: Database, id: string, actor: Actor) 
   return updateRepository(db, id, { status: "archived" }, actor);
 }
 
-export async function listRequirementRepositories(db: Database, requirementId: string, actor: Actor) {
+export async function listRequirementRepositories(db: Database, requirementId: string, actor: Actor, visibility?: SQL) {
   const requirement = await db.query.requirements.findFirst({ where: eq(requirements.id, requirementId) });
   if (!requirement) throw new NotFoundError("Requirement not found");
   return db
     .select({ link: requirementRepositories, repository: repositories })
     .from(requirementRepositories)
     .innerJoin(repositories, eq(repositories.id, requirementRepositories.repositoryId))
-    .where(and(eq(requirementRepositories.requirementId, requirementId), visibilityCondition(actor)))
+    .where(and(eq(requirementRepositories.requirementId, requirementId), visibility ?? visibilityCondition(actor)))
     .orderBy(asc(repositories.canonicalKey), asc(requirementRepositories.id));
 }
 
@@ -1127,13 +1132,13 @@ export async function syncRequirementRepositoryForgeState(
   return { link: updated, idempotent: false, revision: nextRevision, transition };
 }
 
-export async function listTaskRepositories(db: Database, taskId: string, actor: Actor) {
+export async function listTaskRepositories(db: Database, taskId: string, actor: Actor, visibility?: SQL) {
   const task = await db.query.tasks.findFirst({ where: eq(tasks.id, taskId) });
   if (!task) throw new NotFoundError("Task not found");
   return db.select({ link: taskRepositories, repository: repositories })
     .from(taskRepositories)
     .innerJoin(repositories, eq(repositories.id, taskRepositories.repositoryId))
-    .where(and(eq(taskRepositories.taskId, taskId), visibilityCondition(actor)))
+    .where(and(eq(taskRepositories.taskId, taskId), visibility ?? visibilityCondition(actor)))
     .orderBy(asc(repositories.canonicalKey), asc(taskRepositories.id));
 }
 
@@ -1203,8 +1208,12 @@ export async function getRepositoryReadiness(
   repositoryId: string,
   actor: Actor,
   input: RepositoryReadinessInput,
+  visibility?: SQL,
 ) {
-  const repository = await getVisibleRepositoryRow(db, repositoryId, actor);
+  const repository = visibility
+    ? (await db.select().from(repositories).where(and(eq(repositories.id, repositoryId), visibility)))[0]
+    : await getVisibleRepositoryRow(db, repositoryId, actor);
+  if (!repository) throw new NotFoundError("Resource not found");
   const policy = repository.authPolicy ?? {};
   const allowedOperations = policy.allowedOperations ?? ["read", "push", "forge"];
   const allowedTransports = policy.allowedTransports ?? ["ssh", "https"];
@@ -1223,7 +1232,7 @@ export async function getRepositoryReadiness(
   }
   return {
     state, transport, operation: input.operation, reasonCode,
-    nodeId: input.nodeId ?? null, policyRevision: policy.revision ?? 1, checkedAt: new Date(),
+    actorId: actor.id, actorType: actor.type, nodeId: input.nodeId ?? null, policyRevision: policy.revision ?? 1, checkedAt: new Date(),
   };
 }
 
