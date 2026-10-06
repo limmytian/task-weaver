@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNotNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, lt, sql, type SQL } from "drizzle-orm";
 import {
   agentUsageRuns,
   projects,
@@ -285,8 +285,9 @@ export async function reportTiUsage(
 }
 export const reportPiUsage = reportTiUsage;
 
-function filters(input: AgentUsageQuery) {
+function filters(input: AgentUsageQuery, visibility?: SQL) {
   return and(
+    visibility,
     eq(agentUsageRuns.projectId, input.projectId),
     input.requirementId
       ? eq(agentUsageRuns.requirementId, input.requirementId)
@@ -304,20 +305,20 @@ function filters(input: AgentUsageQuery) {
       : undefined,
   );
 }
-export async function listUsage(db: Database, input: AgentUsageQuery) {
+export async function listUsage(db: Database, input: AgentUsageQuery, visibility?: SQL) {
   await validateScope(db, input);
   const [items, total] = await Promise.all([
     db
       .select()
       .from(agentUsageRuns)
-      .where(filters(input))
+      .where(filters(input, visibility))
       .orderBy(desc(agentUsageRuns.startedAt), desc(agentUsageRuns.processId))
       .limit(input.limit)
       .offset(input.offset),
     db
       .select({ count: sql<number>`count(*)::int` })
       .from(agentUsageRuns)
-      .where(filters(input)),
+      .where(filters(input, visibility)),
   ]);
   return {
     items,
@@ -330,12 +331,14 @@ export async function getUsage(
   db: Database,
   projectId: string,
   processId: string,
+  visibility?: SQL,
 ) {
   const [row] = await db
     .select()
     .from(agentUsageRuns)
     .where(
       and(
+        visibility,
         eq(agentUsageRuns.processId, processId),
         eq(agentUsageRuns.projectId, projectId),
       ),
@@ -343,7 +346,7 @@ export async function getUsage(
   if (!row) throw new NotFoundError("Usage process not found in this project");
   return row;
 }
-export async function summarizeUsage(db: Database, input: AgentUsageQuery) {
+export async function summarizeUsage(db: Database, input: AgentUsageQuery, visibility?: SQL) {
   await validateScope(db, input);
   // Aggregate in PostgreSQL without loading all process rows or losing integer precision.
   const [row] = await db
@@ -371,7 +374,7 @@ export async function summarizeUsage(db: Database, input: AgentUsageQuery) {
       cacheWriteReportedRuns: sql<number>`count(${agentUsageRuns.summary}->>'cacheWriteTokens')::int`,
     })
     .from(agentUsageRuns)
-    .where(filters(input));
+    .where(filters(input, visibility));
   const reportedAttempts = db
     .select({
       tiRunId: agentUsageRuns.tiRunId,
@@ -380,7 +383,7 @@ export async function summarizeUsage(db: Database, input: AgentUsageQuery) {
       ),
     })
     .from(agentUsageRuns)
-    .where(eq(agentUsageRuns.source, "ti_runtime"))
+    .where(and(eq(agentUsageRuns.source, "ti_runtime"), visibility))
     .groupBy(agentUsageRuns.tiRunId)
     .as("reported_attempts");
   const [missing] = await db
@@ -392,6 +395,7 @@ export async function summarizeUsage(db: Database, input: AgentUsageQuery) {
     .leftJoin(reportedAttempts, eq(reportedAttempts.tiRunId, tiAgentRuns.id))
     .where(
       and(
+        sql`EXISTS (SELECT 1 FROM ${requirements} WHERE "requirements"."id" = ${tasks.requirementId} AND "requirements"."project_id" = ${tasks.projectId})`,
         eq(tasks.projectId, input.projectId),
         isNotNull(tiAgentRuns.startedAt),
         input.requirementId

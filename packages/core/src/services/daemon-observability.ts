@@ -1,3 +1,4 @@
+import type { MetadataReadScope } from "./metadata-read-scope";
 import { desc, inArray } from "drizzle-orm";
 import {
   daemons,
@@ -97,16 +98,18 @@ function forecast(input: {
 export async function getDaemonObservabilityOverview(
   db: Database,
   input: DaemonObservabilityQuery,
+  scope?: MetadataReadScope,
 ) {
   const asOf = new Date();
   const [daemonRows, progressRows, historyRows, queue] = await Promise.all([
-    db.query.daemons.findMany({ orderBy: daemons.name }),
-    db.query.daemonWorkerProgress.findMany({ orderBy: desc(daemonWorkerProgress.updatedAt) }),
+    db.query.daemons.findMany({ where: scope?.daemon, orderBy: daemons.name }),
+    db.query.daemonWorkerProgress.findMany({ where: scope?.progress, orderBy: desc(daemonWorkerProgress.updatedAt) }),
     db.query.daemonWorkerProgressHistory.findMany({
+      where: scope?.history,
       orderBy: [desc(daemonWorkerProgressHistory.occurredAt), desc(daemonWorkerProgressHistory.id)],
       limit: input.limit,
     }),
-    listDaemonControlPlaneQueues(db),
+    listDaemonControlPlaneQueues(db, scope),
   ]);
 
   const relevantProgress = progressRows;
@@ -149,7 +152,7 @@ export async function getDaemonObservabilityOverview(
       const liveness = livenessFor(daemon, asOf);
       if (!input.includeOffline && liveness === "offline") return null;
       const daemonProgress = progressByDaemon.get(daemon.id) ?? [];
-      const rawWorkers: Array<Record<string, unknown>> = Array.isArray(daemon.activeWorkerStates)
+      const rawWorkers: Array<Record<string, unknown>> = !scope && Array.isArray(daemon.activeWorkerStates)
         ? daemon.activeWorkerStates as Array<Record<string, unknown>>
         : [];
       const workerIndexes = new Set(rawWorkers.map((worker) => Number(worker.index ?? worker.workerIndex ?? -1)));

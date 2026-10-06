@@ -1,3 +1,4 @@
+import type { MetadataReadScope } from "./metadata-read-scope";
 import { and, desc, eq, gte, inArray, lte, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
@@ -411,8 +412,10 @@ function timelineEventMatchesKind(kind: DaemonHistoryKind | undefined, eventKind
 export async function listCorrelatedHistory(
   db: Database,
   input: DaemonHistoryQuery,
+  scope?: MetadataReadScope,
 ) {
   const conditions = [
+    scope?.history,
     input.daemonId ? eq(daemonWorkerProgressHistory.daemonId, input.daemonId) : undefined,
     input.requirementId ? eq(daemonWorkerProgressHistory.requirementId, input.requirementId) : undefined,
     input.runId ? eq(daemonWorkerProgressHistory.runId, input.runId) : undefined,
@@ -428,7 +431,7 @@ export async function listCorrelatedHistory(
 
   const requirement = input.requirementId
     ? await db.query.requirements.findFirst({
-        where: eq(requirements.id, input.requirementId),
+        where: and(eq(requirements.id, input.requirementId), scope?.requirement),
         with: {
           tasks: { orderBy: (task, { asc }) => [asc(task.createdAt)] },
           executionSlices: true,
@@ -444,7 +447,7 @@ export async function listCorrelatedHistory(
       )
     : requirement
       ? and(eq(activityLog.entityType, "requirement"), eq(activityLog.entityId, requirement.id))
-      : input.daemonId
+      : !scope && input.daemonId
         ? and(eq(activityLog.entityType, "daemon"), eq(activityLog.entityId, input.daemonId))
         : undefined;
   const [taskStatuses, activities] = await Promise.all([
@@ -538,8 +541,9 @@ export async function listCorrelatedHistory(
 export async function listBoundedLogTail(
   db: Database,
   input: Omit<DaemonHistoryQuery, "kind" | "severity"> & { maxChars?: number },
+  scope?: MetadataReadScope,
 ) {
-  const history = await listCorrelatedHistory(db, { ...input, kind: "progress" });
+  const history = await listCorrelatedHistory(db, { ...input, kind: "progress" }, scope);
   const requestedMaxChars = Number(input.maxChars ?? 4_000);
   const maxChars = Number.isFinite(requestedMaxChars)
     ? Math.min(20_000, Math.max(200, requestedMaxChars))
@@ -559,9 +563,10 @@ export async function listBoundedLogTail(
 export async function listRequirementTimeline(
   db: Database,
   input: { requirementId: string; limit: number },
+  scope?: MetadataReadScope,
 ) {
   const requirement = await db.query.requirements.findFirst({
-    where: eq(requirements.id, input.requirementId),
+    where: and(eq(requirements.id, input.requirementId), scope?.requirement),
     with: {
       tasks: true,
       executionSlices: true,
@@ -588,7 +593,7 @@ export async function listRequirementTimeline(
       );
   const [progress, taskStatuses, activities] = await Promise.all([
     db.query.daemonWorkerProgressHistory.findMany({
-      where: eq(daemonWorkerProgressHistory.requirementId, requirement.id),
+      where: and(eq(daemonWorkerProgressHistory.requirementId, requirement.id), scope?.history),
       orderBy: desc(daemonWorkerProgressHistory.occurredAt),
       limit: input.limit,
     }),

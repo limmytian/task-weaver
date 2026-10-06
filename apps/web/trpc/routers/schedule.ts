@@ -1,43 +1,43 @@
 import { z } from "zod";
-import { router, resourceProcedure } from "../init";
+import { router, resourceProcedure, ordinaryResourceProcedure } from "../init";
 import {
   acquireDueSchedulesSchema,
   createScheduleSchema,
   listSchedulesSchema,
-  scheduleService,
+  createResourceServices,
   updateScheduleSchema,
 } from "@task-weaver/core";
 
 export const scheduleRouter = router({
-  list: resourceProcedure
+  list: ordinaryResourceProcedure
     .input(listSchedulesSchema)
-    .query(async ({ ctx, input }) => scheduleService.listSchedules(ctx.db, input)),
+    .query(async ({ ctx, input }) => createResourceServices(ctx.identity).scheduleService.listSchedules(ctx.db, input)),
 
-  get: resourceProcedure
+  get: ordinaryResourceProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(async ({ ctx, input }) => scheduleService.getSchedule(ctx.db, input.id)),
+    .query(async ({ ctx, input }) => createResourceServices(ctx.identity).scheduleService.getSchedule(ctx.db, input.id)),
 
-  create: resourceProcedure
+  create: ordinaryResourceProcedure
     .input(createScheduleSchema)
-    .mutation(async ({ ctx, input }) => scheduleService.createSchedule(ctx.db, input, ctx.actor)),
+    .mutation(async ({ ctx, input }) => createResourceServices(ctx.identity).scheduleService.createSchedule(ctx.db, input, ctx.actor)),
 
-  update: resourceProcedure
+  update: ordinaryResourceProcedure
     .input(z.object({ id: z.string().uuid(), data: updateScheduleSchema }))
-    .mutation(async ({ ctx, input }) => scheduleService.updateSchedule(ctx.db, input.id, input.data, ctx.actor)),
+    .mutation(async ({ ctx, input }) => createResourceServices(ctx.identity).scheduleService.updateSchedule(ctx.db, input.id, input.data, ctx.actor)),
 
-  archive: resourceProcedure
+  archive: ordinaryResourceProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(async ({ ctx, input }) => scheduleService.archiveSchedule(ctx.db, input.id, ctx.actor)),
+    .mutation(async ({ ctx, input }) => createResourceServices(ctx.identity).scheduleService.archiveSchedule(ctx.db, input.id, ctx.actor)),
 
   runNow: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(async ({ ctx, input }) => scheduleService.runScheduleNow(ctx.db, input.id, ctx.actor)),
+    .mutation(async ({ ctx, input }) => createResourceServices(ctx.identity).scheduleService.runScheduleNow(ctx.db, input.id, ctx.actor)),
 
-  runs: resourceProcedure
+  runs: ordinaryResourceProcedure
     .input(z.object({ scheduleId: z.string().uuid() }))
-    .query(async ({ ctx, input }) => scheduleService.listScheduleRuns(ctx.db, input.scheduleId)),
+    .query(async ({ ctx, input }) => createResourceServices(ctx.identity).scheduleService.listScheduleRuns(ctx.db, input.scheduleId)),
 
   acquireDue: resourceProcedure
     .input(acquireDueSchedulesSchema)
-    .mutation(async ({ ctx, input }) => scheduleService.acquireDueSchedules(ctx.db, input, ctx.actor)),
+    .mutation(async ({ ctx, input }) => createResourceServices(ctx.identity).scheduleService.acquireDueSchedules(ctx.db, input, ctx.actor)),
 });

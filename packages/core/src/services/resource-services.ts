@@ -31,9 +31,22 @@ import {
   validateAssignee, type ResourceAuthority, type ResourceKind, type ResourceScope,
 } from "./resource-authorization";
 
-type Group = "project" | "requirement" | "task" | "claim" | "document" | "memory" | "recommendation" | "context" | "package" | "embedding" | "mcp" | "repository";
+import * as sloImplementation from "./daemon-slo";
+import * as observabilityImplementation from "./daemon-observability";
+import * as metricsImplementation from "./daemon-metrics";
+import * as progressImplementation from "./daemon-progress";
+import * as daemonImplementation from "./daemons";
+import * as scheduleImplementation from "./schedules";
+import * as tiImplementation from "./ti-agent";
+import * as activityImplementation from "./activity-log";
+import * as usageImplementation from "./agent-usage";
+import * as reviewImplementation from "./reviews";
+import { authorizeMetadataOperation } from "./metadata-authorization";
+
+type Group = "project" | "requirement" | "task" | "claim" | "document" | "memory" | "recommendation" | "context" | "package" | "embedding" | "mcp" | "repository" | "usage" | "review" | "ti" | "activity" | "schedule" | "observability" | "metrics" | "progress" | "daemon" | "slo";
 type Input = Record<string, any>;
 const sources = {
+  slo: sloImplementation, observability: observabilityImplementation, metrics: metricsImplementation, progress: progressImplementation, daemon: daemonImplementation, schedule: scheduleImplementation, ti: tiImplementation, activity: activityImplementation, usage: usageImplementation, review: reviewImplementation,
   repository: repositoryImplementation, project: projectImplementation, requirement: requirementImplementation, task: taskImplementation,
   claim: claimImplementation, document: documentImplementation, memory: memoryImplementation,
   recommendation: recommendationImplementation, context: contextImplementation, package: packageImplementation, embedding: { ...embeddingImplementation, testEmbeddingProfile }, mcp: { ...mcpImplementation, pollLocalToolRequests, completeLocalToolRequest },
@@ -58,7 +71,7 @@ const writeById: Record<string, ResourceKind> = {
   claimTask: "task", releaseTask: "task", heartbeatClaim: "task",
   claimRequirement: "requirement", releaseRequirement: "requirement", heartbeatRequirementClaim: "requirement",
 };
-const pure = new Set(["normalizeMarkdown", "parseWikiLinks", "inferDocType", "calculateSlidingRenewal"]);
+const pure = new Set(["normalizeMarkdown", "parseWikiLinks", "inferDocType", "calculateSlidingRenewal", "reconcileUsage", "normalizeOutcomeSummary", "evaluateReviewPolicy", "resolveReviewPolicy", "tiAgentRetryBackoffMs", "activityLogToCsv", "buildDaemonMetricsReport", "buildDaemonSloReport", "schedulerPriorityRank", "progressPhaseForTaskStatus", "assertIndependentDeliveryIdentity"]);
 
 /** Legacy implementations are private to core; package namespaces fail closed without this factory. */
 export function createResourceServices(context: VerifiedRequestContext) {
@@ -116,13 +129,14 @@ function bindServices(context?: VerifiedRequestContext) {
           if (group === "mcp" && name !== "callTool") result = redactMcpResult(authority, result);
           if (group === "embedding") result = redactEmbeddingResult(authority, result);
           if (group === "repository") result = redactRepositoryResult(result);
+          if (group === "ti" || group === "activity" || group === "schedule") result = redactMetadataResult(result, group);
           return pruneRelations(txDb, authority, result);
         });
       }];
     })) as T;
   }
   return {
-    repositoryService: bind("repository", sources.repository), projectService: bind("project", sources.project), requirementService: bind("requirement", sources.requirement),
+    daemonSloService: bind("slo", sources.slo), daemonObservabilityService: bind("observability", sources.observability), daemonMetricsService: bind("metrics", sources.metrics), daemonProgressService: bind("progress", sources.progress), daemonService: bind("daemon", sources.daemon), scheduleService: bind("schedule", sources.schedule), tiAgentService: bind("ti", sources.ti), activityLogService: bind("activity", sources.activity), agentUsageService: bind("usage", sources.usage), reviewService: bind("review", sources.review), repositoryService: bind("repository", sources.repository), projectService: bind("project", sources.project), requirementService: bind("requirement", sources.requirement),
     taskService: bind("task", sources.task), claimService: bind("claim", sources.claim),
     documentService: bind("document", sources.document), memoryService: bind("memory", sources.memory),
     recommendationService: bind("recommendation", sources.recommendation), contextService: bind("context", sources.context), skillPackageService: bind("package", sources.package), embeddingService: bind("embedding", sources.embedding), mcpRegistryService: bind("mcp", sources.mcp),
@@ -130,7 +144,7 @@ function bindServices(context?: VerifiedRequestContext) {
 }
 
 /** Compatibility names compile for staged adapters but cannot authorize a caller. */
-export const { projectService, requirementService, taskService, claimService, documentService, memoryService, recommendationService, contextService, skillPackageService, embeddingService, mcpRegistryService, repositoryService } = bindServices();
+export const { projectService, requirementService, taskService, claimService, documentService, memoryService, recommendationService, contextService, skillPackageService, embeddingService, mcpRegistryService, repositoryService, agentUsageService, reviewService, tiAgentService, activityLogService, scheduleService, daemonObservabilityService, daemonMetricsService, daemonProgressService, daemonService, daemonSloService } = bindServices();
 
 async function checkTaskInput(db: Database, authority: ResourceAuthority, input: Input, current?: ResourceScope) {
   const scope: ResourceScope = current ?? (input.scope === "personal" ? {
@@ -164,6 +178,7 @@ async function checkMemoryEntity(db: Database, authority: ResourceAuthority, inp
 }
 
 async function authorizeOperation(db: Database, authority: ResourceAuthority, group: Group, name: string, call: any[], context: VerifiedRequestContext) {
+  if (group === "usage" || group === "review" || group === "ti" || group === "activity" || group === "schedule" || group === "observability" || group === "metrics" || group === "progress" || group === "daemon") return authorizeMetadataOperation(db, authority, group, name, call);
   const id = call[1];
   if (group === "repository") {
     const visibility = repositoryPredicate(authority);
@@ -583,4 +598,10 @@ function redactRepositoryResult(result: any): any {
   for (const [key, value] of Object.entries(copy))
     if (value && typeof value === "object" && !(value instanceof Date)) copy[key] = redactRepositoryResult(value);
   return copy;
+}
+
+function redactMetadataResult(value: any, group: string): any {
+  if (Array.isArray(value)) return value.map(item => redactMetadataResult(item, group));
+  if (!value || typeof value !== "object" || value instanceof Date) return value;
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !["apiKeyRef", "baseUrl", "sandboxSessionId", "eventLog", "errorMessage", "leaseOwnerId", "leaseOwnerType", "leaseExpiresAt"].includes(key)).map(([key, item]) => [key, group === "activity" && key === "metadata" ? {} : redactMetadataResult(item, group)]));
 }

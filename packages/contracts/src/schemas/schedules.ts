@@ -22,8 +22,10 @@ export const scheduleTaskTemplateSchema = z.object({
 });
 
 const scheduleBaseSchema = z.object({
-  projectId: z.string().uuid().optional(),
-  requirementId: z.string().uuid().optional(),
+  projectId: z.string().uuid().nullable().optional(),
+  requirementId: z.string().uuid().nullable().optional(),
+  personalOwnerId: z.string().uuid().nullable().optional(),
+  personalOwnerType: z.enum(["human", "agent"]).nullable().optional(),
   targetScope: scheduleTargetScopeSchema.default("project"),
   kind: scheduleKindSchema,
   title: z.string().min(1).max(500),

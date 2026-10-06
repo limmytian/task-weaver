@@ -1,4 +1,4 @@
-import { and, eq, lte, not } from "drizzle-orm";
+import { and, eq, lte, not, type SQL } from "drizzle-orm";
 import {
   type Database,
   activityLog,
@@ -24,6 +24,8 @@ function toScheduleValues(input: CreateScheduleInput, actor: Actor) {
     projectId: input.projectId,
     requirementId: input.requirementId,
     targetScope: input.targetScope,
+    personalOwnerId: input.personalOwnerId,
+    personalOwnerType: input.personalOwnerType,
     kind: input.kind,
     title: input.title,
     description: input.description,
@@ -53,6 +55,8 @@ function toScheduleUpdateValues(input: UpdateScheduleInput) {
     projectId: input.projectId,
     requirementId: input.requirementId,
     targetScope: input.targetScope,
+    personalOwnerId: input.personalOwnerId,
+    personalOwnerType: input.personalOwnerType,
     kind: input.kind,
     title: input.title,
     description: input.description,
@@ -107,8 +111,8 @@ export async function createSchedule(
   return schedule!;
 }
 
-export async function listSchedules(db: Database, input: ListSchedulesInput) {
-  const conditions = [];
+export async function listSchedules(db: Database, input: ListSchedulesInput, visibility?: SQL) {
+  const conditions = [visibility];
   if (input.projectId) conditions.push(eq(schedules.projectId, input.projectId));
   if (input.status) conditions.push(eq(schedules.status, input.status));
   if (input.targetScope) conditions.push(eq(schedules.targetScope, input.targetScope));
@@ -278,8 +282,8 @@ async function processOccurrence(
       assigneeType: schedule.assignedExecutorType ?? undefined,
       requestedProvider: schedule.requestedProvider ?? undefined,
       requestedModel: schedule.requestedModel ?? undefined,
-      personalOwnerId: schedule.assignedExecutor ?? schedule.createdBy,
-      personalOwnerType: schedule.assignedExecutorType ?? "human" as const,
+      personalOwnerId: schedule.personalOwnerId ?? undefined,
+      personalOwnerType: schedule.personalOwnerType ?? undefined,
       tags: ["generated:schedule", `schedule:${schedule.id}`, mode === "manual" ? "schedule:manual" : "schedule:auto"],
       expectedAt: plannedFor,
     }

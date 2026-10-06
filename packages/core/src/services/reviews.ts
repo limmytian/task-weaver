@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, type SQL } from "drizzle-orm";
 import {
   type Database,
   activityLog,
@@ -642,13 +642,14 @@ export async function listRequirementReviewRuns(
   db: Database,
   requirementId: string,
   input: { limit: number; offset: number },
+  visibility?: SQL,
 ) {
   const requirement = await db.query.requirements.findFirst({
     where: eq(requirements.id, requirementId),
   });
   if (!requirement) throw new NotFoundError("Requirement not found");
   return db.query.reviewRuns.findMany({
-    where: eq(reviewRuns.requirementId, requirementId),
+    where: and(eq(reviewRuns.requirementId, requirementId), visibility),
     with: { checks: true, findings: true, decisions: true, requirementRepository: true },
     orderBy: desc(reviewRuns.createdAt),
     limit: input.limit,

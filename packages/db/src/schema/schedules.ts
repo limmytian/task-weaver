@@ -30,6 +30,8 @@ export const schedules = pgTable(
     requirementId: uuid("requirement_id").references(() => requirements.id, {
       onDelete: "set null",
     }),
+    personalOwnerId: text("personal_owner_id"),
+    personalOwnerType: actorTypeEnum("personal_owner_type"),
     targetScope: scheduleTargetScopeEnum("target_scope").default("project").notNull(),
     kind: scheduleKindEnum("kind").notNull(),
     title: text("title").notNull(),

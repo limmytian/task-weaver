@@ -1,15 +1,12 @@
 import { z } from "zod";
 import {
   agentUsageQuerySchema,
-  agentUsageService,
-  projectService,
-  requirementService,
-  taskService,
+  createResourceServices,
 } from "@task-weaver/core";
-import { router, resourceProcedure } from "../init";
-// Read access follows the existing instance Web boundary; reporting is REST API-key only.
+import { router, ordinaryResourceProcedure } from "../init";
+// Usage reads share the live core authorization used by REST.
 export const agentUsageRouter = router({
-  scopes: resourceProcedure
+  scopes: ordinaryResourceProcedure
     .input(
       z.object({
         kind: z.enum(["project", "requirement", "task"]),
@@ -20,7 +17,7 @@ export const agentUsageRouter = router({
     )
     .query(async ({ ctx, input }) => {
       if (input.kind === "project") {
-        const result = await projectService.listProjects(ctx.db, {
+        const result = await createResourceServices(ctx.identity).projectService.listProjects(ctx.db, {
           view: "summary",
           pageSize: 50,
           query: input.query || undefined,
@@ -32,7 +29,7 @@ export const agentUsageRouter = router({
       }
       if (!input.projectId) return [];
       if (input.kind === "requirement") {
-        const result = await requirementService.listRequirements(ctx.db, {
+        const result = await createResourceServices(ctx.identity).requirementService.listRequirements(ctx.db, {
           projectId: input.projectId,
           view: "summary",
           pageSize: 50,
@@ -44,7 +41,7 @@ export const agentUsageRouter = router({
           .parse(result.items)
           .map((item) => ({ id: item.id, label: item.title }));
       }
-      const result = await taskService.listTasks(ctx.db, {
+      const result = await createResourceServices(ctx.identity).taskService.listTasks(ctx.db, {
         projectId: input.projectId,
         requirementId: input.requirementId,
         view: "summary",
@@ -57,17 +54,17 @@ export const agentUsageRouter = router({
         .parse(result.items)
         .map((item) => ({ id: item.id, label: item.title }));
     }),
-  runs: resourceProcedure
+  runs: ordinaryResourceProcedure
     .input(agentUsageQuerySchema)
-    .query(({ ctx, input }) => agentUsageService.listUsage(ctx.db, input)),
-  summary: resourceProcedure
+    .query(({ ctx, input }) => createResourceServices(ctx.identity).agentUsageService.listUsage(ctx.db, input)),
+  summary: ordinaryResourceProcedure
     .input(agentUsageQuerySchema)
-    .query(({ ctx, input }) => agentUsageService.summarizeUsage(ctx.db, input)),
-  run: resourceProcedure
+    .query(({ ctx, input }) => createResourceServices(ctx.identity).agentUsageService.summarizeUsage(ctx.db, input)),
+  run: ordinaryResourceProcedure
     .input(
       z.object({ projectId: z.string().uuid(), processId: z.string().uuid() }),
     )
     .query(({ ctx, input }) =>
-      agentUsageService.getUsage(ctx.db, input.projectId, input.processId),
+      createResourceServices(ctx.identity).agentUsageService.getUsage(ctx.db, input.projectId, input.processId),
     ),
 });

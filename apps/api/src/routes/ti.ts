@@ -9,7 +9,7 @@ import {
   listTiAgentRunsSchema,
   listTiModelConfigsSchema,
   NotFoundError,
-  tiAgentService,
+  createResourceServices,
   resolveTiModelSchema,
   setDefaultTiModelSchema,
   upsertTiAgentPolicySchema,
@@ -32,7 +32,7 @@ tiRoutes.get("/configs", async (c) => {
   if (!parsed.success) {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
-  return c.json(await tiAgentService.listModelConfigs(db, parsed.data, actor));
+  return c.json(await createResourceServices(c.get("identity")).tiAgentService.listModelConfigs(db, parsed.data, actor));
 });
 
 tiRoutes.post("/configs", async (c) => {
@@ -43,7 +43,7 @@ tiRoutes.post("/configs", async (c) => {
   if (!parsed.success) {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
-  return c.json(await tiAgentService.upsertModelConfig(db, parsed.data, actor), 201);
+  return c.json(await createResourceServices(c.get("identity")).tiAgentService.upsertModelConfig(db, parsed.data, actor), 201);
 });
 
 tiRoutes.post("/configs/default", async (c) => {
@@ -55,7 +55,7 @@ tiRoutes.post("/configs/default", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
   try {
-    return c.json(await tiAgentService.setDefaultModel(db, parsed.data, actor));
+    return c.json(await createResourceServices(c.get("identity")).tiAgentService.setDefaultModel(db, parsed.data, actor));
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
     if (err instanceof ValidationError) return c.json({ error: err.message }, 400);
@@ -72,7 +72,7 @@ tiRoutes.post("/resolve-model", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
   try {
-    return c.json(await tiAgentService.resolveModel(db, parsed.data, actor));
+    return c.json(await createResourceServices(c.get("identity")).tiAgentService.resolveModel(db, parsed.data, actor));
   } catch (err) {
     if (err instanceof ValidationError) return c.json({ error: err.message }, 400);
     throw err;
@@ -83,7 +83,7 @@ tiRoutes.get("/policy", async (c) => {
   const db = c.get("db");
   const actor = c.get("actor");
   const query = c.req.query();
-  return c.json(await tiAgentService.getPolicy(db, {
+  return c.json(await createResourceServices(c.get("identity")).tiAgentService.getPolicy(db, {
     ownerId: query.ownerId,
     ownerType: query.ownerType as "human" | "agent" | undefined,
   }, actor));
@@ -97,7 +97,7 @@ tiRoutes.put("/policy", async (c) => {
   if (!parsed.success) {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
-  return c.json(await tiAgentService.upsertPolicy(db, parsed.data, actor));
+  return c.json(await createResourceServices(c.get("identity")).tiAgentService.upsertPolicy(db, parsed.data, actor));
 });
 
 tiRoutes.get("/runs", async (c) => {
@@ -113,13 +113,13 @@ tiRoutes.get("/runs", async (c) => {
   if (!parsed.success) {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
-  return c.json(await tiAgentService.listRuns(db, parsed.data));
+  return c.json(await createResourceServices(c.get("identity")).tiAgentService.listRuns(db, parsed.data));
 });
 
 tiRoutes.get("/runs/:id", async (c) => {
   const db = c.get("db");
   try {
-    return c.json(await tiAgentService.getRun(db, c.req.param("id")));
+    return c.json(await createResourceServices(c.get("identity")).tiAgentService.getRun(db, c.req.param("id")));
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
     throw err;
@@ -135,7 +135,7 @@ tiRoutes.post("/runs", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
   try {
-    return c.json(await tiAgentService.createRun(db, parsed.data, actor), 201);
+    return c.json(await createResourceServices(c.get("identity")).tiAgentService.createRun(db, parsed.data, actor), 201);
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
     if (err instanceof ValidationError) return c.json({ error: err.message }, 400);
@@ -152,7 +152,7 @@ tiRoutes.post("/runs/acquire", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
   try {
-    return c.json(await tiAgentService.acquireRun(db, parsed.data, actor));
+    return c.json(await createResourceServices(c.get("identity")).tiAgentService.acquireRun(db, parsed.data, actor));
   } catch (err) {
     if (err instanceof ValidationError) return c.json({ error: err.message }, 400);
     throw err;
@@ -168,7 +168,7 @@ tiRoutes.post("/runs/:id/complete", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
   try {
-    return c.json(await tiAgentService.completeRun(db, c.req.param("id"), parsed.data, actor));
+    return c.json(await createResourceServices(c.get("identity")).tiAgentService.completeRun(db, c.req.param("id"), parsed.data, actor));
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
     if (err instanceof ValidationError) return c.json({ error: err.message }, 400);

@@ -1,31 +1,16 @@
 import { Hono } from "hono";
-import { activityLogService } from "@task-weaver/core";
+import { createResourceServices, activityQuerySchema, activityLogService } from "@task-weaver/core";
 import type { Env } from "../middleware/actor.js";
 
 const activity = new Hono<Env>();
 
-type ActivityEntityType = "project" | "task" | "document" | "requirement" | "repository" | "daemon" | "schedule" | "ti_agent_model_config" | "ti_agent_policy" | "ti_agent_run";
-
-function parseQueryInput(query: Record<string, string>): activityLogService.ListActivityLogInput {
-  return {
-    projectId: query.projectId,
-    entityType: query.entityType as ActivityEntityType | undefined,
-    entityId: query.entityId,
-    actorId: query.actorId,
-    actorType: query.actorType as "human" | "agent" | undefined,
-    action: query.action,
-    since: query.since,
-    until: query.until,
-    limit: query.limit ? parseInt(query.limit, 10) : 50,
-    offset: query.offset ? parseInt(query.offset, 10) : 0,
-  };
-}
-
 // GET / - List activity log entries
 activity.get("/", async (c) => {
   const db = c.get("db");
-  const input = parseQueryInput(c.req.query());
-  const results = await activityLogService.listActivityLog(db, input);
+  const parsed = activityQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) return c.json({ error: "Invalid activity query" }, 400);
+  const input = parsed.data;
+  const results = await createResourceServices(c.get("identity")).activityLogService.listActivityLog(db, input);
   return c.json(results);
 });
 
@@ -33,18 +18,11 @@ activity.get("/", async (c) => {
 activity.get("/export", async (c) => {
   const db = c.get("db");
   const query = c.req.query();
-  const input = {
-    projectId: query.projectId,
-    entityType: query.entityType as ActivityEntityType | undefined,
-    entityId: query.entityId,
-    actorId: query.actorId,
-    actorType: query.actorType as "human" | "agent" | undefined,
-    action: query.action,
-    since: query.since,
-    until: query.until,
-  };
+  const parsed = activityQuerySchema.safeParse(query);
+  if (!parsed.success) return c.json({ error: "Invalid activity query" }, 400);
+  const input = parsed.data;
 
-  const rows = await activityLogService.exportActivityLog(db, input);
+  const rows = await createResourceServices(c.get("identity")).activityLogService.exportActivityLog(db, input);
   const format = query.format ?? "csv";
 
   if (format === "json") {

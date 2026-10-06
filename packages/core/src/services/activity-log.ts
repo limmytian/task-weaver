@@ -1,4 +1,4 @@
-import { and, eq, desc, sql, gte, lte } from "drizzle-orm";
+import { and, eq, desc, sql, gte, lte, type SQL } from "drizzle-orm";
 import { type Database, activityLog } from "@task-weaver/db";
 
 export interface ListActivityLogInput {
@@ -62,15 +62,16 @@ function buildConditions(input: ListActivityLogInput) {
 export async function listActivityLog(
   db: Database,
   input: ListActivityLogInput,
+  visibility?: SQL,
 ) {
-  const conditions = buildConditions(input);
+  const conditions = [...buildConditions(input), visibility];
   const limit = input.limit ?? 50;
   const offset = input.offset ?? 0;
 
   return db
     .select()
     .from(activityLog)
-    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .where(and(...conditions))
     .orderBy(desc(activityLog.createdAt))
     .limit(limit)
     .offset(offset);
@@ -79,13 +80,14 @@ export async function listActivityLog(
 export async function exportActivityLog(
   db: Database,
   input: Omit<ListActivityLogInput, "limit" | "offset">,
+  visibility?: SQL,
 ) {
-  const conditions = buildConditions(input);
+  const conditions = [...buildConditions(input), visibility];
 
   return db
     .select()
     .from(activityLog)
-    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .where(and(...conditions))
     .orderBy(desc(activityLog.createdAt));
 }
 

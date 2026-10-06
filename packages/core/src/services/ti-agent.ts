@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import {
   type Database,
   activityLog,
@@ -465,8 +465,8 @@ export async function createRun(
   return run!;
 }
 
-export async function listRuns(db: Database, input: ListTiAgentRunsInput) {
-  const conditions = [];
+export async function listRuns(db: Database, input: ListTiAgentRunsInput, visibility?: SQL) {
+  const conditions = [visibility];
   if (input.taskId) conditions.push(eq(tiAgentRuns.taskId, input.taskId));
   if (input.scheduleRunId) conditions.push(eq(tiAgentRuns.scheduleRunId, input.scheduleRunId));
   if (input.assignedAgentId) conditions.push(eq(tiAgentRuns.assignedAgentId, input.assignedAgentId));

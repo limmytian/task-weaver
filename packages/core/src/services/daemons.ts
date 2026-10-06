@@ -1,3 +1,4 @@
+import type { MetadataReadScope } from "./metadata-read-scope";
 import { and, eq, gt, inArray, lt, not, sql } from "drizzle-orm";
 import {
   activityLog,
@@ -628,14 +629,14 @@ export async function listOnlineDaemons(db: Database) {
   return Promise.all(rows.map((daemon) => enrichDaemonWorkerStates(db, daemon)));
 }
 
-export async function listDaemonControlPlaneQueues(db: Database) {
-  await cleanExpiredDaemons(db);
+export async function listDaemonControlPlaneQueues(db: Database, scope?: MetadataReadScope) {
+  if (!scope) await cleanExpiredDaemons(db);
 
   const now = new Date();
   const oneMinuteAgo = new Date(now.getTime() - 60_000);
   const [requirementRows, daemonRows] = await Promise.all([
     db.query.requirements.findMany({
-      where: not(inArray(requirements.status, ["done", "cancelled", "archived"])),
+      where: and(not(inArray(requirements.status, ["done", "cancelled", "archived"])), scope?.requirement),
       with: {
         project: true,
         claim: true,
@@ -658,6 +659,7 @@ export async function listDaemonControlPlaneQueues(db: Database) {
     }),
     db.query.daemons.findMany({
       where: and(
+        scope?.daemon,
         gt(daemons.lastHeartbeatAt, oneMinuteAgo),
         not(eq(daemons.status, "offline")),
         eq(daemons.controlState, "running"),

@@ -1,3 +1,4 @@
+import type { MetadataReadScope } from "./metadata-read-scope";
 import { and, gte, inArray } from "drizzle-orm";
 import {
   daemonWorkerProgressHistory,
@@ -261,15 +262,16 @@ export async function getDaemonMetricsReport(
   db: Database,
   query: DaemonMetricsQuery,
   now = new Date(),
+  scope?: MetadataReadScope,
 ): Promise<DaemonMetricsReport> {
   const windowStart = new Date(now.getTime() - query.windowHours * 3_600_000);
   const [daemonRows, progressRows, historyRows, queue] = await Promise.all([
-    db.query.daemons.findMany({ orderBy: daemons.name }),
-    db.query.daemonWorkerProgress.findMany(),
+    db.query.daemons.findMany({ where: scope?.daemon, orderBy: daemons.name }),
+    db.query.daemonWorkerProgress.findMany({ where: scope?.progress }),
     db.query.daemonWorkerProgressHistory.findMany({
-      where: gte(daemonWorkerProgressHistory.occurredAt, windowStart),
+      where: and(gte(daemonWorkerProgressHistory.occurredAt, windowStart), scope?.history),
     }),
-    listDaemonControlPlaneQueues(db),
+    listDaemonControlPlaneQueues(db, scope),
   ]);
   let progress = progressRows;
   let history = historyRows;

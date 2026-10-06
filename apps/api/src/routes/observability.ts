@@ -2,10 +2,10 @@ import { Hono } from "hono";
 import {
   daemonHistoryQuerySchema,
   daemonObservabilityQuerySchema,
-  daemonObservabilityService,
+  createResourceServices,
   daemonMetricsQuerySchema,
-  daemonMetricsService,
-  daemonProgressService,
+
+
 } from "@task-weaver/core";
 import type { Env } from "../middleware/actor.js";
 
@@ -17,7 +17,7 @@ observabilityRouter.get("/overview", async (c) => {
   if (!parsed.success) {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
-  return c.json(await daemonObservabilityService.getDaemonObservabilityOverview(c.get("db"), parsed.data));
+  return c.json(await createResourceServices(c.get("identity")).daemonObservabilityService.getDaemonObservabilityOverview(c.get("db"), parsed.data));
 });
 
 observabilityRouter.get("/history", async (c) => {
@@ -25,7 +25,7 @@ observabilityRouter.get("/history", async (c) => {
   if (!parsed.success) {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
-  return c.json(await daemonProgressService.listCorrelatedHistory(c.get("db"), parsed.data));
+  return c.json(await createResourceServices(c.get("identity")).daemonProgressService.listCorrelatedHistory(c.get("db"), parsed.data));
 });
 
 observabilityRouter.get("/metrics", async (c) => {
@@ -33,7 +33,7 @@ observabilityRouter.get("/metrics", async (c) => {
   if (!parsed.success) {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
-  return c.json(await daemonMetricsService.getDaemonMetricsReport(c.get("db"), parsed.data));
+  return c.json(await createResourceServices(c.get("identity")).daemonMetricsService.getDaemonMetricsReport(c.get("db"), parsed.data));
 });
 
 observabilityRouter.get("/logs", async (c) => {
@@ -42,7 +42,7 @@ observabilityRouter.get("/logs", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
   const maxChars = Number(c.req.query("maxChars") ?? 4_000);
-  return c.json(await daemonProgressService.listBoundedLogTail(c.get("db"), { ...parsed.data, maxChars }));
+  return c.json(await createResourceServices(c.get("identity")).daemonProgressService.listBoundedLogTail(c.get("db"), { ...parsed.data, maxChars }));
 });
 
 export default observabilityRouter;

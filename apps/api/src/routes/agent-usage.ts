@@ -3,21 +3,12 @@ import { z } from "zod";
 import {
   agentUsageQuerySchema,
   reportAgentUsageSchema,
-  agentUsageService,
+  createResourceServices,
   NotFoundError,
   ValidationError,
 } from "@task-weaver/core";
 import type { Env } from "../middleware/actor.js";
 const routes = new Hono<Env>();
-// Usage reporters must use a validated API key, never a self-declared actor header.
-routes.use("*", async (c, next) => {
-  if (
-    !c.req.header("Authorization")?.startsWith("Bearer ") ||
-    !c.get("actor").id.startsWith("apikey:")
-  )
-    return c.json({ error: "Authenticated API key required" }, 401);
-  await next();
-});
 routes.onError((error, c) => {
   if (error instanceof NotFoundError)
     return c.json({ error: error.message }, 404);
@@ -35,7 +26,7 @@ routes.post("/runs", async (c) => {
       400,
     );
   return c.json(
-    await agentUsageService.reportDaemonUsage(
+    await createResourceServices(c.get("identity")).agentUsageService.reportDaemonUsage(
       c.get("db"),
       parsed.data,
       c.get("actor"),
@@ -49,7 +40,7 @@ routes.get("/runs", async (c) => {
       { error: "Validation error", details: parsed.error.flatten() },
       400,
     );
-  return c.json(await agentUsageService.listUsage(c.get("db"), parsed.data));
+  return c.json(await createResourceServices(c.get("identity")).agentUsageService.listUsage(c.get("db"), parsed.data));
 });
 routes.get("/summary", async (c) => {
   const parsed = agentUsageQuerySchema.safeParse(c.req.query());
@@ -59,7 +50,7 @@ routes.get("/summary", async (c) => {
       400,
     );
   return c.json(
-    await agentUsageService.summarizeUsage(c.get("db"), parsed.data),
+    await createResourceServices(c.get("identity")).agentUsageService.summarizeUsage(c.get("db"), parsed.data),
   );
 });
 routes.get("/runs/:id", async (c) => {
@@ -75,7 +66,7 @@ routes.get("/runs/:id", async (c) => {
   if (!z.string().uuid().safeParse(c.req.param("id")).success)
     return c.json({ error: "Invalid process ID" }, 400);
   return c.json(
-    await agentUsageService.getUsage(
+    await createResourceServices(c.get("identity")).agentUsageService.getUsage(
       c.get("db"),
       parsed.data.projectId,
       c.req.param("id"),
