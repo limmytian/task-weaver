@@ -11,6 +11,10 @@ import { requireRepository } from "./repository-authorization";
 
 /** Event payloads are invalidation hints, never a substitute for authorized detail reads. */
 export async function authorizedRealtimeEvent(db: Database, authority: ResourceAuthority, event: RealtimeEvent): Promise<Record<string, unknown> | null> {
+  if (authority.bounds) {
+    if (!/^(task_|document_|requirement_)/.test(event.type)) return null;
+    if (event.type === "document_deleted" && !authority.bounds.documentIds.includes(event.documentId)) return null;
+  }
   const value = event as RealtimeEvent & Record<string, any>;
   const output: Record<string, unknown> = { type: event.type };
   async function resource(kind: "task" | "document" | "requirement" | "slice", id: string, key: string) {

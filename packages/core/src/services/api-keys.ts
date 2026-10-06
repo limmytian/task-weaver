@@ -1,3 +1,4 @@
+import { liveExecutionAuthority, type ExecutionBounds } from './execution-delegations';
 import { eq, and, gt, isNull, or } from "drizzle-orm";
 import {
   type Database,
@@ -15,6 +16,8 @@ import {
   credentialGrantsSchema,
   issueScopedApiKeySchema,
   requestIdentitySnapshotSchema,
+  type AuthorizationGrant,
+  type Principal,
   type IssueScopedApiKey,
   type VerifiedRequestContext,
 } from "@task-weaver/contracts";
@@ -147,10 +150,15 @@ async function currentAuthority(
   db: AuthDatabase,
   context: { actor: { id: string }; credential: { kind: string; id: string; actorId: string } },
   now: Date,
-) {
+): Promise<{ actor: Principal; grants: AuthorizationGrant[]; key: StoredKey | null; depth: number; bounds?: ExecutionBounds | null }> {
   const actor = await loadActivePrincipal(db, context.actor.id);
   if (context.credential.actorId !== actor.id)
     throw new AuthenticationError("invalid_credential");
+  if (context.credential.kind === "delegation") {
+    const authority = await liveExecutionAuthority(db, context.credential.id, now);
+    if (authority.actor.id !== actor.id) throw new AuthenticationError("invalid_credential");
+    return { ...authority, key: null, depth: 0 };
+  }
   if (context.credential.kind === "api_key") {
     const [key] = await db
       .select()
@@ -185,7 +193,8 @@ async function currentAuthority(
   };
 }
 /** Internal persisted integrations resolve credential bindings through the same live authority. */
-export async function getBoundCredentialAuthority(db: AuthDatabase, binding: { actorId: string; credentialId: string; credentialKind: string }) {
+export async function getBoundCredentialAuthority(db: AuthDatabase, binding: { actorId: string; credentialId: string; credentialKind: string }): Promise<{ actor: Principal; grants: AuthorizationGrant[] }> {
+  if (!["api_key", "session"].includes(binding.credentialKind)) throw new AuthorizationError();
   const { actor, grants } = await currentAuthority(db, {
     actor: { id: binding.actorId },
     credential: { id: binding.credentialId, kind: binding.credentialKind, actorId: binding.actorId },
@@ -198,9 +207,10 @@ export async function getLiveRequestAuthority(
   db: AuthDatabase,
   context: VerifiedRequestContext,
   now = new Date(),
-) {
-  const { actor, grants } = await currentAuthority(db, context, now);
-  return { actor, grants };
+): Promise<{ actor: Principal; grants: AuthorizationGrant[]; bounds?: ExecutionBounds | null }> {
+  const authority = await currentAuthority(db, context, now);
+  const bounds: ExecutionBounds | null = authority.bounds ?? null;
+  return { actor: authority.actor, grants: authority.grants, bounds };
 }
 
 async function credentialManager(

@@ -5,7 +5,7 @@ import {
   documentRequirementLinks, projectMemberships, activityLog,
 } from "@task-weaver/db";
 import {
-  AuthorizationError, NotFoundError, ValidationError, type Actor,
+  AuthenticationError, AuthorizationError, NotFoundError, ValidationError, type Actor,
   type VerifiedRequestContext, stableActorReferenceSchema,
 } from "@task-weaver/contracts";
 import * as projectImplementation from "./projects";
@@ -130,7 +130,10 @@ function bindServices(context?: VerifiedRequestContext) {
           if (group === "embedding") result = redactEmbeddingResult(authority, result);
           if (group === "repository") result = redactRepositoryResult(result);
           if (group === "ti" || group === "activity" || group === "schedule") result = redactMetadataResult(result, group);
-          return pruneRelations(txDb, authority, result);
+          if (authority.bounds) await auditIdentity(tx, "delegation.operation", actor.id, actor.id, authority.bounds.id, { operation: name, runId: authority.bounds.runId, requirementId: authority.bounds.requirementId, parentCredentialId: authority.bounds.parentCredentialId });
+          const visible = await pruneRelations(txDb, authority, result);
+          if (authority.bounds && authority.bounds.expiresAt <= new Date()) throw new AuthenticationError("credential_expired");
+          return visible;
         });
       }];
     })) as T;
@@ -177,7 +180,19 @@ async function checkMemoryEntity(db: Database, authority: ResourceAuthority, inp
   await requireResource(db, authority, input.entityType, input.entityId);
 }
 
+/** Task capabilities do not inherit the parent's project administration or unrelated write surfaces. */
+function authorizeDelegatedOperation(authority: ResourceAuthority, group: Group, name: string, call: any[]) {
+  const reads = new Set(["getProject", "getRequirement", "getTask", "getTaskDetail", "listTasks", "listRequirements", "listProjects", "getDocument", "getDocumentDetail", "listDocuments", "getTaskClaim", "getRequirementClaim", "listExecutionSlices", "listTaskComments", "listTaskNotes", "listDocumentVersions", "getDocumentVersion", "getRequirementRepositories", "getTaskRepositories", "listRequirementRepositories", "listTaskRepositories", "getRepository", "listRepositories", "bootstrapContext", "searchTasks", "searchRequirements", "searchDocuments", "searchDocumentsFulltext", "searchAll", "resolveTitles", "listContextEntries", "searchContext", "getContextEntry"]);
+  const writes = new Set(["updateTask", "updateTaskStatus", "addTaskComment", "addTaskNote", "claimTask", "releaseTask", "heartbeatClaim", "updateDocument"]);
+  if (!reads.has(name) && !(authority.bounds?.purpose === "execute" && writes.has(name))) throw new AuthorizationError();
+  if (["usage", "review", "ti", "activity", "schedule", "observability", "metrics", "progress", "daemon", "mcp", "embedding", "memory", "package", "slo"].includes(group)) throw new AuthorizationError();
+  if (name === "updateTask" && Object.keys(call[2] ?? {}).some(key => !["title", "description", "priority", "expectedAt", "expectedVersion", "version", "status", "reason", "daemonId", "leaseGeneration"].includes(key))) throw new AuthorizationError();
+  if (name === "updateTaskStatus" && call[2]?.force === true) throw new AuthorizationError();
+  if (name === "updateDocument" && Object.keys(call[2] ?? {}).some(key => !["title", "content", "version"].includes(key))) throw new AuthorizationError();
+}
+
 async function authorizeOperation(db: Database, authority: ResourceAuthority, group: Group, name: string, call: any[], context: VerifiedRequestContext) {
+  if (authority.bounds) authorizeDelegatedOperation(authority, group, name, call);
   if (group === "usage" || group === "review" || group === "ti" || group === "activity" || group === "schedule" || group === "observability" || group === "metrics" || group === "progress" || group === "daemon") return authorizeMetadataOperation(db, authority, group, name, call);
   const id = call[1];
   if (group === "repository") {
@@ -497,6 +512,7 @@ async function pruneRelations(db: Database, authority: ResourceAuthority, result
   if (Array.isArray(result)) {
     const visible = [];
     for (const row of result) {
+      if (authority.bounds && row?.id && "orderIndex" in row && "allowParallel" in row && !authority.bounds.sliceIds.includes(row.id)) continue;
       if (row && typeof row === "object") {
         const endpoints: Array<[ResourceKind, string]> = [];
         if (row.id && (row.scope === "project" || row.scope === "personal") && "requirementId" in row) endpoints.push(["task", row.id]);

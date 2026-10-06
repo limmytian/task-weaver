@@ -275,3 +275,13 @@ export type DaemonHistoryQuery = z.infer<typeof daemonHistoryQuerySchema>;
 export type DaemonSloQuery = z.infer<typeof daemonSloQuerySchema>;
 export type DaemonMetricsQuery = z.infer<typeof daemonMetricsQuerySchema>;
 export type DaemonConfig = z.infer<typeof daemonConfigSchema>;
+
+/** Subject, phase, grants and repositories are resolved by the authenticated supervisor service. */
+export const issueExecutionDelegationSchema = z.object({
+  requirementId: z.string().uuid(),
+  runId: z.string().uuid(),
+  workerIndex: z.number().int().min(0).max(255),
+  leaseGeneration: z.number().int().positive().safe(),
+  taskId: z.string().uuid().optional(),
+}).strict();
+export type IssueExecutionDelegationInput = z.infer<typeof issueExecutionDelegationSchema>;

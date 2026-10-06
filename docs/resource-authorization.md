@@ -118,3 +118,26 @@ closed pending authenticated recovery/delegation. The server currently reports
 `executionDelegationSupported: false`; CLI supervisors stop before acquisition or
 child execution until bounded delegation is implemented. This stage authorizes
 supervisor API operations, not AI credential inheritance or Ti/worker activation.
+
+## Task capabilities and local access broker
+
+A recorded Agent supervisor can exchange its subject-bound API key for a task
+capability on its own active daemon worker lease. The server derives the actor,
+project, requirement, phase actions and lease generation. Execution capabilities
+bind one task and its linked documents and repositories; review/merge capabilities
+bind the requirement's recorded task set. They exclude identity, membership,
+instance administration, daemon controls and unrelated content. REST, tRPC,
+GraphQL and events apply the same live core bounds before returning data.
+
+Capabilities expire within 15 minutes and never outlive the parent key or original
+lease. Only the original authenticated supervisor credential can renew them;
+renewal rotates the secret and preserves all bounds. Each operation rechecks the
+parent credential, actor, current grants, original worker lease, task/document
+relationships and repository manifest. Secrets are returned once, stored only as
+hashes, and omitted from audit records.
+
+The local task-access broker gives a child an opaque loopback handle. It keeps
+upstream capability secrets private, strips ambient credentials and actor headers,
+rejects administration/control routes and stops on upstream credential rejection.
+Renewal cannot expand the recorded task/repository bounds. The daemon execution
+support flag remains disabled until cancellation and worker integration complete.

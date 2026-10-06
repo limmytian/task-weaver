@@ -1,3 +1,4 @@
+import { authenticateExecutionDelegation } from './execution-delegations';
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
 import { betterAuth } from "better-auth";
@@ -426,12 +427,12 @@ export function createAuthenticationService(
       cookies.has("tw.session_token") ||
       cookies.has("__Secure-tw.session_token");
     if (headers.has("authorization")) {
-      const match = /^Bearer (tw_[0-9a-f]{64})$/.exec(
+      const match = /^Bearer ((?:tw_|twd_)[0-9a-f]{64})$/.exec(
         headers.get("authorization") ?? "",
       );
       if (!match || hasCookie)
         throw new AuthenticationError("invalid_credential");
-      return authenticateScopedApiKey(db, match[1]!);
+      return match[1]!.startsWith("twd_") ? authenticateExecutionDelegation(db, match[1]!) : authenticateScopedApiKey(db, match[1]!);
     }
     if (
       !cookies.has(sessionCookie) ||

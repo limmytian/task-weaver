@@ -55,3 +55,5 @@ export * from "./resource-authorization";
 export * from "./realtime-authorization";
 
 export { createWebhookService } from "./webhooks";
+
+export { createExecutionDelegationService } from "./execution-delegations";

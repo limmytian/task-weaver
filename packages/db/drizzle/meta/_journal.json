@@ -379,6 +379,13 @@
       "when": 1791280000000,
       "tag": "0053_webhook_authority_binding",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1791280000001,
+      "tag": "0054_execution_delegations",
+      "breakpoints": true
     }
   ]
 }

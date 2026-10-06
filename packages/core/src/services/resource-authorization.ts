@@ -48,7 +48,7 @@ export function requireScope(authority: ResourceAuthority, scope: ResourceScope,
 /** SQL filtering precedes pagination and counts. Invalid/legacy owner combinations are quarantined. */
 export function resourcePredicate(
   authority: ResourceAuthority,
-  columns: { projectId: AnyColumn | SQL; personalOwnerId?: AnyColumn | SQL; personalOwnerType?: AnyColumn | SQL; createdBy?: AnyColumn | SQL },
+  columns: { resourceTable?: string; resourceId?: SQL; projectId: AnyColumn | SQL; personalOwnerId?: AnyColumn | SQL; personalOwnerType?: AnyColumn | SQL; createdBy?: AnyColumn | SQL },
   permission: AuthorizationPermission = "resource.read",
 ): SQL {
   const terms: SQL[] = [];
@@ -65,7 +65,15 @@ export function resourcePredicate(
     if (authority.grants.some(g => g.scope === "global" && g.permissions.includes(permission)))
       terms.push(and(isNull(columns.projectId), unowned, columns.createdBy ? sql`EXISTS (SELECT 1 FROM ${authActors} WHERE ${qualifiedColumn(authActors.id)}::text = ${columns.createdBy})` : sql`false`)!);
   }
-  return or(...terms) ?? sql`false`;
+  const scoped = or(...terms) ?? sql`false`;
+  if (!authority.bounds) return scoped;
+  const projectColumn = columns.projectId as AnyColumn;
+  const tableName = columns.resourceTable ?? (projectColumn.table ? getTableName(projectColumn.table) : undefined);
+  const table = projectColumn.table as unknown as { id?: AnyColumn } | undefined;
+  const id = columns.resourceId ?? (table?.id ? sql`${table.id}` : undefined);
+  const ids = tableName === "tasks" ? authority.bounds.taskIds : tableName === "documents" ? authority.bounds.documentIds : tableName === "requirements" ? [authority.bounds.requirementId] : [];
+  return id && ids.length ? and(scoped, inArray(id, ids))! : sql`false`;
+
 }
 
 /** Scope-labelled assets must agree with their stored owner/project columns. */
@@ -83,11 +91,24 @@ export function labelledResourcePredicate(
 
 export function projectPredicate(authority: ResourceAuthority, permission: AuthorizationPermission = "resource.read", idColumn: AnyColumn | SQL = projects.id) {
   const ids = authority.grants.flatMap(g => g.scope === "project" && g.permissions.includes(permission) ? [g.projectId] : []);
+  if (authority.bounds) {
+    const column = idColumn as AnyColumn;
+    const tableName = column.table ? getTableName(column.table) : undefined;
+    if (tableName === "projects") return ids.includes(authority.bounds.projectId) ? eq(sql`${idColumn}`, authority.bounds.projectId) : sql`false`;
+    if (tableName === "requirements") return ids.includes(authority.bounds.projectId) ? and(eq(sql`${idColumn}`, authority.bounds.projectId), eq(requirements.id, authority.bounds.requirementId))! : sql`false`;
+    return sql`false`;
+  }
   return ids.length ? inArray(sql`${idColumn}`, ids) : sql`false`;
 }
 
 export async function requireResource(db: Database, authority: ResourceAuthority, kind: ResourceKind, id: string, permission: AuthorizationPermission = "resource.read") {
   if (!stableActorReferenceSchema.safeParse({ id, type: "human" }).success) throw new ValidationError("Invalid resource ID");
+  if (authority.bounds) {
+    const bounds = authority.bounds;
+    const allowed = kind === "task" ? bounds.taskIds.includes(id) : kind === "document" ? bounds.documentIds.includes(id)
+      : kind === "requirement" ? id === bounds.requirementId : kind === "project" ? id === bounds.projectId : kind === "slice" ? bounds.sliceIds.includes(id) : false;
+    if (!allowed) throw new NotFoundError("Resource not found");
+  }
   let scope: ResourceScope | undefined;
   if (kind === "project") {
     const row = await db.query.projects.findFirst({ where: eq(projects.id, id) });
@@ -188,7 +209,10 @@ export function qualifiedColumn(column: AnyColumn): SQL {
   return sql`${schema}${sql.identifier(tableName)}.${sql.identifier(column.name)}`;
 }
 export function qualifiedScopeColumns(columns: { projectId: AnyColumn; personalOwnerId?: AnyColumn; personalOwnerType?: AnyColumn; createdBy?: AnyColumn }) {
+  const table = columns.projectId.table as unknown as { id: AnyColumn };
   return {
+    resourceTable: getTableName(columns.projectId.table),
+    resourceId: qualifiedColumn(table.id),
     projectId: qualifiedColumn(columns.projectId),
     personalOwnerId: columns.personalOwnerId ? qualifiedColumn(columns.personalOwnerId) : undefined,
     personalOwnerType: columns.personalOwnerType ? qualifiedColumn(columns.personalOwnerType) : undefined,

@@ -6,6 +6,7 @@ import { requireScope, canAccessResource, type ResourceAuthority } from "./resou
 
 /** Catalog visibility is independent of the projects which link a repository. */
 export function repositoryPredicate(authority: ResourceAuthority): SQL {
+  if (authority.bounds) return authority.bounds.repositoryIds.length ? inArray(repositories.id, authority.bounds.repositoryIds) : sql`false`;
   const scopes: SQL[] = [];
   if (canAccessResource(authority, {}, "resource.read"))
     scopes.push(and(eq(repositories.visibility, "instance"), isNull(repositories.ownerId), isNull(repositories.ownerType))!);

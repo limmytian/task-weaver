@@ -17,6 +17,7 @@ export function usageRelationPredicate() {
 }
 
 export async function authorizeMetadataOperation(db: Database, authority: ResourceAuthority, group: "usage" | "review" | "ti" | "activity" | "schedule" | "observability" | "metrics" | "progress" | "daemon", name: string, call: any[]) {
+  if (authority.bounds) throw new AuthorizationError();
   if ((group === "daemon" || group === "progress") && await authorizeDaemonOperation(db, authority, group, name, call)) return;
   if (["observability", "metrics", "progress", "daemon"].includes(group)) {
     if (!["getDaemonObservabilityOverview", "getDaemonMetricsReport", "listCorrelatedHistory", "listBoundedLogTail", "listRequirementTimeline", "listDaemonControlPlaneQueues"].includes(name)) throw new AuthorizationError();

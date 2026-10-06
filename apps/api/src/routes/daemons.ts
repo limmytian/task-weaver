@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import {
   createAuthorizedEventStream,
   createResourceServices,
+  createExecutionDelegationService,
+  issueExecutionDelegationSchema,
   daemonSloService,
   ConflictError,
   NotFoundError,
@@ -165,6 +167,18 @@ daemonsRouter.post("/:id/reconcile", async (c) => {
     if (err instanceof ValidationError) return c.json({ error: err.message }, 400);
     throw err;
   }
+});
+
+// Task capability issue/renewal is restricted to the original authenticated supervisor.
+daemonsRouter.post("/:id/delegations", async c => {
+  const input = issueExecutionDelegationSchema.parse(await c.req.json());
+  return c.json(await createExecutionDelegationService(c.get("identity")).issue(c.get("db"), c.req.param("id"), input), 201);
+});
+daemonsRouter.post("/:id/delegations/:delegationId/renew", async c => {
+  return c.json(await createExecutionDelegationService(c.get("identity")).renew(c.get("db"), c.req.param("id"), c.req.param("delegationId")));
+});
+daemonsRouter.delete("/:id/delegations/:delegationId", async c => {
+  return c.json(await createExecutionDelegationService(c.get("identity")).revoke(c.get("db"), c.req.param("id"), c.req.param("delegationId")));
 });
 
 // POST /register - Register or update a daemon
