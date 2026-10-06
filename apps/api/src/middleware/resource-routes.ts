@@ -1,5 +1,11 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
+  ["GET", new RegExp("^/api/v1/context/packages(?:/[0-9a-fA-F-]{36}(?:/(?:files|download|health|read))?)?/?$")],
+  ["POST", new RegExp("^/api/v1/context/(?:packages/register|packages/[0-9a-fA-F-]{36}/reindex|import(?:/batch)?)/?$")],
+  ["PATCH", new RegExp("^/api/v1/context/packages/[0-9a-fA-F-]{36}(?:/versions/[^/]+)?/?$")],
+  ["GET", new RegExp("^/api/v1/embeddings/(?:profiles(?:/[0-9a-fA-F-]{36}(?:/(?:preview|usage|generations))?)?|jobs/[0-9a-fA-F-]{36}(?:/items)?)/?$")],
+  ["POST", new RegExp("^/api/v1/embeddings/(?:profiles|profiles/[0-9a-fA-F-]{36}/(?:test|enable|disable|rebuild|cleanup)|jobs/[0-9a-fA-F-]{36}/(?:cancel|resume|retry-failed)|generations/[0-9a-fA-F-]{36}/activate)/?$")],
+  ["PATCH", new RegExp("^/api/v1/embeddings/profiles/[0-9a-fA-F-]{36}/?$")],
   ["GET", new RegExp("^/api/v1/search/(?:documents(?:/fulltext)?|tasks|requirements|all)/?$")],
   ["POST", new RegExp("^/api/v1/search/resolve-titles/?$")],
   ["GET", new RegExp("^/api/v1/context/(?:search|list|bootstrap)/?$")],

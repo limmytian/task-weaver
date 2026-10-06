@@ -7,27 +7,15 @@ import {
   ValidationError,
   createEmbeddingProfileSchema,
   embeddingJobKindSchema,
-  embeddingService,
+  createResourceServices,
+  personalResourceOwnerId,
   listEmbeddingProfilesSchema,
   updateEmbeddingProfileSchema,
-  createOpenAICompatibleEmbeddingProvider,
-  resolveEmbeddingSecretReference,
 } from "@task-weaver/core";
 import type { Env } from "../middleware/actor.js";
 
 const embeddings = new Hono<Env>();
 
-function providerForProfile(profile: Awaited<ReturnType<typeof embeddingService.getEmbeddingProfile>>) {
-  return createOpenAICompatibleEmbeddingProvider({
-    provider: "openai_compatible",
-    baseUrl: profile.baseUrl,
-    model: profile.model,
-    dimensions: profile.dimensions,
-    secretRef: profile.secretRef,
-    timeoutMs: profile.timeoutMs,
-    batchSize: profile.batchSize,
-  }, { resolveSecret: resolveEmbeddingSecretReference });
-}
 
 function errorResponse(c: Context<Env>, error: unknown) {
   if (error instanceof NotFoundError) return c.json({ error: error.message }, 404);
@@ -49,13 +37,13 @@ embeddings.get("/profiles", async (c) => {
     projectId: c.req.query("projectId") || undefined,
     includeGlobal: c.req.query("includeGlobal") !== "false",
     includePersonal: c.req.query("includePersonal") === "true",
-    personalOwnerId: c.req.query("personalOwnerId") || c.get("actor").id,
-    personalOwnerType: c.req.query("personalOwnerType") || c.get("actor").type,
+    personalOwnerId: c.req.query("personalOwnerId") || personalResourceOwnerId(c.get("identity")),
+    personalOwnerType: c.req.query("personalOwnerType") || "human",
     includeDisabled: c.req.query("includeDisabled") !== "false",
   });
   if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
 
-  const profiles = await embeddingService.listEmbeddingProfiles(c.get("db"));
+  const profiles = await createResourceServices(c.get("identity")).embeddingService.listEmbeddingProfiles(c.get("db"));
   const items = profiles.filter((profile) => {
     if (!parsed.data.includeDisabled && profile.status === "disabled") return false;
     if (profile.scope === "global") return parsed.data.includeGlobal;
@@ -72,7 +60,7 @@ embeddings.post("/profiles", async (c) => {
   const parsed = createEmbeddingProfileSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   try {
-    const profile = await embeddingService.createEmbeddingProfile(c.get("db"), parsed.data, c.get("actor"));
+    const profile = await createResourceServices(c.get("identity")).embeddingService.createEmbeddingProfile(c.get("db"), parsed.data, c.get("actor"));
     return c.json(profile, 201);
   } catch (error) {
     return errorResponse(c, error);
@@ -81,7 +69,7 @@ embeddings.post("/profiles", async (c) => {
 
 embeddings.get("/profiles/:id", async (c) => {
   try {
-    return c.json(await embeddingService.getEmbeddingProfile(c.get("db"), c.req.param("id")));
+    return c.json(await createResourceServices(c.get("identity")).embeddingService.getEmbeddingProfile(c.get("db"), c.req.param("id")));
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -91,7 +79,7 @@ embeddings.patch("/profiles/:id", async (c) => {
   const parsed = updateEmbeddingProfileSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   try {
-    const profile = await embeddingService.updateEmbeddingProfile(c.get("db"), c.req.param("id"), parsed.data, c.get("actor"));
+    const profile = await createResourceServices(c.get("identity")).embeddingService.updateEmbeddingProfile(c.get("db"), c.req.param("id"), parsed.data, c.get("actor"));
     return c.json(profile);
   } catch (error) {
     return errorResponse(c, error);
@@ -100,9 +88,7 @@ embeddings.patch("/profiles/:id", async (c) => {
 
 embeddings.post("/profiles/:id/test", async (c) => {
   try {
-    const profile = await embeddingService.getEmbeddingProfile(c.get("db"), c.req.param("id"));
-    const capabilities = await providerForProfile(profile).validateConfiguration();
-    return c.json({ ok: true, capabilities });
+    return c.json(await createResourceServices(c.get("identity")).embeddingService.testEmbeddingProfile(c.get("db"), c.req.param("id")));
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -110,8 +96,7 @@ embeddings.post("/profiles/:id/test", async (c) => {
 
 embeddings.post("/profiles/:id/enable", async (c) => {
   try {
-    const profile = await embeddingService.getEmbeddingProfile(c.get("db"), c.req.param("id"));
-    const updated = await embeddingService.enableEmbeddingProfile(c.get("db"), profile.id, c.get("actor"), providerForProfile(profile));
+    const updated = await createResourceServices(c.get("identity")).embeddingService.enableEmbeddingProfile(c.get("db"), c.req.param("id"), c.get("actor"));
     return c.json(updated);
   } catch (error) {
     return errorResponse(c, error);
@@ -120,7 +105,7 @@ embeddings.post("/profiles/:id/enable", async (c) => {
 
 embeddings.post("/profiles/:id/disable", async (c) => {
   try {
-    return c.json(await embeddingService.setEmbeddingProfileStatus(c.get("db"), c.req.param("id"), "disabled", c.get("actor")));
+    return c.json(await createResourceServices(c.get("identity")).embeddingService.setEmbeddingProfileStatus(c.get("db"), c.req.param("id"), "disabled", c.get("actor")));
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -128,7 +113,7 @@ embeddings.post("/profiles/:id/disable", async (c) => {
 
 embeddings.get("/profiles/:id/preview", async (c) => {
   try {
-    return c.json(await embeddingService.previewEmbeddingRebuild(c.get("db"), c.req.param("id")));
+    return c.json(await createResourceServices(c.get("identity")).embeddingService.previewEmbeddingRebuild(c.get("db"), c.req.param("id")));
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -136,8 +121,8 @@ embeddings.get("/profiles/:id/preview", async (c) => {
 
 embeddings.get("/profiles/:id/usage", async (c) => {
   try {
-    await embeddingService.getEmbeddingProfile(c.get("db"), c.req.param("id"));
-    return c.json(await embeddingService.getEmbeddingUsage(c.get("db"), c.req.param("id")));
+    await createResourceServices(c.get("identity")).embeddingService.getEmbeddingProfile(c.get("db"), c.req.param("id"));
+    return c.json(await createResourceServices(c.get("identity")).embeddingService.getEmbeddingUsage(c.get("db"), c.req.param("id")));
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -145,7 +130,7 @@ embeddings.get("/profiles/:id/usage", async (c) => {
 
 embeddings.get("/profiles/:id/generations", async (c) => {
   try {
-    return c.json({ items: await embeddingService.listEmbeddingGenerations(c.get("db"), c.req.param("id")) });
+    return c.json({ items: await createResourceServices(c.get("identity")).embeddingService.listEmbeddingGenerations(c.get("db"), c.req.param("id")) });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -161,7 +146,7 @@ embeddings.post("/profiles/:id/rebuild", async (c) => {
     return c.json({ error: "Validation error", details: "rebuild kind must be full or forced" }, 400);
   }
   try {
-    return c.json(await embeddingService.startEmbeddingRebuild(c.get("db"), c.req.param("id"), parsed.data, c.get("actor")), 202);
+    return c.json(await createResourceServices(c.get("identity")).embeddingService.startEmbeddingRebuild(c.get("db"), c.req.param("id"), parsed.data, c.get("actor")), 202);
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -169,7 +154,7 @@ embeddings.post("/profiles/:id/rebuild", async (c) => {
 
 embeddings.post("/profiles/:id/cleanup", async (c) => {
   try {
-    return c.json({ deletedGenerations: await embeddingService.cleanupRetiredEmbeddingGenerations(c.get("db"), c.req.param("id")) });
+    return c.json({ deletedGenerations: await createResourceServices(c.get("identity")).embeddingService.cleanupRetiredEmbeddingGenerations(c.get("db"), c.req.param("id")) });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -177,7 +162,7 @@ embeddings.post("/profiles/:id/cleanup", async (c) => {
 
 embeddings.get("/jobs/:id", async (c) => {
   try {
-    return c.json(await embeddingService.getEmbeddingJob(c.get("db"), c.req.param("id")));
+    return c.json(await createResourceServices(c.get("identity")).embeddingService.getEmbeddingJob(c.get("db"), c.req.param("id")));
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -185,7 +170,7 @@ embeddings.get("/jobs/:id", async (c) => {
 
 embeddings.get("/jobs/:id/items", async (c) => {
   try {
-    return c.json({ items: await embeddingService.listEmbeddingJobItems(c.get("db"), c.req.param("id")) });
+    return c.json({ items: await createResourceServices(c.get("identity")).embeddingService.listEmbeddingJobItems(c.get("db"), c.req.param("id")) });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -193,7 +178,7 @@ embeddings.get("/jobs/:id/items", async (c) => {
 
 embeddings.post("/jobs/:id/cancel", async (c) => {
   try {
-    return c.json(await embeddingService.requestEmbeddingJobCancellation(c.get("db"), c.req.param("id"), c.get("actor").id));
+    return c.json(await createResourceServices(c.get("identity")).embeddingService.requestEmbeddingJobCancellation(c.get("db"), c.req.param("id"), c.get("actor").id));
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -201,7 +186,7 @@ embeddings.post("/jobs/:id/cancel", async (c) => {
 
 embeddings.post("/jobs/:id/resume", async (c) => {
   try {
-    return c.json(await embeddingService.resumeEmbeddingJob(c.get("db"), c.req.param("id"), c.get("actor").id));
+    return c.json(await createResourceServices(c.get("identity")).embeddingService.resumeEmbeddingJob(c.get("db"), c.req.param("id"), c.get("actor").id));
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -209,7 +194,7 @@ embeddings.post("/jobs/:id/resume", async (c) => {
 
 embeddings.post("/jobs/:id/retry-failed", async (c) => {
   try {
-    return c.json(await embeddingService.retryFailedEmbeddingJobItems(c.get("db"), c.req.param("id"), c.get("actor").id));
+    return c.json(await createResourceServices(c.get("identity")).embeddingService.retryFailedEmbeddingJobItems(c.get("db"), c.req.param("id"), c.get("actor").id));
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -217,7 +202,7 @@ embeddings.post("/jobs/:id/retry-failed", async (c) => {
 
 embeddings.post("/generations/:id/activate", async (c) => {
   try {
-    return c.json(await embeddingService.markEmbeddingGenerationActive(c.get("db"), c.req.param("id"), c.get("actor")));
+    return c.json(await createResourceServices(c.get("identity")).embeddingService.markEmbeddingGenerationActive(c.get("db"), c.req.param("id"), c.get("actor")));
   } catch (error) {
     return errorResponse(c, error);
   }

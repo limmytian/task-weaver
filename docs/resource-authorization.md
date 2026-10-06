@@ -17,13 +17,22 @@ Query predicates filter project membership, explicitly granted human personal ow
 | Task and requirement claims | Factory; own holder checks plus resource write or execution authority; lease fencing retained | Daemon acquisition and delegated execution remain closed |
 | Documents: CRUD/versions/revert/backlinks/links | Factory; current scope controls history; implicit wiki targets filtered | Title resolution/search/recommendations/context are authenticated and scoped |
 | Memories: CRUD/list/entity shortcut | Factory; resource owner separate from creator/executor | Search applies scope and attached entity predicates without renewing expiry on reads |
-| Context and recommendations | Verified ordinary-resource factory; ranking and vector candidate selection use current document authority | Package metadata enrichment remains staged until asset authorization |
+| Context and recommendations | Verified ordinary-resource factory; ranking and vector candidate selection use current document authority | Package metadata enrichment filters authorized, active packages before context ranking |
 | MCP registry/pool and repository/forge catalog | Transport denied; no tool invocation or repository metadata expansion | Tool and repository authorization |
 | Reviews, schedules, usage, activity, daemon control/progress/observability/metrics/SLO | Transport denied; existing pure state/fence helpers remain private implementation | Metadata and execution authorization |
 | Assistant, Ti, plans, persisted Gateway work | Transport denied / execution paused | Runtime delegation and account-owned controls |
 | Web/daemon SSE and outbound webhooks | Closed; no resource event delivery | Realtime and webhook authorization |
 | Version | Exact public static endpoints; authenticated update check | No ordinary content authority |
 
-REST, tRPC and GraphQL use the same factory. Skill packages/storage/presets and embedding management remain closed pending their asset authorization task.
+REST, tRPC and GraphQL use the same factory. Skill packages/storage and embedding management use the asset authorization boundary below. Preset synchronization and background execution remain closed.
 
 Entry-point allowlists must stay narrower than the factory: implementing one ordinary method does not open a neighboring discovery, execution or system route. GraphQL default field resolvers must recheck the source resource as well as explicit resolvers. Errors use the shared safe transport mapping; inaccessible IDs return 404 and insufficient action on a visible resource returns 403. Responses stay `no-store`.
+
+
+### Skill distribution and embedding management
+
+Skill package registration, metadata/version changes, files, downloads, storage verification and reindexing use the verified core facade. Package predicates run before pagination and context ranking; primary/indexed documents must share the package scope and each storage object must belong to the selected version. Invalid relationships quarantine the package. Internal storage keys are omitted from responses. Global skills are readable to authenticated subjects with global resource.read; global mutations require explicit global resource.write. Personal resources remain human-owned.
+
+Embedding profiles, generations and jobs use the same live scope grants. Provider creation/configuration changes, tests, enablement and generation activation additionally require an active human instance administrator, instance.manage in the credential, and management rights for the resource (project.manage, personal resource.write, or global.manage). Instance administration alone never grants project/personal access. Other readers receive metadata with blank provider endpoint/secret references; raw provider errors and lease details are omitted. Existing resource maintainers may rebuild, disable and control jobs. Malformed cross-scope children quarantine the profile; document counts and rebuild inputs use authorized current documents. Provider test and enable construct their provider inside the authorized core operation. Worker execution, SSE and unconverted execution/integration surfaces remain closed.
+
+PostgreSQL acceptance includes package/version/storage relationship attacks, private/global package access, administrator scope intersection, provider-config privileges, scoped keys, job/generation ownership, and cached-context membership revocation across REST and tRPC. GraphQL has no package or embedding management fields; its existing resource/retrieval fields continue through the same facade.

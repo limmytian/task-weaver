@@ -2,7 +2,6 @@ import { Hono, type Context } from "hono";
 import {
   createResourceServices,
   personalResourceOwnerId,
-  skillPackageService,
   skillPackageStorageService,
   searchContextSchema,
   importSkillSchema,
@@ -101,20 +100,19 @@ context.get("/list", async (c) => {
 // GET /packages - List registered skill packages
 context.get("/packages", async (c) => {
   const db = c.get("db");
-  const actor = c.get("actor");
   const query = c.req.query();
 
   const hasProjectScope = Boolean(query.projectId || query.allProjects === "true");
   const parsed = listSkillPackagesSchema.safeParse({
     ...query,
-    personalOwnerId: query.personalOwnerId ?? (hasProjectScope ? undefined : actor.id),
-    personalOwnerType: query.personalOwnerType ?? (hasProjectScope ? undefined : actor.type),
+    personalOwnerId: query.personalOwnerId ?? (hasProjectScope ? undefined : personalResourceOwnerId(c.get("identity"))),
+    personalOwnerType: query.personalOwnerType ?? (hasProjectScope ? undefined : "human"),
   });
   if (!parsed.success) {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
 
-  const result = await skillPackageService.listPackages(db, parsed.data);
+  const result = await createResourceServices(c.get("identity")).skillPackageService.listPackages(db, parsed.data);
   return c.json(result);
 });
 
@@ -130,7 +128,7 @@ context.post("/packages/register", async (c) => {
   }
 
   try {
-    const result = await skillPackageService.registerPackage(
+    const result = await createResourceServices(c.get("identity")).skillPackageService.registerPackage(
       db,
       parsed.data,
       actor,
@@ -151,7 +149,7 @@ context.get("/packages/:packageId", async (c) => {
   }
 
   try {
-    const result = await skillPackageService.getPackage(db, parsed.data.packageId);
+    const result = await createResourceServices(c.get("identity")).skillPackageService.getPackage(db, parsed.data.packageId);
     return c.json(result);
   } catch (err) {
     return handleSkillPackageError(c, err);
@@ -170,7 +168,7 @@ context.get("/packages/:packageId/files", async (c) => {
   }
 
   try {
-    const result = await skillPackageService.listPackageFiles(db, parsed.data);
+    const result = await createResourceServices(c.get("identity")).skillPackageService.listPackageFiles(db, parsed.data);
     return c.json(result);
   } catch (err) {
     return handleSkillPackageError(c, err);
@@ -189,7 +187,7 @@ context.get("/packages/:packageId/download", async (c) => {
   }
 
   try {
-    const result = await skillPackageService.downloadPackage(
+    const result = await createResourceServices(c.get("identity")).skillPackageService.downloadPackage(
       db,
       parsed.data,
       createSkillPackageStorage(),
@@ -212,7 +210,7 @@ context.get("/packages/:packageId/health", async (c) => {
   }
 
   try {
-    const result = await skillPackageService.verifyPackageStorage(
+    const result = await createResourceServices(c.get("identity")).skillPackageService.verifyPackageStorage(
       db,
       parsed.data,
       createSkillPackageStorage(),
@@ -237,7 +235,7 @@ context.post("/packages/:packageId/reindex", async (c) => {
   }
 
   try {
-    const result = await skillPackageService.reindexPackageTextFiles(
+    const result = await createResourceServices(c.get("identity")).skillPackageService.reindexPackageTextFiles(
       db,
       parsed.data,
       actor,
@@ -262,7 +260,7 @@ context.get("/packages/:packageId/read", async (c) => {
   }
 
   try {
-    const result = await skillPackageService.readPackageTextFile(
+    const result = await createResourceServices(c.get("identity")).skillPackageService.readPackageTextFile(
       db,
       parsed.data,
       createSkillPackageStorage(),
@@ -287,7 +285,7 @@ context.patch("/packages/:packageId", async (c) => {
   }
 
   try {
-    const result = await skillPackageService.updatePackageMetadata(db, parsed.data, actor);
+    const result = await createResourceServices(c.get("identity")).skillPackageService.updatePackageMetadata(db, parsed.data, actor);
     return c.json(result);
   } catch (err) {
     return handleSkillPackageError(c, err);
@@ -309,7 +307,7 @@ context.patch("/packages/:packageId/versions/:version", async (c) => {
   }
 
   try {
-    const result = await skillPackageService.updatePackageVersionStatus(db, parsed.data, actor);
+    const result = await createResourceServices(c.get("identity")).skillPackageService.updatePackageVersionStatus(db, parsed.data, actor);
     return c.json(result);
   } catch (err) {
     return handleSkillPackageError(c, err);

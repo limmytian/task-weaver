@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull, isNotNull, or, sql, type AnyColumn, type SQL, getTableName } from "drizzle-orm";
 import {
   type Database, projects, tasks, requirements, documents, memories,
-  executionSlices, authActors, projectMemberships,
+  executionSlices, authActors, projectMemberships, skillPackages, embeddingProfiles,
 } from "@task-weaver/db";
 import {
   AuthorizationError, NotFoundError, ValidationError, AuthenticationError, stableActorReferenceSchema,
@@ -10,7 +10,7 @@ import {
 import { getLiveRequestAuthority } from "./api-keys";
 import { grantsAreCovered, loadActivePrincipal, type AuthDatabase } from "./auth-principals";
 
-export type ResourceKind = "project" | "requirement" | "task" | "document" | "memory" | "slice";
+export type ResourceKind = "project" | "requirement" | "task" | "document" | "memory" | "slice" | "package" | "profile";
 export type ResourceScope = {
   projectId?: string | null;
   personalOwnerId?: string | null;
@@ -99,8 +99,14 @@ export async function requireResource(db: Database, authority: ResourceAuthority
     const row = kind === "task" ? await db.query.tasks.findFirst({ where: eq(tasks.id, id) })
       : kind === "requirement" ? await db.query.requirements.findFirst({ where: eq(requirements.id, id) })
       : kind === "document" ? await db.query.documents.findFirst({ where: eq(documents.id, id) })
+      : kind === "package" ? await db.query.skillPackages.findFirst({ where: eq(skillPackages.id, id) })
+      : kind === "profile" ? await db.query.embeddingProfiles.findFirst({ where: eq(embeddingProfiles.id, id) })
       : await db.query.memories.findFirst({ where: eq(memories.id, id) });
     scope = row;
+    if (kind === "profile" && row && "scope" in row) {
+      const expected = row.projectId ? "project" : row.personalOwnerId ? "personal" : "global";
+      if (row.scope !== expected) scope = undefined;
+    }
     if (kind === "task" && row && "requirementId" in row && row.projectId) {
       const requirement = row.requirementId ? await db.query.requirements.findFirst({ where: eq(requirements.id, row.requirementId) }) : undefined;
       if (!requirement || requirement.projectId !== row.projectId) scope = undefined;
@@ -109,7 +115,7 @@ export async function requireResource(db: Database, authority: ResourceAuthority
       const [creator] = await db.select({ id: authActors.id }).from(authActors).where(sql`${authActors.id}::text = ${row.createdBy}`).limit(1);
       if (!creator) scope = undefined;
     }
-    if (kind === "task" && row && "scope" in row) {
+    if (kind === "task" && row && "requirementId" in row) {
       if (row.scope === "personal" && (!row.personalOwnerId || row.projectId || row.requirementId || row.executionSliceId)) scope = undefined;
       if (row.scope === "project" && (!row.projectId || !row.requirementId)) scope = undefined;
       if (row.executionSliceId) {

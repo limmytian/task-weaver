@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import {
   type Database, projects, requirements, tasks, documents, memories, executionSlices,
-  embeddingProfiles, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
+  skillPackages, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
   documentRequirementLinks, projectMemberships, activityLog,
 } from "@task-weaver/db";
 import {
@@ -16,18 +16,22 @@ import * as documentImplementation from "./documents";
 import * as memoryImplementation from "./memory";
 import * as recommendationImplementation from "./recommendations";
 import * as contextImplementation from "./context";
+import * as embeddingImplementation from "./embeddings/index";
+import { testEmbeddingProfile, embeddingProvider } from "./embedding-configuration";
+import * as packageImplementation from "./skill-packages";
+import { packageResourcePredicate, requirePackage, profileResourcePredicate, requireProfile, requireProfileManagement, canManageProvider } from "./asset-authorization";
 import { auditIdentity, lockIdentityLifecycle } from "./auth-security";
 import {
   labelledResourcePredicate, qualifiedScopeColumns, taskResourcePredicate, memoryResourcePredicate, resourceAuthority, requireResource, requireScope, resourcePredicate, projectPredicate,
   validateAssignee, type ResourceAuthority, type ResourceKind, type ResourceScope,
 } from "./resource-authorization";
 
-type Group = "project" | "requirement" | "task" | "claim" | "document" | "memory" | "recommendation" | "context";
+type Group = "project" | "requirement" | "task" | "claim" | "document" | "memory" | "recommendation" | "context" | "package" | "embedding";
 type Input = Record<string, any>;
 const sources = {
   project: projectImplementation, requirement: requirementImplementation, task: taskImplementation,
   claim: claimImplementation, document: documentImplementation, memory: memoryImplementation,
-  recommendation: recommendationImplementation, context: contextImplementation,
+  recommendation: recommendationImplementation, context: contextImplementation, package: packageImplementation, embedding: { ...embeddingImplementation, testEmbeddingProfile },
 };
 const readById: Record<string, ResourceKind> = {
   getProject: "project", getRequirement: "requirement", getTask: "task", getTaskDetail: "task",
@@ -103,6 +107,7 @@ function bindServices(context?: VerifiedRequestContext) {
             if (group === "memory") await auditIdentity(tx, `memory.${name}`, actor.id, actor.id, entityId);
             else await tx.insert(activityLog).values({ entityType: group === "claim" ? "task" : group as "project" | "requirement" | "task" | "document", entityId, action: name, actorId: actor.id, actorType: actor.type });
           }
+          if (group === "embedding") result = redactEmbeddingResult(authority, result);
           return pruneRelations(txDb, authority, result);
         });
       }];
@@ -112,12 +117,12 @@ function bindServices(context?: VerifiedRequestContext) {
     projectService: bind("project", sources.project), requirementService: bind("requirement", sources.requirement),
     taskService: bind("task", sources.task), claimService: bind("claim", sources.claim),
     documentService: bind("document", sources.document), memoryService: bind("memory", sources.memory),
-    recommendationService: bind("recommendation", sources.recommendation), contextService: bind("context", sources.context),
+    recommendationService: bind("recommendation", sources.recommendation), contextService: bind("context", sources.context), skillPackageService: bind("package", sources.package), embeddingService: bind("embedding", sources.embedding),
   };
 }
 
 /** Compatibility names compile for staged adapters but cannot authorize a caller. */
-export const { projectService, requirementService, taskService, claimService, documentService, memoryService, recommendationService, contextService } = bindServices();
+export const { projectService, requirementService, taskService, claimService, documentService, memoryService, recommendationService, contextService, skillPackageService, embeddingService } = bindServices();
 
 async function checkTaskInput(db: Database, authority: ResourceAuthority, input: Input, current?: ResourceScope) {
   const scope: ResourceScope = current ?? (input.scope === "personal" ? {
@@ -152,6 +157,71 @@ async function checkMemoryEntity(db: Database, authority: ResourceAuthority, inp
 
 async function authorizeOperation(db: Database, authority: ResourceAuthority, group: Group, name: string, call: any[]) {
   const id = call[1];
+  if (group === "embedding") {
+    if (name === "listEmbeddingProfiles") { call[1] = profileResourcePredicate(authority); return; }
+    if (name === "createEmbeddingProfile") {
+      requireProfileManagement(authority, id, true); return;
+    }
+    const reads = ["getEmbeddingProfile", "previewEmbeddingRebuild", "getEmbeddingUsage", "listEmbeddingGenerations", "getEmbeddingJob", "listEmbeddingJobItems"];
+    const writes = ["updateEmbeddingProfile", "testEmbeddingProfile", "enableEmbeddingProfile", "setEmbeddingProfileStatus", "startEmbeddingRebuild", "cleanupRetiredEmbeddingGenerations", "markEmbeddingGenerationActive", "requestEmbeddingJobCancellation", "resumeEmbeddingJob", "retryFailedEmbeddingJobItems"];
+    if (!reads.includes(name) && !writes.includes(name)) throw new AuthorizationError();
+    let profileId = id;
+    if (["getEmbeddingJob", "listEmbeddingJobItems", "requestEmbeddingJobCancellation", "resumeEmbeddingJob", "retryFailedEmbeddingJobItems"].includes(name)) {
+      const job = await db.query.embeddingJobs.findFirst({ where: eq(embeddingJobs.id, id) });
+      if (!job) throw new NotFoundError("Resource not found");
+      profileId = job.profileId;
+      if (["requestEmbeddingJobCancellation", "resumeEmbeddingJob", "retryFailedEmbeddingJobItems"].includes(name) && call[2] !== authority.actor.id) throw new AuthorizationError();
+    }
+    if (name === "markEmbeddingGenerationActive") {
+      const generation = await db.query.embeddingGenerations.findFirst({ where: eq(embeddingGenerations.id, id) });
+      if (!generation) throw new NotFoundError("Resource not found");
+      profileId = generation.profileId;
+    }
+    const profile = await requireProfile(db, authority, profileId);
+    if (writes.includes(name)) requireProfileManagement(authority, profile,
+      ["updateEmbeddingProfile", "testEmbeddingProfile", "enableEmbeddingProfile", "markEmbeddingGenerationActive"].includes(name) || name === "setEmbeddingProfileStatus" && call[2] === "enabled");
+    if (name === "enableEmbeddingProfile") { call[3] = embeddingProvider(profile); call[4] = resourcePredicate(authority, documents); }
+    if (name === "setEmbeddingProfileStatus") call[4] = resourcePredicate(authority, documents);
+    if (name === "startEmbeddingRebuild") call[4] = resourcePredicate(authority, documents);
+    if (name === "listEmbeddingJobItems") call[2] = resourcePredicate(authority, documents);
+    if (name === "previewEmbeddingRebuild") call[2] = resourcePredicate(authority, documents);
+    return;
+  }
+  if (group === "package") {
+    if (name === "registerPackage") {
+      requireScope(authority, call[1]);
+      const existing = await db.query.skillPackages.findMany({ where: eq(skillPackages.name, call[1].name) });
+      for (const pkg of existing) {
+        if ((pkg.projectId ?? null) === (call[1].projectId ?? null)
+          && (pkg.personalOwnerId ?? null) === (call[1].personalOwnerId ?? null)
+          && (pkg.personalOwnerType ?? null) === (call[1].personalOwnerType ?? null))
+          await requirePackage(db, authority, pkg.id, "resource.write");
+      }
+      call[4] = resourcePredicate(authority, documents);
+      return;
+    }
+    if (name === "listPackages") {
+      if (id.projectId) await requireResource(db, authority, "project", id.projectId);
+      if (id.includePersonal && (id.personalOwnerId || id.personalOwnerType)) requireScope(authority, id, "resource.read");
+      call[2] = packageResourcePredicate(authority); return;
+    }
+    if (name === "getPackageMetadataForDocuments") {
+      for (const documentId of id) await requireResource(db, authority, "document", documentId);
+      call[2] = packageResourcePredicate(authority); return;
+    }
+    const reads = ["getPackage", "listPackageFiles", "readPackageTextFile", "downloadPackage", "verifyPackageStorage"];
+    const writes = ["reindexPackageTextFiles", "updatePackageMetadata", "updatePackageVersionStatus"];
+    if (!reads.includes(name) && !writes.includes(name)) throw new AuthorizationError();
+    const packageId = typeof id === "string" ? id : id.packageId;
+    await requirePackage(db, authority, packageId, writes.includes(name) ? "resource.write" : "resource.read");
+    if (name === "reindexPackageTextFiles") call[4] = resourcePredicate(authority, documents);
+    return;
+  }
+  if (name === "importSkill" || name === "bulkImportSkills") {
+    for (const input of name === "bulkImportSkills" ? id : [id]) requireScope(authority, input);
+    call[3] = resourcePredicate(authority, documents);
+    return;
+  }
   if (readById[name]) {
     const scope = await requireResource(db, authority, readById[name]!, id);
     const predicates = {
@@ -210,6 +280,7 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     call[2] = name === "searchTasks" ? taskResourcePredicate(authority)
       : name === "searchRequirements" ? resourcePredicate(authority, requirements)
       : name === "searchMemories" ? memoryResourcePredicate(authority) : resourcePredicate(authority, documents);
+    if (name === "searchContext" || name === "listSkills") call[3] = packageResourcePredicate(authority);
     if (name === "searchDocuments" || name === "searchDocumentsWithMetadata") call[3] = labelledResourcePredicate(authority, embeddingProfiles);
     return;
   }
@@ -296,6 +367,11 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
 }
 
 async function pruneRelations(db: Database, authority: ResourceAuthority, result: any): Promise<any> {
+  if (result instanceof Map) {
+    const visible = new Map();
+    for (const [key, value] of result) visible.set(key, await pruneRelations(db, authority, value));
+    return visible;
+  }
   if (Array.isArray(result)) {
     const visible = [];
     for (const row of result) {
@@ -323,6 +399,10 @@ async function pruneRelations(db: Database, authority: ResourceAuthority, result
   if (!result || typeof result !== "object" || result instanceof Date) return result;
   const copy = { ...result };
   if ("repositories" in copy) copy.repositories = [];
+  delete copy.storageObject;
+  if (copy.status === "storage_error" && "message" in copy) copy.message = "Package storage object is unavailable";
+  delete copy.objectKey;
+  delete copy.storageKeyPrefix;
   const targets: Record<string, ResourceKind> = { targetDoc: "document", sourceDoc: "document", document: "document", task: "task", dependsOn: "task", requirement: "requirement" };
   for (const key of ["outgoingLinks", "incomingLinks", "taskLinks", "requirementLinks", "documentLinks", "dependencies", "dependents"]) {
     if (!Array.isArray(copy[key])) continue;
@@ -343,4 +423,18 @@ async function pruneRelations(db: Database, authority: ResourceAuthority, result
     if (value && typeof value === "object" && !(value instanceof Date)) copy[key] = await pruneRelations(db, authority, value);
   }
   return copy;
+}
+
+function redactEmbeddingResult(authority: ResourceAuthority, value: any): any {
+  if (Array.isArray(value)) return value.map(item => redactEmbeddingResult(authority, item));
+  if (!value || typeof value !== "object" || value instanceof Date) return value;
+  const result = { ...value };
+  // Provider configuration is visible only to administrators with explicit resource management rights.
+  if ("secretRef" in result && !canManageProvider(authority, result)) {
+    result.secretRef = ""; result.baseUrl = "";
+  }
+  for (const key of ["lastErrorSummary", "errorSummary", "leaseOwner", "leaseToken", "requestReason"]) if (key in result) result[key] = null;
+  if (!("secretRef" in result) && "baseUrl" in result) result.baseUrl = "";
+  for (const [key, child] of Object.entries(result)) if (child && typeof child === "object" && !(child instanceof Date)) result[key] = redactEmbeddingResult(authority, child);
+  return result;
 }

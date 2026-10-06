@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { type SQL, and, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import {
   type Database,
   activityLog,
@@ -51,6 +51,7 @@ export async function registerPackage(
   input: RegisterSkillPackageInput,
   actor: Actor,
   storage: SkillPackageStorageAdapter,
+  authorizedDocumentPredicate?: SQL,
 ) {
   if (input.storageBackend !== storage.backend) {
     throw new ValidationError(`Storage backend "${input.storageBackend}" is not available`);
@@ -72,11 +73,11 @@ export async function registerPackage(
   });
 
   const version = existingVersion
-    ? await replaceExistingVersion(db, existingVersion.id, input, actor, storage, normalizedFiles)
+    ? await replaceExistingVersion(db, existingVersion.id, input, actor, storage, normalizedFiles, authorizedDocumentPredicate)
     : await createPackageVersion(db, pkg.id, input, actor, normalizedFiles);
 
   if (!existingVersion) {
-    await storeFiles(db, pkg.id, version.id, input, actor, storage, normalizedFiles);
+    await storeFiles(db, pkg.id, version.id, input, actor, storage, normalizedFiles, authorizedDocumentPredicate);
   }
 
   const files = await db.query.skillPackageFiles.findMany({
@@ -108,8 +109,8 @@ export async function registerPackage(
   return getPackage(db, pkg.id);
 }
 
-export async function listPackages(db: Database, input: ListSkillPackagesInput) {
-  const conditions = [buildPackageVisibilityCondition(input)];
+export async function listPackages(db: Database, input: ListSkillPackagesInput, authorizedPredicate?: SQL) {
+  const conditions = [buildPackageVisibilityCondition(input), authorizedPredicate];
   if (input.status) {
     conditions.push(eq(skillPackages.status, input.status));
   }
@@ -343,6 +344,7 @@ export async function reindexPackageTextFiles(
   input: ReindexSkillPackageInput,
   actor: Actor,
   storage: SkillPackageStorageAdapter,
+  authorizedDocumentPredicate?: SQL,
 ) {
   const version = await resolvePackageVersion(db, input.packageId, input.version);
   const pkg = await db.query.skillPackages.findFirst({
@@ -419,6 +421,7 @@ export async function reindexPackageTextFiles(
       },
       version.packageId,
       version.id,
+      authorizedDocumentPredicate,
     );
 
     if (file.indexedDocumentId !== indexedDocumentId) {
@@ -521,11 +524,13 @@ export async function updatePackageVersionStatus(
   return updated!;
 }
 
-export async function getPackageMetadataForDocuments(db: Database, documentIds: string[]) {
+export async function getPackageMetadataForDocuments(db: Database, documentIds: string[], authorizedPredicate?: SQL) {
   if (documentIds.length === 0) return new Map<string, unknown>();
 
   const files = await db.query.skillPackageFiles.findMany({
-    where: inArray(skillPackageFiles.indexedDocumentId, documentIds),
+    where: and(inArray(skillPackageFiles.indexedDocumentId, documentIds), authorizedPredicate ? inArray(skillPackageFiles.packageVersionId,
+      db.select({ id: skillPackageVersions.id }).from(skillPackageVersions)
+        .innerJoin(skillPackages, eq(skillPackages.id, skillPackageVersions.packageId)).where(authorizedPredicate)) : undefined),
     with: {
       packageVersion: {
         with: {
@@ -635,6 +640,7 @@ async function replaceExistingVersion(
   actor: Actor,
   storage: SkillPackageStorageAdapter,
   files: NormalizedRegisteredFile[],
+  authorizedDocumentPredicate?: SQL,
 ) {
   const existingFiles = await db.query.skillPackageFiles.findMany({
     where: eq(skillPackageFiles.packageVersionId, versionId),
@@ -673,7 +679,7 @@ async function replaceExistingVersion(
     .returning();
 
   const packageId = updated!.packageId;
-  await storeFiles(db, packageId, versionId, input, actor, storage, files);
+  await storeFiles(db, packageId, versionId, input, actor, storage, files, authorizedDocumentPredicate);
   return updated!;
 }
 
@@ -685,6 +691,7 @@ async function storeFiles(
   actor: Actor,
   storage: SkillPackageStorageAdapter,
   files: NormalizedRegisteredFile[],
+  authorizedDocumentPredicate?: SQL,
 ) {
   for (const file of files) {
     const objectKey = [input.storageKeyPrefix, "skill-packages", packageId, versionId, file.path]
@@ -712,7 +719,7 @@ async function storeFiles(
       .returning();
 
     const indexedDocumentId = file.isReadableText
-      ? await upsertIndexedDocument(db, input, actor, file, packageId, versionId)
+      ? await upsertIndexedDocument(db, input, actor, file, packageId, versionId, authorizedDocumentPredicate)
       : null;
 
     await db.insert(skillPackageFiles).values({
@@ -738,6 +745,7 @@ async function upsertIndexedDocument(
   file: NormalizedRegisteredFile,
   packageId: string,
   versionId: string,
+  authorizedDocumentPredicate?: SQL,
 ) {
   const title = file.path === input.entryPath ? input.name : `${input.name}/${file.path}`;
   const content = file.content.toString("utf8");
@@ -758,7 +766,7 @@ async function upsertIndexedDocument(
       )!
       : and(isNull(documents.projectId), isNull(documents.personalOwnerId))!;
   const existing = await db.query.documents.findFirst({
-    where: or(
+    where: and(legacyScope, authorizedDocumentPredicate, or(
       and(
         eq(documents.docType, "skill"),
         eq(documents.title, title),
@@ -772,7 +780,7 @@ async function upsertIndexedDocument(
         isNull(documents.generationPrompt),
         legacyScope,
       ),
-    ),
+    )),
   });
 
   if (existing) {
@@ -787,7 +795,7 @@ async function upsertIndexedDocument(
       personalOwnerType: input.personalOwnerType ?? null,
       generatedBy: actor.id,
       generationPrompt,
-    }, actor);
+    }, actor, authorizedDocumentPredicate);
     return updated.id;
   }
 
@@ -803,7 +811,7 @@ async function upsertIndexedDocument(
     personalOwnerType: input.personalOwnerType ?? undefined,
     generatedBy: actor.id,
     generationPrompt,
-  }, actor);
+  }, actor, authorizedDocumentPredicate);
   return created.id;
 }
 

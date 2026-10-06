@@ -1,11 +1,8 @@
 import { z } from "zod";
-import { router, resourceProcedure, ordinaryResourceProcedure } from "../init";
+import { router, ordinaryResourceProcedure } from "../init";
 import {
-  contextService,
   createResourceServices,
   personalResourceOwnerId,
-  documentService,
-  skillPackageService,
   skillPackageStorageService,
   importSkillSchema,
   registerSkillPackageSchema,
@@ -57,13 +54,13 @@ export const skillRouter = router({
       return createResourceServices(ctx.identity).documentService.getDocument(ctx.db, input.id);
     }),
 
-  create: resourceProcedure
+  create: ordinaryResourceProcedure
     .input(importSkillSchema)
     .mutation(async ({ ctx, input }) => {
-      return contextService.importSkill(ctx.db, input, ctx.actor);
+      return createResourceServices(ctx.identity).contextService.importSkill(ctx.db, input, ctx.actor);
     }),
 
-  update: resourceProcedure
+  update: ordinaryResourceProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -80,7 +77,7 @@ export const skillRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      return documentService.updateDocument(
+      return createResourceServices(ctx.identity).documentService.updateDocument(
         ctx.db,
         input.id,
         {
@@ -91,28 +88,28 @@ export const skillRouter = router({
       );
     }),
 
-  delete: resourceProcedure
+  delete: ordinaryResourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      return documentService.deleteDocument(ctx.db, input.id, ctx.actor);
+      return createResourceServices(ctx.identity).documentService.deleteDocument(ctx.db, input.id, ctx.actor);
     }),
 
-  packageList: resourceProcedure
+  packageList: ordinaryResourceProcedure
     .input(listSkillPackagesSchema)
     .query(async ({ ctx, input }) => {
-      return skillPackageService.listPackages(ctx.db, input);
+      return createResourceServices(ctx.identity).skillPackageService.listPackages(ctx.db, input);
     }),
 
-  packageGet: resourceProcedure
+  packageGet: ordinaryResourceProcedure
     .input(getSkillPackageSchema)
     .query(async ({ ctx, input }) => {
-      return skillPackageService.getPackage(ctx.db, input.packageId);
+      return createResourceServices(ctx.identity).skillPackageService.getPackage(ctx.db, input.packageId);
     }),
 
-  packageRegister: resourceProcedure
+  packageRegister: ordinaryResourceProcedure
     .input(registerSkillPackageSchema)
     .mutation(async ({ ctx, input }) => {
-      return skillPackageService.registerPackage(
+      return createResourceServices(ctx.identity).skillPackageService.registerPackage(
         ctx.db,
         input,
         ctx.actor,
@@ -120,46 +117,46 @@ export const skillRouter = router({
       );
     }),
 
-  packageFiles: resourceProcedure
+  packageFiles: ordinaryResourceProcedure
     .input(listSkillPackageFilesSchema)
     .query(async ({ ctx, input }) => {
-      return skillPackageService.listPackageFiles(ctx.db, input);
+      return createResourceServices(ctx.identity).skillPackageService.listPackageFiles(ctx.db, input);
     }),
 
-  packageRead: resourceProcedure
+  packageRead: ordinaryResourceProcedure
     .input(readSkillPackageFileSchema)
     .query(async ({ ctx, input }) => {
-      return skillPackageService.readPackageTextFile(
+      return createResourceServices(ctx.identity).skillPackageService.readPackageTextFile(
         ctx.db,
         input,
         createSkillPackageStorage(),
       );
     }),
 
-  packageDownload: resourceProcedure
+  packageDownload: ordinaryResourceProcedure
     .input(downloadSkillPackageSchema)
     .query(async ({ ctx, input }) => {
-      return skillPackageService.downloadPackage(
+      return createResourceServices(ctx.identity).skillPackageService.downloadPackage(
         ctx.db,
         input,
         createSkillPackageStorage(),
       );
     }),
 
-  packageHealth: resourceProcedure
+  packageHealth: ordinaryResourceProcedure
     .input(verifySkillPackageStorageSchema)
     .query(async ({ ctx, input }) => {
-      return skillPackageService.verifyPackageStorage(
+      return createResourceServices(ctx.identity).skillPackageService.verifyPackageStorage(
         ctx.db,
         input,
         createSkillPackageStorage(),
       );
     }),
 
-  packageReindex: resourceProcedure
+  packageReindex: ordinaryResourceProcedure
     .input(reindexSkillPackageSchema)
     .mutation(async ({ ctx, input }) => {
-      return skillPackageService.reindexPackageTextFiles(
+      return createResourceServices(ctx.identity).skillPackageService.reindexPackageTextFiles(
         ctx.db,
         input,
         ctx.actor,
@@ -167,15 +164,15 @@ export const skillRouter = router({
       );
     }),
 
-  packageUpdate: resourceProcedure
+  packageUpdate: ordinaryResourceProcedure
     .input(updateSkillPackageMetadataSchema)
     .mutation(async ({ ctx, input }) => {
-      return skillPackageService.updatePackageMetadata(ctx.db, input, ctx.actor);
+      return createResourceServices(ctx.identity).skillPackageService.updatePackageMetadata(ctx.db, input, ctx.actor);
     }),
 
-  packageVersionStatus: resourceProcedure
+  packageVersionStatus: ordinaryResourceProcedure
     .input(updateSkillPackageVersionStatusSchema)
     .mutation(async ({ ctx, input }) => {
-      return skillPackageService.updatePackageVersionStatus(ctx.db, input, ctx.actor);
+      return createResourceServices(ctx.identity).skillPackageService.updatePackageVersionStatus(ctx.db, input, ctx.actor);
     }),
 });

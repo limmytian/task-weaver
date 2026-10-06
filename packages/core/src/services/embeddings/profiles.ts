@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import {
   type Database,
   activityLog,
@@ -137,8 +137,9 @@ export async function listEmbeddingGenerations(db: Database, profileId: string) 
   });
 }
 
-export async function listEmbeddingProfiles(db: Database) {
+export async function listEmbeddingProfiles(db: Database, authorizedPredicate?: SQL) {
   return db.query.embeddingProfiles.findMany({
+    where: authorizedPredicate,
     orderBy: [asc(embeddingProfiles.scope), asc(embeddingProfiles.name)],
   });
 }
@@ -204,6 +205,7 @@ export async function setEmbeddingProfileStatus(
   profileId: string,
   status: "disabled" | "enabled",
   actor: Actor,
+  authorizedDocumentPredicate?: SQL,
 ) {
   const current = await getProfile(db, profileId);
   assertEmbeddingProfileTransition(current.status, status);
@@ -232,7 +234,7 @@ export async function setEmbeddingProfileStatus(
     .where(eq(embeddingProfiles.id, profileId))
     .returning();
   if (!updated) throw new NotFoundError("Embedding profile not found");
-  if (status === "enabled") await catchUpEmbeddingProfile(db, profileId, actor);
+  if (status === "enabled") await catchUpEmbeddingProfile(db, profileId, actor, authorizedDocumentPredicate);
   await db.insert(activityLog).values({
     entityType: "embedding_profile",
     entityId: profileId,
@@ -247,10 +249,12 @@ export async function enableEmbeddingProfile(
   db: Database,
   profileId: string,
   actor: Actor,
-  provider: EmbeddingProvider,
+  provider?: EmbeddingProvider,
+  authorizedDocumentPredicate?: SQL,
 ) {
   const profile = await getProfile(db, profileId);
   try {
+    if (!provider) throw new ValidationError("Embedding provider is required");
     const capabilities = await provider.validateConfiguration();
     if (capabilities.dimensions !== profile.dimensions || capabilities.model !== profile.model) {
       throw new ValidationError("Embedding provider capabilities do not match the configured profile");
@@ -258,7 +262,7 @@ export async function enableEmbeddingProfile(
     await db.update(embeddingProfiles)
       .set({ lastValidatedAt: new Date(), lastErrorCode: null, lastErrorSummary: null, updatedAt: new Date() })
       .where(eq(embeddingProfiles.id, profile.id));
-    return setEmbeddingProfileStatus(db, profile.id, "enabled", actor);
+    return setEmbeddingProfileStatus(db, profile.id, "enabled", actor, authorizedDocumentPredicate);
   } catch (error) {
     const errorCode = error instanceof ValidationError
       ? "invalid_config"
@@ -415,6 +419,7 @@ export async function startEmbeddingRebuild(
   profileId: string,
   kind: "full" | "forced",
   actor: Actor,
+  authorizedDocumentPredicate?: SQL,
 ) {
   const generation = await createEmbeddingGeneration(db, profileId, actor);
   return createEmbeddingJob(db, {
@@ -422,12 +427,12 @@ export async function startEmbeddingRebuild(
     generationId: generation.id,
     kind,
     maxRetries: 5,
-  }, actor);
+  }, actor, authorizedDocumentPredicate);
 }
 
-export async function previewEmbeddingRebuild(db: Database, profileId: string) {
+export async function previewEmbeddingRebuild(db: Database, profileId: string, authorizedDocumentPredicate?: SQL) {
   const profile = await getProfile(db, profileId);
-  const scopedDocuments = await db.query.documents.findMany({ where: profileDocumentsCondition(profile), columns: { id: true } });
+  const scopedDocuments = await db.query.documents.findMany({ where: and(profileDocumentsCondition(profile), authorizedDocumentPredicate), columns: { id: true } });
   const states = scopedDocuments.length === 0
     ? []
     : await db.query.documentEmbeddingStates.findMany({

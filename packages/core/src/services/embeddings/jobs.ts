@@ -8,6 +8,7 @@ import {
   lt,
   or,
   sql,
+  type SQL,
 } from "drizzle-orm";
 import {
   type Database,
@@ -153,6 +154,7 @@ export async function createEmbeddingJob(
   db: Database,
   input: CreateEmbeddingJobInput,
   actor: Actor,
+  authorizedDocumentPredicate?: SQL,
 ) {
   const profile = await getProfile(db, input.profileId);
   const generation = input.generationId ? await getGeneration(db, input.generationId) : null;
@@ -181,7 +183,7 @@ export async function createEmbeddingJob(
 
   if (input.kind === "full" || input.kind === "forced") {
     const scopedDocuments = await db.query.documents.findMany({
-      where: profileDocumentsCondition(profile),
+      where: and(profileDocumentsCondition(profile), authorizedDocumentPredicate),
       columns: { id: true, version: true, content: true, title: true },
     });
     if (scopedDocuments.length > 0) {
@@ -370,10 +372,10 @@ export async function reconcileDocumentEmbeddingCoverage(
   return reconciled;
 }
 
-export async function catchUpEmbeddingProfile(db: Database, profileId: string, actor: Actor) {
+export async function catchUpEmbeddingProfile(db: Database, profileId: string, actor: Actor, authorizedDocumentPredicate?: SQL) {
   const profile = await getProfile(db, profileId);
   const scopedDocuments = await db.query.documents.findMany({
-    where: profileDocumentsCondition(profile),
+    where: and(profileDocumentsCondition(profile), authorizedDocumentPredicate),
   });
   for (const document of scopedDocuments) {
     await reconcileDocumentEmbeddingCoverage(db, toEmbeddingDocumentSource(document), actor);
@@ -886,9 +888,9 @@ export async function getEmbeddingJob(db: Database, jobId: string) {
   return db.query.embeddingJobs.findFirst({ where: eq(embeddingJobs.id, jobId) });
 }
 
-export async function listEmbeddingJobItems(db: Database, jobId: string) {
+export async function listEmbeddingJobItems(db: Database, jobId: string, authorizedDocumentPredicate?: SQL) {
   return db.query.embeddingJobItems.findMany({
-    where: eq(embeddingJobItems.jobId, jobId),
+    where: and(eq(embeddingJobItems.jobId, jobId), authorizedDocumentPredicate ? inArray(embeddingJobItems.documentId, db.select({ id: documents.id }).from(documents).where(authorizedDocumentPredicate)) : undefined),
     orderBy: [asc(embeddingJobItems.createdAt)],
   });
 }

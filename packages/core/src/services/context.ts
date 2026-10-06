@@ -1,6 +1,6 @@
 import { documentSearchVector } from "./search-vector";
 import { type SQL, and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
-import { type Database, documents } from "@task-weaver/db";
+import { type Database, documents, skillPackages } from "@task-weaver/db";
 import type { Actor } from "@task-weaver/contracts";
 import type { SearchContextInput, ImportSkillInput } from "@task-weaver/contracts";
 import * as documentService from "./documents";
@@ -34,7 +34,7 @@ function buildTsQuery(query: string): string | null {
   return tsQuery || null;
 }
 
-export async function searchContext(db: Database, input: SearchContextInput, authorizedPredicate?: SQL) {
+export async function searchContext(db: Database, input: SearchContextInput, authorizedPredicate?: SQL, authorizedPackagePredicate?: SQL) {
   const searchVector = await documentSearchVector(db);
   const tsQuery = buildTsQuery(input.intent);
   const likePattern = `%${input.intent}%`;
@@ -43,6 +43,7 @@ export async function searchContext(db: Database, input: SearchContextInput, aut
   const conditions = [authorizedPredicate];
   conditions.push(eq(documents.docType, "skill"));
 
+  if (authorizedPackagePredicate) conditions.push(availablePackageDocument(authorizedPackagePredicate));
   conditions.push(buildSkillScopeCondition(input));
 
   if (input.tags && input.tags.length > 0) {
@@ -70,7 +71,7 @@ export async function searchContext(db: Database, input: SearchContextInput, aut
       .where(and(...conditions))
       .orderBy(sql`score DESC`)
       .limit(input.limit);
-    return authorizedPredicate ? results : enrichSkillPackageResults(db, results);
+    return enrichSkillPackageResults(db, results, authorizedPackagePredicate);
   }
 
   // Fallback: keyword-only search
@@ -86,17 +87,18 @@ export async function searchContext(db: Database, input: SearchContextInput, aut
     .from(documents)
     .where(and(...conditions))
     .limit(input.limit);
-  return authorizedPredicate ? results : enrichSkillPackageResults(db, results);
+  return enrichSkillPackageResults(db, results, authorizedPackagePredicate);
 }
 
 export async function importSkill(
   db: Database,
   input: ImportSkillInput,
   actor: Actor,
+  authorizedDocumentPredicate?: SQL,
 ) {
   const existing = await db.query.documents.findFirst({
     where: and(
-      eq(documents.docType, "skill"),
+      eq(documents.docType, "skill"), authorizedDocumentPredicate,
       eq(documents.title, input.title),
       input.personalOwnerId && input.personalOwnerType
         ? and(
@@ -120,7 +122,7 @@ export async function importSkill(
       projectId: input.projectId ?? null,
       personalOwnerId: input.personalOwnerId ?? null,
       personalOwnerType: input.personalOwnerType ?? null,
-    }, actor);
+    }, actor, authorizedDocumentPredicate);
   }
 
   return documentService.createDocument(db, {
@@ -134,17 +136,18 @@ export async function importSkill(
     personalOwnerId: input.personalOwnerId,
     personalOwnerType: input.personalOwnerType,
     generatedBy: actor.id,
-  }, actor);
+  }, actor, authorizedDocumentPredicate);
 }
 
 export async function bulkImportSkills(
   db: Database,
   skills: ImportSkillInput[],
   actor: Actor,
+  authorizedDocumentPredicate?: SQL,
 ) {
   const results = [];
   for (const skill of skills) {
-    results.push(await importSkill(db, skill, actor));
+    results.push(await importSkill(db, skill, actor, authorizedDocumentPredicate));
   }
   return results;
 }
@@ -196,9 +199,11 @@ export async function listSkills(
     personalOwnerType?: "human" | "agent";
   },
   authorizedPredicate?: SQL,
+  authorizedPackagePredicate?: SQL,
 ) {
   const conditions = [eq(documents.docType, "skill"), authorizedPredicate];
 
+  if (authorizedPackagePredicate) conditions.push(availablePackageDocument(authorizedPackagePredicate));
   conditions.push(buildSkillScopeCondition({ includeGlobal: true, ...opts }));
 
   if (opts?.tags && opts.tags.length > 0) {
@@ -210,14 +215,15 @@ export async function listSkills(
     .from(documents)
     .where(and(...conditions))
     .orderBy(documents.title);
-  return authorizedPredicate ? results : enrichSkillPackageResults(db, results);
+  return enrichSkillPackageResults(db, results, authorizedPackagePredicate);
 }
 
 async function enrichSkillPackageResults<T extends { id: string }>(
   db: Database,
   results: T[],
+  authorizedPackagePredicate?: SQL,
 ): Promise<Array<T & { skillPackage?: unknown }>> {
-  const packageMetadataByDocumentId = await getPackageMetadataForDocuments(db, results.map((result) => result.id));
+  const packageMetadataByDocumentId = await getPackageMetadataForDocuments(db, results.map((result) => result.id), authorizedPackagePredicate);
   return results
     .filter((result) => {
       const metadata = packageMetadataByDocumentId.get(result.id) as { active?: boolean } | undefined;
@@ -266,4 +272,17 @@ function buildSkillScopeCondition(input: {
   }
 
   return or(...scopes)!;
+}
+
+/** Filter package-backed documents before ranking and pagination. */
+function availablePackageDocument(predicate: SQL): SQL {
+  return sql`NOT EXISTS (
+    SELECT 1 FROM skill_package_files pf
+    JOIN skill_package_versions pv ON pv.id = pf.package_version_id
+    WHERE pf.indexed_document_id = documents.id AND NOT EXISTS (
+      SELECT 1 FROM ${skillPackages}
+      WHERE ${skillPackages.id} = pv.package_id AND ${predicate}
+      AND ${skillPackages.status} = 'active' AND pv.status = 'active'
+    )
+  )`;
 }
