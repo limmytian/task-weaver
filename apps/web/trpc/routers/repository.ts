@@ -18,11 +18,11 @@ export const repositoryRouter = router({
       const { id, ...readiness } = input;
       return createResourceServices(ctx.identity).repositoryService.getRepository(ctx.db, id, ctx.actor, readiness);
     }),
-  create: resourceProcedure.input(createRepositorySchema).mutation(({ ctx, input }) =>
+  create: ordinaryResourceProcedure.input(createRepositorySchema).mutation(({ ctx, input }) =>
     createResourceServices(ctx.identity).repositoryService.createRepository(ctx.db, input, ctx.actor)),
-  update: resourceProcedure.input(z.object({ id: z.string().uuid(), data: updateRepositorySchema }))
+  update: ordinaryResourceProcedure.input(z.object({ id: z.string().uuid(), data: updateRepositorySchema }))
     .mutation(({ ctx, input }) => createResourceServices(ctx.identity).repositoryService.updateRepository(ctx.db, input.id, input.data, ctx.actor)),
-  archive: resourceProcedure.input(z.object({ id: z.string().uuid() })).mutation(({ ctx, input }) =>
+  archive: ordinaryResourceProcedure.input(z.object({ id: z.string().uuid() })).mutation(({ ctx, input }) =>
     createResourceServices(ctx.identity).repositoryService.archiveRepository(ctx.db, input.id, ctx.actor)),
   readiness: ordinaryResourceProcedure.input(z.object({ id: z.string().uuid() }).merge(repositoryReadinessInputSchema))
     .query(({ ctx, input }) => {
@@ -31,13 +31,13 @@ export const repositoryRouter = router({
     }),
   listForRequirement: ordinaryResourceProcedure.input(z.object({ requirementId: z.string().uuid() }))
     .query(({ ctx, input }) => createResourceServices(ctx.identity).repositoryService.listRequirementRepositories(ctx.db, input.requirementId, ctx.actor)),
-  addToRequirement: resourceProcedure
+  addToRequirement: ordinaryResourceProcedure
     .input(z.object({ requirementId: z.string().uuid() }).merge(addRequirementRepositorySchema))
     .mutation(({ ctx, input }) => {
       const { requirementId, ...data } = input;
       return createResourceServices(ctx.identity).repositoryService.addRequirementRepository(ctx.db, requirementId, data, ctx.actor);
     }),
-  removeFromRequirement: resourceProcedure
+  removeFromRequirement: ordinaryResourceProcedure
     .input(z.object({ requirementId: z.string().uuid(), repositoryId: z.string().uuid() }))
     .mutation(({ ctx, input }) => createResourceServices(ctx.identity).repositoryService.removeRequirementRepository(
       ctx.db, input.requirementId, input.repositoryId, ctx.actor,
@@ -62,11 +62,11 @@ export const repositoryRouter = router({
   )),
   listForTask: ordinaryResourceProcedure.input(z.object({ taskId: z.string().uuid() }))
     .query(({ ctx, input }) => createResourceServices(ctx.identity).repositoryService.listTaskRepositories(ctx.db, input.taskId, ctx.actor)),
-  addToTask: resourceProcedure.input(z.object({ taskId: z.string().uuid() }).merge(addTaskRepositorySchema))
+  addToTask: ordinaryResourceProcedure.input(z.object({ taskId: z.string().uuid() }).merge(addTaskRepositorySchema))
     .mutation(({ ctx, input }) => {
       const { taskId, ...data } = input;
       return createResourceServices(ctx.identity).repositoryService.addTaskRepository(ctx.db, taskId, data, ctx.actor);
     }),
-  removeFromTask: resourceProcedure.input(z.object({ taskId: z.string().uuid(), repositoryId: z.string().uuid() }))
+  removeFromTask: ordinaryResourceProcedure.input(z.object({ taskId: z.string().uuid(), repositoryId: z.string().uuid() }))
     .mutation(({ ctx, input }) => createResourceServices(ctx.identity).repositoryService.removeTaskRepository(ctx.db, input.taskId, input.repositoryId, ctx.actor)),
 });

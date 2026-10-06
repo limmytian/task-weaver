@@ -1,5 +1,10 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
+  ["POST", new RegExp("^/api/v1/repositories/?$")],
+  ["PATCH", new RegExp("^/api/v1/repositories/[0-9a-fA-F-]{36}/?$")],
+  ["DELETE", new RegExp("^/api/v1/repositories/[0-9a-fA-F-]{36}/?$")],
+  ["POST", new RegExp("^/api/v1/(?:requirements|tasks)/[0-9a-fA-F-]{36}/repositories/?$")],
+  ["DELETE", new RegExp("^/api/v1/(?:requirements|tasks)/[0-9a-fA-F-]{36}/repositories/[0-9a-fA-F-]{36}/?$")],
   ["GET", new RegExp("^/api/v1/repositories(?:/[0-9a-fA-F-]{36}(?:/readiness)?)?/?$")],
   ["GET", new RegExp("^/api/v1/(?:requirements|tasks)/[0-9a-fA-F-]{36}/repositories/?$")],
   ["GET", new RegExp("^/api/v1/mcp/(?:servers(?:/[0-9a-fA-F-]{36})?|tools/(?:search|[0-9a-fA-F-]{36}))/?$")],

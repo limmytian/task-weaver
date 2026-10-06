@@ -7,7 +7,7 @@ import { createTRPCContextFactory } from "../apps/web/trpc/init";
 import { appRouter } from "../apps/web/trpc/routers/_app";
 const apiRequire = createRequire(new URL("../apps/api/package.json", import.meta.url));
 const { createDb, runMigrations, authInstanceState, authRateLimits, repositories, requirementRepositories, taskRepositories } = apiRequire("@task-weaver/db");
-const { createAuthenticationRuntime, createResourceServices, NotFoundError, AuthorizationError, listRepositoriesSchema } = apiRequire("@task-weaver/core");
+const { createAuthenticationRuntime, createResourceServices, NotFoundError, AuthorizationError, listRepositoriesSchema, createRepositorySchema } = apiRequire("@task-weaver/core");
 const { eq, like } = apiRequire("drizzle-orm");
 const databaseUrl = process.env.TW_AUTH_E2E_DATABASE_URL;
 
@@ -100,7 +100,7 @@ test("repository catalog separates visibility, relations and readiness", { skip:
     const context = await runtime.verify(new Headers({ authorization: `Bearer ${key.rawKey}` }));
     assert.equal((await createResourceServices(context).repositoryService.listRepositories(db, input, owner.actor)).total, 0);
   });
-  await t.test("REST and tRPC share the catalog scope without opening mutations", async () => {
+  await t.test("REST and tRPC share the catalog scope and deny unauthorized mutations", async () => {
     assert.equal((await rest(`repositories/${hidden.id}`, owner.headers)).status, 404);
     const response = await rest(`repositories/${shared.id}`, admin.headers);
     assert.equal(response.status, 200); assert.equal(response.body.requirements.length, 0);
@@ -120,4 +120,66 @@ test("repository catalog separates visibility, relations and readiness", { skip:
     await assert.rejects(viewer.service.repositoryService.updateRepository(db, shared.id, { displayName: "forged" }, viewer.actor), AuthorizationError);
     await assert.rejects(owner.service.repositoryService.getRepositoryReadiness(db, hidden.id, owner.actor, { operation: "read", nodeId: "forged-node" }), NotFoundError);
   });
+  const input = (visibility: string, ownerId?: string) => createRepositorySchema.parse({ host: "example.test", namespace: "fixture", name: randomUUID(), visibility, ...(ownerId ? { ownerId, ownerType: "human" } : {}) });
+  await t.test("shared catalog requires administrator and explicit Key management grants", async () => {
+    await assert.rejects(owner.service.repositoryService.createRepository(db, input("instance"), owner.actor), AuthorizationError);
+    const row = await admin.service.repositoryService.createRepository(db, input("instance"), admin.actor);
+    assert.equal((await rest(`repositories/${row.id}`, admin.headers, "PATCH", { displayName: "Updated shared" })).status, 200);
+    const key = await runtime.identity.issueKey(admin.headers, admin.actor.id, { name: "Catalog read-only", grants: [{ scope: "global", permissions: ["resource.read"] }], expiresAt: null });
+    const context = await runtime.verify(new Headers({ authorization: `Bearer ${key.rawKey}` }));
+    await assert.rejects(createResourceServices(context).repositoryService.updateRepository(db, row.id, { displayName: "Denied" }, admin.actor), AuthorizationError);
+    assert.equal((await rest(`repositories/${row.id}`, admin.headers, "DELETE")).status, 200);
+  });
+  await t.test("personal management keeps ownership human and denies administrator content access", async () => {
+    const row = await owner.service.repositoryService.createRepository(db, input("private", owner.actor.id), owner.actor);
+    assert.equal(row.ownerId, owner.actor.id);
+    await assert.rejects(admin.service.repositoryService.archiveRepository(db, row.id, admin.actor), NotFoundError);
+    await assert.rejects(owner.service.repositoryService.updateRepository(db, row.id, { visibility: "instance", ownerId: null, ownerType: null }, owner.actor), AuthorizationError);
+    await assert.rejects(owner.service.repositoryService.updateRepository(db, row.id, { ownerId: outsider.actor.id }, owner.actor), AuthorizationError);
+    await assert.rejects(owner.service.repositoryService.updateRepository(db, row.id, { ownerType: "agent" }, owner.actor));
+    const key = await runtime.identity.issueKey(owner.headers, owner.actor.id, { name: "Personal ordinary write", grants: [{ scope: "personal", actorId: owner.actor.id, permissions: ["resource.read", "resource.write"] }], expiresAt: null });
+    const service = createResourceServices(await runtime.verify(new Headers({ authorization: `Bearer ${key.rawKey}` })));
+    await assert.rejects(service.repositoryService.updateRepository(db, row.id, { displayName: "Denied" }, owner.actor), AuthorizationError);
+    assert.equal((await (await caller(owner.headers)).repository.update({ id: row.id, data: { displayName: "Owner update" } })).displayName, "Owner update");
+    await owner.service.repositoryService.archiveRepository(db, row.id, owner.actor);
+  });
+  await t.test("project management links both authorized resources without editing the catalog", async () => {
+    const row = await admin.service.repositoryService.createRepository(db, input("instance"), admin.actor);
+    await runtime.identity.setMembership(owner.headers, project.id, member.actor.id, { role: "maintainer" });
+    await member.service.repositoryService.addRequirementRepository(db, requirement.id, { repositoryId: row.id }, member.actor);
+    await member.service.repositoryService.addTaskRepository(db, task.id, { repositoryId: row.id, addToRequirement: false }, member.actor);
+    await assert.rejects(member.service.repositoryService.updateRepository(db, row.id, { authPolicy: {} }, member.actor), AuthorizationError);
+    await assert.rejects(member.service.repositoryService.addRequirementRepository(db, otherRequirement.id, { repositoryId: row.id }, member.actor), NotFoundError);
+    await assert.rejects(member.service.repositoryService.addRequirementRepository(db, requirement.id, { repositoryId: hidden.id }, member.actor), NotFoundError);
+    await assert.rejects(viewer.service.repositoryService.removeTaskRepository(db, task.id, row.id, viewer.actor), AuthorizationError);
+    await member.service.repositoryService.removeTaskRepository(db, task.id, row.id, member.actor);
+    await member.service.repositoryService.removeRequirementRepository(db, requirement.id, row.id, member.actor);
+  });
+  await t.test("Agent management needs an explicit personal grant and attributes the Agent separately", async () => {
+    const agent = await runtime.identity.createAgent(owner.headers, { displayName: "Repository fixture Agent" });
+    async function credential(permissions: string[]) {
+      const key = await runtime.identity.issueKey(owner.headers, agent.id, { name: "Agent personal catalog", grants: [{ scope: "personal", actorId: owner.actor.id, permissions }], expiresAt: null });
+      return { key, service: createResourceServices(await runtime.verify(new Headers({ authorization: `Bearer ${key.rawKey}` }))) };
+    }
+    const actor = { id: agent.id, type: "agent" };
+    const limited = await credential(["resource.read", "resource.write"]);
+    await assert.rejects(limited.service.repositoryService.createRepository(db, input("private", owner.actor.id), actor), AuthorizationError);
+    const granted = await credential(["resource.read", "repository.manage"]);
+    const row = await granted.service.repositoryService.createRepository(db, input("private", owner.actor.id), actor);
+    assert.equal(row.ownerId, owner.actor.id); assert.equal(row.ownerType, "human"); assert.equal(row.createdBy, agent.id);
+    await granted.service.repositoryService.updateRepository(db, row.id, { displayName: "Agent update" }, actor);
+    await runtime.identity.revokeKey(owner.headers, agent.id, granted.key.id);
+    await assert.rejects(granted.service.repositoryService.archiveRepository(db, row.id, actor));
+  });
+  await t.test("nested links exclude foreign catalogs and invalid task workspace pointers", async () => {
+    await db.insert(taskRepositories).values({ taskId: task.id, repositoryId: hidden.id, createdBy: outsider.actor.id });
+    const detail = await owner.service.taskService.getTaskDetail(db, task.id);
+    assert.ok(detail.repositories.some((link: any) => link.repositoryId === shared.id));
+    assert.ok(!detail.repositories.some((link: any) => link.repositoryId === hidden.id));
+    assert.ok(!JSON.stringify(detail).includes("fixture-only-reference"));
+    const row = await admin.service.repositoryService.createRepository(db, input("instance"), admin.actor);
+    await db.insert(taskRepositories).values({ taskId: task.id, repositoryId: row.id, createdBy: owner.actor.id });
+    assert.ok(!(await owner.service.repositoryService.listTaskRepositories(db, task.id, owner.actor)).some((link: any) => link.repository.id === row.id));
+  });
+
 });

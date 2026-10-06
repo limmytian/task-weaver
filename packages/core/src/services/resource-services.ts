@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import {
   type Database, projects, requirements, tasks, documents, memories, executionSlices,
-  mcpTools, mcpLocalRequests, skillPackages, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
+  mcpTools, mcpLocalRequests, requirementRepositories, skillPackages, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
   documentRequirementLinks, projectMemberships, activityLog,
 } from "@task-weaver/db";
 import {
@@ -19,7 +19,7 @@ import * as contextImplementation from "./context";
 import { invokeMcpTool, pollLocalToolRequests, completeLocalToolRequest } from "./mcp-local";
 import { mcpServerPredicate, requireMcpServer, requireLocalHost, credentialBinding } from "./mcp-authorization";
 import * as repositoryImplementation from "./repositories";
-import { repositoryPredicate, requireRepository } from "./repository-authorization";
+import { repositoryPredicate, requireRepository, requireCatalogManagement } from "./repository-authorization";
 import * as mcpImplementation from "./mcp-registry";
 import * as embeddingImplementation from "./embeddings/index";
 import { testEmbeddingProfile, embeddingProvider } from "./embedding-configuration";
@@ -178,7 +178,36 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
       await requireResource(db, authority, name === "listTaskRepositories" ? "task" : "requirement", id);
       call[3] = visibility; return;
     }
-    // Catalog management and delivery stay closed until their scoped policies are installed.
+    if (name === "createRepository") {
+      await requireCatalogManagement(db, authority, id); return;
+    }
+    if (name === "updateRepository" || name === "archiveRepository") {
+      const current = await requireRepository(db, authority, id);
+      await requireCatalogManagement(db, authority, current);
+      if (name === "updateRepository") {
+        const next = { ...current, ...call[2] };
+        await requireCatalogManagement(db, authority, next);
+        if (current.visibility !== next.visibility || current.ownerId !== next.ownerId || current.ownerType !== next.ownerType)
+          await auditIdentity(db, "repository.scope_changed", authority.actor.id, authority.actor.id, id, { fromVisibility: current.visibility, toVisibility: next.visibility, fromOwnerId: current.ownerId ?? "", toOwnerId: next.ownerId ?? "" });
+        call[4] = visibility;
+      } else call[3] = visibility;
+      return;
+    }
+    if (["addRequirementRepository", "removeRequirementRepository", "addTaskRepository", "removeTaskRepository"].includes(name)) {
+      const kind = name.includes("Task") ? "task" : "requirement";
+      const scope = await requireResource(db, authority, kind, id, "repository.manage");
+      const repositoryId = typeof call[2] === "string" ? call[2] : call[2].repositoryId;
+      await requireRepository(db, authority, repositoryId);
+      if (name === "addTaskRepository") {
+        const task = await db.query.tasks.findFirst({ where: eq(tasks.id, id) });
+        if (task!.scope !== "project" || !task!.requirementId) throw new ValidationError("Only project tasks can link repositories");
+        const requirement = await requireResource(db, authority, "requirement", task!.requirementId, "repository.manage");
+        if (requirement.projectId !== scope.projectId) throw new ValidationError("Task repository links must remain in their project");
+      }
+      if (name.startsWith("add")) call[4] = visibility;
+      return;
+    }
+    // Execution delivery requires its later task-bound delegation implementation.
     throw new AuthorizationError();
   }
   if (group === "mcp") {
@@ -432,6 +461,18 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
   throw new AuthorizationError();
 }
 
+async function checkRepositoryLink(db: Database, authority: ResourceAuthority, link: any) {
+  await requireRepository(db, authority, link.repositoryId);
+  if (link.requirementId) await requireResource(db, authority, "requirement", link.requirementId);
+  if (link.taskId) {
+    await requireResource(db, authority, "task", link.taskId);
+    const task = await db.query.tasks.findFirst({ where: eq(tasks.id, link.taskId) });
+    if (task!.scope !== "project" || !task!.requirementId) throw new NotFoundError("Resource not found");
+    const workspace = await db.query.requirementRepositories.findFirst({ where: and(eq(requirementRepositories.requirementId, task!.requirementId), eq(requirementRepositories.repositoryId, link.repositoryId)) });
+    if (!workspace) throw new NotFoundError("Resource not found");
+  }
+}
+
 async function pruneRelations(db: Database, authority: ResourceAuthority, result: any): Promise<any> {
   if (result instanceof Map) {
     const visible = new Map();
@@ -452,6 +493,11 @@ async function pruneRelations(db: Database, authority: ResourceAuthority, result
         if (row.dependsOnTaskId) endpoints.push(["task", row.dependsOnTaskId]);
         if (row.dependsOnRequirementId) endpoints.push(["requirement", row.dependsOnRequirementId]);
         let allowed = true;
+        const repositoryLink = row.repositoryId ? row : row.link?.repositoryId ? row.link : undefined;
+        if (repositoryLink) {
+          try { await checkRepositoryLink(db, authority, repositoryLink); }
+          catch (error) { if (error instanceof NotFoundError) allowed = false; else throw error; }
+        }
         for (const [kind, id] of endpoints) {
           try { await requireResource(db, authority, kind, id); }
           catch (error) { if (error instanceof NotFoundError) allowed = false; else throw error; }
@@ -464,7 +510,8 @@ async function pruneRelations(db: Database, authority: ResourceAuthority, result
   }
   if (!result || typeof result !== "object" || result instanceof Date) return result;
   const copy = { ...result };
-  if ("repositories" in copy) copy.repositories = [];
+  if (Array.isArray(copy.repositories)) copy.repositories = await pruneRelations(db, authority, copy.repositories);
+  if (copy.repository) copy.repository = redactRepositoryResult(copy.repository);
   delete copy.storageObject;
   if (copy.status === "storage_error" && "message" in copy) copy.message = "Package storage object is unavailable";
   delete copy.objectKey;

@@ -116,7 +116,7 @@ export async function loadPrincipalGrants(
       permissions:
         principal.type === "human"
           ? [...AUTHORIZATION_SCOPE_PERMISSIONS.personal]
-          : ["resource.read", "resource.write", "mcp.manage", "mcp.invoke"],
+          : ["resource.read", "resource.write", "mcp.manage", "mcp.invoke", "repository.manage"],
     },
     {
       scope: "global",

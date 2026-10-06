@@ -198,10 +198,10 @@ export async function createRepository(db: Database, input: CreateRepositoryInpu
   }
 }
 
-async function getVisibleRepositoryRow(db: Database, id: string, actor: Actor) {
-  const repository = await db.query.repositories.findFirst({
-    where: and(eq(repositories.id, id), visibilityCondition(actor)),
-  });
+async function getVisibleRepositoryRow(db: Database, id: string, actor: Actor, visibility?: SQL) {
+  const repository = visibility
+    ? (await db.select().from(repositories).where(and(eq(repositories.id, id), visibility)))[0]
+    : await db.query.repositories.findFirst({ where: and(eq(repositories.id, id), visibilityCondition(actor)) });
   if (!repository) throw new NotFoundError("Repository not found");
   return repository;
 }
@@ -310,8 +310,8 @@ export async function listRepositories(db: Database, input: ListRepositoriesInpu
   };
 }
 
-export async function updateRepository(db: Database, id: string, input: UpdateRepositoryInput, actor: Actor) {
-  const existing = await getVisibleRepositoryRow(db, id, actor);
+export async function updateRepository(db: Database, id: string, input: UpdateRepositoryInput, actor: Actor, visibility?: SQL) {
+  const existing = await getVisibleRepositoryRow(db, id, actor, visibility);
   assertSafeEndpoint(input.webUrl);
   assertSafeEndpoint(input.httpsCloneUrl);
   assertSafeEndpoint(input.sshCloneUrl);
@@ -357,8 +357,8 @@ export async function updateRepository(db: Database, id: string, input: UpdateRe
   }
 }
 
-export async function archiveRepository(db: Database, id: string, actor: Actor) {
-  const existing = await getVisibleRepositoryRow(db, id, actor);
+export async function archiveRepository(db: Database, id: string, actor: Actor, visibility?: SQL) {
+  const existing = await getVisibleRepositoryRow(db, id, actor, visibility);
   const activeLinks = await db
     .select({ id: requirementRepositories.id })
     .from(requirementRepositories)
@@ -370,7 +370,7 @@ export async function archiveRepository(db: Database, id: string, actor: Actor) 
     .limit(1);
   if (activeLinks.length > 0) throw new ValidationError("Repository cannot be archived while active requirements depend on it");
   if (existing.status === "archived") return existing;
-  return updateRepository(db, id, { status: "archived" }, actor);
+  return updateRepository(db, id, { status: "archived" }, actor, visibility);
 }
 
 export async function listRequirementRepositories(db: Database, requirementId: string, actor: Actor, visibility?: SQL) {
@@ -389,10 +389,11 @@ export async function addRequirementRepository(
   requirementId: string,
   input: AddRequirementRepositoryInput,
   actor: Actor,
+  visibility?: SQL,
 ) {
   const [requirement, repository] = await Promise.all([
     db.query.requirements.findFirst({ where: eq(requirements.id, requirementId) }),
-    getVisibleRepositoryRow(db, input.repositoryId, actor),
+    getVisibleRepositoryRow(db, input.repositoryId, actor, visibility),
   ]);
   if (!requirement) throw new NotFoundError("Requirement not found");
   if (repository.status !== "active") throw new ValidationError("Archived repositories cannot be linked");
@@ -1142,10 +1143,10 @@ export async function listTaskRepositories(db: Database, taskId: string, actor: 
     .orderBy(asc(repositories.canonicalKey), asc(taskRepositories.id));
 }
 
-export async function addTaskRepository(db: Database, taskId: string, input: AddTaskRepositoryInput, actor: Actor) {
+export async function addTaskRepository(db: Database, taskId: string, input: AddTaskRepositoryInput, actor: Actor, visibility?: SQL) {
   const [task, repository] = await Promise.all([
     db.query.tasks.findFirst({ where: eq(tasks.id, taskId) }),
-    getVisibleRepositoryRow(db, input.repositoryId, actor),
+    getVisibleRepositoryRow(db, input.repositoryId, actor, visibility),
   ]);
   if (!task) throw new NotFoundError("Task not found");
   if (task.scope !== "project" || !task.requirementId) throw new ValidationError("Only project tasks can link repositories");

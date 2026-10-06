@@ -62,6 +62,8 @@ At every level, the candidate must match host/provider, transport, operation, po
 
 ## Permission and consent model
 
+- Creating or changing a shared instance catalog entry requires an instance administrator and a live global repository.manage grant. Private/restricted human-owned entries require personal repository.manage; agents must receive that explicit credential grant and never become personal owners. Scope transfers require management permission in both scopes.
+- Project repository links require project repository.manage and catalog resource.read. Shared catalog visibility or a project link never grants catalog policy editing. Nested links and usage counts expose only authorized project/task relationships.
 - Creating or changing a repository policy requires repository-management permission.
 - Binding a personal credential reference requires the actor's explicit consent.
 - Sharing a node-scoped profile requires node-administrator consent and a declared actor audience.

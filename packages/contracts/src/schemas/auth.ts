@@ -95,6 +95,7 @@ export const AUTHORIZATION_SCOPE_PERMISSIONS = {
     "agent.manage",
     "mcp.manage",
     "mcp.invoke",
+    "repository.manage",
   ],
   project: [
     "resource.read",
