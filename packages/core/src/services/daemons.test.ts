@@ -1307,7 +1307,7 @@ test("daemon status events and activity expose role and instance ownership", asy
   }
 });
 
-test("human lifecycle controls gate acquisition and drain without interrupting active work", async () => {
+test("authorized lifecycle controls gate acquisition and drain without interrupting active work", async () => {
   db.addDaemon(daemonA, {
     role: "executor",
     actorId: "agent-a",
@@ -1326,16 +1326,10 @@ test("human lifecycle controls gate acquisition and drain without interrupting a
   assert.equal(paused.controlState, "paused");
   assert.equal(await applyTask(db as any, daemonA, projectId, { id: "agent-a", type: "agent" }), null);
   assert.equal(db.activityLog.at(-1)?.action, "control_requested");
-  await assert.rejects(
-    () => requestDaemonControl(
-      db as any,
-      daemonA,
-      "resume",
-      "Agent cannot resume itself",
-      { id: "agent-a", type: "agent" },
-    ),
-    ValidationError,
-  );
+  // Principal/permission checks live in the verified service factory, not this private state machine.
+  const resumedByAgent = await requestDaemonControl(db as any, daemonA, "resume", "Authorized management", { id: "agent-a", type: "agent" });
+  assert.equal(resumedByAgent.controlState, "running");
+  await requestDaemonControl(db as any, daemonA, "pause", "Continue drain fixture", { id: "operator", type: "human" });
 
   const draining = await requestDaemonControl(
     db as any,
@@ -1508,7 +1502,7 @@ test("one actor can run three isolated daemon roles concurrently", async () => {
   );
 });
 
-test("stale pre-identity daemon rows can be adopted without losing worker state", async () => {
+test("unbound legacy daemon rows cannot be adopted as a new principal", async () => {
   const legacyId = "00000000-0000-4000-8000-0000000000e1";
   const legacyStartedAt = new Date("2026-01-01T00:00:00.000Z");
   const newStartedAt = new Date("2026-07-23T12:00:00.000Z");
@@ -1524,24 +1518,11 @@ test("stale pre-identity daemon rows can be adopted without losing worker state"
     lastHeartbeatAt: new Date(Date.now() - 120_000),
   });
 
-  const adopted = await registerDaemon(db as any, {
-    id: legacyId,
-    name: "adopted-reviewer",
-    role: "reviewer",
-    capabilities: ["review", "codex"],
-    host: "new-host",
-    processStartedAt: newStartedAt.toISOString(),
-    workerCapacity: 2,
-  }, { id: "shared-operator", type: "agent" });
-
-  assert.equal(adopted.instanceId, legacyId);
-  assert.equal(adopted.actorId, "shared-operator");
-  assert.equal(adopted.actorType, "agent");
-  assert.equal(adopted.role, "reviewer");
-  assert.equal(adopted.processStartedAt.getTime(), newStartedAt.getTime());
-  assert.equal(adopted.status, "offline");
-  assert.deepEqual(adopted.activeTaskIds, ["00000000-0000-4000-8000-000000000201"]);
-  assert.deepEqual(adopted.activeWorkerStates, [{ index: 0, status: "failed" }]);
+  await assert.rejects(registerDaemon(db as any, {
+    id: legacyId, name: "adopted-reviewer", role: "reviewer", capabilities: ["review", "codex"],
+    host: "new-host", processStartedAt: newStartedAt.toISOString(), workerCapacity: 2,
+  }, { id: "shared-operator", type: "agent" }), ValidationError);
+  assert.equal(db.daemons.get(legacyId)?.actorId, undefined);
 });
 
 test("work acquisition rejects daemons registered for another role", async () => {
@@ -2137,6 +2118,7 @@ test("requirement dependency service rejects cycles", async () => {
 test("expired daemons recover the durable current task without reopening completed work", async () => {
   const staleHeartbeat = new Date(Date.now() - 120_000);
   db.addDaemon(daemonA, {
+    actorId: "stable-executor", actorType: "agent",
     status: "busy",
     activeWorkerStates: [{ workerIndex: 0, requirementId: "req-1", taskId: "task-1" }],
     lastHeartbeatAt: staleHeartbeat,
@@ -2144,7 +2126,7 @@ test("expired daemons recover the durable current task without reopening complet
   db.addRequirement("req-1");
   db.addTask("task-1", "req-1", { status: "done", completedAt: new Date() });
   db.addTask("task-2", "req-1", { status: "in_progress" });
-  const claim = await claimRequirement(db as any, "req-1", { id: daemonA, type: "agent" }, 2, {
+  const claim = await claimRequirement(db as any, "req-1", { id: "stable-executor", type: "agent" }, 2, {
     daemonId: daemonA,
     workerIndex: 0,
   });
@@ -2159,7 +2141,7 @@ test("expired daemons recover the durable current task without reopening complet
     source: "daemon",
     leaseGeneration: claim.generation,
     details: {},
-  }, { id: daemonA, type: "agent" });
+  }, { id: "stable-executor", type: "agent" });
 
   await cleanExpiredDaemons(db as any);
 

@@ -49,14 +49,14 @@ Schedules persist independent personal human ownership. Agent credentials retain
 
 Ti personal owner overrides require live personal grants; instance administrators receive no implicit access to another user's configuration, policy or run. Providers use instance environment credentials, so provider configuration requires the approved administrator boundary even for implicit default references. Ordinary owner controls can choose an existing model or edit account policy. Run reads require a valid task or schedule relationship; orphaned and mismatched runs are quarantined. Credential references, base URLs, event logs, errors, sandbox IDs and lease internals are omitted from transport results.
 
-Activity lists/exports select visible entities before pagination. Project audit requires `audit.read`; personal activity follows the human owner's resource access. Arbitrary audit metadata is omitted from these administration surfaces. Observability, queues, history and metrics use scoped requirement/progress/history SQL, quarantine invalid task/slice/dependency/catalog relationships, and ignore untrusted raw worker-state payloads. Read-only queue inspection performs no daemon cleanup. An administrator with no project membership sees no project queue, worker or history data. Daemon lifecycle/control/progress writes and unconverted SLO surfaces remain closed.
+Activity lists/exports select visible entities before pagination. Project audit requires `audit.read`; personal activity follows the human owner's resource access. Arbitrary audit metadata is omitted from these administration surfaces. Observability, queues, history and metrics use scoped requirement/progress/history SQL, quarantine invalid task/slice/dependency/catalog relationships, and ignore untrusted raw worker-state payloads. Read-only queue inspection performs no daemon cleanup. An administrator with no project membership sees no project queue, worker or history data. C1 authorizes supervisor daemon lifecycle/control/progress writes as described below; unconverted SLO surfaces remain closed.
 
 There is no generic global settings endpoint. Existing identity instance controls and embedding provider controls retain their explicit instance administrator policies. Background workers, SSE and integration execution remain staged closed; B3 does not implement the subsequent delegation or event-stream slices.
 
 
 ## Realtime resource boundaries
 
-Web SSE and optional daemon SSE resolve verified session/key identity and share core event authorization. Every emission and one-second heartbeat checks live credential and actor authority under the identity lifecycle lock. Changed grants close the connection; heartbeat never refreshes session lifetime. Lifecycle/acquisition/control/reporting and background execution remain closed.
+Web SSE and optional daemon SSE resolve verified session/key identity and share core event authorization. Every emission and one-second heartbeat checks live credential and actor authority under the identity lifecycle lock. Changed grants close the connection; heartbeat never refreshes session lifetime. C1 authorizes the supervisor lifecycle/acquisition/control/reporting paths described below; background execution remains closed.
 
 Streams contain scoped invalidation hints, not raw event payloads, attributes, titles, host details, worker state, messages or global sequence metadata. Task/document/requirement IDs are checked against current resources; links require both endpoints. Document deletion uses the deletion audit's persisted scope snapshot; legacy deletions without that snapshot are suppressed. Schedule and daemon events use the existing scoped metadata predicates. Connection queues are bounded and cancelled readers unsubscribe.
 
@@ -71,7 +71,7 @@ Migration 0053 adds a stable actor, revocable session/key binding, configured-sc
 
 Every dispatch and explicit failed-delivery retry revalidates the stored actor, credential, current membership, permission ceiling, configuration generation and all event resources using the same core SSE resource rules. This includes two-endpoint link checks and deletion scope snapshots. HMAC-SHA256 signs only authorized invalidation hints. Requests start under the identity lifecycle lock, have a ten-second timeout, reject embedded URL credentials and do not follow redirects. Secret material and remote response text never enter audit/error responses. Already dispatched data cannot be recalled; queued/retried work is always reauthorized.
 
-The API restores only this authorized webhook event subscriber, with a bounded sequential event queue. Other workers, daemon acquisition/control/reporting, SLO and delegated execution remain closed. There is no autonomous retry worker; authorized managers can explicitly retry failed deliveries within the current binding generation.
+The API restores only this authorized webhook event subscriber, with a bounded sequential event queue. Other workers, SLO and delegated execution remain closed. C1 authorizes the supervisor daemon paths described below. There is no autonomous retry worker; authorized managers can explicitly retry failed deliveries within the current binding generation.
 
 ### CLI credential configuration
 
@@ -92,3 +92,29 @@ development. Existing configured endpoints retain their transport configuration.
 `tw auth logout` removes the stored key locally. It does not revoke a shared key
 on the server; revoke that key through the authenticated credential interface
 when required, and unset any environment override.
+
+
+### Authenticated daemon supervisors
+
+Executor, reviewer and merger registration requires a verified managed-agent key
+with current project read permission and the corresponding `execution.run`,
+`execution.review` or `execution.merge` entitlement. Executor acquisition also
+requires project write permission. Instance IDs, node IDs, client IDs and Actor
+headers never establish authority. Existing instances retain their recorded actor
+and role; unbound legacy instances cannot be adopted through registration.
+
+Core authorization filters project queues, relationship validity and repository
+visibility before pagination, eligibility counts and claims. Progress/recovery
+requires the owned instance, authorized targets and the existing run/worker/lease
+fence. Every operation resolves live credential and membership ceilings; Key
+rotation preserves the stable actor and cannot transfer instance ownership.
+Daemon management requires `project.manage` for the agent's execution projects
+and an owned instance or its recorded managing human. Human or instance-admin
+status alone supplies no daemon management permission.
+
+SSE reconnects reload the configured credential and do not send Actor headers.
+Acquisition performs no global daemon cleanup. Background cleanup remains staged
+closed pending authenticated recovery/delegation. The server currently reports
+`executionDelegationSupported: false`; CLI supervisors stop before acquisition or
+child execution until bounded delegation is implemented. This stage authorizes
+supervisor API operations, not AI credential inheritance or Ti/worker activation.

@@ -403,8 +403,6 @@ class ApiControlPlane implements SmokeControlPlane {
       headers: {
         Authorization: `Bearer ${this.config.apiKey}`,
         'Content-Type': 'application/json',
-        'X-Actor-Id': this.config.actorId,
-        'X-Actor-Type': 'agent',
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })

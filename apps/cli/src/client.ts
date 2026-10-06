@@ -16,9 +16,6 @@ export async function request<T>(
   path: string,
   body?: unknown,
   opts?: {
-    actorId?: string
-    actorType?: 'human' | 'agent'
-    omitAuth?: boolean
     signal?: AbortSignal
     credential?: { apiUrl: string; apiKey: string }
   },
@@ -27,7 +24,7 @@ export async function request<T>(
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   const credential = opts?.credential ?? config
-  if (credential.apiKey && !opts?.omitAuth) {
+  if (credential.apiKey) {
     headers['Authorization'] = `Bearer ${credential.apiKey}`
   }
 

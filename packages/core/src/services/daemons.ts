@@ -1,5 +1,5 @@
 import type { MetadataReadScope } from "./metadata-read-scope";
-import { and, eq, gt, inArray, lt, not, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, not, sql, type SQL } from "drizzle-orm";
 import {
   activityLog,
   type Database,
@@ -123,7 +123,7 @@ function daemonActor(daemon: DaemonRecord): Actor {
 }
 
 function assertDaemonActor(daemon: DaemonRecord, actor: Actor) {
-  if (actor.id !== daemon.id && actor.id !== daemon.actorId) {
+  if (!daemon.actorId || actor.id !== daemon.actorId || actor.type !== daemon.actorType) {
     throw new ValidationError(
       `Daemon instance '${daemon.id}' belongs to actor '${daemon.actorId ?? daemon.id}'`,
     );
@@ -150,9 +150,6 @@ export async function requestDaemonControl(
   reason: string,
   actor: Actor,
 ) {
-  if (actor.type !== "human") {
-    throw new ValidationError("Daemon lifecycle controls require a human operator");
-  }
   const daemon = await db.query.daemons.findFirst({ where: eq(daemons.id, id) });
   if (!daemon) throw new NotFoundError("Daemon not found");
   if (daemon.status === "offline") {
@@ -233,7 +230,7 @@ export async function registerDaemon(
     });
 
     if (existing) {
-      if (existing.actorId && existing.actorId !== actor.id) {
+      if (!existing.actorId || existing.actorId !== actor.id || existing.actorType !== actor.type) {
         throw new ValidationError(
           `Daemon instance '${existing.id}' belongs to actor '${existing.actorId}'`,
         );
@@ -869,6 +866,7 @@ export async function applyTask(
   daemonId: string,
   projectId?: string,
   caller?: Actor,
+  authorizationFilter?: SQL,
 ) {
   const daemon = await db.query.daemons.findFirst({
     where: eq(daemons.id, daemonId),
@@ -882,7 +880,6 @@ export async function applyTask(
   if (!daemonAcceptsWork(daemon)) return null;
   const actor = daemonActor(daemon);
 
-  await cleanExpiredDaemons(db);
 
   const projectFilter = projectId
     ? sql`AND t.project_id = ${projectId}`
@@ -891,6 +888,7 @@ export async function applyTask(
   const candidates = await db.execute(sql`
     SELECT t.* FROM tasks t
     WHERE t.status = 'todo'
+      AND ${authorizationFilter ?? sql`false`}
       ${projectFilter}
       AND EXISTS (
         SELECT 1 FROM requirements r
@@ -1023,6 +1021,7 @@ export async function explainRequirementEligibility(
   projectId?: string,
   modelTiers?: ("fast" | "standard" | "strong")[],
   caller?: Actor,
+  authorizationFilter?: SQL,
 ): Promise<SchedulerEligibilityDiagnostics> {
   const daemon = await db.query.daemons.findFirst({
     where: eq(daemons.id, daemonId),
@@ -1108,6 +1107,7 @@ export async function explainRequirementEligibility(
     LEFT JOIN execution_slices es ON es.id = t.execution_slice_id
     WHERE t.status = 'todo'
       ${projectFilter}
+      AND ${authorizationFilter ?? sql`false`}
     ORDER BY
       GREATEST(
         0,
@@ -1189,6 +1189,7 @@ export async function applyRequirement(
   workerIndex?: number,
   modelTiers?: ("fast" | "standard" | "strong")[],
   caller?: Actor,
+  authorizationFilter?: SQL,
 ) {
   const daemon = await db.query.daemons.findFirst({
     where: eq(daemons.id, daemonId),
@@ -1202,7 +1203,6 @@ export async function applyRequirement(
   if (!daemonAcceptsWork(daemon)) return null;
   const actor = daemonActor(daemon);
 
-  await cleanExpiredDaemons(db);
 
   const projectFilter = projectId
     ? sql`AND t.project_id = ${projectId}`
@@ -1230,6 +1230,7 @@ export async function applyRequirement(
     JOIN requirements r ON r.id = t.requirement_id
     LEFT JOIN execution_slices es ON es.id = t.execution_slice_id
     WHERE t.status = 'todo'
+      AND ${authorizationFilter ?? sql`false`}
       ${projectFilter}
       ${tierFilter}
       AND r.status IN (${EXECUTOR_REQUIREMENT_STATUSES_SQL})
@@ -1424,6 +1425,7 @@ export async function applyReview(
   projectId?: string,
   workerIndex?: number,
   caller?: Actor,
+  authorizationFilter?: SQL,
 ) {
   const daemon = await db.query.daemons.findFirst({
     where: eq(daemons.id, daemonId),
@@ -1437,7 +1439,6 @@ export async function applyReview(
   if (!daemonAcceptsWork(daemon)) return null;
   const actor = daemonActor(daemon);
 
-  await cleanExpiredDaemons(db);
 
   const projectFilter = projectId
     ? sql`AND r.project_id = ${projectId}`
@@ -1446,7 +1447,7 @@ export async function applyReview(
   const candidates = await db.execute(sql`
     SELECT r.*
     FROM requirements r
-    WHERE r.status = ${REVIEWER_REQUIREMENT_STATUS_SQL}
+    WHERE ${authorizationFilter ?? sql`false`} AND r.status = ${REVIEWER_REQUIREMENT_STATUS_SQL}
       AND NOT EXISTS (
         SELECT 1 FROM requirement_repositories rr
         WHERE rr.requirement_id = r.id
@@ -1545,6 +1546,7 @@ export async function applyMerge(
   projectId?: string,
   workerIndex?: number,
   caller?: Actor,
+  authorizationFilter?: SQL,
 ) {
   const daemon = await db.query.daemons.findFirst({
     where: eq(daemons.id, daemonId),
@@ -1558,7 +1560,6 @@ export async function applyMerge(
   if (!daemonAcceptsWork(daemon)) return null;
   const actor = daemonActor(daemon);
 
-  await cleanExpiredDaemons(db);
 
   const projectFilter = projectId
     ? sql`AND r.project_id = ${projectId}`
@@ -1567,7 +1568,7 @@ export async function applyMerge(
   const candidates = await db.execute(sql`
     SELECT r.*
     FROM requirements r
-    WHERE r.status = ${MERGER_REQUIREMENT_STATUS_SQL}
+    WHERE ${authorizationFilter ?? sql`false`} AND r.status = ${MERGER_REQUIREMENT_STATUS_SQL}
       AND NOT EXISTS (
         SELECT 1 FROM requirement_repositories manual_rr
         WHERE manual_rr.requirement_id = r.id

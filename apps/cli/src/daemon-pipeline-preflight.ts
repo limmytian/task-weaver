@@ -129,11 +129,9 @@ export async function runPipelinePreflight(
   const apiGet = dependencies.apiGet ?? (async <T>(path: string) => {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'X-Actor-Type': 'agent',
-      'X-Actor-Id': environment.TW_ACTOR_ID ?? cliConfig.actorId ?? cliConfig.clientId ?? 'tw-cli',
     }
     if (cliConfig.apiKey) headers.Authorization = `Bearer ${cliConfig.apiKey}`
-    const response = await fetch(`${cliConfig.apiUrl}${path}`, { headers })
+    const response = await fetch(`${cliConfig.apiUrl}${path}`, { headers, redirect: 'error' })
     if (!response.ok) throw new Error(`API request failed: HTTP ${response.status} for ${path}`)
     return response.json() as Promise<T>
   })

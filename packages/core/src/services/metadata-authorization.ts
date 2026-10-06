@@ -1,3 +1,4 @@
+import { authorizeDaemonOperation } from './daemon-authorization';
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { agentUsageRuns, reviewRuns, requirementRepositories, repositories, tasks, documents, requirements, projects, activityLog, tiAgentRuns, tiAgentModelConfigs, tiAgentPolicies, schedules, scheduleRuns, type Database } from "@task-weaver/db";
 import { AuthorizationError, NotFoundError, ValidationError, activityQuerySchema } from "@task-weaver/contracts";
@@ -16,6 +17,7 @@ export function usageRelationPredicate() {
 }
 
 export async function authorizeMetadataOperation(db: Database, authority: ResourceAuthority, group: "usage" | "review" | "ti" | "activity" | "schedule" | "observability" | "metrics" | "progress" | "daemon", name: string, call: any[]) {
+  if ((group === "daemon" || group === "progress") && await authorizeDaemonOperation(db, authority, group, name, call)) return;
   if (["observability", "metrics", "progress", "daemon"].includes(group)) {
     if (!["getDaemonObservabilityOverview", "getDaemonMetricsReport", "listCorrelatedHistory", "listBoundedLogTail", "listRequirementTimeline", "listDaemonControlPlaneQueues"].includes(name)) throw new AuthorizationError();
     const input = call[1] ?? {};

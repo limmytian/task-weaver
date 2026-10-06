@@ -103,11 +103,12 @@ test('pipeline CLI starts a role, correlates logs, and drains it on SIGINT', { t
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1')
     const path = url.pathname
+    if (path === '/api/v1/auth/me') return sendJson(response, 200, { actor: { id: '00000000-0000-4000-8000-0000000000aa', type: 'agent' }, account: null, session: null })
     if (request.method === 'GET' && path === '/api/v1/daemons') return sendJson(response, 200, { items: [] })
     if (request.method === 'GET' && path === `/api/v1/projects/${projectId}/requirements`) return sendJson(response, 200, [])
     if (request.method === 'POST' && path === '/api/v1/daemons/register') {
       await readJson(request)
-      return sendJson(response, 201, { config: { mode: 'polling', pollingIntervalMs: 50, pollingBackoffMax: 100 } })
+      return sendJson(response, 201, { config: { executionDelegationSupported: true, mode: 'polling', pollingIntervalMs: 50, pollingBackoffMax: 100 } })
     }
     if (request.method === 'POST' && /^\/api\/v1\/daemons\/[^/]+\/status$/.test(path)) {
       statusReports.push(await readJson(request))

@@ -1,5 +1,7 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
+  ["POST", new RegExp("^/api/v1/daemons/register/?$")],
+  ["POST", new RegExp("^/api/v1/daemons/[0-9a-fA-F-]{36}/(?:heartbeat|status|control|apply-task|apply-requirement|apply-review|apply-merge|progress|reconcile)/?$")],
   ["GET", new RegExp("^/api/v1/observability/(?:overview|metrics|history|logs)/?$")],
   ["GET", new RegExp("^/api/v1/(?:projects/[0-9a-fA-F-]{36}/schedules|schedules/[0-9a-fA-F-]{36}(?:/runs)?)/?$")],
   ["POST", new RegExp("^/api/v1/projects/[0-9a-fA-F-]{36}/schedules/?$")],

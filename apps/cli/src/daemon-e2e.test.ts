@@ -8,7 +8,7 @@ import { delimiter, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { test } from 'node:test'
 
-type AgentMode = 'happy' | 'no-change' | 'push-failure' | 'partial-retry' | 'non-zero' | 'no-finalize' | 'slow'
+type AgentMode = 'happy' | 'no-change' | 'push-failure' | 'partial-retry' | 'non-zero' | 'no-finalize' | 'slow' | 'delegation-unavailable' | 'human-key'
 
 type ScenarioResult = {
   applyCount: number
@@ -346,13 +346,14 @@ async function runDaemonScenario(mode: AgentMode, workers = 1): Promise<Scenario
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const path = url.pathname
+    if (path === '/api/v1/auth/me') return sendJson(res, 200, { actor: { id: '00000000-0000-4000-8000-0000000000aa', type: mode === 'human-key' ? 'human' : 'agent' }, account: null, session: null })
 
     if (req.method === 'POST' && path === '/api/v1/daemons/register') {
       await readJson(req)
       return sendJson(res, 201, {
         id: daemonId,
         status: 'idle',
-        config: { mode: 'polling', pollingIntervalMs: 20, pollingBackoffMax: 50 },
+        config: { executionDelegationSupported: mode !== 'delegation-unavailable', mode: 'polling', pollingIntervalMs: 20, pollingBackoffMax: 50 },
       })
     }
 
@@ -691,4 +692,23 @@ test('daemon SIGINT drains a running child and leaves durable retry state', { ti
   assert.ok(result.statusReports.some((report) => report.status === 'offline'))
   assert.match(result.comments.map((comment) => comment.content).join('\n'), /cancelled.*returned to todo/i)
   assert.match(result.stdout, /entering drain mode/)
+})
+
+
+test('daemon stops before acquisition when bounded delegation is unavailable', { timeout: 60_000 }, async () => {
+  const result = await runDaemonScenario('delegation-unavailable')
+  assert.equal(result.exitCode, 1)
+  assert.match(result.stderr, /delegation is not available/)
+  assert.equal(result.applyCount, 0)
+  assert.equal(result.progressReports.length, 0)
+  assert.equal(result.branchPushed, false)
+})
+
+test('human keys never become managed-agent daemon identities', { timeout: 60_000 }, async () => {
+  const result = await runDaemonScenario('human-key')
+  assert.equal(result.exitCode, 1)
+  assert.match(result.stderr, /verified managed-agent identity/)
+  assert.equal(result.applyCount, 0)
+  assert.equal(result.progressReports.length, 0)
+  assert.equal(result.branchPushed, false)
 })

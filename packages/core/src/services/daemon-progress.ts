@@ -67,7 +67,7 @@ function assertDaemonOwner(
   daemon: { id: string; actorId?: string | null },
   actor: Actor,
 ) {
-  if (actor.id !== daemon.id && actor.id !== daemon.actorId) {
+  if (!daemon.actorId || actor.id !== daemon.actorId) {
     throw new ValidationError(`Daemon instance '${daemon.id}' does not belong to actor '${actor.id}'`);
   }
 }

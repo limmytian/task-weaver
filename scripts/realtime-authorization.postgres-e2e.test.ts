@@ -152,7 +152,7 @@ test("realtime authorization rechecks resource scopes, credentials and stream re
       await assert.rejects(createAuthorizedEventStream(db, identity.context, new Request("http://localhost/events", { headers: { "Last-Event-ID": "old-cursor" } })));
     }
   });
-  await t.test("actual daemon SSE authenticates and does not open execution endpoints", async () => {
+  await t.test("actual daemon SSE authenticates without granting supervisor authority", async () => {
     assert.equal((await api.request("/api/v1/daemons/events")).status, 401);
     assert.equal((await api.request("/api/v1/daemons/events", { headers: { "X-Actor-Id": owner.actor.id } })).status, 401);
     const response = await api.request("/api/v1/daemons/events", { headers: owner.headers });
@@ -167,6 +167,6 @@ test("realtime authorization rechecks resource scopes, credentials and stream re
       if (previous === undefined) delete process.env.TW_DAEMON_MODE;
       else process.env.TW_DAEMON_MODE = previous;
     }
-    assert.equal((await api.request("/api/v1/daemons/register", { method: "POST", headers: owner.headers, body: "{}" })).status, 403);
+    assert.equal((await api.request("/api/v1/daemons/register", { method: "POST", headers: owner.headers, body: JSON.stringify({ name: "Human SSE client", role: "executor", capabilities: ["codex"] }) })).status, 403);
   });
 });

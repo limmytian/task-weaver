@@ -68,6 +68,16 @@ function forgeSyncIdempotencyKey(pullRequest: ForgePullRequest) {
   return `${pullRequest.provider}:${pullRequest.externalId}:${digest}`
 }
 
+async function verifiedDaemonConfig(): Promise<Config> {
+  const config = loadConfig()
+  if (!config.apiKey) throw new Error('A managed-agent scoped API key is required for daemon operation')
+  const identity = await request<{ actor: { id: string; type: string } }>('GET', '/api/v1/auth/me')
+  if (identity.actor?.type !== 'agent' || !UUID_PATTERN.test(identity.actor.id)) {
+    throw new Error('Daemon operation requires a verified managed-agent identity')
+  }
+  return { ...config, actorId: identity.actor.id }
+}
+
 export function resolveDaemonProcessIdentity(
   role: DaemonRole,
   explicitId: string | undefined,
@@ -308,10 +318,7 @@ function startRoleRetryWakeStream(options: {
 }): () => void {
   const ssePath = options.endpoint || '/api/v1/daemons/events'
   const sseUrl = `${options.apiUrl}${ssePath}${ssePath.includes('?') ? '&' : '?'}role=${options.role}`
-  const headers: Record<string, string> = {
-    'X-Actor-Type': 'agent',
-    'X-Actor-Id': options.daemonId,
-  }
+  const headers: Record<string, string> = {}
   if (options.apiKey) headers.Authorization = `Bearer ${options.apiKey}`
   const controller = new AbortController()
   let stopped = false
@@ -319,7 +326,10 @@ function startRoleRetryWakeStream(options: {
 
   const connect = async () => {
     try {
-      const response = await fetch(sseUrl, { headers, signal: controller.signal })
+      const currentKey = loadConfig().apiKey
+      if (currentKey) headers.Authorization = `Bearer ${currentKey}`
+      else delete headers.Authorization
+      const response = await fetch(sseUrl, { headers, signal: controller.signal, redirect: 'error' })
       if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
@@ -595,7 +605,7 @@ export function registerDaemon(program: Command): void {
     .option('--prompt-file <path>', 'read extra local worker prompt text from a file; repeatable', collectRepeatedOption, [])
     .option('--once', 'process at most one requirement lane for the daemon (worker 0 only), then exit')
     .action(async (opts) => {
-      const cliConfig = loadConfig()
+      const cliConfig = await verifiedDaemonConfig()
       const modelMappings = parseModelMappings(opts.model)
       const thinkMappings = parseThinkMappings(opts.think)
       const extraWorkerPrompt = loadExtraWorkerPrompt({ prompt: opts.prompt, promptFile: opts.promptFile })
@@ -625,9 +635,8 @@ export function registerDaemon(program: Command): void {
         ? String(opts.capabilities).split(',').map((value) => value.trim()).filter(Boolean)
         : []
 
-      process.env.TW_ACTOR_ID = actorId
       const daemonRequest = <T>(method: string, path: string, body?: unknown) =>
-        request<T>(method, path, body, { actorId, actorType: 'agent', omitAuth: true })
+        request<T>(method, path, body)
       const daemonGet = <T>(path: string) => daemonRequest<T>('GET', path)
       const daemonPost = <T>(path: string, body: unknown) => daemonRequest<T>('POST', path, body)
       const daemonPatch = <T>(path: string, body: unknown) => daemonRequest<T>('PATCH', path, body)
@@ -651,6 +660,10 @@ export function registerDaemon(program: Command): void {
         processStartedAt: identity.processStartedAt,
         workerCapacity: numWorkers,
       })
+
+      if (registerRes.config?.executionDelegationSupported !== true) {
+        throw new Error('Authenticated task delegation is not available; daemon stopped before acquisition or execution')
+      }
 
       const serverConfig: DaemonConfig = registerRes.config ?? {
         mode: 'polling',
@@ -1333,7 +1346,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         const sseUrl = `${cliConfig.apiUrl}${ssePath}${ssePath.includes('?') ? '&' : '?'}role=executor`
         console.log(`[Daemon] Connecting to SSE: ${sseUrl}`)
 
-        const headers: Record<string, string> = { 'X-Actor-Type': 'agent', 'X-Actor-Id': daemonId }
+        const headers: Record<string, string> = {}
         if (cliConfig.apiKey) headers['Authorization'] = `Bearer ${cliConfig.apiKey}`
 
         let aborted = false
@@ -1341,7 +1354,10 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
 
         const connect = async () => {
           try {
-            const res = await fetch(sseUrl, { headers, signal: controller.signal })
+            const currentKey = loadConfig().apiKey
+            if (currentKey) headers.Authorization = `Bearer ${currentKey}`
+            else delete headers.Authorization
+            const res = await fetch(sseUrl, { headers, signal: controller.signal, redirect: 'error' })
             if (!res.ok || !res.body) {
               throw new Error(`SSE connection failed: HTTP ${res.status}`)
             }
@@ -1441,7 +1457,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
     .option('--no-merge', 'deprecated; review daemon no longer merges')
     .option('--once', 'process at most one acquired requirement, then exit')
     .action(async (opts) => {
-      const cliConfig = loadConfig()
+      const cliConfig = await verifiedDaemonConfig()
       const modelMappings = parseModelMappings(opts.model)
       const thinkMappings = parseThinkMappings(opts.think)
       const extraWorkerPrompt = loadExtraWorkerPrompt({ prompt: opts.prompt, promptFile: opts.promptFile })
@@ -1452,9 +1468,8 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
       const daemonId = identity.instanceId
       const actorId = identity.actorId
 
-      process.env.TW_ACTOR_ID = actorId
       const daemonRequest = <T>(method: string, path: string, body?: unknown) =>
-        request<T>(method, path, body, { actorId, actorType: 'agent', omitAuth: true })
+        request<T>(method, path, body)
       const daemonPost = <T>(path: string, body: unknown) => daemonRequest<T>('POST', path, body)
       const daemonPatch = <T>(path: string, body: unknown) => daemonRequest<T>('PATCH', path, body)
       const daemonPut = <T>(path: string, body: unknown) => daemonRequest<T>('PUT', path, body)
@@ -1487,6 +1502,10 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         processStartedAt: identity.processStartedAt,
         workerCapacity: numWorkers,
       })
+      if (reviewRegistration.config?.executionDelegationSupported !== true) {
+        throw new Error('Authenticated task delegation is not available; daemon stopped before acquisition or execution')
+      }
+
       const reviewDaemonConfig: DaemonConfig = reviewRegistration.config ?? {
         mode: 'polling',
         pollingIntervalMs: 15_000,
@@ -2139,7 +2158,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
     .option('--mode <mode>', 'merge mode: auto, provider, direct, or manual (default: auto)', 'auto')
     .option('--once', 'process at most one acquired requirement, then exit')
     .action(async (opts) => {
-      const cliConfig = loadConfig()
+      const cliConfig = await verifiedDaemonConfig()
       const baseBranch = opts.base as string
       const requestedMergeMode = opts.mode as RequestedMergeMode
       if (!['auto', 'provider', 'direct', 'manual'].includes(requestedMergeMode)) {
@@ -2150,9 +2169,8 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
       const daemonId = identity.instanceId
       const actorId = identity.actorId
 
-      process.env.TW_ACTOR_ID = actorId
       const daemonRequest = <T>(method: string, path: string, body?: unknown) =>
-        request<T>(method, path, body, { actorId, actorType: 'agent', omitAuth: true })
+        request<T>(method, path, body)
       const daemonPost = <T>(path: string, body: unknown) => daemonRequest<T>('POST', path, body)
       const daemonPatch = <T>(path: string, body: unknown) => daemonRequest<T>('PATCH', path, body)
 
@@ -2169,6 +2187,10 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         processStartedAt: identity.processStartedAt,
         workerCapacity: numWorkers,
       })
+      if (mergeRegistration.config?.executionDelegationSupported !== true) {
+        throw new Error('Authenticated task delegation is not available; daemon stopped before acquisition or execution')
+      }
+
       const mergeDaemonConfig: DaemonConfig = mergeRegistration.config ?? {
         mode: 'polling',
         pollingIntervalMs: 15_000,

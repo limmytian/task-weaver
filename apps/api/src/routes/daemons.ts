@@ -1,8 +1,7 @@
 import { Hono } from "hono";
 import {
   createAuthorizedEventStream,
-  daemonService,
-  daemonProgressService,
+  createResourceServices,
   daemonSloService,
   ConflictError,
   NotFoundError,
@@ -43,7 +42,7 @@ daemonsRouter.get("/observability/overview", async (c) => {
 // GET / - List all online/active daemons
 daemonsRouter.get("/", async (c) => {
   const db = c.get("db");
-  const list = await daemonService.listOnlineDaemons(db);
+  const list = await createResourceServices(c.get("identity")).daemonService.listOnlineDaemons(db);
   return c.json({ items: list });
 });
 
@@ -73,7 +72,7 @@ daemonsRouter.get("/progress/current", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
   return c.json({
-    items: await daemonProgressService.listWorkerProgress(c.get("db"), parsed.data),
+    items: await createResourceServices(c.get("identity")).daemonProgressService.listWorkerProgress(c.get("db"), parsed.data),
   });
 });
 
@@ -84,7 +83,7 @@ daemonsRouter.get("/progress/history", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
   return c.json({
-    items: await daemonProgressService.listWorkerProgressHistory(c.get("db"), parsed.data),
+    items: await createResourceServices(c.get("identity")).daemonProgressService.listWorkerProgressHistory(c.get("db"), parsed.data),
   });
 });
 
@@ -93,7 +92,7 @@ daemonsRouter.get("/history", async (c) => {
   if (!parsed.success) {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
-  return c.json(await daemonProgressService.listCorrelatedHistory(c.get("db"), parsed.data));
+  return c.json(await createResourceServices(c.get("identity")).daemonProgressService.listCorrelatedHistory(c.get("db"), parsed.data));
 });
 
 daemonsRouter.get("/logs", async (c) => {
@@ -102,7 +101,7 @@ daemonsRouter.get("/logs", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
   const maxChars = Number(c.req.query("maxChars") ?? 4_000);
-  return c.json(await daemonProgressService.listBoundedLogTail(c.get("db"), { ...parsed.data, maxChars }));
+  return c.json(await createResourceServices(c.get("identity")).daemonProgressService.listBoundedLogTail(c.get("db"), { ...parsed.data, maxChars }));
 });
 
 // GET /timeline/:requirementId - Correlate progress, tasks, review, retry, and delivery history
@@ -115,7 +114,7 @@ daemonsRouter.get("/timeline/:requirementId", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
   try {
-    return c.json(await daemonProgressService.listRequirementTimeline(c.get("db"), parsed.data));
+    return c.json(await createResourceServices(c.get("identity")).daemonProgressService.listRequirementTimeline(c.get("db"), parsed.data));
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
     throw err;
@@ -131,7 +130,7 @@ daemonsRouter.post("/:id/progress", async (c) => {
   }
 
   try {
-    return c.json(await daemonProgressService.reportWorkerProgress(
+    return c.json(await createResourceServices(c.get("identity")).daemonProgressService.reportWorkerProgress(
       c.get("db"),
       c.req.param("id"),
       parsed.data,
@@ -154,7 +153,7 @@ daemonsRouter.post("/:id/reconcile", async (c) => {
   }
 
   try {
-    return c.json(await daemonProgressService.reconcileWorkerRun(
+    return c.json(await createResourceServices(c.get("identity")).daemonProgressService.reconcileWorkerRun(
       c.get("db"),
       c.req.param("id"),
       parsed.data,
@@ -180,7 +179,7 @@ daemonsRouter.post("/register", async (c) => {
   }
 
   try {
-    const daemon = await daemonService.registerDaemon(db, parsed.data, actor);
+    const daemon = await createResourceServices(c.get("identity")).daemonService.registerDaemon(db, parsed.data, actor);
     return c.json(daemon, 201);
   } catch (err) {
     if (err instanceof ValidationError) {
@@ -199,7 +198,7 @@ daemonsRouter.post("/:id/control", async (c) => {
   }
 
   try {
-    return c.json(await daemonService.requestDaemonControl(
+    return c.json(await createResourceServices(c.get("identity")).daemonService.requestDaemonControl(
       c.get("db"),
       c.req.param("id"),
       parsed.data.action,
@@ -221,7 +220,7 @@ daemonsRouter.post("/:id/heartbeat", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const daemon = await daemonService.heartbeatDaemon(db, id, actor);
+    const daemon = await createResourceServices(c.get("identity")).daemonService.heartbeatDaemon(db, id, actor);
     return c.json({ success: true, daemon });
   } catch (err) {
     if (err instanceof NotFoundError) {
@@ -247,7 +246,7 @@ daemonsRouter.post("/:id/status", async (c) => {
   }
 
   try {
-    const daemon = await daemonService.updateDaemonStatus(
+    const daemon = await createResourceServices(c.get("identity")).daemonService.updateDaemonStatus(
       db,
       id,
       parsed.data.status,
@@ -279,7 +278,7 @@ daemonsRouter.post("/:id/apply-task", async (c) => {
   }
 
   try {
-    const result = await daemonService.applyTask(
+    const result = await createResourceServices(c.get("identity")).daemonService.applyTask(
       db,
       id,
       parsed.data.projectId,
@@ -313,7 +312,7 @@ daemonsRouter.post("/:id/apply-requirement", async (c) => {
 
   try {
     const eligibility = parsed.data.includeDiagnostics
-      ? await daemonService.explainRequirementEligibility(
+      ? await createResourceServices(c.get("identity")).daemonService.explainRequirementEligibility(
           db,
           id,
           parsed.data.projectId,
@@ -321,7 +320,7 @@ daemonsRouter.post("/:id/apply-requirement", async (c) => {
           c.get("actor"),
         )
       : undefined;
-    const result = await daemonService.applyRequirement(
+    const result = await createResourceServices(c.get("identity")).daemonService.applyRequirement(
       db,
       id,
       parsed.data.projectId,
@@ -374,7 +373,7 @@ daemonsRouter.post("/:id/apply-review", async (c) => {
   }
 
   try {
-    const result = await daemonService.applyReview(
+    const result = await createResourceServices(c.get("identity")).daemonService.applyReview(
       db,
       id,
       parsed.data.projectId,
@@ -415,7 +414,7 @@ daemonsRouter.post("/:id/apply-merge", async (c) => {
   }
 
   try {
-    const result = await daemonService.applyMerge(
+    const result = await createResourceServices(c.get("identity")).daemonService.applyMerge(
       db,
       id,
       parsed.data.projectId,

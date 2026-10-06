@@ -205,10 +205,11 @@ test('daemon review and merge preserve partial success through a multi-repositor
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const path = url.pathname
+    if (path === '/api/v1/auth/me') return sendJson(res, 200, { actor: { id: '00000000-0000-4000-8000-0000000000aa', type: 'agent' }, account: null, session: null })
 
     if (req.method === 'POST' && path === '/api/v1/daemons/register') {
       await readJson(req)
-      return sendJson(res, 201, { id: daemonId, status: 'idle' })
+      return sendJson(res, 201, { id: daemonId, status: 'idle', config: { executionDelegationSupported: true, mode: 'polling', pollingIntervalMs: 20, pollingBackoffMax: 50 } })
     }
     if (req.method === 'POST' && path === `/api/v1/daemons/${daemonId}/status`) {
       await readJson(req)
