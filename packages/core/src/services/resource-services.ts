@@ -1,8 +1,8 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import {
   type Database, projects, requirements, tasks, documents, memories, executionSlices,
   mcpTools, mcpLocalRequests, requirementRepositories, skillPackages, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
-  documentRequirementLinks, projectMemberships, activityLog,
+  documentRequirementLinks, projectMemberships, activityLog, executionDelegations,
 } from "@task-weaver/db";
 import {
   AuthenticationError, AuthorizationError, NotFoundError, ValidationError, type Actor,
@@ -100,6 +100,10 @@ function bindServices(context?: VerifiedRequestContext) {
           const call = [...args];
           call[0] = txDb;
           await authorizeOperation(txDb, authority, group, name, call, context);
+          const removedDocumentLink = name === "unlinkDocumentFromTask"
+            ? await tx.query.documentTaskLinks.findFirst({ where: eq(documentTaskLinks.id, call[1]) })
+            : name === "unlinkDocumentFromRequirement"
+              ? await tx.query.documentRequirementLinks.findFirst({ where: eq(documentRequirementLinks.id, call[1]) }) : undefined;
           let result: any;
           if (name === "createProject") {
             if (authority.actor.type !== "human" || !authority.grants.some(g => g.scope === "instance" && g.permissions.includes("project.create"))) throw new AuthorizationError();
@@ -125,6 +129,31 @@ function bindServices(context?: VerifiedRequestContext) {
             const entityId = typeof call[1] === "string" ? call[1] : result?.id;
             if (group === "memory") await auditIdentity(tx, `memory.${name}`, actor.id, actor.id, entityId);
             else await tx.insert(activityLog).values({ entityType: group === "claim" ? "task" : group as "project" | "requirement" | "task" | "document", entityId, action: name, actorId: actor.id, actorType: actor.type });
+          }
+          if (group === "task" && ["updateTask", "updateTaskStatus"].includes(name) && ["done", "cancelled"].includes(result?.status)) {
+            await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(isNull(executionDelegations.revokedAt), sql`${call[1]}::uuid = ANY(${executionDelegations.taskIds})`, result.status === "done" ? eq(executionDelegations.purpose, "execute") : undefined));
+          }
+          if (group === "requirement" && ["updateRequirement", "updateRequirementStatus"].includes(name) && ["done", "cancelled", "archived"].includes(result?.status)) {
+            await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(isNull(executionDelegations.revokedAt), eq(executionDelegations.requirementId, call[1])));
+          }
+          if (name === "updateTask" && ["requirementId", "executionSliceId"].some(key => key in (call[2] ?? {}))) {
+            await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(isNull(executionDelegations.revokedAt), sql`${call[1]}::uuid = ANY(${executionDelegations.taskIds})`));
+          }
+          if (name === "updateDocument" && ["projectId", "personalOwnerId", "personalOwnerType", "scope"].some(key => key in (call[2] ?? {}))) {
+            await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(isNull(executionDelegations.revokedAt), sql`${call[1]}::uuid = ANY(${executionDelegations.documentIds})`));
+          }
+          if (["addRequirementRepository", "removeRequirementRepository", "addTaskRepository", "removeTaskRepository"].includes(name)) {
+            const target = name.includes("Task") ? sql`${call[1]}::uuid = ANY(${executionDelegations.taskIds})` : eq(executionDelegations.requirementId, call[1]);
+            await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(isNull(executionDelegations.revokedAt), target));
+          }
+          if (removedDocumentLink) {
+            await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(isNull(executionDelegations.revokedAt), sql`${removedDocumentLink.documentId}::uuid = ANY(${executionDelegations.documentIds})`));
+          }
+          if (["updateRepository", "archiveRepository"].includes(name)) {
+            await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(isNull(executionDelegations.revokedAt), sql`${call[1]}::uuid = ANY(${executionDelegations.repositoryIds})`));
+          }
+          if (["updateProject", "deleteProject"].includes(name) && result?.status === "archived") {
+            await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(isNull(executionDelegations.revokedAt), eq(executionDelegations.projectId, call[1])));
           }
           if (group === "mcp" && name !== "callTool") result = redactMcpResult(authority, result);
           if (group === "embedding") result = redactEmbeddingResult(authority, result);
@@ -180,6 +209,13 @@ async function checkMemoryEntity(db: Database, authority: ResourceAuthority, inp
   await requireResource(db, authority, input.entityType, input.entityId);
 }
 
+function redactDelegatedInput(value: any): any {
+  if (typeof value === "string") return value.replace(/\b(?:tw|twd|twb)_[0-9a-f]{64}\b/gi, "[redacted]");
+  if (Array.isArray(value)) return value.map(redactDelegatedInput);
+  if (value && Object.getPrototypeOf(value) === Object.prototype) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactDelegatedInput(item)]));
+  return value;
+}
+
 /** Task capabilities do not inherit the parent's project administration or unrelated write surfaces. */
 function authorizeDelegatedOperation(authority: ResourceAuthority, group: Group, name: string, call: any[]) {
   const reads = new Set(["getProject", "getRequirement", "getTask", "getTaskDetail", "listTasks", "listRequirements", "listProjects", "getDocument", "getDocumentDetail", "listDocuments", "getTaskClaim", "getRequirementClaim", "listExecutionSlices", "listTaskComments", "listTaskNotes", "listDocumentVersions", "getDocumentVersion", "getRequirementRepositories", "getTaskRepositories", "listRequirementRepositories", "listTaskRepositories", "getRepository", "listRepositories", "bootstrapContext", "searchTasks", "searchRequirements", "searchDocuments", "searchDocumentsFulltext", "searchAll", "resolveTitles", "listContextEntries", "searchContext", "getContextEntry"]);
@@ -187,12 +223,20 @@ function authorizeDelegatedOperation(authority: ResourceAuthority, group: Group,
   if (!reads.has(name) && !(authority.bounds?.purpose === "execute" && writes.has(name))) throw new AuthorizationError();
   if (["usage", "review", "ti", "activity", "schedule", "observability", "metrics", "progress", "daemon", "mcp", "embedding", "memory", "package", "slo"].includes(group)) throw new AuthorizationError();
   if (name === "updateTask" && Object.keys(call[2] ?? {}).some(key => !["title", "description", "priority", "expectedAt", "expectedVersion", "version", "status", "reason", "daemonId", "leaseGeneration"].includes(key))) throw new AuthorizationError();
-  if (name === "updateTaskStatus" && call[2]?.force === true) throw new AuthorizationError();
+  if (name === "updateTaskStatus") {
+    if (call[5] === true) throw new AuthorizationError();
+    const fence = { daemonId: authority.bounds!.daemonId, leaseGeneration: Number(authority.bounds!.leaseGeneration) };
+    if ((call[6]?.daemonId && call[6].daemonId !== fence.daemonId) || (call[6]?.leaseGeneration !== undefined && call[6].leaseGeneration !== fence.leaseGeneration)) throw new AuthorizationError();
+    call[6] = fence;
+  }
   if (name === "updateDocument" && Object.keys(call[2] ?? {}).some(key => !["title", "content", "version"].includes(key))) throw new AuthorizationError();
 }
 
 async function authorizeOperation(db: Database, authority: ResourceAuthority, group: Group, name: string, call: any[], context: VerifiedRequestContext) {
-  if (authority.bounds) authorizeDelegatedOperation(authority, group, name, call);
+  if (authority.bounds) {
+    authorizeDelegatedOperation(authority, group, name, call);
+    for (let index = 1; index < call.length; index++) call[index] = redactDelegatedInput(call[index]);
+  }
   if (group === "usage" || group === "review" || group === "ti" || group === "activity" || group === "schedule" || group === "observability" || group === "metrics" || group === "progress" || group === "daemon") return authorizeMetadataOperation(db, authority, group, name, call);
   const id = call[1];
   if (group === "repository") {

@@ -59,6 +59,10 @@ export class DaemonLifecycle {
     return { key, signal: controller.signal, completion, complete }
   }
 
+  cancel(key: string, reason: string) {
+    this.operations.get(key)?.controller.abort(new DaemonCancellationError(reason))
+  }
+
   async drain(reason: string): Promise<void> {
     if (this.drainPromise) return this.drainPromise
     if (this.currentPhase === 'stopped') return

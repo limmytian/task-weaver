@@ -34,7 +34,9 @@ export async function createTaskAccessBroker(options: {
   const handle = `twb_${randomBytes(32).toString('hex')}`
   const verifier = secretDigest(`Bearer ${handle}`)
   let capability = options.capability
+  let validating = false
   let closed = false
+  let validationTimer: ReturnType<typeof setInterval> | undefined
   let expiryTimer: ReturnType<typeof setTimeout> | undefined
   let renewalTimer: ReturnType<typeof setTimeout> | undefined
   let renewing: Promise<void> | undefined
@@ -89,6 +91,7 @@ export async function createTaskAccessBroker(options: {
     closed = true
     if (renewalTimer) clearTimeout(renewalTimer)
     if (expiryTimer) clearTimeout(expiryTimer)
+    if (validationTimer) clearInterval(validationTimer)
     for (const request of requests) request.abort()
     server.closeAllConnections()
     server.close()
@@ -130,6 +133,19 @@ export async function createTaskAccessBroker(options: {
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('Task broker did not bind loopback')
   scheduleRenewal()
+  validationTimer = setInterval(() => {
+    if (closed || renewing || validating || Date.parse(capability.delegation.expiresAt) - Date.now() < 45_000) return
+    validating = true
+    const controller = new AbortController()
+    requests.add(controller)
+    void fetchUpstream(`${origin.origin}/api/v1/auth/me`, {
+      headers: { authorization: `Bearer ${capability.token}` }, redirect: 'error', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(2500)]),
+    }).then(async response => {
+      await response.body?.cancel()
+      if (!response.ok) invalidate()
+    }).catch(() => { invalidate() }).finally(() => { validating = false; requests.delete(controller) })
+  }, 1000)
+  validationTimer.unref()
   return {
     apiUrl: `http://127.0.0.1:${address.port}`, apiKey: handle,
     async close() {

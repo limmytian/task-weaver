@@ -1,3 +1,4 @@
+import { revokeActorExecutions } from './execution-revocation';
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import {
@@ -162,6 +163,7 @@ export function createIdentityManagementService(
     byActorId: string,
   ) {
     const now = new Date();
+    await revokeActorExecutions(dbOrTx, actor.id);
     const [disabled] = await dbOrTx
       .update(authActors)
       .set({ status: "disabled", updatedAt: now })
@@ -321,6 +323,7 @@ export function createIdentityManagementService(
           parsed.role !== "owner"
         )
           await assertOtherActiveOwner(tx, projectId, actorId);
+        await revokeActorExecutions(tx, actorId, projectId);
         const [membership] = await tx
           .insert(projectMemberships)
           .values({ projectId, actorId, actorType: subject.type, ...parsed })
@@ -386,6 +389,7 @@ export function createIdentityManagementService(
           });
           await assertOtherActiveOwner(tx, projectId, actorId);
         }
+        await revokeActorExecutions(tx, actorId, projectId);
         const removedAt = new Date();
         await tx
           .update(projectMemberships)
@@ -430,6 +434,8 @@ export function createIdentityManagementService(
           throw new ValidationError(
             "Project ownership requires an active human",
           );
+        await revokeActorExecutions(tx, targetActorId, projectId);
+        await revokeActorExecutions(tx, authority.actor.id, projectId);
         const [membership] = await tx
           .insert(projectMemberships)
           .values({

@@ -120,14 +120,16 @@ const { join } = require('node:path');
     process.stdout.write('fake-agent 1.0.0\\n');
     return;
   }
-  if (process.env.TW_API_KEY !== '') {
+  if (!/^twb_[0-9a-f]{64}$/.test(process.env.TW_API_KEY || '')) {
     throw new Error('daemon child must not inherit the configured API key');
   }
   const mode = ${JSON.stringify(mode)};
-  const taskIds = ${JSON.stringify(taskIds)};
-  const partialRetryMarker = join(process.env.HOME, '.partial-retry-cycle');
+  const allTaskIds = ${JSON.stringify(taskIds)};
+  const taskIds = allTaskIds.filter(id => id === process.env.TW_TASK_ID);
+  const isLastTask = process.env.TW_TASK_ID === allTaskIds.at(-1);
+  const partialRetryMarker = join(process.cwd(), '.partial-retry-cycle');
   const firstPartialRetryCycle = mode === 'partial-retry' && !existsSync(partialRetryMarker);
-  if (firstPartialRetryCycle) writeFileSync(partialRetryMarker, 'started\\n');
+  if (firstPartialRetryCycle && isLastTask) writeFileSync(partialRetryMarker, 'started\\n');
   if (mode === 'non-zero') process.exit(7);
   if (mode === 'slow') {
     process.stdout.write('fake-agent-ready\\n');
@@ -142,7 +144,7 @@ const { join } = require('node:path');
     }
   }
 
-  if (mode === 'push-failure' || firstPartialRetryCycle) {
+  if (isLastTask && (mode === 'push-failure' || firstPartialRetryCycle)) {
     const badRemote = ${JSON.stringify(badRemote)};
     const repositoryCwd = repositoryCwds[0];
     const remote = spawnSync('git', ['remote', 'set-url', 'origin', badRemote], { cwd: repositoryCwd, encoding: 'utf8' });
@@ -157,8 +159,8 @@ const { join } = require('node:path');
   for (const taskId of taskIds) {
     const res = await fetch(\`\${apiUrl}/api/v1/tasks/\${taskId}/status\`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'done', reason: \`fake-agent completed \${taskId}\`, force: true }),
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.TW_API_KEY },
+      body: JSON.stringify({ status: 'done', reason: \`fake-agent completed \${taskId}\`, force: false }),
     });
     if (!res.ok) throw new Error(\`status update failed for \${taskId}: HTTP \${res.status}\`);
   }
@@ -219,12 +221,12 @@ async function runDaemonScenario(mode: AgentMode, workers = 1): Promise<Scenario
   const root = await mkdtemp(join(tmpdir(), `tw-daemon-${mode}-`))
   const projectId = '00000000-0000-4000-8000-0000000000f1'
   const daemonId = '00000000-0000-4000-8000-0000000000da'
-  const requirementId = `req-daemon-${mode}`
-  const executionSliceId = `slice-daemon-${mode}`
+  const requirementId = randomUUID()
+  const executionSliceId = randomUUID()
   const branchName = `req/daemon-${mode}`
   const tasks = [
     {
-      id: `task-${mode}-active`,
+      id: randomUUID(),
       projectId,
       requirementId,
       executionSliceId,
@@ -237,7 +239,7 @@ async function runDaemonScenario(mode: AgentMode, workers = 1): Promise<Scenario
       updatedAt: '2026-07-05T00:00:00.000Z',
     },
     {
-      id: `task-${mode}-remaining`,
+      id: randomUUID(),
       projectId,
       requirementId,
       executionSliceId,
@@ -347,6 +349,18 @@ async function runDaemonScenario(mode: AgentMode, workers = 1): Promise<Scenario
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const path = url.pathname
     if (path === '/api/v1/auth/me') return sendJson(res, 200, { actor: { id: '00000000-0000-4000-8000-0000000000aa', type: mode === 'human-key' ? 'human' : 'agent' }, account: null, session: null })
+
+    if (req.method === 'POST' && path === `/api/v1/daemons/${daemonId}/delegations`) {
+      assert.equal(req.headers.authorization, 'Bearer test-key')
+      const body = await readJson(req)
+      return sendJson(res, 201, { token: `twd_${'a'.repeat(64)}`, delegation: {
+        id: randomUUID(), parentCredentialId: randomUUID(), delegatorActorId: '00000000-0000-4000-8000-0000000000aa',
+        initiator: { id: '00000000-0000-4000-8000-0000000000aa', type: 'agent' }, executorActorId: '00000000-0000-4000-8000-0000000000aa',
+        projectId, requirementId: body.requirementId, taskIds: [body.taskId], repositoryIds: [],
+        runId: body.runId, purpose: 'execute', leaseGeneration: body.leaseGeneration, expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      } })
+    }
+    if (req.method === 'DELETE' && path.startsWith(`/api/v1/daemons/${daemonId}/delegations/`)) return sendJson(res, 200, { revoked: true })
 
     if (req.method === 'POST' && path === '/api/v1/daemons/register') {
       await readJson(req)
@@ -567,7 +581,7 @@ async function runDaemonScenario(mode: AgentMode, workers = 1): Promise<Scenario
     await new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()))
     })
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: false })
   }
 }
 

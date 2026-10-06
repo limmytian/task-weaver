@@ -1,3 +1,4 @@
+import { revokeActorExecutions } from './execution-revocation';
 import { authenticateExecutionDelegation } from './execution-delegations';
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
@@ -149,6 +150,7 @@ export async function revokeAccountCredentials(
   byActorId: string,
   now: Date,
 ) {
+  await revokeActorExecutions(db, actorId);
   await revokePendingActivations(db, userId, byActorId, now);
   await db
     .update(authSessions)

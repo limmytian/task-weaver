@@ -47,7 +47,6 @@ type CommandRunner = (
 
 const AI_ENVIRONMENT_KEYS = new Set([
   'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'LANG', 'TERM', 'CI', 'NO_COLOR',
-  'TW_API_URL', 'TW_API_KEY', 'TW_ACTOR_ID', 'TW_ACTOR_TYPE', 'TW_CLIENT_ID', 'TW_NODE_ID',
 ])
 const SECRET_ENVIRONMENT_KEY = /(TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|CREDENTIAL|AUTHORIZATION|COOKIE|SESSION|ASKPASS|SSH_AUTH_SOCK|GIT_SSH|GH_|GITHUB_|GITLAB_)/i
 
@@ -58,8 +57,16 @@ export function buildAiEnvironment(source: NodeJS.ProcessEnv, additions: NodeJS.
     if (AI_ENVIRONMENT_KEYS.has(key) || key.startsWith('LC_')) result[key] = value
   }
   for (const [key, value] of Object.entries(additions)) {
+    if (key === 'TW_API_KEY' && value && !/^twb_[0-9a-f]{64}$/.test(value)) throw new Error('AI access requires a local task broker handle')
     if (value !== undefined && !SECRET_ENVIRONMENT_KEY.test(key)) result[key] = value
   }
+  result.GIT_CONFIG_GLOBAL = '/dev/null'
+  result.GIT_CONFIG_SYSTEM = '/dev/null'
+  result.GIT_CONFIG_COUNT = '2'
+  result.GIT_CONFIG_KEY_0 = 'credential.helper'
+  result.GIT_CONFIG_VALUE_0 = ''
+  result.GIT_CONFIG_KEY_1 = 'core.sshCommand'
+  result.GIT_CONFIG_VALUE_1 = '/usr/bin/false'
   result.GIT_TERMINAL_PROMPT = '0'
   result.GIT_ASKPASS = '/usr/bin/false'
   result.SSH_ASKPASS = '/usr/bin/false'
@@ -221,6 +228,7 @@ export function resolveRepositoryCredential(
 
 export function redactTrustedOutput(value: string): string {
   return value
+    .replace(/\b(?:tw|twd|twb)_[0-9a-f]{64}\b/gi, '[redacted]')
     .replace(/:\/\/[^/@\s]+:[^/@\s]+@/g, '://[redacted]@')
     .replace(/([?&](?:access_?token|api_?key|password|secret|token)=)[^&\s]+/gi, '$1[redacted]')
     .replace(/\b(?:ghp|glpat|github_pat)_[A-Za-z0-9_-]+\b/g, '[redacted]')

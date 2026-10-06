@@ -81,3 +81,16 @@ test('child spawn errors resolve as retryable results instead of crashing the da
   assert.equal(result.errorCode, 'ENOENT')
   assert.match(result.stderr, /ENOENT/)
 })
+
+test('authority loss cancels only its worker and cannot restore an aborted execution', async () => {
+  const lifecycle = new DaemonLifecycle()
+  const first = lifecycle.start('0')
+  const second = lifecycle.start('1')
+  lifecycle.cancel('0', 'Execution lease authority ended')
+  assert.equal(first.signal.aborted, true)
+  assert.equal(second.signal.aborted, false)
+  assert.equal(lifecycle.phase, 'running')
+  first.complete()
+  second.complete()
+  lifecycle.stop()
+})

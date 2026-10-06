@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { createHash, randomBytes } from 'node:crypto';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
-import { daemons, documents, documentTaskLinks, documentRequirementLinks, executionDelegations, requirementClaims, requirements, tasks, requirementRepositories, taskRepositories, type Database } from '@task-weaver/db';
+import { daemons, documents, documentTaskLinks, documentRequirementLinks, executionDelegations, requirementClaims, requirements, tasks, taskDependencies, requirementRepositories, taskRepositories, type Database } from '@task-weaver/db';
 import { AuthenticationError, AuthorizationError, NotFoundError, ValidationError, executionDelegationSchema, issueExecutionDelegationSchema, credentialGrantsSchema, requestIdentitySnapshotSchema, type Principal, type AuthorizationGrant, type AuthorizationPermission, type ExecutionDelegation, type IssueExecutionDelegationInput, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { getBoundCredentialAuthority, getLiveRequestAuthority } from './api-keys';
 import { grantsAreCovered, intersectGrants, loadActivePrincipal, type AuthDatabase } from './auth-principals';
@@ -10,7 +10,7 @@ import { requireRepository } from './repository-authorization';
 import { requireResource } from './resource-authorization';
 
 type StoredDelegation = typeof executionDelegations.$inferSelect;
-export type ExecutionBounds = Pick<StoredDelegation, 'expiresAt' | 'id' | 'projectId' | 'requirementId' | 'taskIds' | 'documentIds' | 'sliceIds' | 'repositoryIds' | 'daemonId' | 'runId' | 'purpose' | 'parentCredentialId'>;
+export type ExecutionBounds = Pick<StoredDelegation, 'leaseGeneration' | 'expiresAt' | 'id' | 'projectId' | 'requirementId' | 'taskIds' | 'documentIds' | 'sliceIds' | 'repositoryIds' | 'daemonId' | 'runId' | 'purpose' | 'parentCredentialId'>;
 const idSchema = z.string().uuid();
 const digest = (token: string) => createHash('sha256').update(token).digest('hex');
 const phasePermission = (purpose: ExecutionDelegation['purpose']): AuthorizationPermission => purpose === 'review' ? 'execution.review' : purpose === 'merge' ? 'execution.merge' : 'execution.run';
@@ -111,6 +111,14 @@ export function createExecutionDelegationService(context: VerifiedRequestContext
         if (!requirement || requirement.leaseGeneration !== claim.generation || ['cancelled', 'done', 'archived'].includes(requirement.status)) throw new AuthorizationError();
         const selected = await tx.select().from(tasks).where(and(eq(tasks.requirementId, input.requirementId), purpose === 'execute' ? eq(tasks.id, input.taskId ?? '') : undefined));
         if (!selected.length || selected.some(task => task.scope !== 'project' || task.projectId !== scope.projectId || task.status === 'cancelled' || (purpose === 'execute' && task.status === 'done'))) throw new AuthorizationError();
+        if (purpose === 'execute') {
+          const blockers = await tx.select({ id: taskDependencies.dependsOnTaskId }).from(taskDependencies).where(and(eq(taskDependencies.taskId, input.taskId!), eq(taskDependencies.type, 'blocks')));
+          for (const blocker of blockers) {
+            await requireResource(tx, authority, 'task', blocker.id);
+            const target = await tx.query.tasks.findFirst({ where: eq(tasks.id, blocker.id) });
+            if (!target || !['done', 'cancelled'].includes(target.status)) throw new AuthorizationError();
+          }
+        }
         const taskIds = selected.map(task => task.id);
         for (const taskId of taskIds) await requireResource(tx, authority, 'task', taskId, phasePermission(purpose));
         const docLinks = await tx.select({ id: documentTaskLinks.documentId }).from(documentTaskLinks).where(inArray(documentTaskLinks.taskId, taskIds));

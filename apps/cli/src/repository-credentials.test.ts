@@ -17,7 +17,7 @@ test('AI environment excludes Git and provider credentials', () => {
     AWS_SECRET_ACCESS_KEY: 'canary-cloud-secret',
   })
   assert.equal(env.PATH, '/usr/bin')
-  assert.equal(env.TW_API_KEY, 'task-weaver-only')
+  assert.equal(env.TW_API_KEY, undefined)
   assert.equal(env.SSH_AUTH_SOCK, undefined)
   assert.equal(env.GITHUB_TOKEN, undefined)
   assert.equal(env.AWS_SECRET_ACCESS_KEY, undefined)

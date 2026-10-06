@@ -1,3 +1,4 @@
+import { createTaskWorkerAccess } from '../task-worker-access.js'
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync } from 'fs'
 import { createHash, randomUUID } from 'crypto'
 import { homedir, hostname } from 'os'
@@ -25,7 +26,6 @@ import { printJson, printTable } from '../output.js'
 import { getGitProviderAdapter, runTrustedGitCommand } from '../git-provider.js'
 import type { ForgeFailure, ForgePullRequest } from '../git-provider.js'
 import {
-  buildAiEnvironment,
   redactTrustedOutput,
   resolveRepositoryCredential,
 } from '../repository-credentials.js'
@@ -748,6 +748,7 @@ export function registerDaemon(program: Command): void {
           if (!worker) return
           applyLeaseSnapshot(worker, snapshot)
           if (!snapshot.healthy) {
+            lifecycle.cancel(snapshot.key, 'Execution lease authority ended')
             console.error(`[Daemon] Worker ${worker.index} lease became unhealthy: ${snapshot.lastError ?? 'unknown heartbeat failure'}`)
           }
           void reportDaemonStatus(workers.some((candidate) => candidate.activeProcess) ? 'busy' : 'idle')
@@ -783,8 +784,8 @@ export function registerDaemon(program: Command): void {
         w.pollTimer = setTimeout(() => poll(w), w.currentInterval)
       }
 
-      const runAgent = async (w: WorkerState, lane: RequirementLane, signal: AbortSignal) => {
-        const { requirement, executionSlice, task, tasks: laneTasks } = lane
+      const runAgent = async (w: WorkerState, lane: RequirementLane, signal: AbortSignal): Promise<void> => {
+        const { requirement, executionSlice, task } = lane
         const leaseFence = { daemonId, leaseGeneration: lane.leaseGeneration }
         const assertLease = () => leaseSupervisor.assertHealthy(String(w.index))
         const assertActive = () => {
@@ -919,7 +920,7 @@ ${workspace.repositories.length > 0
 - Existing changes: ${initialWorkspaceSnapshot.pendingDiffSummary ?? 'none'}
 - Dirty changes are intentionally preserved for this run. Continue from them instead of resetting or discarding them.`
 
-        const taskRoadmap = laneTasks.map((t: any, index: number) =>
+        const taskRoadmap = [task].map((t: any, index: number) =>
           `${index + 1}. [${t.status}] ${t.title} (${t.id})${t.description ? `\n   ${t.description}` : ''}`,
         ).join('\n')
 
@@ -938,10 +939,10 @@ ${workspace.repositories.length > 0
 - Model Tier: ${modelTier}
 - Description: ${executionSlice.description || 'No description provided.'}
 
-This Codex session is scoped to this execution slice. Complete only the tasks listed in the slice roadmap unless a small prerequisite update is required.`
+This session is limited to the current task. Do not process other tasks in this slice.`
           : `Execution Slice:
 - No execution slice is planned for this requirement yet.
-- This Codex session may process the requirement lane roadmap below.`
+- This session is limited to the current task in this requirement.`
 
         const reasoningSection = toolCmd === 'codex' && selectedReasoningEffort
           ? `- Codex Reasoning Effort: ${selectedReasoningEffort}\n`
@@ -981,7 +982,7 @@ ${gitWorkflowSection}
 
 IMPORTANT REQUIREMENTS & PROTOCOL:
 1. The requirement is already claimed by the daemon. Do NOT claim or release it.
-2. Process tasks in the current slice sequentially. Start with ${task.id}, then continue with remaining unblocked todo tasks in this slice.
+2. Work only on task ${task.id}. The supervisor will select subsequent tasks in separate executions.
 3. Before working a task, set it to in_progress if needed. When finished, set it to done with a reason. Use in_review when human judgment is needed.
 4. Use the 'tw' CLI commands to fetch context, list requirements, fetch documents, search, and update progress.
 5. Follow the Daemon-Owned Git Finalization section above after completing code changes for the requirement.
@@ -1009,7 +1010,10 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         if (workspaceQuarantined) {
           console.warn(`[Daemon] Worker ${w.index} quarantined workspace in state '${initialWorkspaceSnapshot.workspaceState}' before agent launch.`)
         }
-        const childResult = workspaceQuarantined ? {
+        if (!lane.runId) throw new Error('Task execution requires a recorded worker run')
+        const access = await createTaskWorkerAccess({ config: cliConfig, daemonId, requirementId: requirement.id, taskId: task.id, runId: lane.runId, workerIndex: w.index, leaseGeneration: lane.leaseGeneration, signal })
+        let childResult: Awaited<ReturnType<typeof runMeteredAgent>>
+        try { childResult = workspaceQuarantined ? {
           ok: false,
           status: 1,
           stdout: '',
@@ -1025,23 +1029,14 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           buildArgv(toolCmd, prompt, workspacePath, selectedModel, selectedReasoningEffort),
           {
             cwd: workspacePath,
-            env: buildAiEnvironment(process.env, {
-              CI: process.env.CI ?? '1',
-              NO_COLOR: '1',
-              TERM: process.env.TERM && process.env.TERM !== 'dumb' ? process.env.TERM : 'xterm-256color',
-              TW_ACTOR_ID: actorId,
-              TW_API_KEY: '',
-              TW_DAEMON_ID: daemonId,
-              TW_REQUIREMENT_LEASE_GENERATION: String(lane.leaseGeneration),
-              ...(lane.runId ? { TW_DAEMON_RUN_ID: lane.runId } : {}),
-            }),
+            env: access.environment,
             timeoutMs: Number.isFinite(configuredAgentTimeout) && configuredAgentTimeout > 0
               ? configuredAgentTimeout
               : 60 * 60_000,
             killGraceMs: 5_000,
             maxOutputBytes: 20 * 1024 * 1024,
-            signal,
-            redact: redactTrustedOutput,
+            signal: access.signal,
+            redact: access.redact,
             onOutput: ({ stream, chunk }) => {
               for (const line of chunk.split(/\r?\n/)) {
                 if (line.trim()) console.log(`[Daemon] Worker ${w.index} ${stream}: ${line}`)
@@ -1050,6 +1045,23 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           },
           { daemonId, projectId: requirement.projectId, requirementId: requirement.id, agent: toolCmd, phase: initialWorkspaceSnapshot.workspaceState === 'dirty' ? 'rework' : 'execution' },
         )
+        } finally { await access.close() }
+        if (childResult.ok && !signal.aborted) {
+          try {
+            const current = await daemonGet<any>(`/api/v1/requirements/${requirement.id}`)
+            const currentTasks = Array.isArray(current.tasks) ? current.tasks : []
+            const completed = currentTasks.find((candidate: any) => candidate.id === task.id)?.status === 'done'
+            const next = currentTasks.find((candidate: any) => candidate.status === 'todo'
+              && candidate.executionSliceId === (executionSlice?.id ?? null)
+              && lane.tasks.some(original => original.id === candidate.id))
+            if (completed && next) {
+              assertActive()
+              return runAgent(w, { ...lane, task: next }, signal)
+            }
+          } catch (error) {
+            console.warn(`[Daemon] Task continuation stopped: ${error instanceof Error ? error.message : String(error)}`)
+          }
+        }
         const cancelReason = cancellationReason(signal)
         const outcome = childResult.timedOut
           ? `timed out after ${childResult.durationMs}ms`
@@ -1188,7 +1200,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
                 }
                 if (executionSliceId) {
                   await fencedPatch(`/api/v1/execution-slices/${executionSliceId}`, {
-                    status: openSliceTasks.length === 0 ? 'done' : 'in_review',
+                    status: openSliceTasks.length === 0 ? 'done' : (reqTasks.find((candidate: any) => candidate.id === taskId)?.status === 'done' ? 'todo' : 'in_review'),
                     resultSummary: `${sliceSummary ?? 'Daemon requirement agent exited cleanly.'}\n\n${finalizationSummary}`,
                   })
                 }
@@ -1197,7 +1209,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
               } else {
                 if (executionSliceId) {
                   await fencedPatch(`/api/v1/execution-slices/${executionSliceId}`, {
-                    status: openSliceTasks.length === 0 ? 'done' : 'in_review',
+                    status: openSliceTasks.length === 0 ? 'done' : (reqTasks.find((candidate: any) => candidate.id === taskId)?.status === 'done' ? 'todo' : 'in_review'),
                     resultSummary: sliceSummary,
                   })
                 }
@@ -1313,6 +1325,23 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
                 leaseGeneration: res.leaseGeneration,
                 runId: res.runId,
               }, operation.signal)
+            } catch (error) {
+              console.error(`[Daemon] Worker ${w.index} stopped; workspace changes remain available for authorized lease recovery.`)
+              if (res.runId) await daemonPost(`/api/v1/daemons/${daemonId}/reconcile`, {
+                runId: res.runId, requirementId: res.requirement.id, executionSliceId: res.executionSlice?.id ?? null,
+                workerIndex: w.index, leaseGeneration: res.leaseGeneration,
+                reason: 'Task execution authority or workspace preparation ended', workspaceState: 'unknown',
+              }).catch(() => undefined)
+              await daemonPost(`/api/v1/requirements/${res.requirement.id}/release`, {
+                reason: 'Worker stopped before successful task completion', daemonId, leaseGeneration: res.leaseGeneration,
+              }).catch(() => undefined)
+              leaseSupervisor.unregister(String(w.index))
+              w.activeProcess = false
+              w.runId = null
+              w.leaseGeneration = null
+              if (opts.once) await stopDaemon('idle', 1)
+              else schedulePoll(w)
+              throw error
             } finally {
               operation.complete()
             }
@@ -1572,6 +1601,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           if (!worker) return
           applyLeaseSnapshot(worker, snapshot)
           if (!snapshot.healthy) {
+            lifecycle.cancel(snapshot.key, 'Execution lease authority ended')
             console.error(`[Daemon] Review worker ${worker.index} lease became unhealthy: ${snapshot.lastError ?? 'unknown heartbeat failure'}`)
           }
           void reportDaemonStatus(workers.some((candidate) => candidate.activeProcess) ? 'busy' : 'idle')
@@ -1595,27 +1625,24 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         process.exitCode = exitCode
       }
 
-      const runAiReview = async (prompt: string, cwd: string, requirement: { id: string; projectId: string }, signal?: AbortSignal): Promise<ReviewDecision> => {
+      const runAiReview = async (prompt: string, cwd: string, requirement: { id: string; projectId: string }, workerIndex: number, lane: { runId?: string; leaseGeneration: number }, signal?: AbortSignal): Promise<ReviewDecision> => {
         if (!reviewTool) {
           return { approved: true, summary: 'AI review skipped.' }
         }
         const modelTier = 'strong'
-        const child = await runMeteredAgent(
+        if (!lane.runId) throw new Error('AI review requires a recorded worker run')
+        const access = await createTaskWorkerAccess({ config: cliConfig, daemonId, requirementId: requirement.id, runId: lane.runId, workerIndex, leaseGeneration: lane.leaseGeneration, signal })
+        let child: Awaited<ReturnType<typeof runMeteredAgent>>
+        try { child = await runMeteredAgent(
           reviewTool,
           buildArgv(reviewTool, prompt, cwd, modelMappings[modelTier], thinkMappings[modelTier]),
           {
             cwd,
-            env: buildAiEnvironment(process.env, {
-              CI: process.env.CI ?? '1',
-              NO_COLOR: '1',
-              TERM: process.env.TERM && process.env.TERM !== 'dumb' ? process.env.TERM : 'xterm-256color',
-              TW_ACTOR_ID: actorId,
-              TW_API_KEY: '',
-            }),
+            env: access.environment,
             timeoutMs: 60 * 60_000,
             maxOutputBytes: 20 * 1024 * 1024,
-            signal,
-            redact: redactTrustedOutput,
+            signal: access.signal,
+            redact: access.redact,
             onOutput: ({ stream, chunk }) => {
               for (const line of chunk.split(/\r?\n/)) {
                 if (line.trim()) console.log(`[Daemon] Review tool ${stream}: ${line}`)
@@ -1624,6 +1651,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           },
           { daemonId, projectId: requirement.projectId, requirementId: requirement.id, agent: reviewTool, phase: 'review' },
         )
+        } finally { await access.close() }
         const output = [child.stdout, child.stderr].filter(Boolean).join('\n').trim()
         if (!child.ok) {
           return {
@@ -1672,6 +1700,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           executionSlice?: any | null
           repositories: RequirementRepositoryEntry[]
           leaseGeneration: number
+          runId?: string
         },
         signal: AbortSignal,
       ) => {
@@ -1792,7 +1821,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
               extraPrompt: extraWorkerPrompt,
               run: trustedRun,
               runCheck: (command, cwd) => runShellCommand(command, cwd, signal),
-              runAiReview: reviewTool ? (prompt, cwd) => runAiReview(prompt, cwd, requirement, signal) : undefined,
+              runAiReview: reviewTool ? (prompt, cwd) => runAiReview(prompt, cwd, requirement, w.index, lane, signal) : undefined,
               allowUnreviewed: Boolean(opts.allowUnreviewed),
               onPrepared: async ({ headCommit, baseCommit }) => {
                 const run = await fencedPost<{ id: string }>(
@@ -2257,6 +2286,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           if (!worker) return
           applyLeaseSnapshot(worker, snapshot)
           if (!snapshot.healthy) {
+            lifecycle.cancel(snapshot.key, 'Execution lease authority ended')
             console.error(`[Daemon] Merge worker ${worker.index} lease became unhealthy: ${snapshot.lastError ?? 'unknown heartbeat failure'}`)
           }
           void reportDaemonStatus(workers.some((candidate) => candidate.activeProcess) ? 'busy' : 'idle')
@@ -2318,6 +2348,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           executionSlice?: any | null
           repositories: RequirementRepositoryEntry[]
           leaseGeneration: number
+          runId?: string
         },
         signal: AbortSignal,
       ) => {

@@ -1,3 +1,4 @@
+import { revokeActorExecutions } from './execution-revocation';
 import { liveExecutionAuthority, type ExecutionBounds } from './execution-delegations';
 import { eq, and, gt, isNull, or } from "drizzle-orm";
 import {
@@ -371,6 +372,7 @@ export async function revokeScopedApiKey(
       true,
     );
     if (key.revokedAt) return publicKey(key);
+    await revokeActorExecutions(tx, key.actorId);
     const [revoked] = await tx
       .update(apiKeys)
       .set({ revokedAt: new Date(), revokedByActorId: authority.actor.id })
@@ -430,6 +432,7 @@ export async function rotateScopedApiKey(
         keyPrefix: material.prefix,
       })
       .returning();
+    await revokeActorExecutions(tx, key.actorId);
     await tx
       .update(apiKeys)
       .set({ revokedAt: now, revokedByActorId: authority.actor.id })

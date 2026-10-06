@@ -141,3 +141,27 @@ upstream capability secrets private, strips ambient credentials and actor header
 rejects administration/control routes and stops on upstream credential rejection.
 Renewal cannot expand the recorded task/repository bounds. The daemon execution
 support flag remains disabled until cancellation and worker integration complete.
+
+### Cancellation and recovery integration
+
+Membership changes, credential revocation/rotation, account or Agent disablement,
+terminal task/requirement transitions and repository manifest changes permanently
+revoke old execution capabilities. Restoring membership or returning a task to an
+active state requires a fresh supervisor exchange. The original worker lease and
+server-derived fences still govern every status mutation; children cannot force
+past dependency checks or supply another daemon's lease identity.
+
+The supervisor gives each executor task and AI review a separate loopback broker,
+temporary home and CLI/provider configuration directories. The environment drops
+ambient TW credentials, provider keys, Git helpers and SSH agent access. Trusted
+Git/forge operations remain in the supervisor. Capability-bearing output is
+redacted. Each child releases its broker and temporary configuration on completion.
+Multiple tasks receive separate capabilities rather than sharing broader task
+rights. Periodic live authority checks, bounded renewal and original expiry close brokers; lease health loss
+cancels the affected operation permanently, preserves workspace changes and uses
+the existing fenced reconciliation path. Unauthorized recovery writes remain
+rejected and the expired lane becomes recoverable by a newly authorized supervisor.
+
+The real daemon execution support flag remains disabled while the existing C3
+Ti/Partners propagation and authenticated end-to-end acceptance are pending.
+Background SLO, scheduled execution and other unconverted workers remain closed.

@@ -133,6 +133,14 @@ test("execution capabilities enforce immutable task bounds and revocable lease a
     const comment = await rest(`tasks/${task.id}/comments`, forged, "POST", { content: "Delegated task evidence" });
     assert.equal(comment.status, 201, JSON.stringify(comment.body));
     assert.equal(comment.body.authorId, agent.id);
+    const secretComment = await rest(`tasks/${task.id}/comments`, headers, "POST", { content: `Secret canary ${capability.token}` });
+    assert.equal(secretComment.status, 201);
+    assert.equal(secretComment.body.content, "Secret canary [redacted]");
+
+    assert.equal((await rest(`tasks/${task.id}/status`, headers, "PATCH", { status: "in_progress", force: true })).status, 403);
+    assert.equal((await rest(`tasks/${task.id}/status`, headers, "PATCH", { status: "in_progress", leaseGeneration: lane.body.leaseGeneration + 1, daemonId })).status, 403);
+    assert.equal((await rest(`tasks/${task.id}/status`, headers, "PATCH", { status: "in_progress" })).status, 200);
+
   });
   await t.test("tRPC and GraphQL reuse the same task/resource capability boundary", async () => {
     const caller = appRouter.createCaller(await createTRPCContextFactory({ db, auth: runtime })({ req: new Request(`${config.trustedOrigins[0]}/api/trpc`, { headers, method: "POST" }) }));
@@ -162,6 +170,29 @@ test("execution capabilities enforce immutable task bounds and revocable lease a
     headers = new Headers({ authorization: `Bearer ${capability.token}` });
     assert.equal((await rest(`tasks/${task.id}`, headers)).status, 200);
   });
+  await t.test("removing and restoring a document link cannot restore the old task capability", async () => {
+    const oldHeaders = headers;
+    const link = await db.query.documentTaskLinks.findFirst({ where: eq(documentTaskLinks.documentId, document.id) });
+    await owner.service.documentService.unlinkDocumentFromTask(db, link.id);
+    assert.equal((await rest(`tasks/${task.id}`, oldHeaders)).status, 401);
+    await owner.service.documentService.linkDocumentToTask(db, document.id, task.id, "references", owner.actor);
+    assert.equal((await rest(`tasks/${task.id}`, oldHeaders)).status, 401);
+    headers = await issue();
+    assert.equal((await rest(`documents/${document.id}`, headers)).status, 200);
+  });
+  await t.test("membership changes permanently revoke capabilities and restored membership requires a fresh exchange", async () => {
+    const oldHeaders = headers;
+    await runtime.identity.removeMembership(owner.headers, project.id, agent.id);
+    assert.equal((await rest(`tasks/${task.id}`, oldHeaders)).status, 401);
+    await runtime.identity.setMembership(owner.headers, project.id, agent.id, { role: "member", explicitPermissions: ["execution.run", "execution.review", "execution.merge"] });
+    assert.equal((await rest(`tasks/${task.id}`, oldHeaders)).status, 401);
+    headers = await issue();
+    assert.equal((await rest(`tasks/${task.id}`, headers)).status, 200);
+    await runtime.identity.setMembership(owner.headers, project.id, agent.id, { role: "viewer" });
+    assert.equal((await rest(`tasks/${task.id}`, headers)).status, 401);
+    await runtime.identity.setMembership(owner.headers, project.id, agent.id, { role: "member", explicitPermissions: ["execution.run", "execution.review", "execution.merge"] });
+    headers = await issue();
+  });
   await t.test("expiry, lease supersession and parent revocation reject stale contexts and replays", async () => {
     const stale = await runtime.verify(headers);
     await db.update(executionDelegations).set({ createdAt: new Date(Date.now() - 60_000), expiresAt: new Date(Date.now() - 1000) }).where(eq(executionDelegations.id, capability.delegation.id));
@@ -178,5 +209,13 @@ test("execution capabilities enforce immutable task bounds and revocable lease a
     assert.ok(!JSON.stringify(audits).includes(capability.token));
     assert.ok(!JSON.stringify(audits).includes(executor.issued.rawKey));
     await db.delete(taskClaims).where(eq(taskClaims.taskId, task.id));
+  });
+  await t.test("completed tasks revoke old grants permanently and disabling the Agent ends its execution", async () => {
+    executor = await key(agent.id, owner, project.id);
+    headers = await issue();
+    assert.equal((await rest(`tasks/${task.id}/status`, headers, "PATCH", { status: "done", reason: "Bound task completed" })).status, 200);
+    assert.equal((await rest(`tasks/${task.id}`, headers)).status, 401);
+    await runtime.identity.disableAgent(owner.headers, agent.id);
+    assert.equal((await call(`${daemonId}/delegations`, executor.headers, request)).response.status, 401);
   });
 });
