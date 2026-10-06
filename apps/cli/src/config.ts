@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, chmodSync, renameSync, unlinkSync, lstatSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
@@ -27,8 +27,23 @@ export interface RepositoryCredentialProfile {
   knownHostsPath?: string
 }
 
-const CONFIG_DIR = join(homedir(), '.config', 'tw')
-const CONFIG_FILE = join(CONFIG_DIR, 'config.json')
+function configDirectory(): string {
+  return process.env.TW_CONFIG_DIR ?? join(homedir(), '.config', 'tw')
+}
+
+export function readStoredConfig(): Partial<Config> {
+  try {
+    if (lstatSync(configDirectory()).isSymbolicLink() || lstatSync(configFilePath()).isSymbolicLink()) throw new Error('Unsafe CLI configuration path')
+    chmodSync(configDirectory(), 0o700)
+    chmodSync(configFilePath(), 0o600)
+    const value: unknown = JSON.parse(readFileSync(configFilePath(), 'utf-8'))
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid CLI configuration')
+    return value as Partial<Config>
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
+    throw new Error('Unable to read CLI configuration')
+  }
+}
 
 export function loadConfig(): Config {
   const apiUrl = process.env.TW_API_URL
@@ -36,12 +51,7 @@ export function loadConfig(): Config {
   const clientIdEnv = process.env.TW_CLIENT_ID
   const nodeIdEnv = process.env.TW_NODE_ID
 
-  let fileConfig: Partial<Config> = {}
-  try {
-    fileConfig = JSON.parse(readFileSync(CONFIG_FILE, 'utf-8'))
-  } catch {
-    // no config file yet
-  }
+  const fileConfig = readStoredConfig()
 
   let dirty = false
 
@@ -58,12 +68,7 @@ export function loadConfig(): Config {
   }
 
   if (dirty) {
-    try {
-      mkdirSync(CONFIG_DIR, { recursive: true })
-      writeFileSync(CONFIG_FILE, JSON.stringify({ ...fileConfig, clientId, nodeId }, null, 2) + '\n', 'utf-8')
-    } catch {
-      // ignore write failures
-    }
+    saveConfig({ ...fileConfig, apiUrl: fileConfig.apiUrl ?? 'http://localhost:3001', clientId, nodeId })
   }
 
   return {
@@ -78,10 +83,22 @@ export function loadConfig(): Config {
 }
 
 export function saveConfig(config: Config): void {
-  mkdirSync(CONFIG_DIR, { recursive: true })
-  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2) + '\n', 'utf-8')
+  const directory = configDirectory()
+  mkdirSync(directory, { recursive: true, mode: 0o700 })
+  if (lstatSync(directory).isSymbolicLink()) throw new Error('Unsafe CLI configuration path')
+  chmodSync(directory, 0o700)
+  const temporary = join(directory, `.config-${randomUUID()}.tmp`)
+  try {
+    writeFileSync(temporary, JSON.stringify(config, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600, flag: 'wx' })
+    renameSync(temporary, configFilePath())
+    chmodSync(configFilePath(), 0o600)
+  } finally {
+    try { unlinkSync(temporary) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
 }
 
 export function configFilePath(): string {
-  return CONFIG_FILE
+  return join(configDirectory(), 'config.json')
 }

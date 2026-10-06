@@ -20,24 +20,23 @@ export async function request<T>(
     actorType?: 'human' | 'agent'
     omitAuth?: boolean
     signal?: AbortSignal
+    credential?: { apiUrl: string; apiKey: string }
   },
 ): Promise<T> {
   const config = loadConfig()
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'X-Actor-Type': opts?.actorType ?? 'agent',
-    'X-Actor-Id': opts?.actorId ?? process.env.TW_ACTOR_ID ?? config.actorId ?? 'tw-cli',
-  }
-  if (config.apiKey && !opts?.omitAuth) {
-    headers['Authorization'] = `Bearer ${config.apiKey}`
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const credential = opts?.credential ?? config
+  if (credential.apiKey && !opts?.omitAuth) {
+    headers['Authorization'] = `Bearer ${credential.apiKey}`
   }
 
-  const url = `${config.apiUrl}${path}`
+  const url = `${credential.apiUrl}${path}`
   const res = await fetch(url, {
     method,
     headers,
     signal: opts?.signal,
+    redirect: 'error',
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
 

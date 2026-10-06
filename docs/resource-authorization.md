@@ -72,3 +72,23 @@ Migration 0053 adds a stable actor, revocable session/key binding, configured-sc
 Every dispatch and explicit failed-delivery retry revalidates the stored actor, credential, current membership, permission ceiling, configuration generation and all event resources using the same core SSE resource rules. This includes two-endpoint link checks and deletion scope snapshots. HMAC-SHA256 signs only authorized invalidation hints. Requests start under the identity lifecycle lock, have a ten-second timeout, reject embedded URL credentials and do not follow redirects. Secret material and remote response text never enter audit/error responses. Already dispatched data cannot be recalled; queued/retried work is always reauthorized.
 
 The API restores only this authorized webhook event subscriber, with a bounded sequential event queue. Other workers, daemon acquisition/control/reporting, SLO and delegated execution remain closed. There is no autonomous retry worker; authorized managers can explicitly retry failed deliveries within the current binding generation.
+
+### CLI credential configuration
+
+`tw auth login` reads a subject-bound scoped API key from hidden terminal input or
+stdin, verifies it with `/api/v1/auth/me`, and saves it without changing client,
+node, daemon instance, or repository credential profile metadata. Create the key
+through the authenticated account interface with the intended subject and grants.
+Human keys remain human identities; managed-agent keys resolve their bound agent.
+`tw auth whoami --json` queries the current verified identity. `tw auth status`
+reports reachability and authentication separately; successful authentication does
+not grant access to every resource.
+
+The CLI configuration directory uses mode `0700` and credential files use `0600`.
+`TW_CONFIG_DIR` selects an isolated configuration directory. `TW_API_KEY` and
+`TW_API_URL` override stored values. Keys are never accepted as command-line
+arguments or printed. New remote logins require HTTPS; loopback HTTP is supported for local
+development. Existing configured endpoints retain their transport configuration. Redirects do not forward credentials.
+`tw auth logout` removes the stored key locally. It does not revoke a shared key
+on the server; revoke that key through the authenticated credential interface
+when required, and unset any environment override.
