@@ -98,7 +98,7 @@ test('collection failures and unsupported sources do not alter execution results
   )
   assert.equal(result.status, 7)
   const controller = new AbortController()
-  setTimeout(() => controller.abort(), 250)
+  let observedOutput = ''
   const reports: ReportAgentUsageInput[] = []
   await runMeteredAgent(
     process.execPath,
@@ -106,7 +106,15 @@ test('collection failures and unsupported sources do not alter execution results
       '-e',
       `process.stdout.write(${JSON.stringify(event())}); setInterval(()=>{},1000)`,
     ],
-    { signal: controller.signal, killGraceMs: 10 },
+    {
+      signal: controller.signal,
+      killGraceMs: 10,
+      timeoutMs: 10_000,
+      onStdout: (chunk) => {
+        observedOutput += chunk.toString('utf8')
+        if (observedOutput.includes('\n')) controller.abort()
+      },
+    },
     {
       daemonId: 'd',
       projectId: 'p',
