@@ -68,6 +68,19 @@ export function resourcePredicate(
   return or(...terms) ?? sql`false`;
 }
 
+/** Scope-labelled assets must agree with their stored owner/project columns. */
+export function labelledResourcePredicate(
+  authority: ResourceAuthority,
+  columns: { scope: AnyColumn; projectId: AnyColumn; personalOwnerId: AnyColumn; personalOwnerType: AnyColumn; createdBy: AnyColumn },
+  permission: AuthorizationPermission = "resource.read",
+) {
+  return and(resourcePredicate(authority, columns, permission), or(
+    and(eq(columns.scope, "project"), isNotNull(columns.projectId)),
+    and(eq(columns.scope, "personal"), isNull(columns.projectId), isNotNull(columns.personalOwnerId), eq(columns.personalOwnerType, "human")),
+    and(eq(columns.scope, "global"), isNull(columns.projectId), isNull(columns.personalOwnerId), isNull(columns.personalOwnerType)),
+  ))!;
+}
+
 export function projectPredicate(authority: ResourceAuthority, permission: AuthorizationPermission = "resource.read", idColumn: AnyColumn | SQL = projects.id) {
   const ids = authority.grants.flatMap(g => g.scope === "project" && g.permissions.includes(permission) ? [g.projectId] : []);
   return ids.length ? inArray(sql`${idColumn}`, ids) : sql`false`;

@@ -1,7 +1,9 @@
 import { z } from "zod";
-import { router, resourceProcedure } from "../init";
+import { router, resourceProcedure, ordinaryResourceProcedure } from "../init";
 import {
   contextService,
+  createResourceServices,
+  personalResourceOwnerId,
   documentService,
   skillPackageService,
   skillPackageStorageService,
@@ -29,7 +31,7 @@ function createSkillPackageStorage() {
 }
 
 export const skillRouter = router({
-  list: resourceProcedure
+  list: ordinaryResourceProcedure
     .input(
       z.object({
         tags: z.array(z.string()).optional(),
@@ -42,17 +44,17 @@ export const skillRouter = router({
       }).optional(),
     )
     .query(async ({ ctx, input }) => {
-      return contextService.listSkills(ctx.db, {
+      return createResourceServices(ctx.identity).contextService.listSkills(ctx.db, {
         ...input,
-        personalOwnerId: input?.personalOwnerId ?? ctx.actor.id,
-        personalOwnerType: input?.personalOwnerType ?? ctx.actor.type,
+        personalOwnerId: input?.personalOwnerId ?? personalResourceOwnerId(ctx.identity),
+        personalOwnerType: input?.personalOwnerType ?? "human",
       });
     }),
 
-  get: resourceProcedure
+  get: ordinaryResourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
-      return documentService.getDocument(ctx.db, input.id);
+      return createResourceServices(ctx.identity).documentService.getDocument(ctx.db, input.id);
     }),
 
   create: resourceProcedure

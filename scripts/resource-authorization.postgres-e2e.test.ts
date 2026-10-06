@@ -153,7 +153,7 @@ test("ordinary resources enforce live authorization consistently across transpor
     assert.deepEqual(graph.body.data.document.outgoingLinks, []);
     const foreign = await graphql(outsider.headers, `{ task(id: "${task.id}") { id title } }`);
     assert.equal(foreign.body.data.task, null);
-    for (const path of ["search?q=fixture", `projects/${project.id}/board`, "daemons/events", "mcp/tools"]) assert.equal((await rest(path, owner.headers)).status, 403);
+    for (const path of ["search?q=fixture", "repositories", "daemons/events", "mcp/tools"]) assert.equal((await rest(path, owner.headers)).status, 403);
   });
   await t.test("global knowledge excludes unmapped legacy rows and checks write authority", async () => {
     const shared = await admin.service.documentService.createDocument(db, { title: "Global fixture", content: "Shared knowledge" }, admin.actor);

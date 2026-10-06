@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   type Database, projects, requirements, tasks, documents, memories, executionSlices,
-  taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
+  embeddingProfiles, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
   documentRequirementLinks, projectMemberships, activityLog,
 } from "@task-weaver/db";
 import {
@@ -14,17 +14,20 @@ import * as taskImplementation from "./tasks";
 import * as claimImplementation from "./claims";
 import * as documentImplementation from "./documents";
 import * as memoryImplementation from "./memory";
+import * as recommendationImplementation from "./recommendations";
+import * as contextImplementation from "./context";
 import { auditIdentity, lockIdentityLifecycle } from "./auth-security";
 import {
-  qualifiedScopeColumns, taskResourcePredicate, memoryResourcePredicate, resourceAuthority, requireResource, requireScope, resourcePredicate, projectPredicate,
+  labelledResourcePredicate, qualifiedScopeColumns, taskResourcePredicate, memoryResourcePredicate, resourceAuthority, requireResource, requireScope, resourcePredicate, projectPredicate,
   validateAssignee, type ResourceAuthority, type ResourceKind, type ResourceScope,
 } from "./resource-authorization";
 
-type Group = "project" | "requirement" | "task" | "claim" | "document" | "memory";
+type Group = "project" | "requirement" | "task" | "claim" | "document" | "memory" | "recommendation" | "context";
 type Input = Record<string, any>;
 const sources = {
   project: projectImplementation, requirement: requirementImplementation, task: taskImplementation,
   claim: claimImplementation, document: documentImplementation, memory: memoryImplementation,
+  recommendation: recommendationImplementation, context: contextImplementation,
 };
 const readById: Record<string, ResourceKind> = {
   getProject: "project", getRequirement: "requirement", getTask: "task", getTaskDetail: "task",
@@ -32,6 +35,10 @@ const readById: Record<string, ResourceKind> = {
   getTaskClaim: "task", getRequirementClaim: "requirement", listExecutionSlices: "requirement",
   listRequirementDependencies: "requirement", checkBlockingDependencies: "task", checkBlockingRequirementDependencies: "requirement",
   getBacklinks: "document", getDocumentVersion: "document",
+  getProjectStats: "project", getProjectHealthDashboard: "project", getKnowledgeGraph: "project",
+  getKanbanBoard: "project", getGanttChart: "project", getRequirementHeatmap: "project",
+  getRequirementBurndown: "requirement", getRequirementTaskDependencyGraph: "requirement",
+  getDocumentRecommendations: "document", getTaskRecommendations: "task",
 };
 const writeById: Record<string, ResourceKind> = {
   updateProject: "project", deleteProject: "project", togglePin: "project",
@@ -94,7 +101,7 @@ function bindServices(context?: VerifiedRequestContext) {
           if (["recordMemory", "updateMemory", "forgetMemory", "unlinkDocuments", "unlinkDocumentFromTask", "unlinkDocumentFromRequirement", "removeTaskDependency", "togglePin"].includes(name)) {
             const entityId = typeof call[1] === "string" ? call[1] : result?.id;
             if (group === "memory") await auditIdentity(tx, `memory.${name}`, actor.id, actor.id, entityId);
-            else await tx.insert(activityLog).values({ entityType: group === "claim" ? "task" : group, entityId, action: name, actorId: actor.id, actorType: actor.type });
+            else await tx.insert(activityLog).values({ entityType: group === "claim" ? "task" : group as "project" | "requirement" | "task" | "document", entityId, action: name, actorId: actor.id, actorType: actor.type });
           }
           return pruneRelations(txDb, authority, result);
         });
@@ -105,11 +112,12 @@ function bindServices(context?: VerifiedRequestContext) {
     projectService: bind("project", sources.project), requirementService: bind("requirement", sources.requirement),
     taskService: bind("task", sources.task), claimService: bind("claim", sources.claim),
     documentService: bind("document", sources.document), memoryService: bind("memory", sources.memory),
+    recommendationService: bind("recommendation", sources.recommendation), contextService: bind("context", sources.context),
   };
 }
 
 /** Compatibility names compile for staged adapters but cannot authorize a caller. */
-export const { projectService, requirementService, taskService, claimService, documentService, memoryService } = bindServices();
+export const { projectService, requirementService, taskService, claimService, documentService, memoryService, recommendationService, contextService } = bindServices();
 
 async function checkTaskInput(db: Database, authority: ResourceAuthority, input: Input, current?: ResourceScope) {
   const scope: ResourceScope = current ?? (input.scope === "personal" ? {
@@ -145,7 +153,19 @@ async function checkMemoryEntity(db: Database, authority: ResourceAuthority, inp
 async function authorizeOperation(db: Database, authority: ResourceAuthority, group: Group, name: string, call: any[]) {
   const id = call[1];
   if (readById[name]) {
-    await requireResource(db, authority, readById[name]!, id);
+    const scope = await requireResource(db, authority, readById[name]!, id);
+    const predicates = {
+      tasks: taskResourcePredicate(authority), requirements: resourcePredicate(authority, requirements),
+      documents: resourcePredicate(authority, documents),
+    };
+    if (["getProjectStats", "getProjectHealthDashboard", "getKnowledgeGraph", "getRequirementHeatmap"].includes(name)) call[2] = predicates;
+    if (["getGanttChart", "getRequirementBurndown"].includes(name)) call[2] = predicates.tasks;
+    if (name === "getRequirementTaskDependencyGraph") call[2] = and(predicates.tasks, eq(tasks.projectId, scope.projectId!));
+    if (name === "getKanbanBoard") call[3] = predicates.tasks;
+    if (name === "getDocumentRecommendations" || name === "getTaskRecommendations") {
+      if (call[2]?.projectId) await requireResource(db, authority, "project", call[2].projectId);
+      call[3] = predicates;
+    }
     if (name === "getMemory") {
       const memory = await db.query.memories.findFirst({ where: eq(memories.id, id) });
       await checkMemoryEntity(db, authority, memory!);
@@ -182,6 +202,19 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     if (["createDocument", "updateDocument", "revertDocument"].includes(name)) call[4] = resourcePredicate(authority, documents);
     return;
   }
+  if (["searchTasks", "searchRequirements", "searchDocuments", "searchDocumentsWithMetadata", "searchDocumentsFullText", "searchMemories", "searchContext", "listSkills"].includes(name)) {
+    const input = call[1] ?? {};
+    if (input.projectId) await requireResource(db, authority, "project", input.projectId);
+    if ((input.includePersonal || input.scope === "personal") && (input.personalOwnerId || input.personalOwnerType)) requireScope(authority, { personalOwnerId: input.personalOwnerId, personalOwnerType: input.personalOwnerType }, "resource.read");
+    if (input.entityId && input.entityType) await checkMemoryEntity(db, authority, input);
+    call[2] = name === "searchTasks" ? taskResourcePredicate(authority)
+      : name === "searchRequirements" ? resourcePredicate(authority, requirements)
+      : name === "searchMemories" ? memoryResourcePredicate(authority) : resourcePredicate(authority, documents);
+    if (name === "searchDocuments" || name === "searchDocumentsWithMetadata") call[3] = labelledResourcePredicate(authority, embeddingProfiles);
+    return;
+  }
+  if (name === "getDocumentByTitle" || name === "resolveDocumentTitles") { call[2] = resourcePredicate(authority, documents); return; }
+  if (name === "getBootstrapContext") return;
   if (name === "createProject") return;
   if (name === "createTask" || name === "createPersonalTask") {
     call[1] = { ...call[1], ...(name === "createPersonalTask" ? { scope: "personal" } : {}) };

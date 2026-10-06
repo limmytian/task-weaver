@@ -1,8 +1,7 @@
 import { Hono } from "hono";
 import {
-  documentService,
-  taskService,
-  requirementService,
+  createResourceServices,
+  personalResourceOwnerId,
   repositoryService,
   searchDocumentsSchema,
   ValidationError,
@@ -28,13 +27,12 @@ export function typedSearchItems(type: string, rows: unknown[]): SearchItem[] {
 // GET /documents - Search documents (supports mode=keyword|fulltext|hybrid|semantic)
 search.get("/documents", async (c) => {
   const db = c.get("db");
-  const actor = c.get("actor");
   const query = c.req.query();
 
   const parsed = searchDocumentsSchema.safeParse({
     ...query,
-    personalOwnerId: query.personalOwnerId ?? actor.id,
-    personalOwnerType: query.personalOwnerType ?? actor.type,
+    personalOwnerId: query.personalOwnerId ?? personalResourceOwnerId(c.get("identity")),
+    personalOwnerType: query.personalOwnerType ?? "human",
   });
 
   if (!parsed.success) {
@@ -42,7 +40,7 @@ search.get("/documents", async (c) => {
   }
 
   try {
-    const results = await documentService.searchDocumentsWithMetadata(db, parsed.data);
+    const results = await createResourceServices(c.get("identity")).documentService.searchDocumentsWithMetadata(db, parsed.data);
     return c.json({ items: results.items, metadata: results.metadata });
   } catch (err) {
     if (err instanceof ValidationError) {
@@ -56,14 +54,13 @@ search.get("/documents", async (c) => {
 // Kept for backward compatibility — equivalent to ?mode=fulltext on /documents
 search.get("/documents/fulltext", async (c) => {
   const db = c.get("db");
-  const actor = c.get("actor");
   const query = c.req.query();
 
   const parsed = searchDocumentsSchema.safeParse({
     ...query,
     mode: "fulltext",
-    personalOwnerId: query.personalOwnerId ?? actor.id,
-    personalOwnerType: query.personalOwnerType ?? actor.type,
+    personalOwnerId: query.personalOwnerId ?? personalResourceOwnerId(c.get("identity")),
+    personalOwnerType: query.personalOwnerType ?? "human",
   });
 
   if (!parsed.success) {
@@ -71,7 +68,7 @@ search.get("/documents/fulltext", async (c) => {
   }
 
   try {
-    const results = await documentService.searchDocuments(db, parsed.data);
+    const results = await createResourceServices(c.get("identity")).documentService.searchDocuments(db, parsed.data);
     return c.json(searchItemsResponse(results));
   } catch (err) {
     if (err instanceof ValidationError) {
@@ -84,7 +81,6 @@ search.get("/documents/fulltext", async (c) => {
 // GET /tasks - Search tasks
 search.get("/tasks", async (c) => {
   const db = c.get("db");
-  const actor = c.get("actor");
   const q = c.req.query("q");
   const projectId = c.req.query("projectId");
   const scope = c.req.query("scope") as "project" | "personal" | undefined;
@@ -93,12 +89,12 @@ search.get("/tasks", async (c) => {
     return c.json({ error: "Query parameter 'q' is required" }, 400);
   }
 
-  const results = await taskService.searchTasks(db, {
+  const results = await createResourceServices(c.get("identity")).taskService.searchTasks(db, {
     query: q,
     projectId: projectId || undefined,
     scope: scope ?? (projectId ? "project" : "personal"),
-    personalOwnerId: c.req.query("personalOwnerId") ?? actor.id,
-    personalOwnerType: (c.req.query("personalOwnerType") as "human" | "agent" | undefined) ?? actor.type,
+    personalOwnerId: c.req.query("personalOwnerId") ?? personalResourceOwnerId(c.get("identity")),
+    personalOwnerType: (c.req.query("personalOwnerType") as "human" | "agent" | undefined) ?? "human",
     limit: 20,
   });
 
@@ -115,7 +111,7 @@ search.get("/requirements", async (c) => {
     return c.json({ error: "Query parameter 'q' is required" }, 400);
   }
 
-  const results = await requirementService.searchRequirements(db, {
+  const results = await createResourceServices(c.get("identity")).requirementService.searchRequirements(db, {
     query: q,
     projectId: projectId || undefined,
     limit: 20,
@@ -153,14 +149,13 @@ search.post("/resolve-titles", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
 
-  const results = await documentService.resolveDocumentTitles(db, parsed.data.titles);
+  const results = await createResourceServices(c.get("identity")).documentService.resolveDocumentTitles(db, parsed.data.titles);
   return c.json(results);
 });
 
 // GET /all - Combined search across tasks and documents
 search.get("/all", async (c) => {
   const db = c.get("db");
-  const actor = c.get("actor");
   const q = c.req.query("q");
   const projectId = c.req.query("projectId");
   const includePersonal = c.req.query("includePersonal") === "true";
@@ -171,33 +166,28 @@ search.get("/all", async (c) => {
   }
 
   const [matchedTasks, matchedRequirements, matchedDocs, matchedRepositories] = await Promise.all([
-    taskService.searchTasks(db, {
+    createResourceServices(c.get("identity")).taskService.searchTasks(db, {
       query: q,
       projectId: projectId || undefined,
       scope: projectId ? "project" : "personal",
-      personalOwnerId: actor.id,
-      personalOwnerType: actor.type,
+      personalOwnerId: personalResourceOwnerId(c.get("identity")),
+      personalOwnerType: "human",
       limit,
     }),
-    requirementService.searchRequirements(db, { query: q, projectId: projectId || undefined, limit }),
-    documentService.searchDocuments(db, {
+    createResourceServices(c.get("identity")).requirementService.searchRequirements(db, { query: q, projectId: projectId || undefined, limit }),
+    createResourceServices(c.get("identity")).documentService.searchDocuments(db, {
       query: q,
       mode: "keyword",
       projectId: projectId || undefined,
       includeGlobal: true,
       includePersonal,
-      personalOwnerId: actor.id,
-      personalOwnerType: actor.type,
+      personalOwnerId: personalResourceOwnerId(c.get("identity")),
+      personalOwnerType: "human",
       limit,
       keywordWeight: 0.3,
       fulltextWeight: 0.7,
     }),
-    repositoryService.listRepositories(db, {
-      query: q,
-      sort: "relevance",
-      page: 1,
-      pageSize: limit,
-    }, actor),
+    Promise.resolve({ items: [] }),
   ]);
 
   return c.json({

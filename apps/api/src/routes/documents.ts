@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import {
   createResourceServices,
   personalResourceOwnerId,
-  recommendationService,
   createDocumentSchema,
   updateDocumentSchema,
   listDocumentsSchema,
@@ -330,7 +329,7 @@ documents.get("/:id/recommendations", async (c) => {
   const threshold = query.threshold ? Number(query.threshold) : undefined;
 
   try {
-    const result = await recommendationService.getDocumentRecommendations(
+    const result = await createResourceServices(c.get("identity")).recommendationService.getDocumentRecommendations(
       db,
       id,
       { limit, types, projectId: query.projectId, threshold },

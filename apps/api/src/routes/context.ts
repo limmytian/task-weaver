@@ -1,6 +1,7 @@
 import { Hono, type Context } from "hono";
 import {
-  contextService,
+  createResourceServices,
+  personalResourceOwnerId,
   skillPackageService,
   skillPackageStorageService,
   searchContextSchema,
@@ -50,7 +51,6 @@ function handleSkillPackageError(c: Context, err: unknown) {
 // GET /search - Search skills by intent
 context.get("/search", async (c) => {
   const db = c.get("db");
-  const actor = c.get("actor");
   const query = c.req.query();
 
   const parsed = searchContextSchema.safeParse({
@@ -61,40 +61,39 @@ context.get("/search", async (c) => {
     projectId: query.projectId,
     includeGlobal: query.includeGlobal,
     includePersonal: query.includePersonal,
-    personalOwnerId: query.personalOwnerId ?? actor.id,
-    personalOwnerType: query.personalOwnerType ?? actor.type,
+    personalOwnerId: query.personalOwnerId ?? personalResourceOwnerId(c.get("identity")),
+    personalOwnerType: query.personalOwnerType ?? "human",
   });
 
   if (!parsed.success) {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
 
-  const results = await contextService.searchContext(db, parsed.data);
+  const results = await createResourceServices(c.get("identity")).contextService.searchContext(db, parsed.data);
   return c.json({ items: results });
 });
 
 // GET /bootstrap - Get bootstrap context (minimal starting info)
-context.get("/bootstrap", (c) => {
-  const bootstrap = contextService.getBootstrapContext();
+context.get("/bootstrap", async (c) => {
+  const bootstrap = await createResourceServices(c.get("identity")).contextService.getBootstrapContext();
   return c.json(bootstrap);
 });
 
 // GET /list - List all available skills
 context.get("/list", async (c) => {
   const db = c.get("db");
-  const actor = c.get("actor");
   const tags = c.req.query("tags")?.split(",");
   const projectId = c.req.query("projectId");
   const allProjects = c.req.query("allProjects") === "true";
   const includePersonal = c.req.query("includePersonal") === "true";
 
-  const results = await contextService.listSkills(db, {
+  const results = await createResourceServices(c.get("identity")).contextService.listSkills(db, {
     tags,
     projectId: projectId || undefined,
     allProjects,
     includePersonal,
-    personalOwnerId: c.req.query("personalOwnerId") ?? actor.id,
-    personalOwnerType: (c.req.query("personalOwnerType") as "human" | "agent" | undefined) ?? actor.type,
+    personalOwnerId: c.req.query("personalOwnerId") ?? personalResourceOwnerId(c.get("identity")),
+    personalOwnerType: (c.req.query("personalOwnerType") as "human" | "agent" | undefined) ?? "human",
   });
   return c.json({ items: results });
 });
@@ -322,9 +321,8 @@ context.get("/:id", async (c) => {
   const db = c.get("db");
   const id = c.req.param("id");
 
-  const { documentService } = await import("@task-weaver/core");
   try {
-    const doc = await documentService.getDocument(db, id);
+    const doc = await createResourceServices(c.get("identity")).documentService.getDocument(db, id);
     return c.json(doc);
   } catch {
     return c.json({ error: "Skill not found" }, 404);
@@ -342,7 +340,7 @@ context.post("/import", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
 
-  const result = await contextService.importSkill(db, parsed.data, actor);
+  const result = await createResourceServices(c.get("identity")).contextService.importSkill(db, parsed.data, actor);
   return c.json(result, 201);
 });
 
@@ -360,7 +358,7 @@ context.post("/import/batch", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
 
-  const results = await contextService.bulkImportSkills(db, parsed.data.skills, actor);
+  const results = await createResourceServices(c.get("identity")).contextService.bulkImportSkills(db, parsed.data.skills, actor);
   return c.json({ items: results, count: results.length }, 201);
 });
 

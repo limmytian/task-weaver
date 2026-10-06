@@ -1,3 +1,4 @@
+import type { RetrievalPredicates } from "./retrieval-predicates";
 import type { SQL } from "drizzle-orm";
 import { eq, sql, and, gte, inArray, or } from "drizzle-orm";
 import {
@@ -188,7 +189,7 @@ export async function getProjectCounts(
   return rows;
 }
 
-export async function getProjectStats(db: Database, id: string) {
+export async function getProjectStats(db: Database, id: string, authorized: RetrievalPredicates = {}) {
   await getProject(db, id);
 
   // Task counts by status
@@ -198,7 +199,7 @@ export async function getProjectStats(db: Database, id: string) {
       count: sql<number>`count(*)::int`,
     })
     .from(tasks)
-    .where(eq(tasks.projectId, id))
+    .where(and(eq(tasks.projectId, id), authorized.tasks))
     .groupBy(tasks.status);
 
   const byStatus: Record<string, number> = {};
@@ -215,7 +216,7 @@ export async function getProjectStats(db: Database, id: string) {
       count: sql<number>`count(*)::int`,
     })
     .from(tasks)
-    .where(eq(tasks.projectId, id))
+    .where(and(eq(tasks.projectId, id), authorized.tasks))
     .groupBy(tasks.priority);
 
   const byPriority: Record<string, number> = {};
@@ -230,6 +231,8 @@ export async function getProjectStats(db: Database, id: string) {
     .innerJoin(tasks, eq(taskDependencies.dependsOnTaskId, tasks.id))
     .where(
       and(
+        eq(tasks.projectId, id), authorized.tasks,
+        inArray(taskDependencies.taskId, db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.projectId, id), authorized.tasks))),
         eq(taskDependencies.type, "blocks"),
         sql`${tasks.status} NOT IN ('done', 'cancelled')`,
       ),
@@ -241,7 +244,7 @@ export async function getProjectStats(db: Database, id: string) {
       avgDays: sql<number | null>`avg(extract(epoch from (${tasks.completedAt} - ${tasks.createdAt})) / 86400)`,
     })
     .from(tasks)
-    .where(and(eq(tasks.projectId, id), eq(tasks.status, "done"), sql`${tasks.completedAt} IS NOT NULL`));
+    .where(and(authorized.tasks, eq(tasks.projectId, id), eq(tasks.status, "done"), sql`${tasks.completedAt} IS NOT NULL`));
 
   // Requirement progress
   const reqProgress = await db
@@ -253,8 +256,8 @@ export async function getProjectStats(db: Database, id: string) {
       completedTasks: sql<number>`count(CASE WHEN ${tasks.status} = 'done' THEN 1 END)::int`,
     })
     .from(requirements)
-    .leftJoin(tasks, eq(tasks.requirementId, requirements.id))
-    .where(eq(requirements.projectId, id))
+    .leftJoin(tasks, and(eq(tasks.requirementId, requirements.id), authorized.tasks))
+    .where(and(eq(requirements.projectId, id), authorized.requirements))
     .groupBy(requirements.id, requirements.title, requirements.status);
 
   return {
@@ -294,6 +297,7 @@ export interface ProjectHealthDashboard {
 export async function getProjectHealthDashboard(
   db: Database,
   id: string,
+  authorized: RetrievalPredicates = {},
 ): Promise<ProjectHealthDashboard> {
   const project = await getProject(db, id);
   const now = new Date();
@@ -312,7 +316,7 @@ export async function getProjectHealthDashboard(
       updatedAt: tasks.updatedAt,
     })
     .from(tasks)
-    .where(eq(tasks.projectId, id));
+    .where(and(eq(tasks.projectId, id), authorized.tasks));
 
   const totalTasks = allTasks.length;
   const doneTasks = allTasks.filter((t) => t.status === "done").length;
@@ -380,8 +384,8 @@ export async function getProjectHealthDashboard(
       taskCount: sql<number>`count(${tasks.id})::int`,
     })
     .from(requirements)
-    .leftJoin(tasks, eq(tasks.requirementId, requirements.id))
-    .where(and(eq(requirements.projectId, id), sql`${requirements.status} != 'cancelled'`))
+    .leftJoin(tasks, and(eq(tasks.requirementId, requirements.id), authorized.tasks))
+    .where(and(authorized.requirements, eq(requirements.projectId, id), sql`${requirements.status} != 'cancelled'`))
     .groupBy(requirements.id, requirements.title);
 
   const requirementsWithoutTasks = reqRows.filter((r) => r.taskCount === 0);
@@ -392,12 +396,12 @@ export async function getProjectHealthDashboard(
   const fourteenDaysAgo = new Date(now);
   fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
 
-  const entityFilter = sql`${activityLog.entityId} IN (
-    SELECT id FROM tasks WHERE project_id = ${id}
-    UNION SELECT id FROM requirements WHERE project_id = ${id}
-    UNION SELECT id FROM documents WHERE project_id = ${id}
-    UNION SELECT ${id}::uuid
-  )`;
+  const entityFilter = or(
+    and(eq(activityLog.entityType, "task"), inArray(activityLog.entityId, db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.projectId, id), authorized.tasks)))),
+    and(eq(activityLog.entityType, "requirement"), inArray(activityLog.entityId, db.select({ id: requirements.id }).from(requirements).where(and(eq(requirements.projectId, id), authorized.requirements)))),
+    and(eq(activityLog.entityType, "document"), inArray(activityLog.entityId, db.select({ id: documents.id }).from(documents).where(and(eq(documents.projectId, id), authorized.documents)))),
+    and(eq(activityLog.entityType, "project"), eq(activityLog.entityId, id)),
+  );
   const [recentRow] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(activityLog)
@@ -423,7 +427,7 @@ export async function getProjectHealthDashboard(
   const [docRow] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(documents)
-    .where(eq(documents.projectId, id));
+    .where(and(eq(documents.projectId, id), authorized.documents));
   const documentCount = docRow?.count ?? 0;
 
   // --- Health score (weighted composite, 0-100) ---
@@ -513,6 +517,7 @@ export interface KnowledgeGraph {
 export async function getKnowledgeGraph(
   db: Database,
   projectId: string,
+  authorized: RetrievalPredicates = {},
 ): Promise<KnowledgeGraph> {
   await getProject(db, projectId);
 
@@ -526,7 +531,7 @@ export async function getKnowledgeGraph(
         tags: documents.tags,
       })
       .from(documents)
-      .where(eq(documents.projectId, projectId)),
+      .where(and(eq(documents.projectId, projectId), authorized.documents)),
     db
       .select({
         id: tasks.id,
@@ -537,7 +542,7 @@ export async function getKnowledgeGraph(
         assignee: tasks.assignee,
       })
       .from(tasks)
-      .where(eq(tasks.projectId, projectId)),
+      .where(and(eq(tasks.projectId, projectId), authorized.tasks)),
     db
       .select({
         id: requirements.id,
@@ -546,7 +551,7 @@ export async function getKnowledgeGraph(
         priority: requirements.priority,
       })
       .from(requirements)
-      .where(eq(requirements.projectId, projectId)),
+      .where(and(eq(requirements.projectId, projectId), authorized.requirements)),
   ]);
 
   // Collect all entity IDs for edge filtering
@@ -592,7 +597,7 @@ export async function getKnowledgeGraph(
         linkType: documentLinks.linkType,
       })
       .from(documentLinks)
-      .where(or(inArray(documentLinks.sourceDocId, docIds), inArray(documentLinks.targetDocId, docIds)));
+      .where(and(inArray(documentLinks.sourceDocId, docIds), inArray(documentLinks.targetDocId, docIds)));
 
     for (const link of docDocLinks) {
       edges.push({
@@ -614,7 +619,7 @@ export async function getKnowledgeGraph(
         linkType: documentTaskLinks.linkType,
       })
       .from(documentTaskLinks)
-      .where(or(inArray(documentTaskLinks.documentId, docIds), inArray(documentTaskLinks.taskId, taskIds)));
+      .where(and(inArray(documentTaskLinks.documentId, docIds), inArray(documentTaskLinks.taskId, taskIds)));
 
     for (const link of docTaskLinkRows) {
       edges.push({
@@ -636,7 +641,7 @@ export async function getKnowledgeGraph(
         linkType: documentRequirementLinks.linkType,
       })
       .from(documentRequirementLinks)
-      .where(or(inArray(documentRequirementLinks.documentId, docIds), inArray(documentRequirementLinks.requirementId, reqIds)));
+      .where(and(inArray(documentRequirementLinks.documentId, docIds), inArray(documentRequirementLinks.requirementId, reqIds)));
 
     for (const link of docReqLinkRows) {
       edges.push({
@@ -658,7 +663,7 @@ export async function getKnowledgeGraph(
         type: taskDependencies.type,
       })
       .from(taskDependencies)
-      .where(inArray(taskDependencies.taskId, taskIds));
+      .where(and(inArray(taskDependencies.taskId, taskIds), inArray(taskDependencies.dependsOnTaskId, taskIds)));
 
     for (const dep of taskDepRows) {
       edges.push({
@@ -680,7 +685,7 @@ export async function getKnowledgeGraph(
         type: requirementDependencies.type,
       })
       .from(requirementDependencies)
-      .where(inArray(requirementDependencies.requirementId, reqIds));
+      .where(and(inArray(requirementDependencies.requirementId, reqIds), inArray(requirementDependencies.dependsOnRequirementId, reqIds)));
 
     for (const dep of reqDepRows) {
       edges.push({

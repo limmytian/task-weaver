@@ -1,8 +1,10 @@
+import type { RetrievalPredicates } from "./retrieval-predicates";
 import type { SQL } from "drizzle-orm";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import {
   type Database,
   requirements,
+  documents,
   repositories,
   executionSlices,
   requirementClaims,
@@ -774,6 +776,7 @@ export interface SearchRequirementsInput {
 export async function searchRequirements(
   db: Database,
   input: SearchRequirementsInput,
+  authorizedPredicate?: SQL,
 ) {
   const likePattern = `%${input.query}%`;
   const conditions = [
@@ -795,7 +798,7 @@ export async function searchRequirements(
       updatedAt: requirements.updatedAt,
     })
     .from(requirements)
-    .where(and(...conditions))
+    .where(and(...conditions, authorizedPredicate))
     .limit(input.limit ?? 20);
 }
 
@@ -822,6 +825,7 @@ export interface RequirementBurndown {
 export async function getRequirementBurndown(
   db: Database,
   requirementId: string,
+  authorizedTaskPredicate?: SQL,
 ): Promise<RequirementBurndown> {
   const requirement = await getRequirementOrThrow(db, requirementId);
 
@@ -833,7 +837,7 @@ export async function getRequirementBurndown(
       completedAt: tasks.completedAt,
     })
     .from(tasks)
-    .where(eq(tasks.requirementId, requirementId));
+    .where(and(eq(tasks.requirementId, requirementId), authorizedTaskPredicate));
 
   if (taskList.length === 0) {
     const today = new Date().toISOString().slice(0, 10);
@@ -967,6 +971,7 @@ export interface RequirementHeatmap {
 export async function getRequirementHeatmap(
   db: Database,
   projectId: string,
+  authorized: RetrievalPredicates = {},
 ): Promise<RequirementHeatmap> {
   const now = new Date();
   const thirtyDaysAgo = new Date(now);
@@ -981,7 +986,7 @@ export async function getRequirementHeatmap(
       priority: requirements.priority,
     })
     .from(requirements)
-    .where(and(eq(requirements.projectId, projectId), sql`${requirements.status} != 'cancelled'`));
+    .where(and(authorized.requirements, eq(requirements.projectId, projectId), sql`${requirements.status} != 'cancelled'`));
 
   if (reqList.length === 0) {
     return {
@@ -1004,7 +1009,7 @@ export async function getRequirementHeatmap(
       overdueTasks: sql<number>`count(CASE WHEN ${tasks.expectedAt} < now() AND ${tasks.status} NOT IN ('done', 'cancelled') THEN 1 END)::int`,
     })
     .from(tasks)
-    .where(inArray(tasks.requirementId, reqIds))
+    .where(and(inArray(tasks.requirementId, reqIds), authorized.tasks))
     .groupBy(tasks.requirementId);
 
   const taskStatsMap = new Map(taskStats.map((r) => [r.requirementId, r]));
@@ -1017,7 +1022,7 @@ export async function getRequirementHeatmap(
     })
     .from(taskComments)
     .innerJoin(tasks, eq(taskComments.taskId, tasks.id))
-    .where(inArray(tasks.requirementId, reqIds))
+    .where(and(inArray(tasks.requirementId, reqIds), authorized.tasks))
     .groupBy(tasks.requirementId);
 
   const commentMap = new Map(commentStats.map((r) => [r.requirementId, r.commentCount]));
@@ -1029,7 +1034,8 @@ export async function getRequirementHeatmap(
       linkCount: sql<number>`count(*)::int`,
     })
     .from(documentRequirementLinks)
-    .where(inArray(documentRequirementLinks.requirementId, reqIds))
+    .innerJoin(documents, eq(documents.id, documentRequirementLinks.documentId))
+    .where(and(inArray(documentRequirementLinks.requirementId, reqIds), authorized.documents))
     .groupBy(documentRequirementLinks.requirementId);
 
   const docLinkMap = new Map(docLinkStats.map((r) => [r.requirementId, r.linkCount]));
@@ -1051,7 +1057,8 @@ export async function getRequirementHeatmap(
         sql`(
           (${activityLog.entityType} = 'requirement' AND ${activityLog.entityId} = ANY(${reqIdArray}))
           OR
-          (${activityLog.entityType} = 'task' AND t.requirement_id = ANY(${reqIdArray}))
+          (${activityLog.entityType} = 'task' AND t.requirement_id = ANY(${reqIdArray})
+            AND t.id IN (${db.select({ id: tasks.id }).from(tasks).where(authorized.tasks)}))
         )`,
       ),
     )

@@ -1,3 +1,4 @@
+import { documentSearchVector } from "./search-vector";
 import type { SQL } from "drizzle-orm";
 import { and, eq, or, isNull, sql, inArray, desc } from "drizzle-orm";
 import {
@@ -300,7 +301,7 @@ export async function listDocuments(
 ): Promise<PagedDocumentList | Array<typeof documents.$inferSelect>> {
   const conditions = [authorizedPredicate];
 
-  conditions.push(buildDocumentScopeCondition(input));
+  conditions.push(buildDocumentScopeCondition(input), authorizedPredicate);
 
   if (input.docType) {
     conditions.push(eq(documents.docType, input.docType));
@@ -533,19 +534,19 @@ export async function unlinkDocumentFromTask(db: Database, linkId: string, _expe
   return deleted;
 }
 
-export async function getDocumentByTitle(db: Database, title: string) {
+export async function getDocumentByTitle(db: Database, title: string, authorizedPredicate?: SQL) {
   return db.query.documents.findFirst({
-    where: eq(documents.title, title),
+    where: and(eq(documents.title, title), authorizedPredicate),
     columns: { id: true, title: true },
   });
 }
 
-export async function resolveDocumentTitles(db: Database, titles: string[]) {
+export async function resolveDocumentTitles(db: Database, titles: string[], authorizedPredicate?: SQL) {
   if (titles.length === 0) return [];
   return db
     .select({ id: documents.id, title: documents.title })
     .from(documents)
-    .where(inArray(documents.title, titles));
+    .where(and(inArray(documents.title, titles), authorizedPredicate));
 }
 
 export async function getBacklinks(db: Database, docId: string) {
@@ -860,7 +861,7 @@ function buildTsQuery(query: string): string | null {
   return tsQuery || null;
 }
 
-function searchDocumentsKeyword(db: Database, input: SearchDocumentsInput) {
+function searchDocumentsKeyword(db: Database, input: SearchDocumentsInput, authorizedPredicate?: SQL) {
   const conditions = [];
   const likePattern = `%${input.query}%`;
   conditions.push(
@@ -870,7 +871,7 @@ function searchDocumentsKeyword(db: Database, input: SearchDocumentsInput) {
     ),
   );
 
-  conditions.push(buildDocumentScopeCondition(input));
+  conditions.push(buildDocumentScopeCondition(input), authorizedPredicate);
 
   return db
     .select(SEARCH_RESULT_COLUMNS)
@@ -921,9 +922,9 @@ function searchMetadata(
   };
 }
 
-async function findSemanticProfile(db: Database, input: SearchDocumentsInput) {
+async function findSemanticProfile(db: Database, input: SearchDocumentsInput, authorizedPredicate?: SQL, profilePredicate?: SQL) {
   const enabledProfiles = await db.query.embeddingProfiles.findMany({
-    where: eq(embeddingProfiles.status, "enabled"),
+    where: and(eq(embeddingProfiles.status, "enabled"), profilePredicate),
   });
   const candidates = enabledProfiles.filter((profile) => {
     if (input.projectId) {
@@ -951,12 +952,12 @@ async function findSemanticProfile(db: Database, input: SearchDocumentsInput) {
   const generation = await db.query.embeddingGenerations.findFirst({
     where: eq(embeddingGenerations.id, profile.activeGenerationId),
   });
-  if (!generation || generation.status !== "active" || generation.configurationHash !== profile.configurationHash) {
+  if (!generation || generation.profileId !== profile.id || generation.status !== "active" || generation.configurationHash !== profile.configurationHash) {
     return { profile, reason: "generation_unavailable" as const };
   }
 
   const scopedDocuments = await db.query.documents.findMany({
-    where: profileDocumentsCondition(profile),
+    where: and(profileDocumentsCondition(profile), buildDocumentScopeCondition(input), authorizedPredicate),
     columns: { id: true },
   });
   const completeStates = scopedDocuments.length === 0
@@ -990,6 +991,7 @@ async function searchDocumentsSemantic(
   input: SearchDocumentsInput,
   profile: typeof embeddingProfiles.$inferSelect,
   generation: typeof embeddingGenerations.$inferSelect,
+  authorizedPredicate?: SQL,
 ) {
   const provider = createOpenAICompatibleEmbeddingProvider({
     provider: profile.provider,
@@ -1025,7 +1027,17 @@ async function searchDocumentsSemantic(
       semanticDistance: semanticDistance.as("semantic_distance"),
     })
     .from(documentEmbeddings)
-    .where(sql`${documentEmbeddings.generationId} = ${generationIdLiteral}`)
+    .innerJoin(embeddingDocumentChunks, eq(embeddingDocumentChunks.id, documentEmbeddings.chunkId))
+    .innerJoin(documents, eq(documents.id, embeddingDocumentChunks.documentId))
+    .innerJoin(documentEmbeddingStates, and(
+      eq(documentEmbeddingStates.documentId, documents.id),
+      eq(documentEmbeddingStates.profileId, profile.id),
+      eq(documentEmbeddingStates.generationId, generation.id),
+      eq(documentEmbeddingStates.state, "complete"),
+    ))
+    .where(and(sql`${documentEmbeddings.generationId} = ${generationIdLiteral}`,
+      eq(embeddingDocumentChunks.generationId, generation.id),
+      profileDocumentsCondition(profile), buildDocumentScopeCondition(input), authorizedPredicate))
     // pgvector only uses an ANN index when the distance operator is the top-level
     // ascending ORDER BY expression in the limited candidate query.
     .orderBy(semanticDistance)
@@ -1073,15 +1085,15 @@ async function searchDocumentsSemantic(
     });
 }
 
-async function lexicalFallback(db: Database, input: SearchDocumentsInput) {
+async function lexicalFallback(db: Database, input: SearchDocumentsInput, authorizedPredicate?: SQL) {
   try {
     return {
-      items: await searchDocumentsFullText(db, input),
+      items: await db.transaction(tx => searchDocumentsFullText(tx as unknown as Database, input, authorizedPredicate)),
       mode: "fulltext" as const,
     };
   } catch {
     return {
-      items: await searchDocumentsKeyword(db, input),
+      items: await searchDocumentsKeyword(db, input, authorizedPredicate),
       mode: "keyword" as const,
     };
   }
@@ -1090,25 +1102,27 @@ async function lexicalFallback(db: Database, input: SearchDocumentsInput) {
 export async function searchDocumentsWithMetadata(
   db: Database,
   input: SearchDocumentsInput,
+  authorizedPredicate?: SQL,
+  profilePredicate?: SQL,
 ): Promise<SearchDocumentsWithMetadataResult> {
   const mode = input.mode ?? "keyword";
   if (mode === "keyword") {
     return {
-      items: await searchDocumentsKeyword(db, input),
+      items: await searchDocumentsKeyword(db, input, authorizedPredicate),
       metadata: searchMetadata(input, "keyword"),
     };
   }
   if (mode === "fulltext") {
-    const lexical = await lexicalFallback(db, input);
+    const lexical = await lexicalFallback(db, input, authorizedPredicate);
     return {
       items: lexical.items,
       metadata: searchMetadata(input, lexical.mode, lexical.mode === "keyword" ? { fallbackReason: "fulltext_unavailable" } : {}),
     };
   }
 
-  const resolved = await findSemanticProfile(db, input);
+  const resolved = await findSemanticProfile(db, input, authorizedPredicate, profilePredicate);
   if (!resolved || !resolved.generation) {
-    const lexical = await lexicalFallback(db, input);
+    const lexical = await lexicalFallback(db, input, authorizedPredicate);
     return {
       items: lexical.items,
       metadata: searchMetadata(input, lexical.mode, {
@@ -1121,7 +1135,7 @@ export async function searchDocumentsWithMetadata(
   }
 
   try {
-    const semanticItems = await searchDocumentsSemantic(db, input, resolved.profile, resolved.generation);
+    const semanticItems = await db.transaction(tx => searchDocumentsSemantic(tx as unknown as Database, input, resolved.profile, resolved.generation, authorizedPredicate));
     if (mode === "semantic") {
       return {
         items: semanticItems,
@@ -1133,7 +1147,7 @@ export async function searchDocumentsWithMetadata(
       };
     }
 
-    const lexical = await lexicalFallback(db, input);
+    const lexical = await lexicalFallback(db, input, authorizedPredicate);
     const lexicalScores = new Map<string, number>();
     const maxLexical = Math.max(...lexical.items.map((row) => Number((row as { score?: number; rank?: number }).score ?? (row as { rank?: number }).rank ?? 0)), 0);
     for (const row of lexical.items) {
@@ -1169,7 +1183,7 @@ export async function searchDocumentsWithMetadata(
       }),
     };
   } catch (error) {
-    const lexical = await lexicalFallback(db, input);
+    const lexical = await lexicalFallback(db, input, authorizedPredicate);
     return {
       items: lexical.items,
       metadata: searchMetadata(input, lexical.mode, {
@@ -1189,8 +1203,10 @@ export async function searchDocumentsWithMetadata(
 export async function searchDocuments(
   db: Database,
   input: SearchDocumentsInput,
+  authorizedPredicate?: SQL,
+  profilePredicate?: SQL,
 ): Promise<SearchDocumentItem[]> {
-  return (await searchDocumentsWithMetadata(db, input)).items as SearchDocumentItem[];
+  return (await searchDocumentsWithMetadata(db, input, authorizedPredicate, profilePredicate)).items as SearchDocumentItem[];
 }
 
 /**
@@ -1200,21 +1216,23 @@ export async function searchDocuments(
 export async function searchDocumentsFullText(
   db: Database,
   input: SearchDocumentsInput,
+  authorizedPredicate?: SQL,
 ) {
+  const searchVector = await documentSearchVector(db);
   const tsQuery = buildTsQuery(input.query);
   if (!tsQuery) {
-    return searchDocumentsKeyword(db, input);
+    return searchDocumentsKeyword(db, input, authorizedPredicate);
   }
 
   const conditions = [];
-  conditions.push(sql`search_vector @@ to_tsquery('english', ${tsQuery})`);
+  conditions.push(sql`${searchVector} @@ to_tsquery('english', ${tsQuery})`);
 
-  conditions.push(buildDocumentScopeCondition(input));
+  conditions.push(buildDocumentScopeCondition(input), authorizedPredicate);
 
   return db
     .select({
       ...SEARCH_RESULT_COLUMNS,
-      rank: sql<number>`ts_rank(search_vector, to_tsquery('english', ${tsQuery}))`.as("rank"),
+      rank: sql<number>`ts_rank(${searchVector}, to_tsquery('english', ${tsQuery}))`.as("rank"),
     })
     .from(documents)
     .where(and(...conditions))

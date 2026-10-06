@@ -1,8 +1,9 @@
-import { and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { documentSearchVector } from "./search-vector";
+import { type SQL, and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { type Database, documents } from "@task-weaver/db";
 import type { Actor } from "@task-weaver/contracts";
 import type { SearchContextInput, ImportSkillInput } from "@task-weaver/contracts";
-import { documentService } from "./index";
+import * as documentService from "./documents";
 import { getPackageMetadataForDocuments } from "./skill-packages";
 
 const CONTEXT_SUMMARY_COLUMNS = {
@@ -27,17 +28,19 @@ function buildTsQuery(query: string): string | null {
     .trim()
     .split(/\s+/)
     .filter(Boolean)
-    .map((w) => w.replace(/'/g, ""))
+    .map((w) => w.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, ""))
+    .filter(Boolean)
     .join(" & ");
   return tsQuery || null;
 }
 
-export async function searchContext(db: Database, input: SearchContextInput) {
+export async function searchContext(db: Database, input: SearchContextInput, authorizedPredicate?: SQL) {
+  const searchVector = await documentSearchVector(db);
   const tsQuery = buildTsQuery(input.intent);
   const likePattern = `%${input.intent}%`;
   const columns = input.mode === "full" ? CONTEXT_FULL_COLUMNS : CONTEXT_SUMMARY_COLUMNS;
 
-  const conditions = [];
+  const conditions = [authorizedPredicate];
   conditions.push(eq(documents.docType, "skill"));
 
   conditions.push(buildSkillScopeCondition(input));
@@ -51,7 +54,7 @@ export async function searchContext(db: Database, input: SearchContextInput) {
       or(
         sql`${documents.title} ILIKE ${likePattern}`,
         sql`${documents.content} ILIKE ${likePattern}`,
-        sql`search_vector @@ to_tsquery('english', ${tsQuery})`,
+        sql`${searchVector} @@ to_tsquery('english', ${tsQuery})`,
       ),
     );
 
@@ -60,14 +63,14 @@ export async function searchContext(db: Database, input: SearchContextInput) {
         ...columns,
         score: sql<number>`(
           0.3 * CASE WHEN ${documents.title} ILIKE ${likePattern} OR ${documents.content} ILIKE ${likePattern} THEN 1.0 ELSE 0.0 END
-          + 0.7 * coalesce(ts_rank(search_vector, to_tsquery('english', ${tsQuery})), 0)
+          + 0.7 * coalesce(ts_rank(${searchVector}, to_tsquery('english', ${tsQuery})), 0)
         )`.as("score"),
       })
       .from(documents)
       .where(and(...conditions))
       .orderBy(sql`score DESC`)
       .limit(input.limit);
-    return enrichSkillPackageResults(db, results);
+    return authorizedPredicate ? results : enrichSkillPackageResults(db, results);
   }
 
   // Fallback: keyword-only search
@@ -83,7 +86,7 @@ export async function searchContext(db: Database, input: SearchContextInput) {
     .from(documents)
     .where(and(...conditions))
     .limit(input.limit);
-  return enrichSkillPackageResults(db, results);
+  return authorizedPredicate ? results : enrichSkillPackageResults(db, results);
 }
 
 export async function importSkill(
@@ -192,8 +195,9 @@ export async function listSkills(
     personalOwnerId?: string;
     personalOwnerType?: "human" | "agent";
   },
+  authorizedPredicate?: SQL,
 ) {
-  const conditions = [eq(documents.docType, "skill")];
+  const conditions = [eq(documents.docType, "skill"), authorizedPredicate];
 
   conditions.push(buildSkillScopeCondition({ includeGlobal: true, ...opts }));
 
@@ -206,7 +210,7 @@ export async function listSkills(
     .from(documents)
     .where(and(...conditions))
     .orderBy(documents.title);
-  return enrichSkillPackageResults(db, results);
+  return authorizedPredicate ? results : enrichSkillPackageResults(db, results);
 }
 
 async function enrichSkillPackageResults<T extends { id: string }>(

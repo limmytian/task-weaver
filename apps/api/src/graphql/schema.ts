@@ -9,7 +9,6 @@ import { GraphQLError, defaultFieldResolver, isObjectType } from "graphql";
 import type { Database } from "@task-weaver/db";
 import {
   createResourceServices,
-  recommendationService,
   authenticationFailure,
   AuthenticationError,
   NotFoundError,
@@ -479,7 +478,7 @@ const resolvers = {
     },
 
     stats: async (project: any, _args: unknown, ctx: GraphQLContext) => {
-      return createResourceServices(ctx.identity).projectService.getProjectStats(ctx.db, project.id);
+      return { ...await createResourceServices(ctx.identity).projectService.getProjectStats(ctx.db, project.id), authorizationProjectId: project.id };
     },
   },
 
@@ -591,7 +590,7 @@ const resolvers = {
       args: { limit?: number; types?: string[] },
       ctx: GraphQLContext,
     ) => {
-      const result = await recommendationService.getDocumentRecommendations(
+      const result = await createResourceServices(ctx.identity).recommendationService.getDocumentRecommendations(
         ctx.db,
         doc.id,
         {
@@ -600,7 +599,7 @@ const resolvers = {
           projectId: doc.projectId ?? undefined,
         },
       );
-      return result.recommendations;
+      return result.recommendations.map(row => ({ ...row, authorizationDocumentId: doc.id }));
     },
   },
 
@@ -608,6 +607,7 @@ const resolvers = {
     byStatus: (stats: any) => {
       if (Array.isArray(stats.byStatus)) return stats.byStatus;
       return Object.entries(stats.byStatus ?? {}).map(([status, count]) => ({
+        authorizationProjectId: stats.authorizationProjectId,
         status,
         count,
       }));
@@ -616,6 +616,7 @@ const resolvers = {
       if (Array.isArray(stats.byPriority)) return stats.byPriority;
       return Object.entries(stats.byPriority ?? {}).map(
         ([priority, count]) => ({
+          authorizationProjectId: stats.authorizationProjectId,
           priority,
           count,
         }),
@@ -724,16 +725,14 @@ for (const type of Object.values(schema.getTypeMap())) {
         const liveContext = { ...context, identity };
         const services = createResourceServices(identity);
         if (type.name === "Query") {
-          if (!["currentActor", "project", "projects", "task", "tasks", "requirement", "requirements", "document", "documents"].includes(name)) requireResourceAuthorization();
+          if (!["currentActor", "project", "projects", "task", "tasks", "requirement", "requirements", "document", "documents", "searchDocuments"].includes(name)) requireResourceAuthorization();
         } else if (type.name === "Project") {
-          if (name === "stats") requireResourceAuthorization();
           await services.projectService.getProject(context.db, source.id);
         } else if (type.name === "Task") {
           await services.taskService.getTask(context.db, source.id);
         } else if (type.name === "Requirement") {
           await services.requirementService.getRequirement(context.db, source.id);
         } else if (type.name === "Document") {
-          if (name === "recommendations") requireResourceAuthorization();
           await services.documentService.getDocument(context.db, source.id);
         } else if (["Comment", "Note", "TaskDependency"].includes(type.name)) {
           await services.taskService.getTask(context.db, source.taskId);
@@ -745,6 +744,15 @@ for (const type of Object.values(schema.getTypeMap())) {
           await services.documentService.getDocument(context.db, source.documentId);
           if (source.taskId) await services.taskService.getTask(context.db, source.taskId);
           if (source.requirementId) await services.requirementService.getRequirement(context.db, source.requirementId);
+        } else if (["ProjectStats", "StatusCount", "PriorityCount"].includes(type.name)) {
+          await services.projectService.getProject(context.db, source.authorizationProjectId);
+        } else if (type.name === "RequirementProgress") {
+          await services.requirementService.getRequirement(context.db, source.id);
+        } else if (type.name === "Recommendation") {
+          await services.documentService.getDocument(context.db, source.authorizationDocumentId);
+          if (source.type === "document") await services.documentService.getDocument(context.db, source.id);
+          else if (source.type === "task") await services.taskService.getTask(context.db, source.id);
+          else await services.requirementService.getRequirement(context.db, source.id);
         } else if (type.name !== "AuthenticatedActor") requireResourceAuthorization();
         return await resolve(source, args, liveContext, info);
       } catch (error) {

@@ -76,36 +76,6 @@ export function calculateSlidingRenewal(
   return newExpiresTime > expiresTime ? new Date(newExpiresTime) : expiresAt;
 }
 
-async function renewMemories(
-  db: Database,
-  retrieved: Array<{ id: string; expiresAt: Date | null }>,
-) {
-  const now = Date.now();
-  const updates = [];
-
-  for (const memory of retrieved) {
-    if (!memory.expiresAt) continue;
-    const expiresTime = memory.expiresAt.getTime();
-    if (expiresTime <= now) continue;
-
-    const newExpiresAt = calculateSlidingRenewal(memory.expiresAt, now);
-
-    if (newExpiresAt.getTime() > expiresTime) {
-      memory.expiresAt = newExpiresAt;
-      updates.push(
-        db
-          .update(memories)
-          .set({ expiresAt: newExpiresAt, updatedAt: new Date() })
-          .where(eq(memories.id, memory.id)),
-      );
-    }
-  }
-
-  if (updates.length > 0) {
-    await Promise.all(updates);
-  }
-}
-
 // -- CRUD --
 
 export async function recordMemory(
@@ -180,7 +150,7 @@ export async function forgetMemory(db: Database, id: string, _actor: Actor) {
 
 // -- Search --
 
-export async function searchMemories(db: Database, input: SearchMemoryInput) {
+export async function searchMemories(db: Database, input: SearchMemoryInput, authorizedPredicate?: SQL) {
   const terms = buildSearchTerms(input.query);
   const likePattern = `%${input.query.replace(/[%_\\]/g, "\\$&")}%`;
   const conditions = [];
@@ -241,11 +211,11 @@ export async function searchMemories(db: Database, input: SearchMemoryInput) {
       )`.as("score"),
     })
     .from(memories)
-    .where(and(...conditions))
+    .where(and(...conditions, authorizedPredicate))
     .orderBy(sql`score DESC`, desc(memories.createdAt))
     .limit(input.limit);
 
-  await renewMemories(db, results);
+  // Discovery does not mutate memory expiry; renewal belongs to an authorized write path.
   return results;
 }
 

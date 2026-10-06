@@ -1,3 +1,5 @@
+import { documentSearchVector } from "./search-vector";
+import type { RetrievalPredicates } from "./retrieval-predicates";
 import { and, eq, or, isNull, sql, ne, notInArray } from "drizzle-orm";
 import {
   type Database,
@@ -95,7 +97,9 @@ export async function getDocumentRecommendations(
     projectId?: string;
     threshold?: number;
   },
+  authorized: RetrievalPredicates = {},
 ) {
+  const searchVector = await documentSearchVector(db);
   const limit = options?.limit ?? 10;
   const types = options?.types ?? ["document", "task", "requirement"];
   const threshold = options?.threshold ?? 0.01;
@@ -146,7 +150,8 @@ export async function getDocumentRecommendations(
       : undefined;
 
     const conditions = [
-      sql`search_vector @@ to_tsquery('english', ${tsQuery})`,
+      authorized.documents,
+      sql`${searchVector} @@ to_tsquery('english', ${tsQuery})`,
       notInArray(documents.id, excludeIds),
     ];
     if (projectCond) conditions.push(projectCond);
@@ -155,7 +160,7 @@ export async function getDocumentRecommendations(
       .select({
         id: documents.id,
         title: documents.title,
-        rank: sql<number>`ts_rank(search_vector, to_tsquery('english', ${tsQuery}))`.as(
+        rank: sql<number>`ts_rank(${searchVector}, to_tsquery('english', ${tsQuery}))`.as(
           "rank",
         ),
       })
@@ -185,7 +190,7 @@ export async function getDocumentRecommendations(
     ].slice(0, 10);
 
     if (keywords.length > 0) {
-      const taskConditions = [];
+      const taskConditions = [authorized.tasks];
 
       // Match tasks whose title or description contains any keyword
       const keywordPatterns = keywords.map(
@@ -247,7 +252,7 @@ export async function getDocumentRecommendations(
     ].slice(0, 10);
 
     if (keywords.length > 0) {
-      const reqConditions = [];
+      const reqConditions = [authorized.requirements];
 
       const keywordPatterns = keywords.map(
         (kw) =>
@@ -321,7 +326,9 @@ export async function getTaskRecommendations(
     types?: ("document" | "task" | "requirement")[];
     threshold?: number;
   },
+  authorized: RetrievalPredicates = {},
 ) {
+  const searchVector = await documentSearchVector(db);
   const limit = options?.limit ?? 10;
   const types = options?.types ?? ["document", "task", "requirement"];
   const threshold = options?.threshold ?? 0.01;
@@ -384,7 +391,8 @@ export async function getTaskRecommendations(
   // 1. Similar documents via tsvector
   if (types.includes("document") && tsQuery) {
     const conditions = [
-      sql`search_vector @@ to_tsquery('english', ${tsQuery})`,
+      authorized.documents,
+      sql`${searchVector} @@ to_tsquery('english', ${tsQuery})`,
     ];
 
     if (linkedDocIds.length > 0) {
@@ -402,7 +410,7 @@ export async function getTaskRecommendations(
       .select({
         id: documents.id,
         title: documents.title,
-        rank: sql<number>`ts_rank(search_vector, to_tsquery('english', ${tsQuery}))`.as(
+        rank: sql<number>`ts_rank(${searchVector}, to_tsquery('english', ${tsQuery}))`.as(
           "rank",
         ),
       })
@@ -426,7 +434,7 @@ export async function getTaskRecommendations(
 
   // 2. Similar tasks via keyword matching (same project)
   if (types.includes("task") && keywords.length > 0) {
-    const taskConditions = [];
+    const taskConditions = [authorized.tasks];
 
     const keywordPatterns = keywords.map(
       (kw) =>
@@ -467,7 +475,7 @@ export async function getTaskRecommendations(
 
   // 3. Similar requirements via keyword matching (same project)
   if (types.includes("requirement") && keywords.length > 0) {
-    const reqConditions = [];
+    const reqConditions = [authorized.requirements];
 
     const keywordPatterns = keywords.map(
       (kw) =>

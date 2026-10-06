@@ -339,15 +339,20 @@ export async function listTasks(
 export async function getRequirementTaskDependencyGraph(
   db: Database,
   requirementId: string,
+  authorizedPredicate?: SQL,
 ) {
   const taskRows = await db.query.tasks.findMany({
-    where: eq(tasks.requirementId, requirementId),
+    where: and(eq(tasks.requirementId, requirementId), authorizedPredicate),
     with: {
       dependencies: { with: { dependsOn: true } },
     },
     orderBy: (t, { asc }) => [asc(t.createdAt)],
   });
 
+  const dependencyIds = taskRows.flatMap(task => task.dependencies.map(dep => dep.dependsOnTaskId));
+  const allowedDependencies = dependencyIds.length ? await db.select({ id: tasks.id }).from(tasks)
+    .where(and(inArray(tasks.id, dependencyIds), authorizedPredicate)) : [];
+  const allowedIds = new Set(allowedDependencies.map(row => row.id));
   const nodeIds = new Set(taskRows.map((task) => task.id));
   const externalNodes = new Map<string, {
     id: string;
@@ -368,7 +373,7 @@ export async function getRequirementTaskDependencyGraph(
 
   for (const task of taskRows) {
     for (const dep of task.dependencies ?? []) {
-      if (!dep.dependsOn) continue;
+      if (!dep.dependsOn || !allowedIds.has(dep.dependsOnTaskId)) continue;
 
       if (!nodeIds.has(dep.dependsOnTaskId)) {
         externalNodes.set(dep.dependsOnTaskId, {
@@ -689,7 +694,7 @@ export interface SearchTasksInput {
   limit?: number;
 }
 
-export async function searchTasks(db: Database, input: SearchTasksInput) {
+export async function searchTasks(db: Database, input: SearchTasksInput, authorizedPredicate?: SQL) {
   const likePattern = `%${input.query}%`;
   const taskScope = input.scope ?? "project";
   const conditions = [
@@ -719,7 +724,7 @@ export async function searchTasks(db: Database, input: SearchTasksInput) {
       updatedAt: tasks.updatedAt,
     })
     .from(tasks)
-    .where(and(...conditions))
+    .where(and(...conditions, authorizedPredicate))
     .limit(input.limit ?? 20);
 
   if (matched.length === 0) return matched.map((task) => ({ ...task, repositories: [] }));
@@ -950,11 +955,12 @@ export async function getKanbanBoard(
   db: Database,
   projectId: string,
   options: { includeTerminal?: boolean; completedWithinDays?: number } = {},
+  authorizedPredicate?: SQL,
 ) {
   const includeTerminal = options.includeTerminal ?? false;
   const days = options.completedWithinDays ?? DEFAULT_COMPLETED_WITHIN_DAYS;
 
-  const whereConditions = [eq(tasks.projectId, projectId)];
+  const whereConditions = [eq(tasks.projectId, projectId), authorizedPredicate];
   if (!includeTerminal) {
     whereConditions.push(sql`${tasks.status} NOT IN ('done', 'cancelled')`);
   } else if (days > 0) {
@@ -1033,9 +1039,9 @@ export interface GanttData {
   dateRange: { start: string; end: string };
 }
 
-export async function getGanttChart(db: Database, projectId: string): Promise<GanttData> {
+export async function getGanttChart(db: Database, projectId: string, authorizedPredicate?: SQL): Promise<GanttData> {
   const allTasks = await db.query.tasks.findMany({
-    where: and(eq(tasks.scope, "project"), eq(tasks.projectId, projectId)),
+    where: and(eq(tasks.scope, "project"), eq(tasks.projectId, projectId), authorizedPredicate),
     with: {
       requirement: true,
       dependencies: {
@@ -1085,7 +1091,7 @@ export async function getGanttChart(db: Database, projectId: string): Promise<Ga
       endDate,
       estimated: !hasActualEnd,
       progress: STATUS_PROGRESS[t.status] ?? 0,
-      dependencies: ((t as any).dependencies ?? []).map((d: any) => ({
+      dependencies: ((t as any).dependencies ?? []).filter((d: any) => allTasks.some(row => row.id === d.dependsOnTaskId)).map((d: any) => ({
         taskId: d.dependsOnTaskId,
         type: d.type,
       })),

@@ -11,17 +11,19 @@ Query predicates filter project membership, explicitly granted human personal ow
 | Service exports / entry points | Current boundary | Remaining work |
 | --- | --- | --- |
 | Authentication, principals, API keys, identity management | Live A3/A4 context, lifecycle locks and scoped grants | Existing UX and upgrade slices |
-| Projects: list/detail/counts/create/update/archive/pin | Verified ordinary-resource factory | Stats, health, graphs: retrieval slice |
-| Requirements: CRUD/batch/slices/dependencies/document links | Verified ordinary-resource factory; both relation endpoints checked | Search, burndown/heatmap: retrieval slice |
-| Tasks: CRUD/status/batch/comments/notes/dependencies | Verified ordinary-resource factory; scope and eligible assignee checked | Search, boards/gantt/graphs: retrieval slice |
+| Projects: list/detail/counts/create/update/archive/pin | Verified ordinary-resource factory | Stats, health and graph queries filter scoped nodes and both edge endpoints |
+| Requirements: CRUD/batch/slices/dependencies/document links | Verified ordinary-resource factory; both relation endpoints checked | Search, burndown/heatmap use authorized SQL sets |
+| Tasks: CRUD/status/batch/comments/notes/dependencies | Verified ordinary-resource factory; scope and eligible assignee checked | Search, boards/gantt/graphs use authorized SQL sets |
 | Task and requirement claims | Factory; own holder checks plus resource write or execution authority; lease fencing retained | Daemon acquisition and delegated execution remain closed |
-| Documents: CRUD/versions/revert/backlinks/links | Factory; current scope controls history; implicit wiki targets filtered | Public title resolution/search/recommendations/context remain closed |
-| Memories: CRUD/list/entity shortcut | Factory; resource owner separate from creator/executor | Search/context assembly remain closed |
-| Context, recommendations, skill packages/storage/presets, embeddings | Transport denied; internal document reconciliation is bounded to the changed document | Retrieval/distribution authorization |
+| Documents: CRUD/versions/revert/backlinks/links | Factory; current scope controls history; implicit wiki targets filtered | Title resolution/search/recommendations/context are authenticated and scoped |
+| Memories: CRUD/list/entity shortcut | Factory; resource owner separate from creator/executor | Search applies scope and attached entity predicates without renewing expiry on reads |
+| Context and recommendations | Verified ordinary-resource factory; ranking and vector candidate selection use current document authority | Package metadata enrichment remains staged until asset authorization |
 | MCP registry/pool and repository/forge catalog | Transport denied; no tool invocation or repository metadata expansion | Tool and repository authorization |
 | Reviews, schedules, usage, activity, daemon control/progress/observability/metrics/SLO | Transport denied; existing pure state/fence helpers remain private implementation | Metadata and execution authorization |
 | Assistant, Ti, plans, persisted Gateway work | Transport denied / execution paused | Runtime delegation and account-owned controls |
 | Web/daemon SSE and outbound webhooks | Closed; no resource event delivery | Realtime and webhook authorization |
 | Version | Exact public static endpoints; authenticated update check | No ordinary content authority |
 
-REST, tRPC and GraphQL use the same factory. Entry-point allowlists must stay narrower than the factory: implementing one ordinary method does not open a neighboring discovery, execution or system route. GraphQL default field resolvers must recheck the source resource as well as explicit resolvers. Errors use the shared safe transport mapping; inaccessible IDs return 404 and insufficient action on a visible resource returns 403. Responses stay `no-store`.
+REST, tRPC and GraphQL use the same factory. Skill packages/storage/presets and embedding management remain closed pending their asset authorization task.
+
+Entry-point allowlists must stay narrower than the factory: implementing one ordinary method does not open a neighboring discovery, execution or system route. GraphQL default field resolvers must recheck the source resource as well as explicit resolvers. Errors use the shared safe transport mapping; inaccessible IDs return 404 and insufficient action on a visible resource returns 403. Responses stay `no-store`.

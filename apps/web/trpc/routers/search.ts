@@ -1,11 +1,6 @@
 import { z } from "zod";
-import { router, resourceProcedure } from "../init";
-import {
-  documentService,
-  repositoryService,
-  taskService,
-  requirementService,
-} from "@task-weaver/core";
+import { router, ordinaryResourceProcedure as resourceProcedure } from "../init";
+import { createResourceServices, personalResourceOwnerId, type repositoryService } from "@task-weaver/core";
 
 const searchInputSchema = z.object({
   query: z.string().min(1),
@@ -35,38 +30,32 @@ export const searchRouter = router({
     .query(async ({ ctx, input }) => {
       const [matchedTasks, matchedDocs, matchedRequirements, matchedRepositories] =
         await Promise.all([
-          taskService.searchTasks(ctx.db, {
+          createResourceServices(ctx.identity).taskService.searchTasks(ctx.db, {
             query: input.query,
             projectId: input.projectId,
             scope: input.projectId ? "project" : "personal",
-            personalOwnerId: ctx.actor.id,
-            personalOwnerType: ctx.actor.type,
+            personalOwnerId: personalResourceOwnerId(ctx.identity),
+            personalOwnerType: "human",
             limit: input.limit,
           }),
-          documentService.searchDocumentsWithMetadata(ctx.db, {
+          createResourceServices(ctx.identity).documentService.searchDocumentsWithMetadata(ctx.db, {
             query: input.query,
             mode: input.mode,
             projectId: input.projectId,
             includeGlobal: true,
             includePersonal: !input.projectId,
-            personalOwnerId: ctx.actor.id,
-            personalOwnerType: ctx.actor.type,
+            personalOwnerId: personalResourceOwnerId(ctx.identity),
+            personalOwnerType: "human",
             limit: input.limit,
             keywordWeight: 0.3,
             fulltextWeight: 0.7,
           }),
-          requirementService.searchRequirements(ctx.db, {
+          createResourceServices(ctx.identity).requirementService.searchRequirements(ctx.db, {
             query: input.query,
             projectId: input.projectId,
             limit: input.limit,
           }),
-          repositoryService.listRepositories(ctx.db, {
-            query: input.query,
-            status: "active",
-            sort: "relevance",
-            page: 1,
-            pageSize: input.limit,
-          }, ctx.actor),
+          Promise.resolve({ items: [] as Awaited<ReturnType<typeof repositoryService.listRepositories>>["items"] }),
         ]);
 
       return {
