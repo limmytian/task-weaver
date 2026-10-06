@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, or, sql, type AnyColumn, type SQL, getTableName } from "drizzle-orm";
+import { and, eq, inArray, isNull, isNotNull, or, sql, type AnyColumn, type SQL, getTableName } from "drizzle-orm";
 import {
   type Database, projects, tasks, requirements, documents, memories,
   executionSlices, authActors, projectMemberships,
@@ -151,7 +151,7 @@ export function personalResourceOwnerId(context: VerifiedRequestContext) {
 export function taskResourcePredicate(authority: ResourceAuthority, qualified = false) {
   const column = (value: AnyColumn): SQL => qualified ? qualifiedColumn(value) : sql`${value}`;
   return and(resourcePredicate(authority, qualified ? qualifiedScopeColumns(tasks) : tasks), or(
-    and(eq(column(tasks.scope), "personal"), isNull(column(tasks.projectId)), isNull(column(tasks.requirementId)), isNull(column(tasks.executionSliceId))),
+    and(eq(column(tasks.scope), "personal"), isNotNull(column(tasks.personalOwnerId)), eq(column(tasks.personalOwnerType), "human"), isNull(column(tasks.projectId)), isNull(column(tasks.requirementId)), isNull(column(tasks.executionSliceId))),
     and(eq(column(tasks.scope), "project"), sql`EXISTS (SELECT 1 FROM ${requirements} WHERE ${qualifiedColumn(requirements.id)} = ${column(tasks.requirementId)} AND ${qualifiedColumn(requirements.projectId)} = ${column(tasks.projectId)})`,
       or(isNull(column(tasks.executionSliceId)), sql`EXISTS (SELECT 1 FROM ${executionSlices} WHERE ${qualifiedColumn(executionSlices.id)} = ${column(tasks.executionSliceId)} AND ${qualifiedColumn(executionSlices.requirementId)} = ${column(tasks.requirementId)})`)),
   ))!;
