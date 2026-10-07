@@ -74,7 +74,7 @@ context.get("/search", async (c) => {
 
 // GET /bootstrap - Get bootstrap context (minimal starting info)
 context.get("/bootstrap", async (c) => {
-  const bootstrap = await createResourceServices(c.get("identity")).contextService.getBootstrapContext();
+  const bootstrap = await createResourceServices(c.get("identity")).contextService.getBootstrapContext(c.get("db"));
   return c.json(bootstrap);
 });
 

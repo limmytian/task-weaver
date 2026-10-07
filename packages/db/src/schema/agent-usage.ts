@@ -35,6 +35,9 @@ export const agentUsageRuns = pgTable(
       onDelete: "set null",
     }),
     attempt: integer("attempt"),
+    leaseRunId: uuid("lease_run_id"),
+    leaseGeneration: integer("lease_generation"),
+    workerIndex: text("worker_index"),
     source: text("source", {
       enum: ["codex_jsonl", "daemon_unknown", "ti_runtime"],
     }).notNull(),

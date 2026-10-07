@@ -161,7 +161,7 @@ export interface BootstrapContext {
   examples: string[];
 }
 
-export function getBootstrapContext(): BootstrapContext {
+export function getBootstrapContext(_db: Database): BootstrapContext {
   return {
     version: "1.0",
     description:

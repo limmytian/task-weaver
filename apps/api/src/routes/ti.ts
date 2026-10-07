@@ -196,11 +196,10 @@ tiRoutes.post("/runs/:id/delegations/:delegationId/renew", async c => {
 });
 
 tiRoutes.post("/runs/:id/usage", async (c) => {
-  if (!c.req.header("Authorization")?.startsWith("Bearer ") || !c.get("actor").id.startsWith("apikey:")) return c.json({ error: "Authenticated API key required" }, 401);
   const parsed = reportTiAgentUsageSchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   try {
-    return c.json(await agentUsageService.reportTiUsage(c.get("db"), c.req.param("id"), parsed.data, c.get("actor")));
+    return c.json(await createResourceServices(c.get("identity")).agentUsageService.reportTiUsage(c.get("db"), c.req.param("id"), parsed.data, c.get("actor")));
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
     if (err instanceof ValidationError) return c.json({ error: err.message }, 400);

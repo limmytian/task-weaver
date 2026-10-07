@@ -124,7 +124,7 @@ export const listTiAgentRunsSchema = z.object({
 
 export const acquireTiAgentRunSchema = z.object({
   assignedAgentId: z.string().uuid(),
-  workerId: z.string().min(1),
+  workerId: z.string().min(1).max(200),
   durationMinutes: z.number().int().min(1).max(15).default(15),
 });
 

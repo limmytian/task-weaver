@@ -90,6 +90,8 @@ export const reviewRuns = pgTable(
     reviewerActorId: text("reviewer_actor_id").notNull(),
     reviewerActorType: actorTypeEnum("reviewer_actor_type").notNull(),
     reviewerDaemonId: uuid("reviewer_daemon_id"),
+    leaseRunId: uuid("lease_run_id"),
+    leaseGeneration: integer("lease_generation"),
     supersedesRunId: uuid("supersedes_run_id"),
     supersededByRunId: uuid("superseded_by_run_id"),
     summary: text("summary"),

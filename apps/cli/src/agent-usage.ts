@@ -137,7 +137,7 @@ export class CodexUsageCollector {
 
 type Scope = Pick<
   ReportAgentUsageInput,
-  'daemonId' | 'projectId' | 'requirementId' | 'phase' | 'agent'
+  'daemonId' | 'projectId' | 'requirementId' | 'phase' | 'agent' | 'runId' | 'leaseGeneration' | 'workerIndex'
 >
 export async function runMeteredAgent(
   command: string,

@@ -78,6 +78,9 @@ export const reportAgentUsageSchema = z
   .object({
     processId: z.string().uuid(),
     daemonId: z.string().uuid(),
+    runId: z.string().uuid().optional(),
+    leaseGeneration: z.number().int().positive().optional(),
+    workerIndex: z.union([z.string().min(1).max(160), z.number().int().nonnegative()]).optional(),
     projectId: z.string().uuid(),
     requirementId: z.string().uuid(),
     agent: identity,
@@ -91,6 +94,7 @@ export const reportTiAgentUsageSchema = z
   .object({
     processId: z.string().uuid(),
     workerId: z.string().min(1).max(160),
+    leaseGeneration: z.number().int().positive().optional(),
     attempt: z.number().int().nonnegative(),
     startedAt: z.string().datetime(),
     ...snapshotFields,

@@ -1,3 +1,4 @@
+import { requireDaemonLease } from './daemon-lease-authorization';
 import { authorizeDaemonOperation } from './daemon-authorization';
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { agentUsageRuns, reviewRuns, requirementRepositories, repositories, tasks, documents, requirements, projects, activityLog, tiAgentRuns, tiAgentModelConfigs, tiAgentPolicies, schedules, scheduleRuns, type Database } from "@task-weaver/db";
@@ -110,6 +111,13 @@ export async function authorizeMetadataOperation(db: Database, authority: Resour
     return;
   }
   if (group === "usage") {
+    if (name === "reportDaemonUsage") {
+      const input = call[1];
+      if (!input.runId || input.workerIndex === undefined) throw new AuthorizationError();
+      const { daemon, requirement } = await requireDaemonLease(db, authority, input.requirementId, input);
+      if (requirement.projectId !== input.projectId || daemon.role === "merger" || (daemon.role === "reviewer" ? input.phase !== "review" : !["execution", "rework"].includes(input.phase))) throw new AuthorizationError();
+      return;
+    }
     if (!["listUsage", "summarizeUsage", "getUsage"].includes(name)) throw new AuthorizationError();
     const input = name === "getUsage" ? { projectId: call[1] } : call[1];
     await requireResource(db, authority, "project", input.projectId, "audit.read");
@@ -152,8 +160,10 @@ export async function authorizeMetadataOperation(db: Database, authority: Resour
       input[key] = link[key];
     }
     if (input.headCommit !== link.headCommit) throw new ValidationError("Review must use the current delivery head");
-    // Daemon identities require authenticated execution enrollment in the later delegation slice.
-    if (input.daemonId !== undefined) throw new AuthorizationError();
+    if (input.daemonId !== undefined) {
+      const { claim } = await requireDaemonLease(db, authority, call[1], input, "reviewer");
+      call[4] = { runId: claim.id, generation: claim.generation };
+    } else if (authority.actor.type !== "human") throw new AuthorizationError();
     call[2] = input;
     return;
   }
@@ -167,7 +177,10 @@ export async function authorizeMetadataOperation(db: Database, authority: Resour
     if (name !== "getReviewRun") {
       if (link.headCommit !== run.headCommit) throw new ValidationError("Review delivery head has changed");
       if (name === "evaluateReviewRun" && (call[2]?.mergerActorId !== undefined || call[2]?.mergerActorType !== undefined || call[2]?.mergerDaemonId !== undefined || call[2]?.mergeMode !== undefined)) throw new AuthorizationError();
-      if (call[2]?.daemonId !== undefined) throw new AuthorizationError();
+      if (run.reviewerDaemonId) {
+        const { claim } = await requireDaemonLease(db, authority, run.requirementId, call[2] ?? {}, "reviewer");
+        if (run.reviewerDaemonId !== call[2]?.daemonId || run.leaseRunId !== claim.id || run.leaseGeneration !== claim.generation) throw new AuthorizationError();
+      } else if (call[2]?.daemonId !== undefined || authority.actor.type !== "human") throw new AuthorizationError();
       if (run.reviewerActorId !== authority.actor.id || run.reviewerActorType !== authority.actor.type) throw new AuthorizationError();
     }
     return;

@@ -77,7 +77,7 @@ test("daemon authority scopes registration, queues and fenced operations", { ski
     forged.set("x-actor-id", otherAgent.id); forged.set("x-actor-type", "human");
     const result = await call("register", forged, { ...registration, actorId: otherAgent.id, clientId: otherAgent.id });
     assert.equal(result.response.status, 201, JSON.stringify(result.body));
-    assert.equal(result.body.config.executionDelegationSupported, false);
+    assert.equal(result.body.config.executionDelegationSupported, true);
     assert.equal(result.body.actorId, agent.id); assert.equal(result.body.actorType, "agent");
     assert.equal((await call("register", foreign.headers, registration)).response.status, 404);
     assert.equal((await call("register", executor.headers, { ...registration, role: "reviewer", capabilities: ["review"] })).response.status, 404);

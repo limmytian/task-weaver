@@ -113,11 +113,41 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     assert.deepEqual(renewed.delegation.taskIds, capability.delegation.taskIds);
     capability = renewed;
   });
+  await t.test("Ti usage shares the original executor key, attempt and lease fence", async () => {
+    const input = { ...fence(), processId: randomUUID(), attempt: acquired.retryCount, startedAt: new Date().toISOString(), revision: 0, outcome: "running", endedAt: null, summary: { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, cacheSemantics: "unknown", provider: "fixture", model: "safe", completeness: "unknown" } };
+    await assert.rejects(() => foreign.service.agentUsageService.reportTiUsage(db, run.id, input, foreign.actor));
+    await assert.rejects(() => executor.service.agentUsageService.reportTiUsage(db, run.id, { ...input, leaseGeneration: input.leaseGeneration + 1 }, executor.actor));
+    const report = await executor.service.agentUsageService.reportTiUsage(db, run.id, input, executor.actor);
+    assert.equal(report.reportedBy, agent.id); assert.equal(report.leaseGeneration, acquired.leaseGeneration); assert.equal(report.workerIndex, worker.workerId);
+  });
   await t.test("completion revokes children and a completed execution cannot renew", async () => {
     await supervisor.invoke(db, "completeRun", [run.id, { ...fence(), status: "succeeded" }]);
     await assert.rejects(() => runtime.verify(new Headers({ authorization: `Bearer ${capability.token}` })));
     await assert.rejects(() => supervisor.renewDelegation(db, run.id, capability.delegation.id, fence()));
     assert.equal(await db.query.requirementClaims.findFirst({ where: eq(requirementClaims.requirementId, requirement.id) }), undefined);
+  });
+  await t.test("expired Ti leases and retries exchange fresh fences without restoring old child authority", async () => {
+    const queued = await owner.service.tiAgentService.createRun(db, { taskId: task.id, assignedAgentId: agent.id, assignedAgentType: "agent", maxRetries: 1 }, owner.actor);
+    const first = await executor.service.tiAgentService.acquireRun(db, worker, executor.actor);
+    assert.equal(first.id, queued.id);
+    const firstFence = { workerId: worker.workerId, leaseGeneration: first.leaseGeneration };
+    const old = await supervisor.issueDelegation(db, first.id, firstFence);
+    await db.update(tiAgentRuns).set({ leaseExpiresAt: new Date(Date.now() - 1_000) }).where(eq(tiAgentRuns.id, first.id));
+    await db.update(requirementClaims).set({ expiresAt: new Date(Date.now() - 1_000) }).where(eq(requirementClaims.requirementId, requirement.id));
+    await assert.rejects(() => runtime.verify(new Headers({ authorization: `Bearer ${old.token}` })));
+    await assert.rejects(() => supervisor.invoke(db, "heartbeatRunLease", [first.id, { ...firstFence, durationMinutes: 15 }]));
+    const second = await executor.service.tiAgentService.acquireRun(db, worker, executor.actor);
+    assert.equal(second.id, first.id); assert.ok(second.leaseGeneration > first.leaseGeneration);
+    const secondFence = { workerId: worker.workerId, leaseGeneration: second.leaseGeneration };
+    await assert.rejects(() => supervisor.invoke(db, "completeRun", [first.id, { ...firstFence, status: "succeeded" }]));
+    const child = await supervisor.issueDelegation(db, first.id, secondFence);
+    const retried = await supervisor.invoke(db, "scheduleRunRetry", [first.id, { ...secondFence, errorMessage: `Retry ${child.token}`, delayMs: 0 }]);
+    assert.equal(retried.status, "queued"); assert.equal(retried.retryCount, second.retryCount + 1);
+    assert.ok(!JSON.stringify(retried).includes(child.token));
+    await assert.rejects(() => runtime.verify(new Headers({ authorization: `Bearer ${child.token}` })));
+    const third = await executor.service.tiAgentService.acquireRun(db, worker, executor.actor);
+    assert.equal(third.id, first.id); assert.ok(third.leaseGeneration > second.leaseGeneration);
+    await supervisor.invoke(db, "completeRun", [third.id, { workerId: worker.workerId, leaseGeneration: third.leaseGeneration, status: "succeeded" }]);
   });
   await t.test("assistant approval uses the real owner and current payload targets", async () => {
     const [conversation] = await db.insert(assistantConversations).values({ projectId: project.id, createdBy: owner.actor.id, createdByType: "human" }).returning();

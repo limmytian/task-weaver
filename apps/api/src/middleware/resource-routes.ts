@@ -1,5 +1,9 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
+  ["PATCH", new RegExp("^/api/v1/requirement-repositories/[0-9a-fA-F-]{36}/delivery/?$")],
+  ["POST", new RegExp("^/api/v1/requirement-repositories/[0-9a-fA-F-]{36}/(?:forge-sync|reopen)/?$")],
+  ["POST", new RegExp("^/api/v1/agent-usage/runs/?$")],
+  ["POST", new RegExp("^/api/v1/ti/runs/[0-9a-fA-F-]{36}/usage/?$")],
   ["POST", new RegExp("^/api/v1/daemons/[0-9a-fA-F-]{36}/delegations(?:/[0-9a-fA-F-]{36}/renew)?/?$")],
   ["DELETE", new RegExp("^/api/v1/daemons/[0-9a-fA-F-]{36}/delegations/[0-9a-fA-F-]{36}/?$")],
   ["POST", new RegExp("^/api/v1/daemons/register/?$")],

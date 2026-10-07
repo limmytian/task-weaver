@@ -8,6 +8,8 @@ import { requireResource, requireScope, projectPredicate } from './resource-auth
 import { requireRepository } from './repository-authorization';
 import { claimRequirement } from './claims';
 import * as implementation from './ti-agent';
+import { reportTiUsage } from './agent-usage';
+import { reportTiAgentUsageSchema } from '@task-weaver/contracts';
 import { liveTiRunAuthority, assertTiTaskReady, tiRunAuthorizationSchema } from './ti-execution-authorization';
 import { insertCapability, liveExecutionAuthority } from './execution-delegations';
 
@@ -104,8 +106,13 @@ export function createTiExecutionService(context: VerifiedRequestContext) {
         const [id, rawInput] = args;
         const schemas = { heartbeatRunLease: tiHeartbeatSchema, updateRunProgress: tiProgressSchema, scheduleRunRetry: tiRetrySchema, completeRun: completeTiAgentRunSchema };
         const schema = schemas[name as keyof typeof schemas];
-        const input = redact(schema ? schema.parse(rawInput) : tiWorkerFenceSchema.strict().parse(rawInput));
+        const input = redact(schema ? schema.parse(rawInput) : name === 'reportUsage' ? reportTiAgentUsageSchema.parse(rawInput) : tiWorkerFenceSchema.strict().parse(rawInput));
         const live = await held(tx, id, tiWorkerFenceSchema.parse(input));
+        if (name === 'reportUsage') {
+          const usage = reportTiAgentUsageSchema.parse(input);
+          if (usage.attempt !== live.run.retryCount) throw new AuthorizationError();
+          return reportTiUsage(tx, id, usage, actor, { runId: live.claim!.id, generation: live.claim!.generation, workerId: live.binding.workerId! });
+        }
         if (name === 'assertRun') return { ...redact(live.run), leaseGeneration: live.binding.leaseGeneration };
         if (name === 'heartbeatRunLease') {
           if (!Number.isInteger(input.durationMinutes) || input.durationMinutes < 1 || input.durationMinutes > 15) throw new ValidationError('Invalid Ti lease duration');

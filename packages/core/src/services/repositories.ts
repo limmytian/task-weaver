@@ -40,6 +40,7 @@ import {
 } from "./daemon-state-machine";
 import {
   assertIndependentDeliveryIdentity,
+  assertCurrentReviewEvidence,
   getEffectiveReviewPolicy,
 } from "./reviews";
 import {
@@ -720,6 +721,7 @@ export async function updateRequirementRepositoryDelivery(
   linkId: string,
   input: UpdateRequirementRepositoryDeliveryInput,
   actor: Actor,
+  authenticatedPhase?: "execution" | "review" | "merge",
 ) {
   const link = await db.query.requirementRepositories.findFirst({
     where: eq(requirementRepositories.id, linkId),
@@ -756,10 +758,11 @@ export async function updateRequirementRepositoryDelivery(
     where: eq(requirements.id, link.requirementId),
   });
   if (!requirement) throw new NotFoundError("Requirement not found");
-  const actorPhase = deliveryIdentityPhase(fields);
+  const actorPhase = authenticatedPhase ?? deliveryIdentityPhase(fields);
   const policy = actorPhase === "review" || actorPhase === "merge"
     ? await getEffectiveReviewPolicy(db, link.requirementId)
     : null;
+  if (authenticatedPhase === "merge" && policy && !policy.allowedMergeModes.includes(fields.mergeMode ?? link.mergeMode ?? policy.defaultMergeMode)) throw new ValidationError("Merge mode is not allowed by the current review policy");
   const overrideRequested = reviewPolicyDecision === "bypassed";
   if (overrideRequested) {
     if (!policy?.allowManualOverride) {
@@ -797,8 +800,8 @@ export async function updateRequirementRepositoryDelivery(
     ),
   );
   if (
-    actorPhase === "review"
-    && fields.deliveryStatus === "ready_to_merge"
+    ((actorPhase === "review" && fields.deliveryStatus === "ready_to_merge")
+      || (actorPhase === "merge" && (fields.deliveryStatus === "merged" || fields.mergeStatus === "merging" || fields.mergeStatus === "merged")))
     && requiresStructuredReview
     && !overrideRequested
   ) {
@@ -806,9 +809,11 @@ export async function updateRequirementRepositoryDelivery(
       where: eq(reviewRuns.requirementRepositoryId, link.id),
       orderBy: desc(reviewRuns.attempt),
     });
-    if (!latestRun || latestRun.status !== "approved" || latestRun.headCommit !== (fields.headCommit ?? link.headCommit)) {
+    if (!latestRun || latestRun.status !== "approved" || latestRun.headCommit !== (actorPhase === "merge" ? link.headCommit : fields.headCommit ?? link.headCommit)) {
       throw new ValidationError("Repository cannot become ready to merge until the current structured review run is approved");
     }
+    if (authenticatedPhase === "review" && (latestRun.reviewerActorId !== actor.id || latestRun.reviewerActorType !== actor.type || latestRun.reviewerDaemonId !== daemonId || latestRun.leaseGeneration !== leaseGeneration)) throw new ValidationError("Review delivery requires the recorded reviewer and original lease");
+    if (authenticatedPhase) await assertCurrentReviewEvidence(db, latestRun.id, policy!, actorPhase === "merge" ? { actorId: actor.id, actorType: actor.type, daemonId: daemonId ?? null } : undefined, actorPhase === "merge" ? fields.mergeMode ?? link.mergeMode ?? policy!.defaultMergeMode : undefined);
   }
   const operation = fields.mergeStatus
     ? "merge"
@@ -957,6 +962,7 @@ export async function syncRequirementRepositoryForgeState(
   linkId: string,
   input: SyncRequirementRepositoryForgeStateInput,
   actor: Actor,
+  authenticatedPhase?: "review" | "merge",
 ) {
   const link = await db.query.requirementRepositories.findFirst({
     where: eq(requirementRepositories.id, linkId),
@@ -1023,6 +1029,20 @@ export async function syncRequirementRepositoryForgeState(
     snapshot,
     currentHeadApproved: Boolean(approvedRun),
   });
+  if (authenticatedPhase) {
+    const policy = await getEffectiveReviewPolicy(db, link.requirementId);
+    assertIndependentDeliveryIdentity(policy, authenticatedPhase, {
+      executor: { actorId: link.executorActorId, actorType: link.executorActorType, daemonId: link.executorDaemonId },
+      reviewer: { actorId: link.reviewerActorId, actorType: link.reviewerActorType, daemonId: link.reviewerDaemonId },
+      current: { actorId: actor.id, actorType: actor.type, daemonId: input.daemonId ?? null },
+    });
+    if (transition.deliveryStatus === "merged") {
+      if (snapshot.headCommit && snapshot.headCommit !== link.headCommit) throw new ValidationError("Provider merge must use the current delivery head");
+      if (!approvedRun && (policy.requiredChecks.length > 0 || policy.requireAiReview || policy.minimumHumanApprovals > 0 || policy.requireIndependentReviewer)) throw new ValidationError("Provider merge requires approved evidence for the current delivery head");
+    }
+    if (approvedRun && ["ready_to_merge", "merged"].includes(transition.deliveryStatus)) await assertCurrentReviewEvidence(db, approvedRun.id, policy, authenticatedPhase === "merge" ? { actorId: actor.id, actorType: actor.type, daemonId: input.daemonId ?? null } : undefined, authenticatedPhase === "merge" ? "provider" : undefined);
+    if (transition.deliveryStatus === "merged" && (authenticatedPhase !== "merge" || !policy.allowedMergeModes.includes("provider"))) throw new ValidationError("Provider merge is not authorized by the current role and review policy");
+  }
   assertRepositoryDeliveryStatusTransition(link.deliveryStatus, transition.deliveryStatus);
 
   const nextRevision = link.externalSyncRevision + 1;
@@ -1048,6 +1068,8 @@ export async function syncRequirementRepositoryForgeState(
     externalState,
     externalStateUpdatedAt: input.observedAt,
     externalSyncRevision: nextRevision,
+    ...(authenticatedPhase === "review" && approvedRun ? { reviewerActorId: approvedRun.reviewerActorId, reviewerActorType: approvedRun.reviewerActorType, reviewerDaemonId: approvedRun.reviewerDaemonId }
+      : authenticatedPhase === "merge" && transition.deliveryStatus === "merged" ? { mergerActorId: actor.id, mergerActorType: actor.type, mergerDaemonId: input.daemonId ?? null } : {}),
     deliveryStatus: transition.deliveryStatus,
     reviewStatus: transition.reviewStatus,
     mergeStatus: transition.mergeStatus,
@@ -1121,6 +1143,8 @@ export async function syncRequirementRepositoryForgeState(
       mergeStatus: transition.mergeStatus,
       idempotencyKey: input.idempotencyKey,
       externalSyncRevision: nextRevision,
+      ...(authenticatedPhase === "review" && approvedRun ? { reviewerActorId: approvedRun.reviewerActorId, reviewerActorType: approvedRun.reviewerActorType, reviewerDaemonId: approvedRun.reviewerDaemonId }
+        : authenticatedPhase === "merge" && transition.deliveryStatus === "merged" ? { mergerActorId: actor.id, mergerActorType: actor.type, mergerDaemonId: input.daemonId ?? null } : {}),
       leaseGeneration: input.leaseGeneration,
       daemonId: input.daemonId,
     },

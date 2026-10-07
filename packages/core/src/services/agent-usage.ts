@@ -39,6 +39,9 @@ export function reconcileUsage(
     "daemonId",
     "tiRunId",
     "attempt",
+    "leaseRunId",
+    "leaseGeneration",
+    "workerIndex",
     "source",
     "agent",
     "phase",
@@ -162,6 +165,8 @@ export function normalizeOutcomeSummary(
 ): AgentUsageSummary {
   return {
     ...summary,
+    provider: summary.provider.replace(/(?:tw|twd|twb)_[0-9a-f]{64}/gi, "redacted"),
+    model: summary.model.replace(/(?:tw|twd|twb)_[0-9a-f]{64}/gi, "redacted"),
     completeness:
       outcome !== "succeeded" && summary.completeness === "complete"
         ? "partial"
@@ -207,6 +212,8 @@ export async function reportDaemonUsage(
   }
   return persist(db, {
     ...input,
+    leaseRunId: input.runId,
+    workerIndex: input.workerIndex === undefined ? null : String(input.workerIndex),
     taskId: null,
     tiRunId: null,
     attempt: null,
@@ -223,6 +230,7 @@ export async function reportTiUsage(
   runId: string,
   input: ReportTiAgentUsageInput,
   actor: Actor,
+  authenticatedLease?: { runId: string; generation: number; workerId: string },
 ) {
   const run = await db.query.tiAgentRuns.findFirst({
     where: eq(tiAgentRuns.id, runId),
@@ -272,6 +280,9 @@ export async function reportTiUsage(
     daemonId: null,
     tiRunId: run.id,
     attempt: input.attempt,
+    leaseRunId: authenticatedLease?.runId,
+    leaseGeneration: authenticatedLease?.generation,
+    workerIndex: authenticatedLease?.workerId,
     source: "ti_runtime",
     agent: "ti",
     phase: input.attempt > 0 ? "rework" : "execution",

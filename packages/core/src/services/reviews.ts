@@ -344,6 +344,18 @@ async function reviewRunOrThrow(db: Database, id: string) {
   return run;
 }
 
+/** Revalidate recorded evidence when current policy gates a delivery transition. */
+export async function assertCurrentReviewEvidence(db: Database, id: string, policy: ResolvedReviewPolicy, merger?: ReviewIdentity, mergeMode?: ReviewMergeMode) {
+  const run = await reviewRunOrThrow(db, id);
+  const evaluation = evaluateReviewPolicy(policy, {
+    headCommit: run.headCommit, checks: run.checks, findings: run.findings, decisions: run.decisions,
+    executor: { actorId: run.executorActorId, actorType: run.executorActorType, daemonId: run.executorDaemonId },
+    reviewer: { actorId: run.reviewerActorId, actorType: run.reviewerActorType, daemonId: run.reviewerDaemonId },
+    merger, mergeMode,
+  });
+  if (!evaluation.satisfied) throw new ValidationError("Current review policy is not satisfied by the recorded evidence");
+}
+
 export async function getReviewRun(db: Database, id: string) {
   return reviewRunOrThrow(db, id);
 }
@@ -368,6 +380,7 @@ export async function startReviewRun(
   requirementId: string,
   input: CreateReviewRunInput,
   actor: Actor,
+  authenticatedLease?: { runId: string; generation: number },
 ) {
   await assertReviewMutation(db, requirementId, actor, input);
   const link = await db.query.requirementRepositories.findFirst({
@@ -386,6 +399,8 @@ export async function startReviewRun(
     && (existing.status === "running" || existing.status === "approved")
     && existing.reviewerActorId === actor.id
     && existing.reviewerDaemonId === (input.daemonId ?? null)
+    && existing.leaseRunId === (authenticatedLease?.runId ?? null)
+    && existing.leaseGeneration === (authenticatedLease?.generation ?? null)
   ) {
     return existing;
   }
@@ -404,6 +419,8 @@ export async function startReviewRun(
     reviewerActorId: actor.id,
     reviewerActorType: actor.type,
     reviewerDaemonId: input.daemonId,
+    leaseRunId: authenticatedLease?.runId,
+    leaseGeneration: authenticatedLease?.generation,
     supersedesRunId: existing?.id,
   }).onConflictDoNothing().returning();
   const created = inserted ?? await db.query.reviewRuns.findFirst({

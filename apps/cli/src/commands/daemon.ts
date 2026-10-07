@@ -1043,7 +1043,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
               }
             },
           },
-          { daemonId, projectId: requirement.projectId, requirementId: requirement.id, agent: toolCmd, phase: initialWorkspaceSnapshot.workspaceState === 'dirty' ? 'rework' : 'execution' },
+          { daemonId, runId: lane.runId, leaseGeneration: lane.leaseGeneration, workerIndex: w.index, projectId: requirement.projectId, requirementId: requirement.id, agent: toolCmd, phase: initialWorkspaceSnapshot.workspaceState === 'dirty' ? 'rework' : 'execution' },
         )
         } finally { await access.close() }
         if (childResult.ok && !signal.aborted) {
@@ -1649,7 +1649,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
               }
             },
           },
-          { daemonId, projectId: requirement.projectId, requirementId: requirement.id, agent: reviewTool, phase: 'review' },
+          { daemonId, runId: lane.runId, leaseGeneration: lane.leaseGeneration, workerIndex, projectId: requirement.projectId, requirementId: requirement.id, agent: reviewTool, phase: 'review' },
         )
         } finally { await access.close() }
         const output = [child.stdout, child.stderr].filter(Boolean).join('\n').trim()

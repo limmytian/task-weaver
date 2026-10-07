@@ -1,7 +1,8 @@
+import { requireDaemonLease } from './daemon-lease-authorization';
 import { createTiExecutionService, isTiExecutionOperation } from './ti-execution';
 import { inArray, and, eq, isNull, sql } from "drizzle-orm";
 import {
-  type Database, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
+  type Database, daemons, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
   mcpTools, mcpLocalRequests, requirementRepositories, skillPackages, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
   documentRequirementLinks, projectMemberships, activityLog, executionDelegations,
 } from "@task-weaver/db";
@@ -86,6 +87,7 @@ function bindServices(context?: VerifiedRequestContext) {
       return [name, async (...args: any[]) => {
         if (!context) throw new AuthorizationError();
         const db = args[0] as Database;
+        if (group === "usage" && name === "reportTiUsage") return createTiExecutionService(context).invoke(db, "reportUsage", args.slice(1));
         if (group === "ti" && isTiExecutionOperation(name)) return createTiExecutionService(context).invoke(db, name, args.slice(1));
         if (group === "mcp" && name === "callTool") return invokeMcpTool(db, context, args[1], args[2], args[3], args[4]);
         return db.transaction(async tx => {
@@ -227,7 +229,7 @@ function redactDelegatedInput(value: any): any {
 
 /** Task capabilities do not inherit the parent's project administration or unrelated write surfaces. */
 function authorizeDelegatedOperation(authority: ResourceAuthority, group: Group, name: string, call: any[]) {
-  const reads = new Set(["getProject", "getRequirement", "getTask", "getTaskDetail", "listTasks", "listRequirements", "listProjects", "getDocument", "getDocumentDetail", "listDocuments", "getTaskClaim", "getRequirementClaim", "listExecutionSlices", "listTaskComments", "listTaskNotes", "listDocumentVersions", "getDocumentVersion", "getRequirementRepositories", "getTaskRepositories", "listRequirementRepositories", "listTaskRepositories", "getRepository", "listRepositories", "bootstrapContext", "searchTasks", "searchRequirements", "searchDocuments", "searchDocumentsFulltext", "searchAll", "resolveTitles", "listContextEntries", "searchContext", "getContextEntry"]);
+  const reads = new Set(["getProject", "getRequirement", "getTask", "getTaskDetail", "listTasks", "listRequirements", "listProjects", "getDocument", "getDocumentDetail", "listDocuments", "getTaskClaim", "getRequirementClaim", "listExecutionSlices", "listTaskComments", "listTaskNotes", "listDocumentVersions", "getDocumentVersion", "getRequirementRepositories", "getTaskRepositories", "listRequirementRepositories", "listTaskRepositories", "getRepository", "listRepositories", "bootstrapContext", "getBootstrapContext", "searchTasks", "searchRequirements", "searchDocuments", "searchDocumentsFulltext", "searchAll", "resolveTitles", "listContextEntries", "searchContext", "getContextEntry"]);
   const writes = new Set(["updateTask", "updateTaskStatus", "addTaskComment", "addTaskNote", "claimTask", "releaseTask", "heartbeatClaim", "updateDocument"]);
   if (!reads.has(name) && !(["execute", "automation"].includes(authority.bounds?.purpose ?? "") && writes.has(name))) throw new AuthorizationError();
   if (["usage", "review", "ti", "activity", "schedule", "observability", "metrics", "progress", "daemon", "mcp", "embedding", "memory", "package", "slo"].includes(group)) throw new AuthorizationError();
@@ -290,7 +292,28 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
       if (name.startsWith("add")) call[4] = visibility;
       return;
     }
-    // Execution delivery requires its later task-bound delegation implementation.
+    if (["updateRequirementRepositoryDelivery", "syncRequirementRepositoryForgeState", "reopenRequirementRepositoryDelivery"].includes(name)) {
+      const link = await db.query.requirementRepositories.findFirst({ where: eq(requirementRepositories.id, id) });
+      if (!link) throw new NotFoundError("Resource not found");
+      await requireRepository(db, authority, link.repositoryId);
+      const input = call[2] ?? {};
+      const { daemon } = await requireDaemonLease(db, authority, link.requirementId, input);
+      if (name === "syncRequirementRepositoryForgeState") {
+        if (daemon.role === "executor" || (daemon.role === "reviewer" && input.snapshot?.state === "merged")) throw new AuthorizationError();
+        call[4] = daemon.role === "reviewer" ? "review" : "merge";
+      }
+      if (name === "reopenRequirementRepositoryDelivery" && daemon.role !== "executor") throw new AuthorizationError();
+      if (name === "updateRequirementRepositoryDelivery") {
+        if (daemon.role === "executor" && ["review", "merge"].includes(input.operationCheckpoint?.operation)) throw new AuthorizationError();
+        if (daemon.role === "reviewer" && input.operationCheckpoint?.operation === "merge") throw new AuthorizationError();
+        if (input.manualOverrideReason !== undefined || input.manualOverrideReference !== undefined || input.reviewPolicyDecision === "bypassed") throw new AuthorizationError();
+        if (daemon.role === "executor" && (input.reviewStatus && !["pending", "not_supported", "in_review", "failed"].includes(input.reviewStatus) || input.mergeStatus && !["pending", "not_needed", "failed"].includes(input.mergeStatus) || ["ready_to_merge", "merged"].includes(input.deliveryStatus))) throw new AuthorizationError();
+        if (daemon.role === "reviewer" && (input.mergeStatus && !["pending", "ready", "failed"].includes(input.mergeStatus) || input.deliveryStatus === "merged")) throw new AuthorizationError();
+        call[4] = daemon.role === "reviewer" ? "review" : daemon.role === "merger" ? "merge" : "execution";
+      }
+      return;
+    }
+    // Other execution delivery operations stay closed.
     throw new AuthorizationError();
   }
   if (group === "mcp") {
@@ -418,6 +441,13 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
       const memory = await db.query.memories.findFirst({ where: eq(memories.id, id) });
       await checkMemoryEntity(db, authority, memory!);
     }
+    return;
+  }
+  if (group === "claim" && ["heartbeatRequirementClaim", "releaseRequirement"].includes(name) && call[4]) {
+    const daemon = await db.query.daemons.findFirst({ where: eq(daemons.id, call[4]) });
+    if (authority.bounds || authority.actor.type !== "agent" || !daemon || daemon.actorId !== authority.actor.id || daemon.actorType !== "agent") throw new AuthorizationError();
+    await requireResource(db, authority, "requirement", id, daemon.role === "reviewer" ? "execution.review" : daemon.role === "merger" ? "execution.merge" : "execution.run");
+    // The claim implementation checks the exact holder, daemon, generation and expiry.
     return;
   }
   if (writeById[name]) {
