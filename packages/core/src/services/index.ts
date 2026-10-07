@@ -59,3 +59,5 @@ export { createWebhookService } from "./webhooks";
 export { createExecutionDelegationService, authenticateExecutionDelegation } from "./execution-delegations";
 
 export { createTiExecutionService } from "./ti-execution";
+
+export { inspectOwnershipMigration, applyOwnershipMigration, ownershipMigrationManifestSchema } from "./auth-ownership-migration";
