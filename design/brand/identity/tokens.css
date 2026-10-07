@@ -1,0 +1,57 @@
+/* Owner-selected identity tokens. Opt in only during approved product integration. */
+.tw-brand {
+  --background: #ffffff;
+  --foreground: #17212b;
+  --card: #ffffff;
+  --card-foreground: #17212b;
+  --muted: #f1f5f9;
+  --muted-foreground: #475569;
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --primary-foreground: #ffffff;
+  --brand-secondary: #0369a1;
+  --accent: #eef2ff;
+  --accent-foreground: #3730a3;
+  --ring: #4f46e5;
+  --input: #64748b;
+  --sidebar: #f8fafc;
+  --sidebar-foreground: #17212b;
+  --sidebar-primary: #4f46e5;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eef2ff;
+  --sidebar-accent-foreground: #3730a3;
+  --sidebar-ring: #4f46e5;
+  --link: #4f46e5;
+}
+
+.tw-brand.dark, .dark .tw-brand {
+  --background: #111827;
+  --foreground: #f8fafc;
+  --card: #1e293b;
+  --card-foreground: #f8fafc;
+  --muted: #1e293b;
+  --muted-foreground: #cbd5e1;
+  --primary: #a5b4fc;
+  --primary-hover: #c7d2fe;
+  --primary-foreground: #111827;
+  --brand-secondary: #7dd3fc;
+  --accent: #1e293b;
+  --accent-foreground: #c7d2fe;
+  --ring: #a5b4fc;
+  --input: #94a3b8;
+  --sidebar: #1e293b;
+  --sidebar-foreground: #f8fafc;
+  --sidebar-primary: #a5b4fc;
+  --sidebar-primary-foreground: #111827;
+  --sidebar-accent: #334155;
+  --sidebar-accent-foreground: #e0e7ff;
+  --sidebar-ring: #a5b4fc;
+  --link: #a5b4fc;
+}
+
+.tw-brand :is(button, a, input, textarea, select):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+.tw-brand .brand-action:hover { background: var(--primary-hover); }
+.tw-brand .brand-link { color: var(--link); text-decoration: underline; text-underline-offset: 3px; }

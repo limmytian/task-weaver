@@ -1,0 +1,243 @@
+{
+  "method": "WCAG relative luminance for opaque sRGB pairs; no complete UI conformance claim",
+  "checks": [
+    {
+      "mode": "light",
+      "foreground": "foreground",
+      "background": "background",
+      "minimum": 4.5,
+      "ratio": 16.29
+    },
+    {
+      "mode": "light",
+      "foreground": "cardForeground",
+      "background": "card",
+      "minimum": 4.5,
+      "ratio": 16.29
+    },
+    {
+      "mode": "light",
+      "foreground": "mutedForeground",
+      "background": "muted",
+      "minimum": 4.5,
+      "ratio": 6.92
+    },
+    {
+      "mode": "light",
+      "foreground": "primaryForeground",
+      "background": "primary",
+      "minimum": 4.5,
+      "ratio": 6.29
+    },
+    {
+      "mode": "light",
+      "foreground": "primaryForeground",
+      "background": "primaryHover",
+      "minimum": 4.5,
+      "ratio": 7.9
+    },
+    {
+      "mode": "light",
+      "foreground": "accentForeground",
+      "background": "accent",
+      "minimum": 4.5,
+      "ratio": 8.88
+    },
+    {
+      "mode": "light",
+      "foreground": "link",
+      "background": "background",
+      "minimum": 4.5,
+      "ratio": 6.29
+    },
+    {
+      "mode": "light",
+      "foreground": "link",
+      "background": "card",
+      "minimum": 4.5,
+      "ratio": 6.29
+    },
+    {
+      "mode": "light",
+      "foreground": "brandSecondary",
+      "background": "background",
+      "minimum": 3,
+      "ratio": 5.93
+    },
+    {
+      "mode": "light",
+      "foreground": "ring",
+      "background": "background",
+      "minimum": 3,
+      "ratio": 6.29
+    },
+    {
+      "mode": "light",
+      "foreground": "ring",
+      "background": "card",
+      "minimum": 3,
+      "ratio": 6.29
+    },
+    {
+      "mode": "light",
+      "foreground": "input",
+      "background": "background",
+      "minimum": 3,
+      "ratio": 4.76
+    },
+    {
+      "mode": "light",
+      "foreground": "input",
+      "background": "card",
+      "minimum": 3,
+      "ratio": 4.76
+    },
+    {
+      "mode": "light",
+      "foreground": "sidebarForeground",
+      "background": "sidebar",
+      "minimum": 4.5,
+      "ratio": 15.57
+    },
+    {
+      "mode": "light",
+      "foreground": "sidebarPrimaryForeground",
+      "background": "sidebarPrimary",
+      "minimum": 4.5,
+      "ratio": 6.29
+    },
+    {
+      "mode": "light",
+      "foreground": "sidebarAccentForeground",
+      "background": "sidebarAccent",
+      "minimum": 4.5,
+      "ratio": 8.88
+    },
+    {
+      "mode": "light",
+      "foreground": "sidebarRing",
+      "background": "sidebar",
+      "minimum": 3,
+      "ratio": 6.01
+    },
+    {
+      "mode": "dark",
+      "foreground": "foreground",
+      "background": "background",
+      "minimum": 4.5,
+      "ratio": 16.96
+    },
+    {
+      "mode": "dark",
+      "foreground": "cardForeground",
+      "background": "card",
+      "minimum": 4.5,
+      "ratio": 13.98
+    },
+    {
+      "mode": "dark",
+      "foreground": "mutedForeground",
+      "background": "muted",
+      "minimum": 4.5,
+      "ratio": 9.85
+    },
+    {
+      "mode": "dark",
+      "foreground": "primaryForeground",
+      "background": "primary",
+      "minimum": 4.5,
+      "ratio": 8.9
+    },
+    {
+      "mode": "dark",
+      "foreground": "primaryForeground",
+      "background": "primaryHover",
+      "minimum": 4.5,
+      "ratio": 11.89
+    },
+    {
+      "mode": "dark",
+      "foreground": "accentForeground",
+      "background": "accent",
+      "minimum": 4.5,
+      "ratio": 9.81
+    },
+    {
+      "mode": "dark",
+      "foreground": "link",
+      "background": "background",
+      "minimum": 4.5,
+      "ratio": 8.9
+    },
+    {
+      "mode": "dark",
+      "foreground": "link",
+      "background": "card",
+      "minimum": 4.5,
+      "ratio": 7.34
+    },
+    {
+      "mode": "dark",
+      "foreground": "brandSecondary",
+      "background": "background",
+      "minimum": 3,
+      "ratio": 10.64
+    },
+    {
+      "mode": "dark",
+      "foreground": "ring",
+      "background": "background",
+      "minimum": 3,
+      "ratio": 8.9
+    },
+    {
+      "mode": "dark",
+      "foreground": "ring",
+      "background": "card",
+      "minimum": 3,
+      "ratio": 7.34
+    },
+    {
+      "mode": "dark",
+      "foreground": "input",
+      "background": "background",
+      "minimum": 3,
+      "ratio": 6.92
+    },
+    {
+      "mode": "dark",
+      "foreground": "input",
+      "background": "card",
+      "minimum": 3,
+      "ratio": 5.71
+    },
+    {
+      "mode": "dark",
+      "foreground": "sidebarForeground",
+      "background": "sidebar",
+      "minimum": 4.5,
+      "ratio": 13.98
+    },
+    {
+      "mode": "dark",
+      "foreground": "sidebarPrimaryForeground",
+      "background": "sidebarPrimary",
+      "minimum": 4.5,
+      "ratio": 8.9
+    },
+    {
+      "mode": "dark",
+      "foreground": "sidebarAccentForeground",
+      "background": "sidebarAccent",
+      "minimum": 4.5,
+      "ratio": 8.4
+    },
+    {
+      "mode": "dark",
+      "foreground": "sidebarRing",
+      "background": "sidebar",
+      "minimum": 3,
+      "ratio": 7.34
+    }
+  ]
+}

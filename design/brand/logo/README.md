@@ -1,6 +1,6 @@
 # Task Weaver logo artwork
 
-The original A weave is the owner-selected logo geometry. Both strands have equal weight and retain the approved over/under relationships. Colors are provisional pending the brand token task; these exports do not install a product theme.
+The original A weave is the owner-selected logo geometry. Both strands have equal weight and retain the approved over/under relationships. The owner-selected palette is indigo/blue (02). These exports do not install a product theme.
 
 ## Files and usage
 

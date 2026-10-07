@@ -13,6 +13,6 @@
 </mask>
 </defs>
 <path d="M12 22h22q8 0 8 8v22" stroke="#4f46e5" mask="url(#a-first)"/>
-<path d="M22 12v22q0 8 8 8h22" stroke="#0f766e" mask="url(#a-second)"/>
+<path d="M22 12v22q0 8 8 8h22" stroke="#0369a1" mask="url(#a-second)"/>
 </g>
 </svg>

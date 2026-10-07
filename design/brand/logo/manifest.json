@@ -1,51 +1,51 @@
 {
   "favicon.ico": {
-    "bytes": 1630,
-    "sha256": "75fb4c148990de96160783c0ac0fbf7f4aa27e404587720112d8c56e8722798b"
+    "bytes": 1605,
+    "sha256": "7ab8f14d7a7ec506a13704f02b882d81fbcfd8450a726572cc2755b409bfb314"
   },
   "mark-dark-128.png": {
-    "bytes": 1652,
-    "sha256": "1e3358bad9259f6997e107772f20297c9800bd2d416c336fe4e3cf6b35491892"
+    "bytes": 1623,
+    "sha256": "dbe622e69496eb85a9c3ac8a98921b097d66c74d709e5c43e08bb171dabbd685"
   },
   "mark-dark-16.png": {
-    "bytes": 364,
-    "sha256": "cd7682f36ba13467b18a6bf8162310d998a0c49d06bf083850ffb6bf5ffa6d0b"
+    "bytes": 359,
+    "sha256": "dcbdc0822371882e1922ef984415ad907df2190e5442f0d404c76a8ef96bd919"
   },
   "mark-dark-180.png": {
-    "bytes": 2663,
-    "sha256": "1a593913f7f6ec0a81670a307f8a0ceca84fa7890a0e00e129a64e040582b21e"
+    "bytes": 2628,
+    "sha256": "d05757530b68e98517be97ffa861f4c1f84df1504bd0cb2c2fceb307f6aa6c2d"
   },
   "mark-dark-192.png": {
-    "bytes": 2501,
-    "sha256": "b6a5efb32e7453ca3a32011920858b5d07e8cb0ccda28af5b409f23454c53171"
+    "bytes": 2470,
+    "sha256": "b59eb9fd2d9048417a8e3723a4e3dfce57787442e7c1ac7df707d3fe9c727fc1"
   },
   "mark-dark-24.png": {
-    "bytes": 544,
-    "sha256": "0aa60bf50525f57b3f06bfbcddc3d3b368395b212c3698e0999a9c30c09634f1"
+    "bytes": 536,
+    "sha256": "e6b72aa68446132bb81470dd299343244c84f552be4de770f9272acbad4a794d"
   },
   "mark-dark-256.png": {
-    "bytes": 3624,
-    "sha256": "062af8eb49b8f3eb78408a6b9bfbfca4d4bb7a282ea0509fa2391def9b5bb3ac"
+    "bytes": 3586,
+    "sha256": "316812a73913586035502b9351e32d13ceb9904ae72b520b068d2769f61061c6"
   },
   "mark-dark-32.png": {
-    "bytes": 446,
-    "sha256": "abadf1761a3e8c0a2bd65f09c2e67ecad476d565f3231b16c3fe527989fcc636"
+    "bytes": 444,
+    "sha256": "f345032361160fb7e6fc58d2bf3b777c6dcaecbbf538eec0a224773724cb51d5"
   },
   "mark-dark-48.png": {
-    "bytes": 746,
-    "sha256": "4d4aa81c50837f7c0eabe561a5c6cdf84ff6445ec8572abf8e5e806c3cb017a2"
+    "bytes": 743,
+    "sha256": "5b2c1430f5da922c97bb51f7aed1aaf26b24ec299884bcee5ee3e6000edfce71"
   },
   "mark-dark-512.png": {
-    "bytes": 7876,
-    "sha256": "2fde5661f7d29a15df953b927ba70e3b14727833a993d2210ef595ca20f589c1"
+    "bytes": 7787,
+    "sha256": "3215b2a52f88d8b0576c0d6e75c5fbe32bb49f96489863930ea783ec8c722420"
   },
   "mark-dark-64.png": {
-    "bytes": 836,
-    "sha256": "ece3cf797aa7b5403921439ac91f02ad6fdd3f53ce4bab039f731606f682d0bc"
+    "bytes": 826,
+    "sha256": "da895d15246e9835ed82686d5d13101a745b36f114e74e0ff918f1bb8afcd31b"
   },
   "mark-dark.svg": {
     "bytes": 851,
-    "sha256": "5b74433b5fa96831442c11cba1e153242c8df1c1d4e88c1fc0f635b6a87e9987"
+    "sha256": "75a4e087e253c3962458afd3c67e20eeda385730768e8b2484e8de13a03d1ba8"
   },
   "mark-ink-128.png": {
     "bytes": 1682,
@@ -92,48 +92,48 @@
     "sha256": "48c822a070d7d53cee89441d220394271871822b4d422ebd3144d28859fca4b5"
   },
   "mark-light-128.png": {
-    "bytes": 1675,
-    "sha256": "8e5194974e564909a479238711af17b51a1779eaa835c4aed7ccebc8ba743af7"
+    "bytes": 1661,
+    "sha256": "8914fbcbe0fb812f00f56df7142dafe8c76513505e8174e9b4090715527e2a6f"
   },
   "mark-light-16.png": {
-    "bytes": 363,
-    "sha256": "514888281d4fc7ab3d216274569d2ce4b2a1462a88614cdd89f909ce024e85f0"
+    "bytes": 368,
+    "sha256": "78d8173d53943953ae4d841104c14a162b3cf4241665e4bf64408909c675f16f"
   },
   "mark-light-180.png": {
-    "bytes": 2714,
-    "sha256": "f3cafa8ef4e69a1ea8000df14553d8174736ab26131410833f4c1011f6134fab"
+    "bytes": 2659,
+    "sha256": "d42479460ef86e0f85ca8b0252abad85f7eeac062dbf06611d96f9364f894b06"
   },
   "mark-light-192.png": {
-    "bytes": 2597,
-    "sha256": "0d15a367d45311280900b043e82a131e241f89ff6c82173a96dc7ed8150b50b7"
+    "bytes": 2525,
+    "sha256": "0818bed73fa12aee40ec0b04722e40a79e1f234c14a43698dbe2c2f3e3fb990b"
   },
   "mark-light-24.png": {
-    "bytes": 545,
-    "sha256": "6126b3f1f90ca0700782d4850cfdde3f4a16baf04b1d3df07caae5fcdf29ec31"
+    "bytes": 542,
+    "sha256": "bff3273c180125adb18ac2330de5ac37a5c884dbc00928aa37338ac4c640b2cc"
   },
   "mark-light-256.png": {
-    "bytes": 3647,
-    "sha256": "820588d09b8dee4106c37044525b860c44c2e7975053249a17c6a6e605c5a775"
+    "bytes": 3596,
+    "sha256": "33c32a5a7ed67eb645c62cfe2c2a3894edd10beba9257f735a16243dd0bf9996"
   },
   "mark-light-32.png": {
-    "bytes": 473,
-    "sha256": "0b3aa4b298693e26d2b1ed12df6a261c5c125484a595039e4005e46014ccd2d9"
+    "bytes": 450,
+    "sha256": "e00f509e907de08701175c9d66ca5933a19c617167a26b80beecdee927b2ce28"
   },
   "mark-light-48.png": {
-    "bytes": 740,
-    "sha256": "b33db3c52921e92b0890ec78fa26605117b6da91df5071ef1de55ed6a617e6a9"
+    "bytes": 733,
+    "sha256": "3688403e9463f16a17769bb7ec055571f8efe897bc92c73ddd3d2e9fc3e66bd4"
   },
   "mark-light-512.png": {
-    "bytes": 7954,
-    "sha256": "90e93a037fd2586176d86d682718f3e4395ec936824f9d90561b89f503a65b25"
+    "bytes": 7876,
+    "sha256": "69318ecc336a830d7f18292a207e6b437333372b50947851f947bb223ee7ddfc"
   },
   "mark-light-64.png": {
-    "bytes": 859,
-    "sha256": "9a8be9463d0e453315cdaa5e027ab6b51d86f53744d900e4d4850249366d194c"
+    "bytes": 838,
+    "sha256": "6ea782327896b7d98bff66271793b83378d8d72a54e2f2ecfa057f9c47b0021a"
   },
   "mark-light.svg": {
     "bytes": 851,
-    "sha256": "65952c39b39f6718acd8498b3c85e9f56d8a65f6061d4dd94075092996ec7b93"
+    "sha256": "bd93311b66f1e30942111e15ea17f78360025dd0c98f316c130054780d634b65"
   },
   "mark-white-128.png": {
     "bytes": 1348,
@@ -181,7 +181,7 @@
   },
   "wordmark-dark.svg": {
     "bytes": 63117,
-    "sha256": "e3c9e7ae42b816f438537bab06b9acfdefeee4146950c6f99bc0b204f64d862e"
+    "sha256": "843b20136fe298cb763d320eb63bf11c2084eb9b29eb948a9e61929d1efebb2e"
   },
   "wordmark-ink.svg": {
     "bytes": 63117,
@@ -189,7 +189,7 @@
   },
   "wordmark-light.svg": {
     "bytes": 63117,
-    "sha256": "9203eee596f083e6006e67107843a0971efe2faf78783f1ab16d62ce5d361766"
+    "sha256": "a497d58cfd543dea2fa3619b0f4bb49281445f5b2a203eb62ba89c889de8a00f"
   },
   "wordmark-white.svg": {
     "bytes": 63117,
