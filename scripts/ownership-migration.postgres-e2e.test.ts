@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
 const require = createRequire(new URL("../apps/api/package.json", import.meta.url));
 const { createDb, runMigrations, authInstanceState, projects, documents, daemons, apiKeys, requirements, requirementClaims, taskClaims, tasks, tiAgentRuns, tiAgentPolicies, tiAgentModelConfigs, repositoryCheckoutBindings, repositories, authMigrationReceipts, projectMemberships } = require("@task-weaver/db");
 const { createAuthenticationRuntime, createResourceServices, inspectOwnershipMigration, applyOwnershipMigration } = require("@task-weaver/core");
-const { eq } = require("drizzle-orm");
+const { eq, sql } = require("drizzle-orm");
 const databaseUrl = process.env.TW_AUTH_E2E_DATABASE_URL;
 
 test("offline ownership migration is explicit, restricted, atomic and replay-safe", { skip: !databaseUrl, timeout: 150000 }, async t => {
@@ -60,7 +60,9 @@ test("offline ownership migration is explicit, restricted, atomic and replay-saf
   const [repo] = await db.insert(repositories).values({ displayName: "Legacy repository", provider: "github", host: "github.com", namespace: "fixture", name: randomUUID(), canonicalKey: randomUUID(), createdBy: "anonymous" }).returning();
   await db.insert(repositoryCheckoutBindings).values({ repositoryId: repo.id, nodeId: "legacy", checkoutPath: "/private/migration-path-canary", lastVerifiedAt: new Date() });
   const [legacyUuidDoc] = await db.insert(documents).values({ title: "Legacy UUID label", content: "migration-content-canary", createdBy: "tw-cli", personalOwnerId: owner.context.actor.id, personalOwnerType: "human" }).returning();
-  const legacyBefore = new Date().toISOString();
+  // Include all legacy fixtures despite PostgreSQL sub-millisecond timestamp precision.
+  const [boundary] = await db.select({ cutoff: sql`date_trunc('milliseconds', clock_timestamp()) + interval '1 millisecond'` }).from(documents).where(eq(documents.id, legacyUuidDoc.id));
+  const legacyBefore = new Date(boundary.cutoff).toISOString();
   await db.update(tiAgentModelConfigs).set({ createdAt: new Date(Date.parse(legacyBefore) + 1000) }).where(eq(tiAgentModelConfigs.id, currentModel.id));
   const [freshDoc] = await db.insert(documents).values({ title: "New authenticated note", content: "Private fixture", createdBy: owner.context.actor.id, personalOwnerId: owner.context.actor.id, personalOwnerType: "human", createdAt: new Date(Date.parse(legacyBefore) + 1000) }).returning();
   let before: any;
@@ -74,6 +76,8 @@ test("offline ownership migration is explicit, restricted, atomic and replay-saf
   await t.test("inventory is deterministic, read-only and secret-free", async () => {
     before = await inspectOwnershipMigration(db, legacyBefore);
     assert.deepEqual(await inspectOwnershipMigration(db, legacyBefore), before);
+    assert.ok(before.rows.some((row: any) => row.resource === "documents" && row.id === legacyUuidDoc.id));
+    assert.ok(!before.rows.some((row: any) => row.resource === "documents" && row.id === freshDoc.id));
     for (const secret of ["migration-content-canary", "migration-secret-canary", "migration-path-canary", "apikey:legacy", "tw-cli", "a".repeat(64)]) assert.ok(!JSON.stringify(before).includes(secret));
     const mapping = (resource: string, id: string, actorId: string) => ({ resource, id, actorId, ownerFingerprint: before.rows.find((row: any) => row.resource === resource && row.id === id).ownerFingerprint });
     manifest = { id: randomUUID(), legacyBefore, ownership: [mapping("documents", privateDoc.id, owner.context.actor.id), mapping("daemons", daemon.id, agent.id)], memberships: [{ projectId: project.id, actorId: owner.context.actor.id, role: "owner", explicitPermissions: [] }] };
