@@ -72,8 +72,8 @@ try {
     [null, "scripts/realtime-authorization.postgres-e2e.test.ts"],
     [null, "scripts/webhook-authorization.postgres-e2e.test.ts"],
     [null, "scripts/daemon-authorization.postgres-e2e.test.ts"],
-    [null, "scripts/ti-execution.postgres-e2e.test.ts",
-  "scripts/execution-delegation.postgres-e2e.test.ts"],
+    [null, "scripts/ti-execution.postgres-e2e.test.ts"],
+    [null, "scripts/execution-delegation.postgres-e2e.test.ts"],
   ]) {
     if (process.env.TW_AUTH_E2E_TEST_FILTER && !testFile.includes(process.env.TW_AUTH_E2E_TEST_FILTER)) continue;
     const result = spawnSync(
