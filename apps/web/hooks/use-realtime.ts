@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { acceptRealtimeSequence } from "@task-weaver/contracts/events";
+import { SESSION_INVALIDATED_EVENT } from "@/lib/browser-session";
 import { trpc } from "@/trpc/client";
 
 type ConnectionState = "connecting" | "live" | "reconnecting" | "stale";
@@ -136,11 +137,13 @@ export function useRealtime() {
       };
     };
 
+    const stop = () => { closed = true; es?.close(); };
+    window.addEventListener(SESSION_INVALIDATED_EVENT, stop);
     connect();
     const consistencyRefresh = setInterval(scheduleDaemonRefresh, 30_000);
     return () => {
-      closed = true;
-      es?.close();
+      stop();
+      window.removeEventListener(SESSION_INVALIDATED_EVENT, stop);
       clearInterval(consistencyRefresh);
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };

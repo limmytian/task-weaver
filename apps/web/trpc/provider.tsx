@@ -1,10 +1,31 @@
 "use client";
 
 import { useState } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  QueryClient,
+  QueryClientProvider,
+  QueryCache,
+  MutationCache,
+} from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
 import { trpc } from "./client";
+import { invalidateBrowserSession } from "@/lib/browser-session";
+
+function handleAuthenticationError(error: unknown) {
+  if (
+    typeof window === "undefined" ||
+    !window.location.pathname.startsWith("/projects")
+  )
+    return;
+  if (
+    error &&
+    typeof error === "object" &&
+    "data" in error &&
+    (error.data as { code?: string } | undefined)?.code === "UNAUTHORIZED"
+  )
+    invalidateBrowserSession();
+}
 
 function getBaseUrl() {
   if (typeof window !== "undefined") return "";
@@ -15,6 +36,10 @@ export function TRPCProvider({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
     () =>
       new QueryClient({
+        queryCache: new QueryCache({ onError: handleAuthenticationError }),
+        mutationCache: new MutationCache({
+          onError: handleAuthenticationError,
+        }),
         defaultOptions: {
           queries: {
             staleTime: 5 * 1000,
@@ -61,12 +86,21 @@ export function TRPCProvider({ children }: { children: React.ReactNode }) {
               }
               headers.set("x-csrf-token", await challenge);
             }
-            return fetch(url, {
+            const response = await fetch(url, {
               ...options,
               headers,
               credentials: "same-origin",
               cache: "no-store",
             });
+            if (
+              response.status === 401 &&
+              typeof window !== "undefined" &&
+              window.location.pathname.startsWith("/projects")
+            ) {
+              queryClient.clear();
+              invalidateBrowserSession();
+            }
+            return response;
           },
         }),
       ],
