@@ -82,6 +82,10 @@ export function TaskDetailSheet({
     { enabled: !!taskId },
   );
   const effectiveProjectId = task?.projectId ?? projectId;
+  const candidates = trpc.auth.assignees.useQuery(
+    { projectId: effectiveProjectId ?? undefined },
+    { enabled: !!task, refetchOnWindowFocus: true },
+  );
 
   const invalidateTaskQueries = () => {
     utils.task.get.invalidate({ id: taskId! });
@@ -236,24 +240,28 @@ export function TaskDetailSheet({
               <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
                 Assignee
               </label>
-              <Input
-                className="h-10 sm:h-9"
-                placeholder="Unassigned"
-                defaultValue={task.assignee ?? ""}
-                disabled={task.status === "cancelled" || updateTask.isPending}
-                onBlur={(e) => {
-                  const val = e.target.value.trim() || null;
-                  if (val !== (task.assignee ?? null)) {
-                    updateTask.mutate({
-                      id: task.id,
-                      data: { assignee: val },
-                    });
-                  }
+              <select
+                aria-label="Assignee"
+                className="h-10 w-full rounded-md border bg-background px-3 text-sm sm:h-9"
+                value={task.assignee ?? ""}
+                disabled={task.status === "cancelled" || updateTask.isPending || candidates.isError || candidates.isLoading}
+                onChange={(event) => {
+                  const candidate = candidates.data?.find((actor) => actor.id === event.target.value);
+                  updateTask.mutate({
+                    id: task.id,
+                    data: { assignee: candidate?.id ?? null, assigneeType: candidate?.type ?? null },
+                  });
                 }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                }}
-              />
+              >
+                <option value="">Unassigned</option>
+                {task.assignee && !candidates.data?.some((actor) => actor.id === task.assignee) && (
+                  <option value={task.assignee} disabled>Previous assignee is unavailable</option>
+                )}
+                {candidates.data?.map((actor) => (
+                  <option key={actor.id} value={actor.id}>{actor.displayName} ({actor.type})</option>
+                ))}
+              </select>
+              {candidates.isError && <p role="alert" className="text-xs text-destructive">Eligible assignees are unavailable.</p>}
             </div>
             <div>
               <label className="mb-1.5 flex text-xs font-medium text-muted-foreground items-center gap-1.5">

@@ -7,6 +7,14 @@ import {
 import { router, protectedProcedure } from "../init";
 const reference = credentialSubjectSchema.extend({ id: z.string().uuid() });
 export const apiKeyRouter = router({
+  grantOptions: protectedProcedure
+    .input(credentialSubjectSchema.optional())
+    .query(({ ctx, input }) =>
+      ctx.auth.identity.keyGrantOptions(
+        ctx.req.headers,
+        input?.actorId ?? ctx.identity.actor.id,
+      ),
+    ),
   list: protectedProcedure
     .input(credentialSubjectSchema.optional())
     .query(({ ctx, input }) =>

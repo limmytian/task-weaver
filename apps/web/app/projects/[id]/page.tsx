@@ -2,6 +2,7 @@
 
 import { use, useMemo, useState } from "react";
 import Link from "next/link";
+import { ProjectMembers } from "@/components/project-members";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -824,6 +825,8 @@ function ProjectSettings({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const router = useRouter();
   const utils = trpc.useUtils();
+  const permissions = trpc.auth.permissions.useQuery();
+  const canManage = permissions.data?.grants.some(grant => grant.scope === "project" && grant.projectId === project.id && grant.permissions.includes("project.manage"));
 
   const updateProject = trpc.project.update.useMutation({
     onSuccess: () => {
@@ -837,7 +840,7 @@ function ProjectSettings({
       utils.project.list.invalidate();
       utils.project.pinned.invalidate();
       router.push("/projects");
-      toast.success("Project deleted");
+      toast.success("Project archived");
     },
     onError: (err) => toast.error("Failed to delete project", { description: err.message }),
   });
@@ -859,8 +862,11 @@ function ProjectSettings({
     });
   };
 
+  if (!canManage) return <ProjectMembers projectId={project.id} />;
+
   return (
     <div className="max-w-xl space-y-6">
+      <ProjectMembers projectId={project.id} />
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -919,14 +925,14 @@ function ProjectSettings({
         </CardHeader>
         <CardContent>
           <p className="mb-3 text-sm text-muted-foreground">
-            Permanently delete this project and all its requirements, tasks, and documents. This action cannot be undone.
+            Archive this project and restrict active access. Requirements, tasks and documents are retained.
           </p>
           <Button
             variant="destructive"
             onClick={() => setDeleteConfirmOpen(true)}
             disabled={deleteProject.isPending}
           >
-            {deleteProject.isPending ? "Deleting..." : "Delete Project"}
+            {deleteProject.isPending ? "Archiving..." : "Archive Project"}
           </Button>
         </CardContent>
       </Card>
@@ -934,9 +940,9 @@ function ProjectSettings({
       <ConfirmDialog
         open={deleteConfirmOpen}
         onOpenChange={setDeleteConfirmOpen}
-        title="Delete Project"
-        description={`Are you sure you want to permanently delete "${project.name}"? All requirements, tasks, and documents under this project will be removed. This cannot be undone.`}
-        confirmLabel="Delete"
+        title="Archive Project"
+        description={`Archive "${project.name}" and restrict active project access? Project content is retained.`}
+        confirmLabel="Archive"
         destructive
         onConfirm={() => deleteProject.mutate({ id: project.id })}
       />

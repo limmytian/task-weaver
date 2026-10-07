@@ -67,6 +67,14 @@ export const authRouter = router({
         ctx.responseHeaders,
       ),
     ),
+  permissions: protectedProcedure.query(({ ctx }) =>
+    ctx.auth.identity.permissions(ctx.req.headers),
+  ),
+  assignees: protectedProcedure
+    .input(z.object({ projectId: z.string().uuid().optional() }).strict())
+    .query(({ ctx, input }) =>
+      ctx.auth.identity.listAssignees(ctx.req.headers, input.projectId),
+    ),
   current: protectedProcedure.query(({ ctx }) =>
     ctx.auth.authentication.current(ctx.req.headers),
   ),

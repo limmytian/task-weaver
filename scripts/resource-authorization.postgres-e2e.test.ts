@@ -6,7 +6,7 @@ import { createApiApplication } from "../apps/api/src/application";
 import { createTRPCContextFactory } from "../apps/web/trpc/init";
 import { appRouter } from "../apps/web/trpc/routers/_app";
 const apiRequire = createRequire(new URL("../apps/api/package.json", import.meta.url));
-const { createDb, runMigrations, authInstanceState, documents, memories, tasks, documentLinks } = apiRequire("@task-weaver/db");
+const { createDb, runMigrations, authInstanceState, projects, documents, memories, tasks, documentLinks } = apiRequire("@task-weaver/db");
 const { createAuthenticationRuntime, createResourceServices, NotFoundError, AuthorizationError, ValidationError } = apiRequire("@task-weaver/core");
 const { eq } = apiRequire("drizzle-orm");
 const databaseUrl = process.env.TW_AUTH_E2E_DATABASE_URL;
@@ -69,6 +69,50 @@ test("ordinary resources enforce live authorization consistently across transpor
     return rest("graphql", headers, "POST", { query });
   }
 
+  await t.test("project pins belong to the verified actor and require personal authority", async () => {
+    await db.update(projects).set({ pinnedAt: new Date() }).where(eq(projects.id, project.id));
+    assert.equal((await owner.service.projectService.getProject(db, project.id)).pinnedAt, null);
+    assert.equal((await owner.service.projectService.listPinnedProjects(db)).length, 0);
+    const pinned = await viewer.service.projectService.togglePin(db, project.id);
+    assert.ok(pinned.pinnedAt);
+    assert.equal((await owner.service.projectService.getProject(db, project.id)).pinnedAt, null);
+    assert.equal((await viewer.service.projectService.listPinnedProjects(db))[0].id, project.id);
+    assert.equal((await owner.service.projectService.listPinnedProjects(db)).length, 0);
+    await assert.rejects(admin.service.projectService.togglePin(db, project.id), NotFoundError);
+    const key = await runtime.identity.issueKey(owner.headers, owner.actor.id, { name: "Project read only", expiresAt: null, grants: [{ scope: "project", projectId: project.id, permissions: ["resource.read"] }] });
+    const bounded = createResourceServices(await runtime.verify(new Headers({ authorization: `Bearer ${key.rawKey}` })));
+    await assert.rejects(bounded.projectService.togglePin(db, project.id), AuthorizationError);
+    assert.equal((await viewer.service.projectService.togglePin(db, project.id)).pinnedAt, null);
+  });
+  await t.test("assignee and credential choices use live memberships and subject ownership", async () => {
+    await assert.rejects(runtime.identity.setMembership(owner.headers, project.id, randomUUID(), { role: "member" }), NotFoundError);
+    assert.equal((await runtime.verify(owner.headers)).actor.id, owner.actor.id);
+    const choices = await runtime.identity.listAssignees(owner.headers, project.id);
+    assert.ok(choices.some((actor: any) => actor.id === owner.actor.id));
+    assert.ok(choices.some((actor: any) => actor.id === member.actor.id));
+    assert.ok(!choices.some((actor: any) => [viewer.actor.id, outsider.actor.id, admin.actor.id].includes(actor.id)));
+    await assert.rejects(runtime.identity.listAssignees(admin.headers, project.id), AuthorizationError);
+    const agent = await runtime.identity.createAgent(owner.headers, { displayName: "Owned candidate" });
+    assert.ok((await runtime.identity.listAssignees(owner.headers)).some((actor: any) => actor.id === agent.id));
+    assert.ok(!(await runtime.identity.listAssignees(outsider.headers)).some((actor: any) => actor.id === agent.id));
+    const grants = await runtime.identity.keyGrantOptions(owner.headers, owner.actor.id);
+    assert.ok(grants.some((grant: any) => grant.scope === "project" && grant.projectId === project.id));
+    await assert.rejects(runtime.identity.keyGrantOptions(outsider.headers, owner.actor.id), AuthorizationError);
+    await assert.rejects(runtime.identity.keyGrantOptions(admin.headers, owner.actor.id), AuthorizationError);
+    await runtime.identity.setMembership(owner.headers, project.id, agent.id, { role: "member" });
+    const agentOptions = await runtime.identity.keyGrantOptions(owner.headers, agent.id);
+    const projectOptions = agentOptions.find((grant: any) => grant.scope === "project" && grant.projectId === project.id);
+    assert.deepEqual(projectOptions.permissions, ["resource.read", "resource.write"]);
+    assert.ok(agentOptions.every((grant: any) => grant.scope !== "personal" || grant.actorId === owner.actor.id));
+    const next = await caller(owner.headers);
+    assert.ok((await next.auth.assignees({ projectId: project.id })).some((actor: any) => actor.id === agent.id));
+    assert.ok((await next.apiKey.grantOptions({ actorId: agent.id })).some((grant: any) => grant.scope === "project"));
+    await runtime.identity.removeMembership(owner.headers, project.id, agent.id);
+    assert.ok(!(await runtime.identity.keyGrantOptions(owner.headers, agent.id)).some((grant: any) => grant.scope === "project" && grant.projectId === project.id));
+    await runtime.identity.disableAgent(owner.headers, agent.id);
+    assert.ok(!(await runtime.identity.listAssignees(owner.headers)).some((actor: any) => actor.id === agent.id));
+    await assert.rejects(runtime.identity.keyGrantOptions(owner.headers, agent.id));
+  });
   await t.test("nonmembers and administrators cannot read IDs; viewers cannot write", async () => {
     for (const user of [outsider, admin]) {
       await assert.rejects(user.service.projectService.getProject(db, project.id), NotFoundError);

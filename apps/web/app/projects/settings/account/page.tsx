@@ -113,6 +113,9 @@ export default function AccountPage() {
           Sign out
         </Button>
       </header>
+      <p className="break-all text-xs text-muted-foreground">
+        Your stable actor ID: {current.data?.actor.id}
+      </p>
       {message && (
         <p role="status" className="rounded-md border p-3 text-sm">
           {message}

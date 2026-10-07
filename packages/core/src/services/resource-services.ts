@@ -1,8 +1,8 @@
 import { requireDaemonLease } from './daemon-lease-authorization';
 import { createTiExecutionService, isTiExecutionOperation } from './ti-execution';
-import { inArray, and, eq, isNull, sql } from "drizzle-orm";
+import { inArray, and, eq, isNull, sql, desc } from "drizzle-orm";
 import {
-  type Database, daemons, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
+  projectPreferences, type Database, daemons, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
   mcpTools, mcpLocalRequests, requirementRepositories, skillPackages, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
   documentRequirementLinks, projectMemberships, activityLog, executionDelegations,
 } from "@task-weaver/db";
@@ -120,6 +120,18 @@ function bindServices(context?: VerifiedRequestContext) {
             await auditIdentity(tx, "project.created", actor.id, actor.id, project!.id);
             await tx.insert(activityLog).values({ entityType: "project", entityId: project!.id, action: "created", actorId: actor.id, actorType: actor.type });
             result = project;
+          } else if (name === "togglePin") {
+            const predicate = and(eq(projectPreferences.actorId, actor.id), eq(projectPreferences.projectId, call[1]));
+            const [pin] = await tx.select().from(projectPreferences).where(predicate);
+            if (pin) await tx.delete(projectPreferences).where(predicate);
+            else await tx.insert(projectPreferences).values({ actorId: actor.id, projectId: call[1] });
+            result = await projectImplementation.getProject(txDb, call[1]);
+            await auditIdentity(tx, "project.preference_changed", actor.id, actor.id, call[1]);
+          } else if (name === "listPinnedProjects") {
+            result = (await tx.select({ project: projects }).from(projects)
+              .innerJoin(projectPreferences, eq(projectPreferences.projectId, projects.id))
+              .where(and(projectPredicate(authority), eq(projectPreferences.actorId, actor.id), eq(projects.status, "active"))).orderBy(desc(projectPreferences.pinnedAt)))
+              .map(row => row.project);
           } else if (name === "deleteProject") {
             // Archive instead of cascading project data into unowned/global resources.
             result = await projectImplementation.updateProject(txDb, call[1], { status: "archived" }, actor);
@@ -133,7 +145,7 @@ function bindServices(context?: VerifiedRequestContext) {
           } else {
             result = await implementation(...call);
           }
-          if (["recordMemory", "updateMemory", "forgetMemory", "unlinkDocuments", "unlinkDocumentFromTask", "unlinkDocumentFromRequirement", "removeTaskDependency", "togglePin"].includes(name)) {
+          if (["recordMemory", "updateMemory", "forgetMemory", "unlinkDocuments", "unlinkDocumentFromTask", "unlinkDocumentFromRequirement", "removeTaskDependency"].includes(name)) {
             const entityId = typeof call[1] === "string" ? call[1] : result?.id;
             if (group === "memory") await auditIdentity(tx, `memory.${name}`, actor.id, actor.id, entityId);
             else await tx.insert(activityLog).values({ entityType: group === "claim" ? "task" : group as "project" | "requirement" | "task" | "document", entityId, action: name, actorId: actor.id, actorType: actor.type });
@@ -171,6 +183,15 @@ function bindServices(context?: VerifiedRequestContext) {
           if (group === "repository") result = redactRepositoryResult(result);
           if (group === "ti" || group === "activity" || group === "schedule") result = redactMetadataResult(result, group);
           if (authority.bounds) await auditIdentity(tx, "delegation.operation", actor.id, actor.id, authority.bounds.id, { operation: name, runId: authority.bounds.runId, requirementId: authority.bounds.requirementId, parentCredentialId: authority.bounds.parentCredentialId });
+          if (group === "project") {
+            const pins = new Map((await tx.select().from(projectPreferences).where(eq(projectPreferences.actorId, actor.id))).map(pin => [pin.projectId, pin.pinnedAt]));
+            const personalize = (value: any): any => {
+              if (Array.isArray(value)) return value.map(personalize);
+              if (!value || typeof value !== "object" || value instanceof Date) return value;
+              return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, key === "pinnedAt" && value.id ? pins.get(value.id) ?? null : personalize(nested)]));
+            };
+            result = personalize(result);
+          }
           const visible = await pruneRelations(txDb, authority, result);
           if (authority.bounds && authority.bounds.expiresAt <= new Date()) throw new AuthenticationError("credential_expired");
           return visible;
@@ -448,6 +469,11 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     if (authority.bounds || authority.actor.type !== "agent" || !daemon || daemon.actorId !== authority.actor.id || daemon.actorType !== "agent") throw new AuthorizationError();
     await requireResource(db, authority, "requirement", id, daemon.role === "reviewer" ? "execution.review" : daemon.role === "merger" ? "execution.merge" : "execution.run");
     // The claim implementation checks the exact holder, daemon, generation and expiry.
+    return;
+  }
+  if (name === "togglePin") {
+    await requireResource(db, authority, "project", id);
+    requireScope(authority, { personalOwnerId: authority.actor.id, personalOwnerType: authority.actor.type }, "resource.write");
     return;
   }
   if (writeById[name]) {

@@ -10,6 +10,7 @@ import {
   apiKeyEvents,
 } from "@task-weaver/db";
 import {
+  AuthenticationError,
   AuthorizationError,
   NotFoundError,
   ValidationError,
@@ -28,6 +29,8 @@ import {
 import {
   type AuthDatabase,
   loadActivePrincipal,
+  loadPrincipalGrants,
+  intersectGrants,
   grantsAreCovered,
 } from "./auth-principals";
 import {
@@ -217,6 +220,41 @@ export function createIdentityManagementService(
         return project!;
       });
     },
+    async permissions(headers: Headers) {
+      const context = await authentication.resolve(headers);
+      const authority = await getLiveRequestAuthority(db, context);
+      return { actor: authority.actor, grants: authority.grants };
+    },
+    async listAssignees(headers: Headers, projectId?: string) {
+      return db.transaction(async tx => {
+        await lockIdentityLifecycle(tx);
+        const context = await authentication.resolve(headers);
+        if (context.credential.kind === "delegation") throw new AuthorizationError();
+        const authority = await getLiveRequestAuthority(tx, context);
+        let actorIds: string[];
+        if (projectId) {
+          id(projectId);
+          await requireLivePermission(tx, context, { scope: "project", projectId, permissions: ["resource.read"] });
+          actorIds = (await tx.select().from(projectMemberships).where(and(eq(projectMemberships.projectId, projectId), isNull(projectMemberships.removedAt))))
+            .filter(member => member.role !== "viewer").map(member => member.actorId);
+        } else {
+          if (authority.actor.type !== "human") throw new AuthorizationError();
+          await requireLivePermission(tx, context, { scope: "personal", actorId: authority.actor.id, permissions: ["resource.read"] });
+          actorIds = [authority.actor.id, ...(await tx.select().from(authActors).where(eq(authActors.managedByActorId, authority.actor.id))).map(actor => actor.id)];
+        }
+        const eligible = [];
+        for (const actorId of actorIds) {
+          try {
+            const principal = await loadActivePrincipal(tx, actorId);
+            const [actor] = await tx.select().from(authActors).where(eq(authActors.id, actorId));
+            eligible.push({ id: principal.id, type: principal.type, displayName: actor!.displayName });
+          } catch (error) {
+            if (!(error instanceof AuthenticationError)) throw error;
+          }
+        }
+        return eligible;
+      });
+    },
     async listMemberships(headers: Headers, projectId: string) {
       id(projectId);
       const context = await authentication.resolve(headers);
@@ -256,7 +294,11 @@ export function createIdentityManagementService(
         );
         // Changes to one's own role/explicit rights require another administrator's approval.
         if (actorId === authority.actor.id) throw new AuthorizationError();
-        const subject = await loadActivePrincipal(tx, actorId);
+        const subject = await loadActivePrincipal(tx, actorId).catch(error => {
+          // An invalid target does not invalidate the caller's authenticated session.
+          if (error instanceof AuthenticationError) throw new NotFoundError("Actor not found");
+          throw error;
+        });
         const [existing] = await tx
           .select()
           .from(projectMemberships)
@@ -538,6 +580,17 @@ export function createIdentityManagementService(
           .where(and(eq(authActors.id, actorId), eq(authActors.type, "agent")));
         if (!actor) throw new NotFoundError("Agent not found");
         return disableAgent(tx, actor, authority.actor.id);
+      });
+    },
+    async keyGrantOptions(headers: Headers, actorId: string) {
+      id(actorId);
+      const context = await authentication.resolve(headers);
+      return db.transaction(async tx => {
+        await lockIdentityLifecycle(tx);
+        // The same credential-manager check used for listing protects subject metadata.
+        await listScopedApiKeys(tx, context, actorId);
+        const authority = await getLiveRequestAuthority(tx, context);
+        return intersectGrants(authority.grants, await loadPrincipalGrants(tx, actorId));
       });
     },
     async issueKey(headers: Headers, actorId: string, input: unknown) {

@@ -15,6 +15,7 @@ export const navigation: readonly NavigationItem[] = [
       { id: "settings", label: "Settings", href: "/projects/settings", icon: "settings" },
     ];
 export const settings: readonly SettingsItem[] = [
+  { id: "managed-agents", href: "/projects/settings/agents", title: "Managed Agents", description: "Owned identities and credentials", icon: "key" },
   { id: "account", href: "/projects/settings/account", title: "Account", description: "Sessions, password and account administration", icon: "key" },
   { id: "version", href: "/projects/settings/version", title: "Version", description: "Build and release information", icon: "server" },
   { id: "api-keys", href: "/projects/settings/api-keys", title: "API Keys", description: "Agent authentication", icon: "key" },

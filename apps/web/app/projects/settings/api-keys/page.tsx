@@ -1,326 +1,278 @@
 "use client";
-
-import { useState } from "react";
-import { AlertTriangle, Check, Copy, Key, Plus, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { useState, type FormEvent } from "react";
+import Link from "next/link";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  issueOwnedApiKeySchema,
+  type AuthorizationGrant,
+  type AuthorizationPermission,
+} from "@task-weaver/contracts";
+import { useWebIdentity } from "@/components/web-identity-provider";
+import { OneTimeSecret } from "@/components/one-time-secret";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import { QueryStatePanel } from "@/components/query-state-panel";
-import { useWebIdentity } from "@/components/web-identity-provider";
 
 export default function ApiKeysSettingsPage() {
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createdKey, setCreatedKey] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const identity = useWebIdentity();
+  const agents = trpc.auth.agents.useQuery();
+  const [subject, setSubject] = useState(identity.id);
+  const target = { actorId: subject };
+  const keys = trpc.apiKey.list.useQuery(target);
+  const options = trpc.apiKey.grantOptions.useQuery(target);
+  const create = trpc.apiKey.create.useMutation();
+  const rotate = trpc.apiKey.rotate.useMutation();
+  const revoke = trpc.apiKey.revoke.useMutation();
+  const queryClient = useQueryClient();
   const utils = trpc.useUtils();
-  const {
-    data: keys,
-    error,
-    isError,
-    isLoading,
-    refetch,
-  } = trpc.apiKey.list.useQuery();
-  const revokeKey = trpc.apiKey.revoke.useMutation();
-
-  const handleRevoke = async (id: string) => {
-    try {
-      await revokeKey.mutateAsync({ id });
-      await utils.apiKey.list.invalidate();
-      toast.success("API key revoked");
-    } catch (mutationError) {
-      toast.error(
-        mutationError instanceof Error
-          ? mutationError.message
-          : "API key could not be revoked",
-      );
-    }
-  };
-
-  const handleCopy = async () => {
-    if (!createdKey) return;
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(createdKey);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = createdKey;
-        textarea.setAttribute("readonly", "");
-        textarea.style.position = "fixed";
-        textarea.style.left = "-9999px";
-        document.body.appendChild(textarea);
-        textarea.select();
-        const copiedWithFallback = document.execCommand("copy");
-        document.body.removeChild(textarea);
-        if (!copiedWithFallback) throw new Error("Copy command failed");
-      }
-      setCopied(true);
-      toast.success("API key copied");
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast.error("Failed to copy API key");
-    }
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1.5">
-            <CardTitle className="flex items-center gap-2">
-              <Key className="h-5 w-5" />
-              API Keys
-            </CardTitle>
-            <CardDescription>
-              Create and revoke credentials bound to your identity and selected
-              permissions.
-            </CardDescription>
-          </div>
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4" />
-            Create key
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {createdKey && (
-          <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-            <div className="mb-2 flex items-center gap-2 text-sm font-medium text-amber-600 dark:text-amber-400">
-              <AlertTriangle className="h-4 w-4" />
-              Copy your API key now — it won&apos;t be shown again
-            </div>
-            <div className="flex items-center gap-2">
-              <code className="min-w-0 flex-1 break-all rounded bg-muted px-3 py-2 font-mono text-xs">
-                {createdKey}
-              </code>
-              <Button
-                size="sm"
-                variant="outline"
-                aria-label="Copy API key"
-                onClick={handleCopy}
-              >
-                {copied ? (
-                  <Check className="h-4 w-4" />
-                ) : (
-                  <Copy className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {isError ? (
-          <QueryStatePanel
-            icon={<Key className="h-5 w-5" />}
-            title="API keys could not be loaded"
-            description={error.message}
-            onAction={() => refetch()}
-          />
-        ) : isLoading ? (
-          <div className="space-y-3">
-            {Array.from({ length: 2 }).map((_, index) => (
-              <Skeleton key={index} className="h-16 rounded-lg" />
-            ))}
-          </div>
-        ) : !keys?.length ? (
-          <QueryStatePanel
-            icon={<Key className="h-5 w-5" />}
-            title="No API keys yet"
-            description="Create a key to let an AI agent authenticate with Task Weaver."
-            actionLabel="Create key"
-            onAction={() => setCreateOpen(true)}
-          />
-        ) : (
-          <div className="space-y-3">
-            {keys.map((key) => (
-              <div
-                key={key.id}
-                className="flex items-center justify-between gap-3 rounded-lg border p-3"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{key.name}</p>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                    <code>{key.prefix}...</code>
-                    <span>
-                      Created {new Date(key.createdAt).toLocaleDateString()}
-                    </span>
-                    {key.lastUsedAt && (
-                      <span>
-                        Last used{" "}
-                        {new Date(key.lastUsedAt).toLocaleDateString()}
-                      </span>
-                    )}
-                    {key.expiresAt && (
-                      <span>
-                        Expires {new Date(key.expiresAt).toLocaleDateString()}
-                      </span>
-                    )}
-                    {!key.expiresAt && <span>No time-based expiry</span>}
-                    {key.revokedAt && <span>Revoked</span>}
-                  </div>
-                </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="shrink-0 text-destructive hover:text-destructive"
-                  aria-label={`Revoke ${key.name}`}
-                  onClick={() => handleRevoke(key.id)}
-                  disabled={revokeKey.isPending || Boolean(key.revokedAt)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </CardContent>
-
-      <CreateApiKeyDialog
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        onCreated={(rawKey) => {
-          setCreatedKey(rawKey);
-          utils.apiKey.list.invalidate();
-        }}
-      />
-    </Card>
-  );
-}
-
-function CreateApiKeyDialog({
-  open,
-  onOpenChange,
-  onCreated,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onCreated: (rawKey: string) => void;
-}) {
-  const [name, setName] = useState("");
-  const actor = useWebIdentity();
+  const [secret, setSecret] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [selected, setSelected] = useState<
+    Record<string, AuthorizationPermission[]>
+  >({});
   const [expiry, setExpiry] = useState("90");
-  const [customExpiry, setCustomExpiry] = useState("");
-  const createKey = trpc.apiKey.create.useMutation();
-
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!name.trim()) return;
+  const busy = create.isPending || rotate.isPending || revoke.isPending;
+  const grantId = (grant: AuthorizationGrant) =>
+    grant.scope === "project"
+      ? `project:${grant.projectId}`
+      : grant.scope === "personal"
+        ? `personal:${grant.actorId}`
+        : grant.scope;
+  async function perform(action: () => Promise<void>) {
+    setSecret(null);
+    setError("");
     try {
+      await action();
+      await utils.apiKey.invalidate();
+    } catch {
+      setError(
+        "Credential operation denied or unavailable. Confirm your identity and current scope before retrying.",
+      );
+    } finally {
+      create.reset();
+      rotate.reset();
+      revoke.reset();
+      queryClient.getMutationCache().clear();
+    }
+  }
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    await perform(async () => {
+      const grants = (options.data ?? []).flatMap((grant) => {
+        const permissions =
+          selected[grantId(grant)]?.filter((permission) =>
+            grant.permissions.includes(permission),
+          ) ?? [];
+        return permissions.length ? [{ ...grant, permissions }] : [];
+      });
       const expiresAt =
         expiry === "never"
           ? null
           : expiry === "custom"
-            ? new Date(customExpiry).toISOString()
-            : new Date(Date.now() + Number(expiry) * 86400_000).toISOString();
-      const data = await createKey.mutateAsync({
-        name: name.trim(),
-        expiresAt,
-        grants: [
-          {
-            scope: "personal",
-            actorId: actor.id,
-            permissions: ["resource.read"],
-          },
-        ],
-      });
-      onCreated(data.rawKey);
-      onOpenChange(false);
-      setName("");
-      toast.success("API key created");
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "API key could not be created",
+            ? new Date(String(data.get("expiresAt"))).toISOString()
+            : new Date(Date.now() + Number(expiry) * 86400000).toISOString();
+      const result = await create.mutateAsync(
+        issueOwnedApiKeySchema.parse({
+          actorId: subject,
+          name: data.get("name"),
+          expiresAt,
+          grants,
+        }),
       );
-    }
-  };
-
+      setSecret(result.rawKey);
+      form.reset();
+      setSelected({});
+    });
+  }
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <form onSubmit={handleSubmit}>
-          <DialogHeader>
-            <DialogTitle>Create API key</DialogTitle>
-            <DialogDescription>
-              This key grants read access to your personal space and acts as
-              you. Choose its expiry explicitly; you can revoke it at any time.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="mt-4 space-y-1.5">
-            <label htmlFor="api-key-name" className="text-sm font-medium">
-              Name
-            </label>
-            <Input
-              id="api-key-name"
-              placeholder="e.g. Documentation agent"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              autoFocus
-            />
-          </div>
-          <div className="mt-4 space-y-1.5">
-            <label htmlFor="api-key-expiry" className="text-sm font-medium">
-              Expires
-            </label>
-            <select
-              id="api-key-expiry"
-              className="w-full rounded-md border bg-background p-2 text-sm"
-              value={expiry}
-              onChange={(event) => setExpiry(event.target.value)}
+    <section className="space-y-5">
+      <h1 className="text-xl font-semibold">Scoped API Keys</h1>
+      <p className="text-sm text-muted-foreground">
+        Human Keys act as that human. Agent Keys retain an independent identity.
+        Issuance is limited by your current authority and the subject&apos;s
+        rights; membership changes and revocation remain effective.
+      </p>
+      <Link className="text-sm underline" href="/projects/settings/account">
+        Confirm identity for credential changes
+      </Link>
+      <div className="space-y-2">
+        <label htmlFor="key-subject" className="text-sm font-medium">
+          Credential owner
+        </label>
+        <select
+          id="key-subject"
+          value={subject}
+          className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+          onChange={(event) => {
+            setSubject(event.target.value);
+            setSelected({});
+            setSecret(null);
+            setError("");
+          }}
+        >
+          <option value={identity.id}>You (human)</option>
+          {agents.data
+            ?.filter((agent) => agent.status === "active")
+            .map((agent) => (
+              <option key={agent.id} value={agent.id}>
+                {agent.displayName} (managed Agent)
+              </option>
+            ))}
+        </select>
+      </div>
+      {secret && (
+        <OneTimeSecret
+          key={secret}
+          value={secret}
+          label="New API Key (shown once)"
+          onDismiss={() => setSecret(null)}
+        />
+      )}
+      {(error || keys.error || options.error) && (
+        <p role="alert" className="text-sm text-destructive">
+          {error ||
+            "You cannot manage this subject's credentials, or its current scope is unavailable."}
+        </p>
+      )}
+      <form onSubmit={submit} className="space-y-4 rounded-md border p-4">
+        <h2 className="font-medium">Create Key</h2>
+        <label className="text-sm font-medium" htmlFor="key-name">
+          Name
+        </label>
+        <Input id="key-name" name="name" maxLength={255} required />
+        <label className="text-sm font-medium" htmlFor="key-expiry">
+          Expiry
+        </label>
+        <select
+          id="key-expiry"
+          value={expiry}
+          onChange={(event) => setExpiry(event.target.value)}
+          className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+        >
+          <option value="30">30 days</option>
+          <option value="90">90 days</option>
+          <option value="365">One year</option>
+          <option value="custom">Custom date</option>
+          <option value="never">Never (still revocable)</option>
+        </select>
+        {expiry === "custom" && (
+          <Input
+            aria-label="Custom expiry"
+            name="expiresAt"
+            type="datetime-local"
+            required
+          />
+        )}
+        <div className="space-y-3">
+          {options.data?.map((grant) => (
+            <fieldset
+              key={grantId(grant)}
+              className="min-w-0 rounded-md border p-3"
             >
-              <option value="30">In 30 days</option>
-              <option value="90">In 90 days</option>
-              <option value="365">In one year</option>
-              <option value="custom">Custom date</option>
-              <option value="never">Never</option>
-            </select>
-            {expiry === "custom" && (
-              <Input
-                type="datetime-local"
-                aria-label="Custom expiry"
-                value={customExpiry}
-                onChange={(event) => setCustomExpiry(event.target.value)}
-                required
-              />
-            )}
-          </div>
-          <DialogFooter className="mt-6">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={createKey.isPending}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              disabled={
-                !name.trim() ||
-                createKey.isPending ||
-                (expiry === "custom" && !customExpiry)
-              }
-            >
-              {createKey.isPending ? "Creating…" : "Create key"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+              <legend className="break-all px-1 text-sm">
+                {grantId(grant)}
+              </legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {grant.permissions.map((permission) => (
+                  <label
+                    key={permission}
+                    className="flex items-center gap-2 text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={
+                        selected[grantId(grant)]?.includes(permission) ?? false
+                      }
+                      onChange={(event) =>
+                        setSelected((previous) => ({
+                          ...previous,
+                          [grantId(grant)]: event.target.checked
+                            ? [...(previous[grantId(grant)] ?? []), permission]
+                            : (previous[grantId(grant)] ?? []).filter(
+                                (item) => item !== permission,
+                              ),
+                        }))
+                      }
+                    />
+                    {permission}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          ))}
+        </div>
+        <Button
+          disabled={
+            busy ||
+            options.isLoading ||
+            options.isError ||
+            !Object.values(selected).some((value) => value.length)
+          }
+        >
+          Create scoped Key
+        </Button>
+      </form>
+      <div className="space-y-3">
+        {keys.data
+          ?.filter((key) => !key.revokedAt)
+          .map((key) => (
+            <div key={key.id} className="space-y-2 rounded-md border p-3">
+              <p className="font-medium">{key.name}</p>
+              <p className="text-xs text-muted-foreground">
+                {key.prefix}… ·{" "}
+                {key.expiresAt
+                  ? `Expires ${new Date(key.expiresAt).toLocaleString()}`
+                  : "No time-based expiry"}
+              </p>
+              <ul className="space-y-1 text-xs">
+                {key.grants.map((grant, index) => (
+                  <li className="break-all" key={index}>
+                    {grantId(grant)}: {grant.permissions.join(", ")}
+                  </li>
+                ))}
+              </ul>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        "Rotate this Key and invalidate its previous credential?",
+                      )
+                    )
+                      void perform(async () => {
+                        setSecret(
+                          (await rotate.mutateAsync({ id: key.id, ...target }))
+                            .rawKey,
+                        );
+                      });
+                  }}
+                >
+                  Rotate
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={busy}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        "Revoke this Key and dependent executions?",
+                      )
+                    )
+                      void perform(async () => {
+                        await revoke.mutateAsync({ id: key.id, ...target });
+                      });
+                  }}
+                >
+                  Revoke
+                </Button>
+              </div>
+            </div>
+          ))}
+      </div>
+    </section>
   );
 }

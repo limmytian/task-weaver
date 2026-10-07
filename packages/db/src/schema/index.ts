@@ -21,3 +21,5 @@ export * from "./daemons";
 export * from "./agent-usage";
 export * from "./auth";
 export * from "./execution-delegations";
+
+export * from "./project-preferences";
