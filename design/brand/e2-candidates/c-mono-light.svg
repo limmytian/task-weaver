@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+<title id="title">Task Weaver candidate C: Woven W</title>
+<desc id="desc">A compact word-initial silhouette. A deliberate interruption gives the ribbon a woven rhythm. Unapproved exploration.</desc>
+<g fill="none" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+<defs>
+<mask maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64" id="c-cut">
+<rect width="64" height="64" fill="white"/>
+<path d="m21 35 8 5" stroke="black" stroke-width="4"/>
+</mask>
+</defs>
+<path d="m10 15 10 34 12-22 12 22 10-34" stroke="#17212b" stroke-width="8" mask="url(#c-cut)"/>
+<path d="m32 27 12 22 10-34" stroke="#17212b" stroke-width="8"/>
+</g>
+</svg>
