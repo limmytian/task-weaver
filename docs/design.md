@@ -603,11 +603,54 @@ PostgreSQL NOTIFY path:
 
 ## 12. Authentication and Authorization
 
-| Actor | Authentication | Purpose |
-|-------|----------------|---------|
-| Human | Session / JWT through Web UI | Manage through the frontend |
-| AI agent | API key (`Authorization: Bearer tw_xxx`) | Independent key per agent |
-| CLI daemon | API key and daemon registration | Operate through REST after registration |
+0.3.3 uses closed local accounts, revocable database sessions and subject-bound
+scoped API keys. A human key remains a human identity; a managed Agent has its own
+stable actor and managing human. Rotation changes the credential, not the actor.
+REST, tRPC, GraphQL, SSR and events use the same live core authorization rules.
+Actor headers, personal owner fields, client IDs and node IDs never authenticate.
+
+| Boundary | Effective authority |
+|----------|---------------------|
+| Personal space | Human ownership plus explicit personal grants; Agent execution is separately attributed |
+| Project viewer | Read ordinary resources |
+| Project member | Read/write ordinary resources |
+| Project maintainer | Project administration below ownership level |
+| Project owner | Membership and ownership management; retain an active human owner |
+| Instance administrator | Account/instance management; no implicit project or other human's personal access |
+| API Key | Current subject permissions intersect its explicit scope/action ceiling and live credential ancestry |
+| Execution delegation | Explicit phase entitlement, parent credential and original lease; immutable task/repository/action bounds |
+
+Tool invocation, repository catalog management and execution run/review/merge are
+separate permissions. Project links do not grant catalog editing. Instance-backed
+provider configuration requires a human administrator, credential `instance.manage`
+and the corresponding resource management permission.
+
+The Web `/login` page supports first-admin bootstrap, one-time activation and
+login. Public signup is unavailable. Account settings manage sessions/passwords;
+recently authenticated administrators provision/recover accounts. Project settings
+manage eligible members and Agents. Key creation/rotation reveals a secret once,
+with explicit expiry (including an explicit no-expiry choice) and grants. Logout,
+expiry and actor changes clear caches and close/reconnect authorized streams.
+Project pins are per actor. Never share a bootstrap, session or supervisor secret
+with a child executor.
+
+Delegations last at most 15 minutes, bounded by the parent credential and lease.
+Only the original authenticated supervisor credential can renew without widening
+bounds. Revocation, membership/manifest changes, terminal work, expiry and lease
+supersession invalidate old authority; restoring membership does not revive it.
+Web/daemon SSE and webhook replay reauthorize current resource access and omit
+unauthorized payload/count/cursor metadata. SSE access does not grant execution.
+
+An offline 0.3.2 upgrade needs explicit ownership mappings and project human owners;
+unmapped legacy content is quarantined and unbound legacy keys must be reissued.
+Historical actor labels are preserved as attribution. Back up the complete database
+and skill storage; recovery restores the matching pre-upgrade state, not older
+binaries against the migrated schema. SLO, unconverted background workers and
+personal autonomous Ti remain closed. Source acceptance does not publish or deploy.
+
+See [authentication contracts](authentication-contract.md),
+[resource coverage](resource-authorization.md), [account and operator guide](authenticated-access.md)
+and [upgrade/recovery](ce-upgrades.md).
 
 ---
 

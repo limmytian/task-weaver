@@ -6,9 +6,10 @@ package; `@task-weaver/core` and its `schemas`/`types` entry points re-export th
 contracts for compatibility. REST, tRPC, GraphQL, CLI, streams and background
 execution must share the same server identity resolver and core authorization.
 
-These contracts are a foundation, not an activated authentication system. The
-existing transport adapters still require coordinated replacement before the
-application can be treated as an authenticated multi-user service.
+The 0.3.3 source implements these contracts across the authorized resource and
+execution surfaces. Unconverted operations remain explicitly denied. See
+[authenticated access](authenticated-access.md) for account UX, CLI setup and
+offline upgrade/recovery; source acceptance does not authorize production rollout.
 
 ## Identity and credentials
 
@@ -39,7 +40,7 @@ does not bypass revocation or recent-login requirements for sensitive actions.
 Deleting an API key revokes it immediately, including keys without an expiry,
 and invalidates its dependent delegations. Preserve its audit reference/tombstone;
 deletion does not erase historical actor attribution. These lifecycle operations
-are enforced by credential services when implemented, not by shape validation.
+are enforced by live credential services, not by shape validation.
 
 `issueScopedApiKeySchema` contains no subject ID:
 the authorized self/managed-agent route determines the subject. Requested grants,
@@ -85,8 +86,11 @@ cross-project grants, empty/duplicate tasks, credential/delegation lifetime
 mismatches, administrative actions and incompatible execution phases. Its shape
 cannot prove the parent authority, task/project relations or current lease.
 Review/merge may include task-bound bookkeeping but cannot receive another
-phase's execution permission. Subsequent renewal and revocation checks must
-preserve these bounds.
+phase's execution permission. Delegations last at most 15 minutes and never outlive the parent or original
+lease. Only the original authenticated supervisor credential can renew, rotating
+the secret without widening task/repository/action bounds. Each operation
+revalidates current authority; revocation or lease changes permanently invalidate
+old capabilities.
 
 Public account, principal, membership, session and API-key metadata DTOs are
 strict allowlists and reject token/password/hash/secret fields. Services must
@@ -105,7 +109,7 @@ authority. Cookie-authenticated mutations require Origin and CSRF validation.
 
 Contract validation tests cover structural failures and export compatibility.
 Runtime revocation, ownership filtering, transport/SSE isolation, credential
-storage and migration require integration/security tests when implemented.
+storage, delegation and offline migration are covered by `pnpm test:auth-postgres`.
 
 ## Identity storage
 
@@ -120,19 +124,17 @@ uniqueness is case insensitive. New actors/users default to disabled.
 `betterAuthTables` maps the four provider models to their Drizzle tables using the
 [Better Auth core schema](https://better-auth.com/docs/concepts/database) and
 [Drizzle adapter](https://better-auth.com/docs/adapters/drizzle). Provider token and
-password fields are private storage, never public DTOs. A3 must configure UUID IDs,
-closed registration, server-only identity fields and hooks that supply finite
-absolute/idle session deadlines before enabling the provider. Cookie caching must
-be disabled. This storage change does not enable login or transport authentication.
+password fields are private storage, never public DTOs. The runtime configures UUID IDs,
+closed registration, server-only identity fields and finite absolute/idle session
+deadlines. Cookie caching is disabled; live database state governs authentication.
 
 Bootstrap must lock the seeded singleton and validate the deployment Secret;
 the migration neither creates an administrator nor persists that Secret. Recovery
-uses administrator-issued, finite, hashed one-time activations. A3 must serialize
+uses administrator-issued, finite, hashed one-time activations. Lifecycle services serialize
 account/ownership mutations and protect the last active human administrator and
-project owner; additive storage cannot impose those cross-row invariants on legacy
-projects before their explicit ownership migration. Membership removal is recorded
+project owner. Legacy projects require explicit ownership migration before access. Membership removal is recorded
 with `removedAt`; rejoining reuses the unique project/actor record and preserves
-history through the activity log. No runtime account lifecycle is enabled here.
+history through the activity log. The account lifecycle uses these persisted records and live transactional checks.
 
 ## Scoped API key storage and services
 
@@ -149,9 +151,9 @@ live entitlements with stored ceilings. It never accepts actor headers. Sessions
 can issue longer or explicitly non-expiring keys; API-key issuers cannot extend
 beyond their own finite lifetime or grant scope. Derived keys retain a parent link
 and a bounded ancestry depth. Every authentication walks that live ancestry:
-revoking or rotating a parent invalidates descendants. Future execution delegation
-resolvers must likewise recheck their parent credential on each protected operation;
-A2 does not create delegations, runners or revocation caches.
+revoking or rotating a parent invalidates descendants. Execution delegation
+resolvers likewise recheck their parent credential on each protected operation;
+no authorization cache can restore revoked access.
 
 Issuance targets the caller or its managed agent and requires credential-management
 authority. Grants must be covered by both issuer and subject rights; managing an
@@ -164,13 +166,9 @@ Unrelated API-key parents cannot replace an existing ancestry. Serializable writ
 row locking and a unique rotation link prevent concurrent duplicate rotations.
 Revocation remains available to an authorized manager for a disabled managed agent.
 
-Legacy compatibility functions now exclude hashes, retain revoked tombstones and
-hide bound keys from legacy listing, authentication and mutation. They are explicitly
-deprecated until A4 replaces the old transport routes coherently after A3. Unbound
-legacy keys remain historical compatibility credentials, cannot construct a new
-verified context and receive no implicit project membership or stable identity.
-This foundation does not make the current transports a secure multi-user release.
-The ordered A3/A4 and resource/execution slices must complete before activation.
+Unbound legacy Keys cannot construct a verified context and receive no implicit
+membership or stable identity. Offline ownership migration revokes them without
+promotion; reissue subject-bound scoped Keys after explicit account/owner mapping.
 
 Run `pnpm test:auth-postgres` for a disposable loopback-only pgvector PostgreSQL
 fixture. It checks clean and pre-0048 upgrades, repeat migration, preserved legacy
@@ -193,14 +191,14 @@ resource owner are separate records. A validated delegation/run establishes agen
 execution attribution; a human key alone cannot prove which agent operated it.
 Credential rotation or agent replacement does not transfer existing data ownership.
 Any legacy agent-owned rows require explicit ownership migration rather than silent
-rewriting. Resource services adopt this owner resolution in the ordered isolation
-slices before runtime activation.
+rewriting. Current resource services resolve the verified human owner separately
+from execution attribution.
 
 ## Account and session service lifecycle (A3)
 
 The core authentication factory keeps Better Auth's handler and raw provider
 responses private. Public registration and OIDC/SSO are disabled. Transport
-adapters in A4 must use the factory's guarded operations, never mount the
+adapters use the factory's guarded operations and never mount the
 provider handler directly. Account bootstrap requires an explicit Secret and a
 serialized instance initialization record. Administrator invitations and recovery
 use single-use, hashed activation tokens, defaulting to 24 hours.
@@ -290,12 +288,10 @@ invalidates the old password until activation. Unexpected database/provider
 exceptions are replaced at the service boundary because their query parameters
 may contain secret material. Known domain errors remain safe, structured errors.
 
-A4 must wire REST, tRPC, SSR and GraphQL to these services, consistently enforce
-CSRF/CORS, map safe authentication/rate-limit errors and propagate no-store and
-Set-Cookie headers. Resource-specific enforcement, SSE/background revalidation,
-legacy ownership migration and trusted executor attribution remain in their
-existing later slices. These services do not activate any transport or confer
-review/merge eligibility beyond the existing review policy.
+REST, tRPC, SSR and GraphQL use these services with CSRF/CORS, safe errors,
+no-store and Set-Cookie propagation. Resource/event/runtime authorization is
+separate from identity and never implies review/merge eligibility beyond current
+explicit entitlements and the recorded review policy.
 
 ## A3 review corrections
 
@@ -319,7 +315,7 @@ membership administration within their live credential ceiling; removing an owne
 additionally requires a recently authenticated human session and another active
 human owner.
 
-## A4 transport adapters and staged activation
+## Shared transport adapters
 
 REST, Next tRPC, human SSR and GraphQL use `createAuthenticationRuntime` and the
 same persisted provider/session/key state. Each protected invocation reloads live
@@ -373,10 +369,9 @@ managed agents and explicitly guarded project creation/membership/ownership.
 `/api/v1/api-keys` uses the shared strict scoped-key schema; optional `actorId`
 selects only an authorized self/managed-Agent subject. Expiry/null and grants are
 explicit; rotation preserves grants/expiry, and deletion retains revocation
-history. tRPC `auth` and `apiKey` expose the same guarded services. The existing
-key form receives only the minimum compatibility update to select an explicit
-expiry and a human-owned personal read grant; full account/project/Agent UX
-remains in the planned D slices.
+history. tRPC `auth` and `apiKey` expose the same guarded services. Account/project/Agent UX manages
+current sessions, memberships, eligible assignees and subject-bound scoped Keys.
+Issuance and rotation expose raw secrets once; routine metadata never includes them.
 
 Authentication responses preserve multiple Set-Cookie values, use no-store, and
 return safe errors: 401 for missing/invalid/revoked credentials, 403 for forbidden
@@ -388,13 +383,17 @@ challenge preserves its original deadline and cookie across REST/Next/tabs;
 near-expired or invalid challenges are replaced. The browser uses a single-flight
 challenge and refreshes before its returned deadline.
 
-This is an authentication-only staging build. Unconverted data/retrieval/execution
-REST routes and tRPC resource procedures reject access even for administrators.
-GraphQL exposes only verified current-actor data while all legacy resource fields
-remain closed. Next SSE emits no event, count or resume metadata; persisted
-Gateway execution workers and outbound webhook/runtime subscriptions are paused.
-B1-B4 and C1-C3 must replace each staging guard with resource/runtime authorization
-before reopening its surface. There is no environment flag to enable the old
-unrestricted paths. D must complete login/onboarding/recovery UX, legacy
-credential/ownership migration and upgrade/runtime acceptance before production
-activation. Authentication alone is not completed multi-user resource isolation.
+## Current activation boundary
+
+REST, tRPC and GraphQL ordinary resources, retrieval/assets, repositories, tools,
+metadata, Web/daemon SSE and webhooks now use the verified core boundaries.
+Authenticated supervisor and delegated project execution are implemented;
+[resource coverage](resource-authorization.md) identifies remaining closed paths.
+No environment flag restores legacy anonymous or allow-all behavior.
+
+D1 provides login/bootstrap/activation, account/session administration, project
+members/Agents, scoped credential lifecycle and actor-private pins. D2 provides
+explicit offline legacy ownership migration, quarantine and runtime fencing,
+with exact-0.3.2 upgrade/full-backup recovery regression. D3 adds the registered
+entry-point credential inventory and cross-actor HTTP matrix. These source checks
+are acceptance evidence, not a version release or deployment instruction.

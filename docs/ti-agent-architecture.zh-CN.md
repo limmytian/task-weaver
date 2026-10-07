@@ -1,5 +1,9 @@
 # Ti Agent 架构设计与 Partners E2B 集成方案
 
+> 0.3.3 实现边界：项目指定执行使用已验证发起者权限上限和独立的 task-bounded Agent capability。
+> 个人自主 Ti、到期/后台 acquisition 及尚未转换的 assistant/Partners outbound worker 仍关闭。
+> 下文个人/Chat 方案不代表开放授权。英文规范见 [认证访问指南](authenticated-access.md)。
+
 本文档定义了 Task Weaver 服务端 **Ti Agent** 的重构架构，涵盖其与 **Partners**（兼容 E2B 生态的沙箱算力层）的深度集成、Chat 多会话历史管理、Token 开销统计核算以及存储优化策略。
 
 ---

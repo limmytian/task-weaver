@@ -15,6 +15,18 @@ List commands return `{ "items": [...], "meta": {...} }` with compact summaries 
 
 ---
 
+## Verified access prerequisite
+
+Use `tw auth login` with hidden scoped-Key input and check `tw auth whoami --json`
+before any workflow. Actor headers or client/node IDs cannot supply identity.
+Claim only currently authorized, unblocked work and preserve the original lease
+fence. Resource visibility does not grant tool invocation, repository editing or
+execution review/merge. An administrator does not inherit private/project content.
+Children receive task-bounded delegation (at most 15 minutes), not supervisor
+credentials. Renewal cannot widen bounds; revoked/expired capabilities require a
+fresh authorized exchange. Keep credentials out of documents and CLI arguments.
+Source development does not authorize starting a daemon or publishing/deploying.
+
 ## Project Onboarding
 
 Bootstrap a new project from scratch.

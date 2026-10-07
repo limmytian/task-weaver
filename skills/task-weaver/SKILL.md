@@ -259,28 +259,59 @@ Every mutation is recorded: `entityType`, `entityId`, `action`, `actorId`, `acto
 
 ## Authentication
 
-### CLI
+0.3.3 requires a revocable browser session or a subject-bound scoped API Key.
+Create the Key through authenticated account settings for self or an owned Agent,
+with explicit grants and expiry (including an explicit no-expiry choice).
 
 ```bash
-tw auth setup   # interactive: set API URL and API key
-tw auth status  # show current config and test connection
+tw auth login --api-url http://127.0.0.1:3001
+tw auth whoami --json
+tw auth status --json
+tw auth logout
 ```
 
-Config stored at `~/.config/tw/config.json`. Override with env vars:
-```bash
-TW_API_URL=http://localhost:3001 TW_API_KEY=tw_xxx tw task list --project <id>
-```
-
-### REST API
+Login reads a secret from hidden input or stdin, verifies it, then saves it. Do not
+put a Key in a command argument. Remote login requires HTTPS; loopback HTTP is
+supported. `tw auth setup` is an interactive alternative. Configuration defaults
+to `~/.config/tw/config.json`; `TW_CONFIG_DIR` selects another directory.
+Directories use `0700` and credential files `0600`. `TW_API_URL`/`TW_API_KEY`
+override saved settings. Local logout does not revoke a shared server Key; revoke
+it separately and unset any environment override.
 
 ```http
-Authorization: Bearer tw_your_api_key
+Authorization: Bearer <subject-bound-scoped-key>
 Content-Type: application/json
-X-Actor-Id: my-agent
-X-Actor-Type: agent
 ```
 
-With a valid API key, actor is auto-set to `apikey:{keyId}`. Without a key, `X-Actor-Id` / `X-Actor-Type` headers are used (defaults: `anonymous` / `human`). Always set `X-Actor-Type: agent`.
+The verified credential supplies a stable actor UUID. A human Key stays human;
+a managed Agent Key stays Agent. Rotation does not change identity. Actor headers,
+clientId/nodeId and requested owner fields never authenticate or grant access.
+Do not combine Bearer and session credentials. Browser mutations require exact
+Origin, the CSRF cookie and `X-CSRF-Token`.
+
+Effective authority intersects current actor permissions, credential ceiling and
+any execution bounds. Viewer reads ordinary project resources; member writes;
+maintainer manages below ownership; owner manages membership/ownership while
+retaining a human owner. Execution/tool rights are explicit entitlements.
+Instance administration does not grant project or other humans' personal content.
+Project scopes do not include personal space. Personal data belongs to its human
+owner, while Agent execution is separately attributed. Shared repository catalog
+management requires administrator plus explicit global `repository.manage`;
+project links do not authorize catalog editing.
+
+Task delegation lasts at most 15 minutes and never outlives the parent credential
+or original lease. Only the original supervisor credential may renew without
+widening tasks, repositories or actions. Revocation, expiry, membership/manifest
+changes and lease supersession invalidate old authority permanently. Children use
+a bounded local broker, never an inherited supervisor Key. SSE access does not
+permit execution; reconnect and replay recheck current resource access.
+
+Public signup is closed. First-admin bootstrap uses a deployment Secret once;
+administrators provision/recover accounts with finite one-time activation.
+Legacy actor strings/Keys are not verified identity: offline upgrade requires
+explicit owner mappings, quarantines unmapped data and reissues scoped Keys.
+SLO, unconverted background workers and personal autonomous Ti remain closed.
+Source integration targets 0.3.3 and does not authorize release/deployment.
 
 ## Conventions
 
@@ -332,7 +363,7 @@ Descriptions: plain text or Markdown. Documents: Markdown with `[[wiki-links]]` 
 
 ```bash
 # First-time setup
-tw auth setup   # enter API URL and API key
+tw auth login   # verify a scoped Key through hidden input
 
 # Create project
 tw project create --name "My Project" --description "..."
@@ -449,7 +480,7 @@ The Web Daemons page shows daemon status, active worker lanes, current requireme
 `tw daemon review` and `tw daemon merge` split review from final merge for requirement branches that have already been finalized to `in_review`:
 
 ```bash
-tw daemon review --project $PROJECT_ID --workers 1 --base main \
+tw daemon review --project $PROJECT_ID --workers 1 --base 0.3.3 \
   --check "pnpm typecheck" \
   --check "pnpm test" \
   --prompt-file ~/.config/tw/review-extra.md
@@ -615,7 +646,7 @@ Use this when a task needs a capability the core `tw` commands don't cover (e.g.
 2. **Link tasks to requirements** — every task needs a `requirementId`
 3. **Use wiki-links in documents** — builds a connected knowledge graph
 4. **Check for existing entities** before creating duplicates (use `tw search`)
-5. **Use meaningful actor IDs** — configure via `tw auth setup`
+5. **Use verified identities** — check the stable credential subject with `tw auth whoami`
 6. **Read before write** — query current state before making changes
 7. **Verify after batch operations** — use `tw activity` to confirm changes
 8. **Claim before working** — in interactive/multi-agent mode, always `tw task claim` before starting work. **Exception:** in daemon/executor mode the daemon already holds the requirement lane — don't claim or release (see [Operating Modes](#operating-modes))

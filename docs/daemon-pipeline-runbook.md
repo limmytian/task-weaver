@@ -4,13 +4,26 @@ This runbook covers the unified local supervisor for Task Weaver executor, revie
 
 ## Prerequisites
 
-- Install the `tw` CLI and run `tw auth setup`.
+- Install the `tw` CLI, verify a managed-Agent scoped Key with `tw auth login`,
+  and confirm its stable actor with `tw auth whoami --json`.
+- Grant current project permissions and the explicit executor/reviewer/merger
+  entitlement for each role. Instance/node/client IDs cannot grant authority.
+- Preserve the original worker lease/fence. Children receive task-bounded local
+  broker access with a maximum 15-minute delegation; only the original supervisor
+  credential can renew without widening tasks/repositories/actions.
+- Verify revoke/expiry/member-removal cancellation in a disposable environment.
+  Supervisor, provider and Git secrets must not be inherited by children.
 - Configure non-secret repository catalog entries and local credential profile references.
 - Install every AI CLI named in the pipeline configuration.
 - Ensure the daemon node can read and push linked repositories and reach the configured API.
 - Use Node.js 20 or newer.
 
 Start from [the example configuration](../examples/daemon-pipeline/pipeline.yaml). Store secrets in the service environment or a protected environment file. The pipeline configuration should contain only environment references.
+
+See [authenticated access](authenticated-access.md) for credential, cancellation
+and offline-upgrade rules. These operator commands require explicit execution
+authorization; source acceptance alone does not start a daemon. Unconverted SLO,
+background acquisition and personal autonomous Ti remain closed.
 
 ## Validate and Start
 

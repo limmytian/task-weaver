@@ -56,7 +56,7 @@ Use Node.js from `.node-version` and pnpm 9.15.0:
 
 ```sh
 cp .env.example .env
-# Configure DATABASE_URL before initialization.
+# Configure DATABASE_URL and the 0.3.3 authentication settings before initialization.
 pnpm install --frozen-lockfile
 pnpm exec dotenv -- pnpm --filter @task-weaver/db db:migrate
 pnpm exec dotenv -- pnpm --filter @task-weaver/db db:setup-search
@@ -69,11 +69,21 @@ Compose example deliberately uses the published digest-pinned images.
 
 ## Security and persistence
 
-Use a trusted local environment and keep the default loopback port bindings. The
-Web UI and API accept unauthenticated access; API keys identify actors but are
-not a global access-control boundary. An authenticated gateway, TLS, and a
-separate authorization review are necessary before exposing an installation
-outside a trusted network.
+Keep the default loopback bindings and use TLS outside loopback. The default
+published digest-pinned images predate the 0.3.3 authentication implementation;
+they must not be described as an authenticated multi-user release. The 0.3.3 source
+requires verified sessions/scoped Keys and live resource authorization. Missing
+`TW_AUTH_SECRET` or `TW_AUTH_BASE_URL` fails closed; there is no anonymous fallback.
+
+API and Web need the same database, authentication Secret/base URL and exact
+trusted origins. Browser calls use one origin and signed CSRF cookies/tokens.
+Set these through the service's Secret/environment facility; `.env.example`
+contains source-development placeholders, not credentials. The default Compose
+images/environment are retained for the published release. A future authenticated
+image pair also needs explicit API/Web environment injection; editing a host
+`.env` alone does not inject arbitrary variables into Compose containers.
+See [authenticated access](authenticated-access.md) for bootstrap, closed account
+provisioning, scoped CLI login, revocation and the offline upgrade boundary.
 
 The `skill-data` volume stores skill package objects. Preserve it together with
 database backups. The database operator owns database security patches,

@@ -1,5 +1,11 @@
 # Ti Agent Architecture & Partners E2B Integration
 
+> 0.3.3 implementation boundary: assigned project execution uses verified initiator
+> ceilings and separate task-bounded Agent capabilities. Personal autonomous Ti,
+> due/background acquisition and unconverted assistant/Partners outbound workers
+> remain closed. Proposed personal/Chat behavior below is not authorization to
+> activate it. See [authenticated access](authenticated-access.md).
+
 This document defines the architectural redesign for the Task Weaver server-side **Ti Agent**, its integration with **Partners** (E2B-compatible sandbox compute layer), multi-session Chat management, token usage accounting, and storage optimization.
 
 ---

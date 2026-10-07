@@ -590,11 +590,44 @@ PostgreSQL NOTIFY path:
 
 ## 12. 认证与权限
 
-| 类型 | 认证方式 | 说明 |
-|------|----------|------|
-| 人类用户 | Session / JWT（Web UI 登录） | 通过 Web 前端管理 |
-| AI Agent | API Key（`Authorization: Bearer tw_xxx`） | 每个 Agent 独立 Key |
-| CLI Daemon | API Key + daemon 注册 | 注册后通过 REST API 操作 |
+0.3.3 使用封闭注册的本地账号、可撤销的数据库会话和绑定主体的 scoped API Key。
+人类 Key 保持人类身份；受管 Agent 有独立的稳定 actor 及管理人类。轮换只改变凭据，
+不改变 actor。REST、tRPC、GraphQL、SSR 与事件入口复用实时 core 授权。
+Actor header、个人 owner 字段、clientId 和 nodeId 都不能证明身份。
+
+| 边界 | 实际权限 |
+|------|----------|
+| 个人空间 | 人类所有权与显式 personal grants；Agent 执行单独记录 |
+| 项目 viewer | 读取普通资源 |
+| 项目 member | 读写普通资源 |
+| 项目 maintainer | 管理项目，但不能管理所有权 |
+| 项目 owner | 管理成员及所有权；保留至少一个有效人类 owner |
+| 实例管理员 | 管理账号与实例；不自动获得项目或他人个人内容权限 |
+| API Key | 主体当前权限与凭据显式 scope/action ceiling、实时父凭据链取交集 |
+| 执行 delegation | 显式阶段权限、父凭据及原 lease；task/repository/action 范围不可扩大 |
+
+工具调用、仓库 catalog 管理和 execution run/review/merge 是独立权限。
+项目仓库链接不赋予 catalog 编辑权限。使用实例凭据的 Provider 配置要求人类实例管理员、
+凭据中的 `instance.manage` 及对应资源管理权限。
+
+Web `/login` 支持首管理员 bootstrap、一次性激活和登录，不开放公共注册。
+账号设置管理会话和密码；近期重新认证的管理员可发放/恢复账号。
+项目设置管理有资格的成员和 Agent。Key 创建/轮换只展示一次 secret，必须显式选择
+到期时间（含显式永不过期）与 grants。退出、到期或切换身份会清理缓存并关闭/重连
+已授权事件流；项目置顶属于各 actor。子执行器不得继承 bootstrap、会话或 supervisor secret。
+
+Delegation 最长 15 分钟，且不能超过父凭据或原 lease；仅原已认证 supervisor 凭据
+可在不扩大范围的前提下续期。撤销、成员/manifest 变化、任务结束、到期及 lease 更新
+使旧权限失效；恢复成员资格不会恢复旧 delegation。Web/daemon SSE 与 webhook 回放
+核验当前资源权限，不返回未授权 payload、计数或 cursor 元数据。SSE 权限不代表执行权限。
+
+从 0.3.2 离线升级需要显式所有权映射及项目人类 owner；未映射旧内容被隔离，
+未绑定旧 Key 必须重新签发，历史 actor 标签仅保留审计归属。备份完整数据库与 Skill 存储；
+恢复需要匹配的升级前状态，不能直接用旧程序连接已升级 schema。
+SLO、尚未转换的后台 worker 和个人自主 Ti 仍关闭。源码验收不代表发布或部署授权。
+
+英文规范：[认证契约](authentication-contract.md)、[资源覆盖](resource-authorization.md)、
+[账号与运维指南](authenticated-access.md)、[升级恢复](ce-upgrades.md)。
 
 ---
 

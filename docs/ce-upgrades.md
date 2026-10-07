@@ -14,6 +14,29 @@ the exact OCI digests in that release's `api-image.digest` and
 `web-image.digest` assets. Verify signatures, SBOMs, and checksums before
 putting a new pair into service.
 
+## 0.3.2 to authenticated 0.3.3 source rehearsal
+
+The authenticated source includes a disposable regression pinned to public
+`v0.3.2` commit `556ba6373bb1f4a128455f008d07d53725495c20` and its exact 48 SQL
+migration hashes, followed by current forward migrations. This evidence does not
+publish a new image pair or broaden the existing binary support window. Run
+`pnpm test:auth-postgres` after building to exercise the full isolated fixture.
+
+Follow [authenticated access](authenticated-access.md#offline-upgrade-and-recovery)
+for the explicit cutoff/inventory/manifest dry run and acknowledged offline apply.
+Migrations alone grant no ownership. Legacy labels remain historical; unmapped
+content is restricted and unbound Keys are revoked/reissued rather than promoted.
+Old daemon/task/requirement/Ti/delegation authority is fenced. New registration,
+explicit configuration revalidation and fresh leases are required. Receipt replay
+must not disturb work authorized after cutover.
+
+Back up the complete database with extension definitions and matching skill
+objects, verify restoration, and stop writes throughout maintenance. A schema-only
+dump may omit extensions. Rollback restores the recorded pre-upgrade database and
+storage with old binaries; it discards subsequent writes. Do not connect an old
+binary to the migrated live schema. Dirty worktree recovery preserves changes;
+conflicted/missing worktrees require explicit quarantine/review and current fences.
+
 ## Docker Compose fresh install
 
 Provide an external PostgreSQL database and a local, untracked `.env` with

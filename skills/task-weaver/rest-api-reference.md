@@ -14,9 +14,45 @@ Base URL: `http://localhost:3001/api/v1`
 ```http
 Authorization: Bearer tw_your_api_key
 Content-Type: application/json
-X-Actor-Id: my-agent
-X-Actor-Type: agent
 ```
+
+The bearer must be a subject-bound scoped Key. Its stable actor, live membership
+and scope/action ceiling determine authority; Actor/client/node headers are never
+identity proof. Human Keys stay human. Do not mix Bearer and session credentials.
+Browser sessions require exact Origin plus CSRF cookie/token for mutations,
+including GraphQL POST and tRPC mutations. Public health/version and explicit
+authentication entry points return no ordinary resource authority. Invalid Bearer
+headers are rejected even on public entry points.
+
+## Account and credential lifecycle (0.3.3)
+
+| Method/path under `/api/v1` | Purpose and boundary |
+| --- | --- |
+| `GET /auth/csrf` | Public signed browser CSRF challenge |
+| `POST /auth/bootstrap` | One-time first human administrator; deployment bootstrap Secret |
+| `POST /auth/login`, `POST /auth/activate` | Local login or finite one-time activation; no public signup |
+| `GET /auth/me`, `POST /auth/logout` | Verified identity and session logout |
+| `POST /auth/reauthenticate`, `POST /auth/password` | Recent authentication and password lifecycle |
+| `GET /auth/sessions`, `DELETE /auth/sessions/:id` | Owner-scoped session metadata/revocation |
+| `GET/POST /auth/accounts`, `PATCH /auth/accounts/:id`, `POST /auth/accounts/:id/recover` | Recently authenticated human administrator; no implicit content access |
+| `GET/POST /auth/agents`, `DELETE /auth/agents/:id` | Owned managed-Agent lifecycle |
+| `DELETE /auth/admin/agents/:id` | Explicit administrator disablement; no content grant |
+| `POST /auth/projects`, `GET /auth/projects/:id/members` | Guarded project creation and membership visibility |
+| `PUT/DELETE /auth/projects/:id/members/:actorId`, `POST /auth/projects/:id/owner` | Role/entitlement ceiling, live membership and last human owner protection |
+| `GET/POST /api-keys`, `POST /api-keys/:id/rotate`, `DELETE /api-keys/:id` | Authorized self/managed-Agent subject; strict scoped grants and explicit expiry; one-time raw secret |
+
+Keys rotate without changing actor identity. No-expiry is explicit `expiresAt:
+null`, not omitted. Revocation/rotation invalidates dependent authority. An admin
+cannot read another actor's private content. Personal owner selectors constrain
+server checks; they cannot redirect ownership. Search/count/history/download and
+nested graph responses are filtered before limits/expansion. SSE connections and
+webhook retries reauthorize live resource access, including credential revocation.
+
+Daemon task capabilities are bounded to the original lease, parent credential,
+phase, tasks and repositories, for at most 15 minutes. Only the original supervisor
+credential can renew without enlarging bounds. SLO/unconverted background workers
+and personal autonomous Ti remain closed. See `docs/authenticated-access.md` in
+the source repository for operator/bootstrap and offline upgrade/recovery guidance.
 
 ---
 
@@ -1526,56 +1562,67 @@ Returns all matching activity log entries (no pagination). CSV format includes h
 
 ### List API Keys
 
-```
+```http
 GET /api/v1/api-keys
+GET /api/v1/api-keys?actorId=<owned-agent-uuid>
 ```
 
-Returns all API keys (hash and prefix visible, raw key not included).
+Returns only authorized subject metadata, display prefix, grants and lifecycle
+information. No hash/verifier or raw Key appears. Omitting `actorId` selects self;
+a supplied subject must be self or an authorized managed Agent.
 
 ### Create API Key
 
-```
+```http
 POST /api/v1/api-keys
 ```
 
 ```json
 {
-  "name": "my-agent-key",
-  "permissions": { "read": true, "write": true },
+  "name": "project-reader",
+  "grants": [{
+    "scope": "project",
+    "projectId": "00000000-0000-4000-8000-000000000001",
+    "permissions": ["resource.read"]
+  }],
   "expiresAt": "2027-01-01T00:00:00.000Z"
 }
 ```
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| `name` | string | yes | Key name |
-| `permissions` | object | no | Permission flags |
-| `expiresAt` | ISO 8601 | no | Expiration date |
+| `name` | string | yes | Display name |
+| `actorId` | UUID | no | Self or authorized managed Agent; defaults to self |
+| `grants` | array | yes | Explicit finite scope/action ceiling; must intersect issuer and subject authority |
+| `expiresAt` | ISO 8601 or null | yes | Explicit deadline or explicit no time-based expiry |
 
-Response: `201` — includes `rawKey` (shown only once, save it).
+Response `201` includes `rawKey` once. Global, personal, project and instance
+targets are distinct. Personal targets name a human owner. No legacy `permissions`
+object, wildcard grants, omitted expiry or arbitrary subject override is accepted.
 
 ### Rotate API Key
 
-```
-POST /api/v1/api-keys/:id/rotate
+```http
+POST /api/v1/api-keys/:id/rotate?actorId=<authorized-subject-uuid>
 ```
 
 ```json
-{ "name": "new-name", "expiresAt": "2027-06-01T00:00:00.000Z" }
+{}
 ```
 
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| `name` | string | no | New name (inherits old name if omitted) |
-| `expiresAt` | ISO 8601 | no | New expiration (inherits old if omitted) |
-
-Atomically creates a new key and deletes the old one. Permissions are inherited. Response includes `rawKey` and `previousKeyId`.
+The body is strictly empty. Rotation preserves actor, name, grants/ancestry and
+expiry while narrowing to current authority. Changes require explicit new
+issuance. The previous Key is revoked with audit history retained; dependent
+credentials are invalidated. The new `rawKey` is returned once.
 
 ### Revoke API Key
 
+```http
+DELETE /api/v1/api-keys/:id?actorId=<authorized-subject-uuid>
 ```
-DELETE /api/v1/api-keys/:id
-```
+
+Omit `actorId` for self. Revocation retains a tombstone and immediately invalidates
+the Key and its dependent authority, including explicitly non-expiring Keys.
 
 ---
 
@@ -1591,7 +1638,7 @@ POST /api/v1/webhooks
 {
   "url": "https://my-agent.com/task-events",
   "events": ["task.created", "task.status_changed", "document.updated"],
-  "projectId": "uuid-or-omit-for-account-level",
+  "projectId": "00000000-0000-4000-8000-000000000001",
   "description": "Notify agent on task changes"
 }
 ```
@@ -1600,12 +1647,17 @@ POST /api/v1/webhooks
 |-------|------|----------|-------|
 | `url` | URL | yes | Endpoint to receive POST requests |
 | `events` | string[] | yes | Event types to subscribe to (min 1) |
-| `projectId` | UUID | no | Scope to project (omit for account-level) |
+| `projectId` | UUID | no | Project scope; omission requests a separately authorized global binding |
 | `secret` | string | no | HMAC secret (min 16 chars, auto-generated if omitted) |
 | `active` | boolean | no | Default: `true` |
 | `description` | string | no | Max 500 chars |
 
-Response: `201` — includes `secret` (shown only on create, save it for verification).
+Response: `201` includes the signing secret once. Reads omit secrets. Authorized
+`PATCH` with `rotateSecret: true` rotates it and invalidates the previous binding
+generation; the new secret is returned once. Outbound events and retries recheck
+actor, credential ceiling, current scope and configuration generation. Global
+hooks cannot forward personal/project events merely because their owner is an
+instance administrator. Legacy unbound hooks stay closed.
 
 **Supported events:** `task.created`, `task.updated`, `task.status_changed`, `task.commented`, `task.deleted`, `requirement.created`, `requirement.updated`, `requirement.deleted`, `document.created`, `document.updated`, `document.deleted`, `document.linked`.
 
@@ -1660,7 +1712,11 @@ GET /api/v1/webhooks/:id/deliveries?status=failed&limit=20
 POST /api/v1/webhooks/:id/test
 ```
 
-Sends a `webhook.test` event to verify connectivity. Returns delivery record.
+Sends an explicitly authorized `webhook.test` connectivity event. Returns safe
+delivery metadata without payload, remote response or signing secret. Managers may
+retry a failed delivery with `POST /api/v1/webhooks/:id/deliveries/:deliveryId/retry`;
+retry reauthorizes the current binding and event resources. No autonomous retry
+worker is enabled.
 
 ### Webhook Payload Format
 
@@ -1866,10 +1922,10 @@ Task Weaver acts as an MCP host/registry. External MCP servers are registered, t
 
 | Server type | Transport | Scope field | Visible to |
 |-------------|-----------|-------------|------------|
-| Global | `sse` / `streamable-http` | `projectId = null` | Everyone |
-| Project | any | `projectId = uuid` | Searches for that project |
-| Local-shared | `stdio` | `scope=local` | Agents on same machine (`nodeId` match), additionally constrained by `projectId` when set |
-| Private | `stdio` | `scope=private` (default) | Registering process only (`clientId` match), additionally constrained by `projectId` when set |
+| Global | `sse` / `streamable-http` | `projectId = null` | Authenticated actors with global resource grants |
+| Project | any | `projectId = uuid` | Current project permission and credential ceiling |
+| Local-shared | `stdio` | `scope=local` | Verified registration actor/credential plus `nodeId`, additionally constrained by resource scope |
+| Private | `stdio` | `scope=private` (default) | Verified registration actor/credential plus `clientId`, additionally constrained by resource scope |
 
 ### Register MCP Server
 
@@ -1994,8 +2050,8 @@ GET /api/v1/mcp/tools/search?intent=read+file&projectId=uuid&includeGlobal=true&
 | `intent` | string | Natural-language description of what you need (required) |
 | `projectId` | UUID | Include tools scoped to this project |
 | `includeGlobal` | boolean | Include global tools with project-scoped results (default: `true`) |
-| `clientId` | string | Your process ID — enables private tools. Also accepted via `X-Client-Id` header. |
-| `nodeId` | string | Your machine ID — enables local-shared tools. Also accepted via `X-Node-Id` header. |
+| `clientId` | string | Your process ID — a discovery constraint; verified registration binding is still required. Also accepted via `X-Client-Id` header. |
+| `nodeId` | string | Your machine ID — a discovery constraint; verified registration binding is still required. Also accepted via `X-Node-Id` header. |
 | `serverId` | UUID | Filter to a specific server |
 | `tags` | string | Comma-separated tag filter |
 | `limit` | integer | 1–20, default 10 |
@@ -2221,7 +2277,7 @@ tw daemon start --tools codex \
 CLI daemon review:
 
 ```bash
-tw daemon review --project <project-id> --base main \
+tw daemon review --project <project-id> --base 0.3.3 \
   --check "pnpm typecheck" \
   --check "pnpm test" \
   --prompt-file ~/.config/tw/review-extra.md
@@ -2258,7 +2314,7 @@ The review daemon calls `apply-review` to claim one `in_review` requirement at a
 CLI daemon merge:
 
 ```bash
-tw daemon merge --project <project-id> --base main
+tw daemon merge --project <project-id> --base 0.3.3
 ```
 
 ### Apply Merge Lane

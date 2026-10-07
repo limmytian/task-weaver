@@ -90,12 +90,14 @@ PostgreSQL is maintained by your database operator. See
 [deployment](docs/deployment.md) for compatibility, persistence, backup, and
 upgrade guidance.
 
-The Compose example and source development are intended for a trusted local
-environment.
-The Web UI and API allow unauthenticated access; an API key identifies an actor
-but does not protect the entire application. Do not expose these services to the
-Internet without an authenticated gateway and a separate deployment review.
-See [deployment](docs/deployment.md) for persistence, backups, and rollback.
+The published images selected by the Compose defaults predate 0.3.3 authentication
+and remain intended for a trusted local environment. The `0.3.3` source requires
+revocable sessions or subject-bound scoped Keys and live resource permissions;
+Actor headers cannot supply identity. API and Web need matching authentication
+Secret/base URL/origin configuration. See [authenticated access](docs/authenticated-access.md)
+for bootstrap, account/Key management and explicit legacy ownership migration.
+Use TLS outside loopback. Source acceptance does not update published images or
+authorize production rollout; see [deployment](docs/deployment.md).
 
 The historical v0.1.0 images selected by Compose defaults support Linux ARM64 only. v0.1.0 does
 not publish AMD64 images, floating tags, signatures, npm packages, a first-party
@@ -105,7 +107,8 @@ PostgreSQL image, or complete upgrade/downgrade certification.
 
 ```bash
 pnpm install --frozen-lockfile
-# Provision PostgreSQL with vector and pg_trgm; set DATABASE_URL in .env.
+# Provision PostgreSQL with vector and pg_trgm.
+# Set DATABASE_URL and the authentication settings from .env.example locally.
 pnpm exec dotenv -- pnpm --filter @task-weaver/db db:migrate
 pnpm exec dotenv -- pnpm --filter @task-weaver/db db:setup-search
 pnpm dev
@@ -140,7 +143,8 @@ For regular use, add an alias pointing to the checkout's installed `tsx`:
 
 ```bash
 alias tw='/path/to/task-weaver/node_modules/.bin/tsx /path/to/task-weaver/apps/cli/src/index.ts'
-tw auth setup
+tw auth login
+tw auth whoami --json
 tw auth status
 ```
 
@@ -153,6 +157,7 @@ checkout instructions above.
 ## Documentation and community
 
 - [Architecture](docs/design.md) ([简体中文](docs/design.zh-CN.md))
+- [Authenticated accounts, CLI access and offline upgrade](docs/authenticated-access.md)
 - [Deployment and rollback](docs/deployment.md)
 - [Release gates](docs/release-gates.md)
 - [CE packages](docs/ce-packages.md) and [release operations](docs/release-operations.md)
