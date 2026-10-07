@@ -199,12 +199,12 @@ export async function listScheduleRuns(db: Database, scheduleId: string) {
   });
 }
 
-export async function runScheduleNow(db: Database, id: string, actor: Actor) {
+export async function runScheduleNow(db: Database, id: string, actor: Actor, operations?: { createTask: typeof createTask; createRun: typeof createRun }) {
   const schedule = await getSchedule(db, id);
   if (schedule.status === "archived") {
     throw new ValidationError("Archived schedules cannot be run");
   }
-  return processOccurrence(db, schedule, new Date(), actor, "manual");
+  return processOccurrence(db, schedule, new Date(), actor, "manual", operations);
 }
 
 export async function acquireDueSchedules(
@@ -263,6 +263,7 @@ async function processOccurrence(
   plannedFor: Date,
   actor: Actor,
   mode: "manual" | "scheduled",
+  operations?: { createTask: typeof createTask; createRun: typeof createRun },
 ) {
   const run = await ensurePendingRun(db, schedule, plannedFor);
   if (run.status === "created" && run.generatedTaskId) return run;
@@ -303,7 +304,7 @@ async function processOccurrence(
       expectedAt: plannedFor,
     };
 
-  const task = await createTask(db, taskInput, actor);
+  const task = await (operations?.createTask ?? createTask)(db, taskInput, actor);
 
   const [updated] = await db
     .update(scheduleRuns)
@@ -326,7 +327,7 @@ async function processOccurrence(
   });
 
   if (schedule.autoRun && schedule.assignedExecutor && schedule.assignedExecutorType === "agent") {
-    await createRun(db, {
+    await (operations?.createRun ?? createRun)(db, {
       taskId: task.id,
       scheduleRunId: updated!.id,
       assignedAgentId: schedule.assignedExecutor,

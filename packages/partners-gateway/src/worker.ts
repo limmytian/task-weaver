@@ -1,3 +1,4 @@
+import { createGatewayTwAuthority } from './tw-authority.js';
 import type { Database } from "@task-weaver/db";
 import { hostname } from "node:os";
 import {
@@ -37,6 +38,8 @@ export type TiAgentGatewayWorkerOptions = {
 };
 
 type WorkerDependencies = {
+  validateRun?: (id: string) => Promise<void>;
+  authorizeDispatch?: (id: string) => Promise<import("@task-weaver/contracts").ExecutionDelegation>;
   acquireRun: typeof tiAgentService.acquireRun;
   getRun: typeof tiAgentService.getRun;
   heartbeatRunLease: typeof tiAgentService.heartbeatRunLease;
@@ -129,6 +132,7 @@ export class TiAgentGatewayWorker {
     let sessionIdToCleanup: string | null = null;
 
     try {
+      await this.dependencies.validateRun?.(run.id);
       const detailedRun = await this.dependencies.getRun(this.db, run.id);
       if (signal.aborted) return true;
       const prompt = buildTiAgentRunPrompt(detailedRun);
@@ -136,6 +140,7 @@ export class TiAgentGatewayWorker {
         run: detailedRun,
         prompt,
         config: this.gatewayConfig,
+        authority: await this.dependencies.authorizeDispatch?.(run.id),
       }));
       sessionIdToCleanup = job.sessionId ?? job.id;
       const events: Parameters<typeof buildTiCompletionFromGateway>[0]["events"] = [];
@@ -147,6 +152,7 @@ export class TiAgentGatewayWorker {
       signal.addEventListener("abort", abortStream, { once: true });
       const heartbeatTimer = setInterval(() => {
         heartbeatInFlight = heartbeatInFlight
+          .then(() => this.dependencies.validateRun?.(run.id))
           .then(() => this.dependencies.heartbeatRunLease(this.db, run.id, {
             workerId: this.options.workerId,
             durationMinutes: this.options.leaseDurationMinutes,
@@ -155,14 +161,16 @@ export class TiAgentGatewayWorker {
           .catch((error: unknown) => {
             heartbeatFailure = error;
             streamController.abort();
+            if (sessionIdToCleanup) void this.gatewayClient.deleteSession(sessionIdToCleanup).catch(() => undefined);
           });
-      }, this.options.heartbeatIntervalMs);
+      }, this.dependencies.validateRun ? Math.min(1_000, this.options.heartbeatIntervalMs) : this.options.heartbeatIntervalMs);
 
       try {
         if (!TERMINAL_STATES.has(job.state)) {
           for await (const event of this.gatewayClient.streamEvents(job.id, {
             signal: streamController.signal,
           })) {
+            await this.dependencies.validateRun?.(run.id);
             events.push(event);
             if (events.length > 500) events.splice(0, events.length - 500);
             if (event.state) job = { ...job, state: event.state };
@@ -193,6 +201,7 @@ export class TiAgentGatewayWorker {
             return true;
           }
           if (heartbeatFailure) throw heartbeatFailure;
+          await this.dependencies.validateRun?.(run.id);
           job = await this.gatewayClient.getJob(job.id);
         }
       } finally {
@@ -303,13 +312,14 @@ export function createTiAgentGatewayWorkerFromEnv(
 ) {
   if (!gatewayConfig.enabled) return null;
   const workerConfig = getPartnersGatewayWorkerConfig(env);
-  return createTiAgentGatewayWorker(db, gatewayConfig, workerConfig);
+  return createTiAgentGatewayWorker(db, gatewayConfig, workerConfig, () => env.TW_PARTNERS_GATEWAY_API_KEY);
 }
 
 export function createTiAgentGatewayWorker(
   db: Database,
   gatewayConfig: PartnersGatewayConfig,
   workerConfig: PartnersGatewayWorkerConfig,
+  getProductKey: () => string | undefined = () => undefined,
 ) {
   if (!gatewayConfig.enabled) return null;
   return new TiAgentGatewayWorker(
@@ -328,6 +338,7 @@ export function createTiAgentGatewayWorker(
       retryBaseDelayMs: workerConfig.retryBaseDelayMs,
       retryMaxDelayMs: workerConfig.retryMaxDelayMs,
     },
+    { ...defaultDependencies, ...createGatewayTwAuthority(db, gatewayConfig, workerConfig, getProductKey) } as WorkerDependencies,
   );
 }
 

@@ -61,6 +61,7 @@ export const tiAgentRuns = pgTable(
     status: text("status", {
       enum: ["queued", "running", "succeeded", "failed", "in_review", "cancelled"],
     }).default("queued").notNull(),
+    authorization: jsonb("execution_authority").$type<unknown>(),
     leaseOwnerId: text("lease_owner_id"),
     leaseOwnerType: actorTypeEnum("lease_owner_type"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),

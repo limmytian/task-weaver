@@ -416,14 +416,15 @@ export async function createRun(
   db: Database,
   input: CreateTiAgentRunInput,
   actor: Actor,
+  modelOwner: Actor = actor,
 ) {
   await validateRunTarget(db, input);
-  const policy = await getPolicy(db, {}, actor);
+  const policy = await getPolicy(db, {}, modelOwner);
   const model = await resolveModel(db, {
     requestedProvider: input.requestedProvider,
     requestedModel: input.requestedModel,
     target: "agent",
-  }, actor);
+  }, modelOwner);
 
   const [run] = await db
     .insert(tiAgentRuns)

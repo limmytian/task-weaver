@@ -56,4 +56,6 @@ export * from "./realtime-authorization";
 
 export { createWebhookService } from "./webhooks";
 
-export { createExecutionDelegationService } from "./execution-delegations";
+export { createExecutionDelegationService, authenticateExecutionDelegation } from "./execution-delegations";
+
+export { createTiExecutionService } from "./ti-execution";

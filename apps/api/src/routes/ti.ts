@@ -1,3 +1,4 @@
+import { createTiExecutionService, tiWorkerFenceSchema, tiHeartbeatSchema, tiProgressSchema, tiRetrySchema } from '@task-weaver/core';
 import { Hono } from "hono";
 import { z } from "zod";
 import {
@@ -174,6 +175,24 @@ tiRoutes.post("/runs/:id/complete", async (c) => {
     if (err instanceof ValidationError) return c.json({ error: err.message }, 400);
     throw err;
   }
+});
+
+for (const [path, operation, schema] of [["heartbeat", "heartbeatRunLease", tiHeartbeatSchema], ["progress", "updateRunProgress", tiProgressSchema], ["retry", "scheduleRunRetry", tiRetrySchema]] as const) {
+  tiRoutes.post(`/runs/:id/${path}`, async c => {
+    const parsed = schema.safeParse(await c.req.json());
+    if (!parsed.success) return c.json({ error: "Validation error" }, 400);
+    return c.json(await createTiExecutionService(c.get("identity")).invoke(c.get("db"), operation, [c.req.param("id"), parsed.data]));
+  });
+}
+tiRoutes.post("/runs/:id/delegations", async c => {
+  const parsed = tiWorkerFenceSchema.strict().safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: "Validation error" }, 400);
+  return c.json(await createTiExecutionService(c.get("identity")).issueDelegation(c.get("db"), c.req.param("id"), parsed.data), 201);
+});
+tiRoutes.post("/runs/:id/delegations/:delegationId/renew", async c => {
+  const parsed = tiWorkerFenceSchema.strict().safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: "Validation error" }, 400);
+  return c.json(await createTiExecutionService(c.get("identity")).renewDelegation(c.get("db"), c.req.param("id"), c.req.param("delegationId"), parsed.data));
 });
 
 tiRoutes.post("/runs/:id/usage", async (c) => {

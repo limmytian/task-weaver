@@ -1,3 +1,4 @@
+import { liveTiRunAuthority } from './ti-execution-authorization';
 import { z } from 'zod';
 import { createHash, randomBytes } from 'node:crypto';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
@@ -10,7 +11,7 @@ import { requireRepository } from './repository-authorization';
 import { requireResource } from './resource-authorization';
 
 type StoredDelegation = typeof executionDelegations.$inferSelect;
-export type ExecutionBounds = Pick<StoredDelegation, 'leaseGeneration' | 'expiresAt' | 'id' | 'projectId' | 'requirementId' | 'taskIds' | 'documentIds' | 'sliceIds' | 'repositoryIds' | 'daemonId' | 'runId' | 'purpose' | 'parentCredentialId'>;
+export type ExecutionBounds = Pick<StoredDelegation, 'leaseGeneration' | 'expiresAt' | 'id' | 'projectId' | 'requirementId' | 'taskIds' | 'documentIds' | 'sliceIds' | 'repositoryIds' | 'daemonId' | 'runId' | 'purpose' | 'parentCredentialId' | 'tiRunId'>;
 const idSchema = z.string().uuid();
 const digest = (token: string) => createHash('sha256').update(token).digest('hex');
 const phasePermission = (purpose: ExecutionDelegation['purpose']): AuthorizationPermission => purpose === 'review' ? 'execution.review' : purpose === 'merge' ? 'execution.merge' : 'execution.run';
@@ -34,6 +35,16 @@ export async function liveExecutionAuthority(db: AuthDatabase, id: string, now =
   const parent = await getBoundCredentialAuthority(db, { actorId: row.actorId, credentialId: row.parentCredentialId, credentialKind: 'api_key' });
   if (parent.actor.type !== 'agent') throw new AuthenticationError('invalid_credential');
   await loadActivePrincipal(db, row.initiatorActorId);
+  if (row.purpose === 'automation') {
+    if (!row.tiRunId || row.daemonId) throw new AuthenticationError('invalid_credential');
+    const live = await liveTiRunAuthority(database, row.tiRunId);
+    if (live.binding.executorActorId !== row.actorId || live.binding.executorCredentialId !== row.parentCredentialId
+      || live.binding.initiatorActorId !== row.initiatorActorId || live.binding.claimId !== row.runId
+      || live.binding.leaseGeneration !== Number(row.leaseGeneration) || live.claim?.workerIndex !== row.workerIndex
+      || row.taskIds.length !== 1 || row.taskIds[0] !== live.task.id || live.task.projectId !== row.projectId || live.task.requirementId !== row.requirementId) throw new AuthenticationError('invalid_credential');
+    if (!grantsAreCovered(credentialGrantsSchema.parse(row.grants), live.initiator.grants)) throw new AuthorizationError();
+  } else {
+  if (!row.daemonId || row.tiRunId) throw new AuthenticationError('invalid_credential');
   const daemon = await database.query.daemons.findFirst({ where: eq(daemons.id, row.daemonId) });
   const lease = await database.query.requirementClaims.findFirst({ where: eq(requirementClaims.requirementId, row.requirementId) });
   const requirement = await database.query.requirements.findFirst({ where: eq(requirements.id, row.requirementId) });
@@ -43,12 +54,13 @@ export async function liveExecutionAuthority(db: AuthDatabase, id: string, now =
     || lease.daemonId !== row.daemonId || lease.workerIndex !== row.workerIndex || lease.generation !== Number(row.leaseGeneration)
     || lease.expiresAt <= now || !requirement || requirement.projectId !== row.projectId || requirement.leaseGeneration !== Number(row.leaseGeneration)
     || ['cancelled', 'done', 'archived'].includes(requirement.status)) throw new AuthenticationError('invalid_credential');
+  }
   if (!grantsAreCovered(credentialGrantsSchema.parse(row.grants), parent.grants)) throw new AuthorizationError();
   const authority = { ...parent, bounds: null };
   for (const taskId of row.taskIds) {
     const task = await database.query.tasks.findFirst({ where: eq(tasks.id, taskId) });
     if (!task || task.scope !== 'project' || task.requirementId !== row.requirementId || task.projectId !== row.projectId
-      || task.status === 'cancelled' || (row.purpose === 'execute' && task.status === 'done')) throw new AuthenticationError('invalid_credential');
+      || task.status === 'cancelled' || (['execute', 'automation'].includes(row.purpose) && task.status === 'done')) throw new AuthenticationError('invalid_credential');
     await requireResource(database, authority, 'task', taskId, phasePermission(row.purpose));
   }
   for (const documentId of row.documentIds) {
@@ -78,7 +90,7 @@ export async function authenticateExecutionDelegation(db: AuthDatabase, token: s
   }, verifiedAt: new Date().toISOString() }) as VerifiedRequestContext;
 }
 
-async function insertCapability(db: Database, bounds: Omit<typeof executionDelegations.$inferInsert, 'id' | 'tokenHash' | 'createdAt' | 'expiresAt'>, deadline: Date) {
+export async function insertCapability(db: Database, bounds: Omit<typeof executionDelegations.$inferInsert, 'id' | 'tokenHash' | 'createdAt' | 'expiresAt'>, deadline: Date) {
   const now = new Date();
   const expiresAt = new Date(Math.min(now.getTime() + 15 * 60_000, deadline.getTime()));
   if (expiresAt <= now) throw new AuthenticationError('credential_expired');

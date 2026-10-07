@@ -1,6 +1,7 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { createTiExecutionService, isTiExecutionOperation } from './ti-execution';
+import { inArray, and, eq, isNull, sql } from "drizzle-orm";
 import {
-  type Database, projects, requirements, tasks, documents, memories, executionSlices,
+  type Database, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
   mcpTools, mcpLocalRequests, requirementRepositories, skillPackages, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
   documentRequirementLinks, projectMemberships, activityLog, executionDelegations,
 } from "@task-weaver/db";
@@ -85,6 +86,7 @@ function bindServices(context?: VerifiedRequestContext) {
       return [name, async (...args: any[]) => {
         if (!context) throw new AuthorizationError();
         const db = args[0] as Database;
+        if (group === "ti" && isTiExecutionOperation(name)) return createTiExecutionService(context).invoke(db, name, args.slice(1));
         if (group === "mcp" && name === "callTool") return invokeMcpTool(db, context, args[1], args[2], args[3], args[4]);
         return db.transaction(async tx => {
           // Serialize policy mutations with resource operations, including reads and nested relations.
@@ -104,6 +106,10 @@ function bindServices(context?: VerifiedRequestContext) {
             ? await tx.query.documentTaskLinks.findFirst({ where: eq(documentTaskLinks.id, call[1]) })
             : name === "unlinkDocumentFromRequirement"
               ? await tx.query.documentRequirementLinks.findFirst({ where: eq(documentRequirementLinks.id, call[1]) }) : undefined;
+          if (group === "schedule" && name === "runScheduleNow") {
+            const services = createResourceServices(context);
+            call[3] = { createTask: services.taskService.createTask, createRun: services.tiAgentService.createRun };
+          }
           let result: any;
           if (name === "createProject") {
             if (authority.actor.type !== "human" || !authority.grants.some(g => g.scope === "instance" && g.permissions.includes("project.create"))) throw new AuthorizationError();
@@ -131,12 +137,15 @@ function bindServices(context?: VerifiedRequestContext) {
             else await tx.insert(activityLog).values({ entityType: group === "claim" ? "task" : group as "project" | "requirement" | "task" | "document", entityId, action: name, actorId: actor.id, actorType: actor.type });
           }
           if (group === "task" && ["updateTask", "updateTaskStatus"].includes(name) && ["done", "cancelled"].includes(result?.status)) {
-            await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(isNull(executionDelegations.revokedAt), sql`${call[1]}::uuid = ANY(${executionDelegations.taskIds})`, result.status === "done" ? eq(executionDelegations.purpose, "execute") : undefined));
+            await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(isNull(executionDelegations.revokedAt), sql`${call[1]}::uuid = ANY(${executionDelegations.taskIds})`, result.status === "done" ? inArray(executionDelegations.purpose, ["execute", "automation"]) : undefined));
           }
           if (group === "requirement" && ["updateRequirement", "updateRequirementStatus"].includes(name) && ["done", "cancelled", "archived"].includes(result?.status)) {
             await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(isNull(executionDelegations.revokedAt), eq(executionDelegations.requirementId, call[1])));
           }
-          if (name === "updateTask" && ["requirementId", "executionSliceId"].some(key => key in (call[2] ?? {}))) {
+          if (group === "task" && name === "updateTask" && ["requirementId", "executionSliceId", "assignee", "assigneeType"].some(key => key in (call[2] ?? {}))) {
+            await tx.update(tiAgentRuns).set({ status: "cancelled", completedAt: new Date(), leaseExpiresAt: new Date() }).where(and(eq(tiAgentRuns.taskId, call[1]), inArray(tiAgentRuns.status, ["queued", "running", "in_review"])));
+          }
+          if (name === "updateTask" && ["requirementId", "executionSliceId", "assignee", "assigneeType"].some(key => key in (call[2] ?? {}))) {
             await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(isNull(executionDelegations.revokedAt), sql`${call[1]}::uuid = ANY(${executionDelegations.taskIds})`));
           }
           if (name === "updateDocument" && ["projectId", "personalOwnerId", "personalOwnerType", "scope"].some(key => key in (call[2] ?? {}))) {
@@ -220,12 +229,12 @@ function redactDelegatedInput(value: any): any {
 function authorizeDelegatedOperation(authority: ResourceAuthority, group: Group, name: string, call: any[]) {
   const reads = new Set(["getProject", "getRequirement", "getTask", "getTaskDetail", "listTasks", "listRequirements", "listProjects", "getDocument", "getDocumentDetail", "listDocuments", "getTaskClaim", "getRequirementClaim", "listExecutionSlices", "listTaskComments", "listTaskNotes", "listDocumentVersions", "getDocumentVersion", "getRequirementRepositories", "getTaskRepositories", "listRequirementRepositories", "listTaskRepositories", "getRepository", "listRepositories", "bootstrapContext", "searchTasks", "searchRequirements", "searchDocuments", "searchDocumentsFulltext", "searchAll", "resolveTitles", "listContextEntries", "searchContext", "getContextEntry"]);
   const writes = new Set(["updateTask", "updateTaskStatus", "addTaskComment", "addTaskNote", "claimTask", "releaseTask", "heartbeatClaim", "updateDocument"]);
-  if (!reads.has(name) && !(authority.bounds?.purpose === "execute" && writes.has(name))) throw new AuthorizationError();
+  if (!reads.has(name) && !(["execute", "automation"].includes(authority.bounds?.purpose ?? "") && writes.has(name))) throw new AuthorizationError();
   if (["usage", "review", "ti", "activity", "schedule", "observability", "metrics", "progress", "daemon", "mcp", "embedding", "memory", "package", "slo"].includes(group)) throw new AuthorizationError();
   if (name === "updateTask" && Object.keys(call[2] ?? {}).some(key => !["title", "description", "priority", "expectedAt", "expectedVersion", "version", "status", "reason", "daemonId", "leaseGeneration"].includes(key))) throw new AuthorizationError();
   if (name === "updateTaskStatus") {
     if (call[5] === true) throw new AuthorizationError();
-    const fence = { daemonId: authority.bounds!.daemonId, leaseGeneration: Number(authority.bounds!.leaseGeneration) };
+    const fence = { daemonId: authority.bounds!.daemonId ?? undefined, leaseGeneration: Number(authority.bounds!.leaseGeneration) };
     if ((call[6]?.daemonId && call[6].daemonId !== fence.daemonId) || (call[6]?.leaseGeneration !== undefined && call[6].leaseGeneration !== fence.leaseGeneration)) throw new AuthorizationError();
     call[6] = fence;
   }
@@ -663,5 +672,5 @@ function redactRepositoryResult(result: any): any {
 function redactMetadataResult(value: any, group: string): any {
   if (Array.isArray(value)) return value.map(item => redactMetadataResult(item, group));
   if (!value || typeof value !== "object" || value instanceof Date) return value;
-  return Object.fromEntries(Object.entries(value).filter(([key]) => !["apiKeyRef", "baseUrl", "sandboxSessionId", "eventLog", "errorMessage", "leaseOwnerId", "leaseOwnerType", "leaseExpiresAt"].includes(key)).map(([key, item]) => [key, group === "activity" && key === "metadata" ? {} : redactMetadataResult(item, group)]));
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !["authorization", "apiKeyRef", "baseUrl", "sandboxSessionId", "eventLog", "errorMessage", "leaseOwnerId", "leaseOwnerType", "leaseExpiresAt"].includes(key)).map(([key, item]) => [key, group === "activity" && key === "metadata" ? {} : redactMetadataResult(item, group)]));
 }

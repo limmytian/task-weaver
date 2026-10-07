@@ -55,7 +55,7 @@ export function createPartnersGatewayRuntime(db: Database, env: NodeJS.ProcessEn
       id: "partners-gateway-runner",
       start: () => {
         const resolvedWorkerConfig = workerConfig ?? getPartnersGatewayWorkerConfig(env);
-        worker = createTiAgentGatewayWorker(db, config, resolvedWorkerConfig);
+        worker = createTiAgentGatewayWorker(db, config, resolvedWorkerConfig, () => env.TW_PARTNERS_GATEWAY_API_KEY);
         worker?.start();
       },
       stop: async () => {

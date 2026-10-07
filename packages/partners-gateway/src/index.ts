@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { CompleteTiAgentRunInput } from "@task-weaver/contracts";
+import { executionDelegationSchema, type ExecutionDelegation, type CompleteTiAgentRunInput } from "@task-weaver/contracts";
 
 const optionalString = (schema: z.ZodString) => z.preprocess(
   (value) => value === "" ? undefined : value,
@@ -26,7 +26,7 @@ const gatewayWorkerConfigSchema = z.object({
   actorId: optionalString(z.string().min(1)).default("task-weaver:ti-agent"),
   assignedAgentId: optionalString(z.string().min(1)).default("task-weaver:ti-agent"),
   workerId: optionalString(z.string().min(1)),
-  leaseDurationMinutes: z.coerce.number().int().min(1).max(1_440).default(15),
+  leaseDurationMinutes: z.coerce.number().int().min(1).max(15).default(15),
   heartbeatIntervalMs: z.coerce.number().int().min(100).max(86_400_000).default(300_000),
   progressFlushIntervalMs: z.coerce.number().int().min(100).max(3_600_000).default(2_000),
   idlePollIntervalMs: z.coerce.number().int().min(100).max(3_600_000).default(5_000),
@@ -178,9 +178,12 @@ export function createPartnersGatewayClient(
     ...(config.serviceToken ? { authorization: `Bearer ${config.serviceToken}` } : {}),
   };
 
+  const gatewayRequest = (url: string, options: RequestInit = {}) => fetchImpl(url, {
+    ...options, redirect: 'error', signal: options.signal ?? AbortSignal.timeout(10_000),
+  });
   return {
     async createJob(request: PartnersGatewayJobRequest): Promise<PartnersGatewayJob> {
-      const response = await fetchImpl(`${baseUrl}/v1/jobs`, {
+      const response = await gatewayRequest(`${baseUrl}/v1/jobs`, {
         method: "POST",
         headers: {
           ...headers,
@@ -192,17 +195,17 @@ export function createPartnersGatewayClient(
     },
 
     async getJob(jobId: string): Promise<PartnersGatewayJob> {
-      const response = await fetchImpl(`${baseUrl}/v1/jobs/${jobId}`, { headers });
+      const response = await gatewayRequest(`${baseUrl}/v1/jobs/${jobId}`, { headers });
       return parseGatewayJson<PartnersGatewayJob>(response);
     },
 
     async listArtifacts(jobId: string): Promise<{ items: unknown[] }> {
-      const response = await fetchImpl(`${baseUrl}/v1/jobs/${jobId}/artifacts`, { headers });
+      const response = await gatewayRequest(`${baseUrl}/v1/jobs/${jobId}/artifacts`, { headers });
       return parseGatewayJson<{ items: unknown[] }>(response);
     },
 
     async deleteSession(sessionId: string): Promise<void> {
-      const response = await fetchImpl(`${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}`, {
+      const response = await gatewayRequest(`${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}`, {
         method: "DELETE",
         headers,
       });
@@ -215,7 +218,7 @@ export function createPartnersGatewayClient(
       sessionId: string,
       files: Array<{ path: string; content: string }>,
     ): Promise<{ written: string[]; totalBytes: number }> {
-      const response = await fetchImpl(`${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/workspace/sync`, {
+      const response = await gatewayRequest(`${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/workspace/sync`, {
         method: "POST",
         headers,
         body: JSON.stringify({ files }),
@@ -224,7 +227,7 @@ export function createPartnersGatewayClient(
     },
 
     async health(): Promise<Record<string, unknown>> {
-      const response = await fetchImpl(`${baseUrl}/health`, { headers });
+      const response = await gatewayRequest(`${baseUrl}/health`, { headers });
       if (!response.ok) return parseGatewayJson<Record<string, unknown>>(response);
       return response.json().catch(() => ({ status: "ok" })) as Promise<Record<string, unknown>>;
     },
@@ -233,7 +236,7 @@ export function createPartnersGatewayClient(
       jobId: string,
       options: { signal?: AbortSignal; lastEventId?: string } = {},
     ): AsyncGenerator<PartnersGatewayEvent> {
-      const response = await fetchImpl(`${baseUrl}/v1/jobs/${jobId}/events`, {
+      const response = await gatewayRequest(`${baseUrl}/v1/jobs/${jobId}/events`, {
         headers: {
           ...headers,
           accept: "text/event-stream",
@@ -308,6 +311,7 @@ export function buildGatewayJobRequestFromTiRun(input: {
   prompt: string;
   config: PartnersGatewayConfig;
   timeoutSeconds?: number;
+  authority?: ExecutionDelegation;
 }): PartnersGatewayJobRequest {
   return {
     id: `tw_ti_${input.run.id}`,
@@ -334,6 +338,7 @@ export function buildGatewayJobRequestFromTiRun(input: {
     },
     metadata: {
       taskWeaver: {
+        delegation: input.authority ? executionDelegationSchema.parse(input.authority) : null,
         tiAgentRunId: input.run.id,
         taskId: input.run.taskId ?? null,
         scheduleRunId: input.run.scheduleRunId ?? null,
@@ -441,7 +446,7 @@ function summarizeGatewayEvents(events: PartnersGatewayEvent[]) {
 async function parseGatewayJson<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({})) as { error?: unknown };
   if (!response.ok) {
-    const message = typeof body?.error === "string" ? body.error : `Partners gateway HTTP ${response.status}`;
+    const message = `Partners gateway HTTP ${response.status}`;
     throw new PartnersGatewayError(message, response.status);
   }
   return body as T;

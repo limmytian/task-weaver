@@ -39,10 +39,14 @@ export async function authorizeMetadataOperation(db: Database, authority: Resour
       call[1] = await authorizeScheduleInput(db, authority, { ...call[1] });
       return;
     }
-    if (["getSchedule", "updateSchedule", "archiveSchedule", "listScheduleRuns"].includes(name)) {
+    if (["getSchedule", "updateSchedule", "archiveSchedule", "listScheduleRuns", "runScheduleNow"].includes(name)) {
       const [row] = await db.select().from(schedules).where(and(eq(schedules.id, call[1]), schedulePredicate(authority))).limit(1);
       if (!row) throw new NotFoundError("Resource not found");
-      if (["updateSchedule", "archiveSchedule"].includes(name)) requireScope(authority, row, row.projectId ? "project.manage" : "resource.write");
+      if (["updateSchedule", "archiveSchedule", "runScheduleNow"].includes(name)) requireScope(authority, row, row.projectId ? "project.manage" : "resource.write");
+      if (name === "runScheduleNow") {
+        await authorizeScheduleInput(db, authority, { ...row });
+        if (row.status !== "active") throw new AuthorizationError();
+      }
       if (name === "updateSchedule") {
         const merged = await authorizeScheduleInput(db, authority, { ...row, ...call[2] });
         call[2] = { ...call[2], projectId: merged.projectId, requirementId: merged.requirementId, targetScope: merged.targetScope, personalOwnerId: merged.personalOwnerId, personalOwnerType: merged.personalOwnerType };

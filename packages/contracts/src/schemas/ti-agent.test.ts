@@ -2,18 +2,19 @@ import assert from "node:assert";
 import { test } from "node:test";
 import {
   createTiAgentRunSchema,
-  TI_SERVER_AGENT_ID,
   resolveTiModelSchema,
   upsertTiAgentPolicySchema,
   upsertTiModelConfigSchema,
 } from "./ti-agent";
 
 test("Ti agent schemas", async (t) => {
-  await t.test("defaults queued runs to the bounded server agent", () => {
+  await t.test("requires an explicit stable assigned agent", () => {
     const parsed = createTiAgentRunSchema.parse({
       taskId: "00000000-0000-4000-8000-000000000001",
+      assignedAgentId: "00000000-0000-4000-8000-000000000002",
     });
-    assert.equal(parsed.assignedAgentId, TI_SERVER_AGENT_ID);
+    assert.equal(parsed.assignedAgentId, "00000000-0000-4000-8000-000000000002");
+    assert.equal(createTiAgentRunSchema.safeParse({ taskId: parsed.taskId }).success, false);
     assert.equal(parsed.assignedAgentType, "agent");
     assert.equal(parsed.maxRetries, undefined);
   });

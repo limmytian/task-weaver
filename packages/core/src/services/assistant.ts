@@ -1,3 +1,8 @@
+import { createResourceServices } from './resource-services';
+import { getLiveRequestAuthority } from './api-keys';
+import { lockIdentityLifecycle } from './auth-security';
+import { requireResource } from './resource-authorization';
+import { AuthorizationError, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import {
   type Database,
@@ -16,7 +21,7 @@ import {
   schedules,
   tasks,
 } from "@task-weaver/db";
-import { NotFoundError, ValidationError } from "@task-weaver/contracts";
+import { NotFoundError, ValidationError, assistantActionProposalSchema } from "@task-weaver/contracts";
 import type { Actor } from "@task-weaver/contracts";
 import type {
   BuildAssistantContextInput,
@@ -30,16 +35,8 @@ import type {
   UpdateAssistantActionStatusInput,
 } from "@task-weaver/contracts";
 import type { TaskStatus } from "@task-weaver/contracts";
-import { createDocument } from "./documents";
-import { createRun, resolveModel } from "./ti-agent";
-import { createSchedule, updateSchedule } from "./schedules";
-import {
-  addTaskComment,
-  addTaskNote,
-  createTask,
-  updateTask,
-  updateTaskStatus,
-} from "./tasks";
+import { resolveModel } from "./ti-agent";
+
 
 const REDACTED = "[redacted]";
 const SECRET_KEY_PATTERN = /(api[_-]?key|token|secret|password|credential|authorization)/i;
@@ -922,53 +919,56 @@ function proposalFromAction(action: AssistantActionRow): AssistantActionProposal
     payload: action.payload,
     preview: action.preview ?? undefined,
   };
-  return parsed as AssistantActionProposal;
+  const validated = assistantActionProposalSchema.safeParse(parsed);
+  if (!validated.success) throw new ValidationError("Invalid assistant action payload");
+  return validated.data;
 }
 
 async function executeActionPayload(
   db: Database,
   action: AssistantActionRow,
   actor: Actor,
+  services: ReturnType<typeof createResourceServices>,
 ) {
   const proposal = proposalFromAction(action);
 
   switch (proposal.actionType) {
     case "create_task": {
-      const result = await createTask(db, proposal.payload, actor);
+      const result = await services.taskService.createTask(db, proposal.payload, actor);
       return { entityType: "task", entityId: result.id, result };
     }
     case "update_task": {
       const { taskId, status, reason, force, ...updates } = proposal.payload;
       let result = Object.keys(updates).length > 0
-        ? await updateTask(db, taskId, updates, actor)
-        : await db.query.tasks.findFirst({ where: eq(tasks.id, taskId) });
+        ? await services.taskService.updateTask(db, taskId, updates, actor)
+        : await services.taskService.getTask(db, taskId);
       if (status) {
-        result = await updateTaskStatus(db, taskId, status as TaskStatus, actor, reason, force);
+        result = await services.taskService.updateTaskStatus(db, taskId, status as TaskStatus, actor, reason, force);
       }
       return { entityType: "task", entityId: taskId, result };
     }
     case "create_schedule": {
-      const result = await createSchedule(db, proposal.payload, actor);
+      const result = await services.scheduleService.createSchedule(db, proposal.payload, actor);
       return { entityType: "schedule", entityId: result.id, result };
     }
     case "pause_schedule": {
-      const result = await updateSchedule(db, proposal.payload.scheduleId, { status: "paused" }, actor);
+      const result = await services.scheduleService.updateSchedule(db, proposal.payload.scheduleId, { status: "paused" }, actor);
       return { entityType: "schedule", entityId: result.id, result };
     }
     case "queue_ti_run": {
-      const result = await createRun(db, proposal.payload, actor);
+      const result = await services.tiAgentService.createRun(db, proposal.payload, actor);
       return { entityType: "ti_agent_run", entityId: result.id, result };
     }
     case "add_comment": {
-      const result = await addTaskComment(db, proposal.payload.taskId, proposal.payload.content, actor);
+      const result = await services.taskService.addTaskComment(db, proposal.payload.taskId, proposal.payload.content, actor);
       return { entityType: "task", entityId: proposal.payload.taskId, result };
     }
     case "add_note": {
-      const result = await addTaskNote(db, proposal.payload.taskId, proposal.payload.content, proposal.payload.pinned, actor);
+      const result = await services.taskService.addTaskNote(db, proposal.payload.taskId, proposal.payload.content, proposal.payload.pinned, actor);
       return { entityType: "task", entityId: proposal.payload.taskId, result };
     }
     case "draft_document": {
-      const result = await createDocument(db, {
+      const result = await services.documentService.createDocument(db, {
         ...proposal.payload,
         generatedBy: proposal.payload.generatedBy ?? "assistant",
         generationPrompt: proposal.payload.generationPrompt ?? action.preview ?? undefined,
@@ -979,37 +979,35 @@ async function executeActionPayload(
   }
 }
 
+/** Approval is intent, not a stored permission bypass. Recheck each payload target through core. */
 export async function executeApprovedAction(
   db: Database,
   id: string,
   actor: Actor,
+  context?: VerifiedRequestContext,
 ) {
-  const action = await db.query.assistantActions.findFirst({
-    where: eq(assistantActions.id, id),
-  });
-  if (!action) throw new NotFoundError("Assistant action not found");
-  if (!["proposed", "approved"].includes(action.status)) {
-    throw new ValidationError(`Assistant action cannot execute from status '${action.status}'`);
-  }
-
-  await updateActionStatus(db, id, { status: "approved" }, actor);
-  await updateActionStatus(db, id, { status: "executing" }, actor);
-
-  try {
-    const execution = await executeActionPayload(db, action, actor);
-    return updateActionStatus(db, id, {
-      status: "succeeded",
-      executionResult: {
-        entityType: execution.entityType,
-        entityId: execution.entityId,
-        result: execution.result,
-      },
+  if (!context) throw new AuthorizationError();
+  return db.transaction(async tx => {
+    await lockIdentityLifecycle(tx);
+    const authority = await getLiveRequestAuthority(tx, context);
+    if (authority.bounds || actor.id !== authority.actor.id || actor.type !== authority.actor.type) throw new AuthorizationError();
+    const action = await tx.query.assistantActions.findFirst({ where: eq(assistantActions.id, id) });
+    const conversation = action && await tx.query.assistantConversations.findFirst({ where: eq(assistantConversations.id, action.conversationId) });
+    if (!action || !conversation || conversation.createdBy !== actor.id || conversation.createdByType !== actor.type) throw new NotFoundError("Resource not found");
+    for (const [kind, resourceId] of [["project", conversation.projectId], ["requirement", conversation.requirementId], ["task", conversation.taskId]] as const) {
+      if (resourceId) await requireResource(tx as unknown as Database, authority, kind, resourceId);
+    }
+    if (!["proposed", "approved"].includes(action.status)) throw new ValidationError("Assistant action cannot execute from its current status");
+    // No caller can supply approval identity, execution results, force flags, or completion state.
+    const proposal = proposalFromAction(action);
+    if (proposal.actionType === 'update_task' && proposal.payload.force) throw new AuthorizationError();
+    await updateActionStatus(tx as unknown as Database, id, { status: "approved" }, actor);
+    await updateActionStatus(tx as unknown as Database, id, { status: "executing" }, actor);
+    const execution = await executeActionPayload(tx as unknown as Database, action, actor, createResourceServices(context));
+    return updateActionStatus(tx as unknown as Database, id, {
+      status: "succeeded", executionResult: { entityType: execution.entityType, entityId: execution.entityId, result: execution.result },
     }, actor);
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : "Assistant action execution failed";
-    await updateActionStatus(db, id, { status: "failed", errorMessage }, actor);
-    throw err;
-  }
+  });
 }
 
 function countByStatus(rows: Array<{ status: string }>) {

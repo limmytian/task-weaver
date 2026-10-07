@@ -37,7 +37,7 @@ export const assistantRouter = router({
 
   executeAction: resourceProcedure
     .input(executeAssistantActionSchema)
-    .mutation(async ({ ctx, input }) => assistantService.executeApprovedAction(ctx.db, input.id, ctx.actor)),
+    .mutation(async ({ ctx, input }) => assistantService.executeApprovedAction(ctx.db, input.id, ctx.actor, ctx.identity)),
 
   updateActionStatus: resourceProcedure
     .input(executeAssistantActionSchema.extend({ data: updateAssistantActionStatusSchema }))

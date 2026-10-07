@@ -4,6 +4,7 @@ import { authActors } from './auth';
 import { apiKeys } from './api-keys';
 import { projects } from './projects';
 import { requirements } from './requirements';
+import { tiAgentRuns } from './ti-agent';
 import { daemons } from './daemons';
 
 /** Verifiers and immutable bounds remain private; revoked rows retain execution attribution. */
@@ -15,7 +16,8 @@ export const executionDelegations = pgTable('execution_delegations', {
   initiatorActorId: uuid('initiator_actor_id').notNull().references(() => authActors.id, { onDelete: 'restrict' }),
   projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
   requirementId: uuid('requirement_id').notNull().references(() => requirements.id, { onDelete: 'restrict' }),
-  daemonId: uuid('daemon_id').notNull().references(() => daemons.id, { onDelete: 'restrict' }),
+  tiRunId: uuid('ti_run_id').references(() => tiAgentRuns.id, { onDelete: 'restrict' }),
+  daemonId: uuid('daemon_id').references(() => daemons.id, { onDelete: 'restrict' }),
   runId: uuid('run_id').notNull(),
   workerIndex: text('worker_index').notNull(),
   leaseGeneration: text('lease_generation').notNull(),
@@ -32,5 +34,6 @@ export const executionDelegations = pgTable('execution_delegations', {
   uniqueIndex('execution_delegations_token_hash_unique').on(table.tokenHash),
   uniqueIndex('execution_delegations_active_run_unique').on(table.runId, table.purpose).where(sql`${table.revokedAt} IS NULL`),
   index('execution_delegations_subject_project_idx').on(table.actorId, table.projectId),
+  check('execution_delegations_lease_kind_check', sql`(${table.purpose} = 'automation' AND ${table.tiRunId} IS NOT NULL AND ${table.daemonId} IS NULL) OR (${table.purpose} <> 'automation' AND ${table.tiRunId} IS NULL AND ${table.daemonId} IS NOT NULL)`),
   check('execution_delegations_bounds_check', sql`${table.tokenHash} ~ '^[0-9a-f]{64}$' AND cardinality(${table.taskIds}) > 0 AND ${table.purpose} IN ('execute', 'review', 'merge', 'automation') AND ${table.leaseGeneration} ~ '^[1-9][0-9]*$' AND ${table.expiresAt} > ${table.createdAt} AND ${table.expiresAt} <= ${table.createdAt} + interval '15 minutes'`),
 ]);

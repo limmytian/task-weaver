@@ -98,7 +98,7 @@ export const resolveTiModelSchema = z.object({
 export const createTiAgentRunSchema = z.object({
   taskId: z.string().uuid().optional(),
   scheduleRunId: z.string().uuid().optional(),
-  assignedAgentId: z.string().min(1).default(TI_SERVER_AGENT_ID),
+  assignedAgentId: z.string().uuid(),
   assignedAgentType: z.enum(["human", "agent"]).default("agent"),
   requestedProvider: z.string().nullable().optional(),
   requestedModel: z.string().nullable().optional(),
@@ -123,12 +123,19 @@ export const listTiAgentRunsSchema = z.object({
 });
 
 export const acquireTiAgentRunSchema = z.object({
-  assignedAgentId: z.string().min(1).default(TI_SERVER_AGENT_ID),
+  assignedAgentId: z.string().uuid(),
   workerId: z.string().min(1),
-  durationMinutes: z.number().int().min(1).max(1440).default(15),
+  durationMinutes: z.number().int().min(1).max(15).default(15),
 });
 
+export const tiWorkerFenceSchema = z.object({ workerId: z.string().min(1).max(200), leaseGeneration: z.number().int().positive() });
+export const tiHeartbeatSchema = tiWorkerFenceSchema.extend({ durationMinutes: z.number().int().min(1).max(15).default(15) }).strict();
+export const tiProgressSchema = tiWorkerFenceSchema.extend({ eventLog: z.array(z.unknown()).max(500), outputSummary: z.string().max(8000).nullable().optional(), actualProvider: z.string().nullable().optional(), actualModel: z.string().nullable().optional(), sandboxSessionId: z.string().nullable().optional(), tokenUsageId: z.string().uuid().nullable().optional() }).strict();
+export const tiRetrySchema = tiWorkerFenceSchema.extend({ errorMessage: z.string().max(8000), delayMs: z.number().int().min(0).max(300_000) }).strict();
+
 export const completeTiAgentRunSchema = z.object({
+  workerId: z.string().min(1).optional(),
+  leaseGeneration: z.number().int().positive().optional(),
   status: z.enum(["succeeded", "failed", "in_review", "cancelled"]),
   actualProvider: z.string().nullable().optional(),
   actualModel: z.string().nullable().optional(),

@@ -121,7 +121,7 @@ assistantRoutes.post("/actions/:id/execute", async (c) => {
   }
 
   try {
-    return c.json(await assistantService.executeApprovedAction(db, parsed.data.id, actor));
+    return c.json(await assistantService.executeApprovedAction(db, parsed.data.id, actor, c.get("identity")));
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
     if (err instanceof ValidationError) return c.json({ error: err.message }, 400);
