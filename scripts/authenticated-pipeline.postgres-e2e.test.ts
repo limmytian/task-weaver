@@ -79,6 +79,9 @@ test("authenticated disposable CLI pipeline preserves real roles, delivery and u
   t.after(() => rm(root, { recursive: true, force: true }));
   const home = join(root, "home"), bin = join(root, "bin"), seed = join(root, "seed"), remote = join(root, "remote.git");
   for (const path of [home, bin, seed]) await mkdir(path, { recursive: true });
+  // The disposable fixture must not depend on a host keychain or Git helper.
+  const gitConfig = join(home, ".gitconfig");
+  await writeFile(gitConfig, "[credential]\n\thelper = store\n");
   function git(args: string[], cwd?: string) {
     const result = spawnSync("git", args, { cwd, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
@@ -133,7 +136,7 @@ const fs = require('node:fs'), path = require('node:path');
     const id = randomUUID();
     const child = spawn(process.execPath, ["--import", "tsx/esm", "src/index.ts", "daemon", role, "--id", id, "--project", project.id, "--once", ...extra], {
       cwd: join(process.cwd(), "apps/cli"), stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, HOME: home, PATH: `${bin}${delimiter}${process.env.PATH}`, TW_API_URL: apiUrl, TW_API_KEY: roleKeys[role as keyof typeof roleKeys].issued.rawKey, TW_NODE_ID: "disposable-auth-node", TW_PROVIDER_SECRET: canary,
+      env: { ...process.env, HOME: home, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_SYSTEM: "/dev/null", GIT_CONFIG_GLOBAL: gitConfig, PATH: `${bin}${delimiter}${process.env.PATH}`, TW_API_URL: apiUrl, TW_API_KEY: roleKeys[role as keyof typeof roleKeys].issued.rawKey, TW_NODE_ID: "disposable-auth-node", TW_PROVIDER_SECRET: canary,
         GIT_AUTHOR_NAME: "Fixture", GIT_AUTHOR_EMAIL: "fixture@example.test", GIT_COMMITTER_NAME: "Fixture", GIT_COMMITTER_EMAIL: "fixture@example.test" },
     });
     let output = "";
