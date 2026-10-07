@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
+import { readdirSync } from "node:fs";
 import { createApiApplication } from "../apps/api/src/application";
 import {
   createTRPCContextFactory,
@@ -133,6 +134,56 @@ test(
       requestHeaders.set("content-type", "application/json");
       return rest("graphql", requestHeaders, "POST", { query });
     }
+    await t.test("every registered HTTP entry point rejects forged authority before resource validation", async () => {
+      assert.deepEqual(
+        readdirSync(new URL("../apps/web/app/api/", import.meta.url), { recursive: true })
+          .filter(path => typeof path === "string" && path.endsWith("route.ts"))
+          .sort(),
+        ["auth/csrf/route.ts", "events/route.ts", "trpc/[trpc]/route.ts"],
+        "Classify and exercise any new Next API entry point in the authorization inventory",
+      );
+      const publicRoutes = new Set([
+        "GET /health", "GET /api/v1/version", "GET /api/v1/version/",
+        "GET /api/v1/auth/csrf", "POST /api/v1/auth/login",
+        "POST /api/v1/auth/bootstrap", "POST /api/v1/auth/activate",
+      ]);
+      const inventory = new Set<string>();
+      for (const route of api.routes.flatMap(route => route.method === "ALL" && route.path.includes("graphql")
+        ? ["GET", "POST"].map(method => ({ ...route, method })) : [route])) {
+        if (route.method === "ALL") continue;
+        const identity = `${route.method} ${route.path}`;
+        if (inventory.has(identity)) continue;
+        inventory.add(identity);
+        const path = route.path.replace(/:[^/]+/g, randomUUID()).replace(/\*/g, "fixture");
+        for (const authorization of [undefined, "Basic forged", "Bearer forged"]) {
+          if (authorization === undefined && publicRoutes.has(identity)) continue;
+          const headers = new Headers({ "x-actor-id": randomUUID(), "x-actor-type": "human" });
+          if (authorization) headers.set("authorization", authorization);
+          const response = await api.request(path, { method: route.method, headers });
+          assert.equal(response.status, 401, `${identity}: ${authorization ?? "actor headers"}`);
+        }
+      }
+      assert.ok(inventory.size > 200, "The registered REST/GraphQL inventory must not silently become empty");
+      const publicProcedures = new Set(["version.info", "auth.csrf", "auth.login", "auth.bootstrap", "auth.activate"]);
+      const procedures = Object.entries(appRouter._def.procedures);
+      assert.ok(procedures.length > 100, "The tRPC inventory must not silently become empty");
+      for (const [path, procedure] of procedures) {
+        for (const authorization of [undefined, "Bearer forged"]) {
+          if (authorization === undefined && publicProcedures.has(path)) continue;
+          const headers = new Headers({ "x-actor-id": randomUUID() });
+          if (authorization) headers.set("authorization", authorization);
+          const result = await trpc(path, headers, procedure._def.type === "mutation" ? "POST" : "GET");
+          assert.equal(result.response.status, 401, `tRPC ${path}: ${authorization ?? "actor headers"}`);
+        }
+      }
+      t.diagnostic(`Verified ${inventory.size} registered REST/GraphQL method-path pairs and ${procedures.length} tRPC procedures`);
+      for (const authorization of [undefined, "Bearer forged"]) {
+        const headers = new Headers({ "x-actor-id": randomUUID() });
+        if (authorization) headers.set("authorization", authorization);
+        const response = await nextEvents(new Request(`${origin}/api/events`, { headers }));
+        assert.equal(response.status, 401);
+      }
+    });
     const email = `${randomUUID()}@example.test`;
     const bootstrap = await rest("auth/bootstrap", await client(), "POST", {
       email,

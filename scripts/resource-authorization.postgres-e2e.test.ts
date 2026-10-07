@@ -9,6 +9,8 @@ const apiRequire = createRequire(new URL("../apps/api/package.json", import.meta
 const { createDb, runMigrations, authInstanceState, projects, documents, memories, tasks, documentLinks } = apiRequire("@task-weaver/db");
 const { createAuthenticationRuntime, createResourceServices, NotFoundError, AuthorizationError, ValidationError } = apiRequire("@task-weaver/core");
 const { eq } = apiRequire("drizzle-orm");
+const webRequire = createRequire(new URL("../apps/web/package.json", import.meta.url));
+const { fetchRequestHandler } = webRequire("@trpc/server/adapters/fetch");
 const databaseUrl = process.env.TW_AUTH_E2E_DATABASE_URL;
 
 test("ordinary resources enforce live authorization consistently across transports", { skip: !databaseUrl, timeout: 150_000 }, async t => {
@@ -69,6 +71,82 @@ test("ordinary resources enforce live authorization consistently across transpor
     return rest("graphql", headers, "POST", { query });
   }
 
+  async function trpcRead(path: string, input: unknown, headers: Headers, mutation = false) {
+    const query = new URLSearchParams({ input: JSON.stringify({ json: input }) });
+    const req = new Request(`${config.trustedOrigins[0]}/api/trpc/${path}${mutation ? "" : `?${query}`}`, {
+      headers: new Headers([...headers, ["content-type", "application/json"]]),
+      method: mutation ? "POST" : "GET",
+      ...(mutation ? { body: JSON.stringify({ json: input }) } : {}),
+    });
+    const response = await fetchRequestHandler({
+      endpoint: "/api/trpc", req, router: appRouter,
+      createContext: createTRPCContextFactory({ db, auth: runtime }),
+    });
+    return { status: response.status, body: await response.json() as any };
+  }
+  await t.test("HTTP transport matrix intersects roles, personal ownership and credential ceilings", async t => {
+    const agent = await runtime.identity.createAgent(owner.headers, { displayName: "Matrix agent" });
+    await runtime.identity.setMembership(owner.headers, project.id, agent.id, { role: "member" });
+    const subjects = [
+      { name: "owner session", headers: owner.headers, project: true, personal: true },
+      { name: "member session", headers: member.headers, project: true, personal: false },
+      { name: "viewer session", headers: viewer.headers, project: true, personal: false },
+      { name: "other project owner", headers: outsider.headers, project: false, personal: false },
+      { name: "instance administrator", headers: admin.headers, project: false, personal: false },
+    ];
+    const keys = [];
+    for (const [name, actorId, grants, projectAccess, personalAccess] of [
+      ["human project key", owner.actor.id, [{ scope: "project", projectId: project.id, permissions: ["resource.read"] }], true, false],
+      ["human personal key", owner.actor.id, [{ scope: "personal", actorId: owner.actor.id, permissions: ["resource.read"] }], false, true],
+      ["agent project key", agent.id, [{ scope: "project", projectId: project.id, permissions: ["resource.read"] }], true, false],
+    ] as const) {
+      const key = await runtime.identity.issueKey(owner.headers, actorId, { name, grants, expiresAt: null });
+      const headers = new Headers({ authorization: `Bearer ${key.rawKey}`, "x-actor-id": outsider.actor.id, "x-actor-type": "human" });
+      keys.push({ key, actorId, headers });
+      subjects.push({ name, headers, project: projectAccess, personal: personalAccess });
+    }
+    for (const subject of subjects) {
+      await t.test(subject.name, async () => {
+        for (const resource of [
+          { kind: "task", id: task.id, allowed: subject.project },
+          { kind: "document", id: doc.id, allowed: subject.project },
+          { kind: "document", id: personal.id, allowed: subject.personal },
+          { kind: "document", id: hiddenDoc.id, allowed: subject.headers === outsider.headers },
+        ]) {
+          const http = await rest(`${resource.kind}s/${resource.id}`, subject.headers);
+          const rpc = await trpcRead(`${resource.kind}.get`, { id: resource.id }, subject.headers);
+          const graph = await graphql(subject.headers, `{ ${resource.kind}(id: "${resource.id}") { id } }`);
+          assert.equal(http.status, resource.allowed ? 200 : 404, `${subject.name}: REST ${resource.kind}`);
+          assert.equal(rpc.status, resource.allowed ? 200 : 404, `${subject.name}: HTTP tRPC ${resource.kind}: ${JSON.stringify(rpc.body)}`);
+          assert.equal(graph.status, 200);
+          assert.equal(graph.body.data[resource.kind]?.id ?? null, resource.allowed ? resource.id : null);
+          if (!resource.allowed) {
+            assert.equal(JSON.stringify(graph.body).includes("Private content"), false);
+            assert.equal(JSON.stringify(rpc.body).includes("Private content"), false);
+          }
+        }
+        const canWrite = subject.headers === owner.headers || subject.headers === member.headers;
+        const mutation = { title: canWrite ? "Task" : "Unauthorized matrix mutation" };
+        const http = await rest(`tasks/${task.id}`, subject.headers, "PATCH", mutation);
+        const rpc = await trpcRead("task.update", { id: task.id, data: mutation }, subject.headers, true);
+        if (canWrite) {
+          assert.equal(http.status, 200);
+          assert.equal(rpc.status, 200, JSON.stringify(rpc.body));
+        } else {
+          assert.ok([403, 404].includes(http.status));
+          assert.equal(rpc.status, http.status, JSON.stringify(rpc.body));
+        }
+        assert.equal((await owner.service.taskService.getTask(db, task.id)).title, "Task");
+      });
+    }
+    for (const { key, actorId, headers } of keys) {
+      await runtime.identity.revokeKey(owner.headers, actorId, key.id);
+      assert.equal((await rest(`tasks/${task.id}`, headers)).status, 401);
+      assert.equal((await trpcRead("task.get", { id: task.id }, headers)).status, 401);
+      assert.equal((await graphql(headers, `{ task(id: "${task.id}") { id } }`)).status, 401);
+    }
+    await runtime.identity.disableAgent(owner.headers, agent.id);
+  });
   await t.test("project pins belong to the verified actor and require personal authority", async () => {
     await db.update(projects).set({ pinnedAt: new Date() }).where(eq(projects.id, project.id));
     assert.equal((await owner.service.projectService.getProject(db, project.id)).pinnedAt, null);
