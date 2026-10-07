@@ -56,9 +56,11 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
   const legacyToken = `tw_${randomBytes(32).toString("hex")}`;
   await db.execute(sql`INSERT INTO task_weaver.api_keys (name, key_hash, key_prefix) VALUES ('Synthetic legacy key', ${createHash("sha256").update(legacyToken).digest("hex")}, 'tw_fixture')`);
   await db.execute(sql`INSERT INTO task_weaver.ti_agent_runs (task_id, status, created_by, lease_owner_id, lease_owner_type, lease_expires_at) VALUES (${task.id}, 'running', 'apikey:synthetic', 'tw-cli', 'agent', now() + interval '10 minutes')`);
-  await db.insert(tiAgentModelConfigs).values({ ownerId: "apikey:synthetic", ownerType: "agent", provider: "fixture", model: "safe", credentialStatus: "valid", isDefaultAgent: true }).returning();
-  await db.insert(tiAgentPolicies).values({ ownerId: "apikey:synthetic", ownerType: "agent", enabled: true, executionMode: "live" });
-  const cutoff = new Date().toISOString();
+  const [legacyModel] = await db.insert(tiAgentModelConfigs).values({ ownerId: "apikey:synthetic", ownerType: "agent", provider: "fixture", model: "safe", credentialStatus: "valid", isDefaultAgent: true }).returning();
+  const [legacyPolicy] = await db.insert(tiAgentPolicies).values({ ownerId: "apikey:synthetic", ownerType: "agent", enabled: true, executionMode: "live" }).returning();
+  // Use the database clock and round up: PostgreSQL timestamps retain sub-millisecond precision.
+  const [boundary] = await db.select({ cutoff: sql`date_trunc('milliseconds', clock_timestamp()) + interval '1 millisecond'` }).from(tiAgentPolicies).where(eq(tiAgentPolicies.id, legacyPolicy.id));
+  const cutoff = new Date(boundary.cutoff).toISOString();
   // The full database dump exists only in test memory and contains synthetic fixtures, never a real database.
   const backup = execFileSync("docker", ["exec", container, "pg_dump", "-U", "fixture", "-d", "tw_auth_e2e", "--clean", "--if-exists"], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
   assert.ok(backup.includes("Sanitized legacy A"));
@@ -95,6 +97,9 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
   const owner = await human(), stranger = await human();
   const agent = await runtime.identity.createAgent(owner.headers, { displayName: "Recovered executor" });
   const before = await inspectOwnershipMigration(db, cutoff);
+  for (const id of [legacyModel.id, legacyPolicy.id]) {
+    assert.ok(before.rows.some((row: any) => row.id === id), "Legacy model and policy must be inside the fixture cutoff");
+  }
   const ownership = before.rows.filter((row: any) => [privateDoc.id, active.id, inactive.id].includes(row.id) || ["tiAgentModelConfigs", "tiAgentPolicies"].includes(row.resource)).map((row: any) => ({ resource: row.resource, id: row.id, ownerFingerprint: row.ownerFingerprint, actorId: row.resource === "daemons" ? agent.id : owner.actor.id }));
   const manifest = { id: randomUUID(), legacyBefore: cutoff, ownership, memberships: [
     { projectId: project.id, actorId: owner.actor.id, role: "owner", explicitPermissions: ["execution.run"] },
