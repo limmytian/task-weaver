@@ -56,11 +56,12 @@ test("offline ownership migration is explicit, restricted, atomic and replay-saf
   const [run] = await db.insert(tiAgentRuns).values({ taskId: task.id, createdBy: "apikey:legacy", status: "running", leaseOwnerId: "tw-cli", leaseOwnerType: "agent", leaseExpiresAt: new Date(Date.now() + 600000) }).returning();
   await db.insert(tiAgentPolicies).values({ ownerId: "apikey:legacy", ownerType: "agent", enabled: true, executionMode: "live" });
   const [legacyModel] = await db.insert(tiAgentModelConfigs).values({ ownerId: "apikey:legacy", ownerType: "agent", provider: "fixture", model: "fixture", credentialStatus: "valid", apiKeyRef: "migration-secret-canary", availabilityCheckedAt: new Date() }).returning();
-  await db.insert(tiAgentModelConfigs).values({ ownerId: owner.context.actor.id, ownerType: "human", provider: "fixture", model: "fixture" });
+  const [currentModel] = await db.insert(tiAgentModelConfigs).values({ ownerId: owner.context.actor.id, ownerType: "human", provider: "fixture", model: "fixture" }).returning();
   const [repo] = await db.insert(repositories).values({ displayName: "Legacy repository", provider: "github", host: "github.com", namespace: "fixture", name: randomUUID(), canonicalKey: randomUUID(), createdBy: "anonymous" }).returning();
   await db.insert(repositoryCheckoutBindings).values({ repositoryId: repo.id, nodeId: "legacy", checkoutPath: "/private/migration-path-canary", lastVerifiedAt: new Date() });
   const [legacyUuidDoc] = await db.insert(documents).values({ title: "Legacy UUID label", content: "migration-content-canary", createdBy: "tw-cli", personalOwnerId: owner.context.actor.id, personalOwnerType: "human" }).returning();
   const legacyBefore = new Date().toISOString();
+  await db.update(tiAgentModelConfigs).set({ createdAt: new Date(Date.parse(legacyBefore) + 1000) }).where(eq(tiAgentModelConfigs.id, currentModel.id));
   const [freshDoc] = await db.insert(documents).values({ title: "New authenticated note", content: "Private fixture", createdBy: owner.context.actor.id, personalOwnerId: owner.context.actor.id, personalOwnerType: "human", createdAt: new Date(Date.parse(legacyBefore) + 1000) }).returning();
   let before: any;
   let manifest: any;

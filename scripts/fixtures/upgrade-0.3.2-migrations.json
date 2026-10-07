@@ -1,0 +1,396 @@
+{
+  "version": "0.3.2",
+  "commit": "556ba6373bb1f4a128455f008d07d53725495c20",
+  "journal": {
+    "version": "7",
+    "dialect": "postgresql",
+    "entries": [
+      {
+        "idx": 0,
+        "version": "7",
+        "when": 1772960054472,
+        "tag": "0000_nosy_vanisher",
+        "breakpoints": true
+      },
+      {
+        "idx": 1,
+        "version": "7",
+        "when": 1773224668299,
+        "tag": "0001_common_thor",
+        "breakpoints": true
+      },
+      {
+        "idx": 2,
+        "version": "7",
+        "when": 1773225987995,
+        "tag": "0002_open_molly_hayes",
+        "breakpoints": true
+      },
+      {
+        "idx": 3,
+        "version": "7",
+        "when": 1773282790998,
+        "tag": "0003_dark_tempest",
+        "breakpoints": true
+      },
+      {
+        "idx": 4,
+        "version": "7",
+        "when": 1773716019180,
+        "tag": "0004_wide_quasimodo",
+        "breakpoints": true
+      },
+      {
+        "idx": 5,
+        "version": "7",
+        "when": 1774181894587,
+        "tag": "0005_omniscient_felicia_hardy",
+        "breakpoints": true
+      },
+      {
+        "idx": 6,
+        "version": "7",
+        "when": 1775553338552,
+        "tag": "0006_superb_quentin_quire",
+        "breakpoints": true
+      },
+      {
+        "idx": 7,
+        "version": "7",
+        "when": 1779469094449,
+        "tag": "0007_blushing_mystique",
+        "breakpoints": true
+      },
+      {
+        "idx": 8,
+        "version": "7",
+        "when": 1782052966893,
+        "tag": "0008_legal_wrecker",
+        "breakpoints": true
+      },
+      {
+        "idx": 9,
+        "version": "7",
+        "when": 1750550400000,
+        "tag": "0009_add_project_git_url",
+        "breakpoints": true
+      },
+      {
+        "idx": 10,
+        "version": "7",
+        "when": 1750636800000,
+        "tag": "0010_add_branch_name",
+        "breakpoints": true
+      },
+      {
+        "idx": 11,
+        "version": "7",
+        "when": 1750723200000,
+        "tag": "0011_daemon_active_task_ids",
+        "breakpoints": true
+      },
+      {
+        "idx": 12,
+        "version": "7",
+        "when": 1750809600000,
+        "tag": "0012_mcp_scope_nodeid",
+        "breakpoints": true
+      },
+      {
+        "idx": 13,
+        "version": "7",
+        "when": 1782538067000,
+        "tag": "0013_requirement_claims_worker_states",
+        "breakpoints": true
+      },
+      {
+        "idx": 14,
+        "version": "7",
+        "when": 1782541500000,
+        "tag": "0014_mcp_project_scope",
+        "breakpoints": true
+      },
+      {
+        "idx": 15,
+        "version": "7",
+        "when": 1782543600000,
+        "tag": "0015_requirement_dependencies",
+        "breakpoints": true
+      },
+      {
+        "idx": 16,
+        "version": "7",
+        "when": 1782582000000,
+        "tag": "0016_execution_slices",
+        "breakpoints": true
+      },
+      {
+        "idx": 17,
+        "version": "7",
+        "when": 1782625200000,
+        "tag": "0017_schedules",
+        "breakpoints": true
+      },
+      {
+        "idx": 18,
+        "version": "7",
+        "when": 1782628800000,
+        "tag": "0018_schedule_catch_up_policy",
+        "breakpoints": true
+      },
+      {
+        "idx": 19,
+        "version": "7",
+        "when": 1782632400000,
+        "tag": "0019_personal_spaces",
+        "breakpoints": true
+      },
+      {
+        "idx": 20,
+        "version": "7",
+        "when": 1782639600000,
+        "tag": "0020_pi_agent",
+        "breakpoints": true
+      },
+      {
+        "idx": 21,
+        "version": "7",
+        "when": 1782643200000,
+        "tag": "0021_pi_agent_policies_task_models",
+        "breakpoints": true
+      },
+      {
+        "idx": 22,
+        "version": "7",
+        "when": 1782676800000,
+        "tag": "0022_assistant_foundations",
+        "breakpoints": true
+      },
+      {
+        "idx": 23,
+        "version": "7",
+        "when": 1782680400000,
+        "tag": "0023_assistant_policy_controls",
+        "breakpoints": true
+      },
+      {
+        "idx": 24,
+        "version": "7",
+        "when": 1782684000000,
+        "tag": "0024_pi_agent_model_base_url",
+        "breakpoints": true
+      },
+      {
+        "idx": 25,
+        "version": "7",
+        "when": 1782687600000,
+        "tag": "0025_ti_server_agent_identity",
+        "breakpoints": true
+      },
+      {
+        "idx": 26,
+        "version": "7",
+        "when": 1783228461000,
+        "tag": "0026_skill_packages",
+        "breakpoints": true
+      },
+      {
+        "idx": 27,
+        "version": "7",
+        "when": 1783229485000,
+        "tag": "0027_skill_package_activity",
+        "breakpoints": true
+      },
+      {
+        "idx": 28,
+        "version": "7",
+        "when": 1783555200000,
+        "tag": "0028_review_merge_statuses",
+        "breakpoints": true
+      },
+      {
+        "idx": 29,
+        "version": "7",
+        "when": 1784433600000,
+        "tag": "0029_repository_catalog",
+        "breakpoints": true
+      },
+      {
+        "idx": 30,
+        "version": "7",
+        "when": 1784437200000,
+        "tag": "0030_remove_project_git_url",
+        "breakpoints": true
+      },
+      {
+        "idx": 31,
+        "version": "7",
+        "when": 1784851200000,
+        "tag": "0031_daemon_role_identity",
+        "breakpoints": true
+      },
+      {
+        "idx": 32,
+        "version": "7",
+        "when": 1784854800000,
+        "tag": "0032_requirement_lease_fencing",
+        "breakpoints": true
+      },
+      {
+        "idx": 33,
+        "version": "7",
+        "when": 1784858400000,
+        "tag": "0033_repository_retry_routing",
+        "breakpoints": true
+      },
+      {
+        "idx": 34,
+        "version": "7",
+        "when": 1784862000000,
+        "tag": "0034_repository_retry_policy",
+        "breakpoints": true
+      },
+      {
+        "idx": 35,
+        "version": "7",
+        "when": 1784865600000,
+        "tag": "0035_daemon_worker_progress",
+        "breakpoints": true
+      },
+      {
+        "idx": 36,
+        "version": "7",
+        "when": 1784869200000,
+        "tag": "0036_daemon_worker_recovery",
+        "breakpoints": true
+      },
+      {
+        "idx": 37,
+        "version": "7",
+        "when": 1784872800000,
+        "tag": "0037_repository_operation_checkpoints",
+        "breakpoints": true
+      },
+      {
+        "idx": 38,
+        "version": "7",
+        "when": 1784876400000,
+        "tag": "0038_execution_slice_parallelism",
+        "breakpoints": true
+      },
+      {
+        "idx": 39,
+        "version": "7",
+        "when": 1784880000000,
+        "tag": "0039_daemon_control_state",
+        "breakpoints": true
+      },
+      {
+        "idx": 40,
+        "version": "7",
+        "when": 1784883600000,
+        "tag": "0040_review_policy_audit_model",
+        "breakpoints": true
+      },
+      {
+        "idx": 41,
+        "version": "7",
+        "when": 1784887200000,
+        "tag": "0041_forge_delivery_state",
+        "breakpoints": true
+      },
+      {
+        "idx": 42,
+        "version": "7",
+        "when": 1785594000000,
+        "tag": "0042_embedding_foundation",
+        "breakpoints": true
+      },
+      {
+        "idx": 43,
+        "version": "7",
+        "when": 1785597000000,
+        "tag": "0043_embedding_generation_hnsw",
+        "breakpoints": true
+      },
+      {
+        "idx": 44,
+        "version": "7",
+        "when": 1786623091000,
+        "tag": "0044_activity_log_entity_types",
+        "breakpoints": true
+      },
+      {
+        "idx": 45,
+        "version": "7",
+        "when": 1790499600000,
+        "tag": "0045_pi_agent_retry_schedule",
+        "breakpoints": true
+      },
+      {
+        "idx": 46,
+        "version": "7",
+        "when": 1790899200000,
+        "tag": "0046_agent_usage_runs",
+        "breakpoints": true
+      },
+      {
+        "idx": 47,
+        "version": "7",
+        "when": 1791200000000,
+        "tag": "0047_ti_agent_overhaul",
+        "breakpoints": true
+      }
+    ]
+  },
+  "sha256": {
+    "0000_nosy_vanisher.sql": "2005ef15219e51e9b4f5720ba1cef4e5cdb923d3b72464813afd81ac177cc5c6",
+    "0001_common_thor.sql": "7f5ad972155b300f3d94d6b12b21c370c4ba626f8ba737b8183103a9a3b62b31",
+    "0002_open_molly_hayes.sql": "d5de33cde642399af4ebaaf05dff5edd9532d2bc0af151f4ebfe21bd130246d2",
+    "0003_dark_tempest.sql": "82ea2e3ce918491b88144c5e57711c2d266db7ca11a6fbddefa43e752f474d05",
+    "0004_wide_quasimodo.sql": "0687d0422e1983007c59bded99f12323a6b61f5c4b2fde82202aa7e7a2d3a493",
+    "0005_omniscient_felicia_hardy.sql": "8124070ea164a46a17aba352ed7b68098999a41dc8414e44e7f152858e720b59",
+    "0006_superb_quentin_quire.sql": "c3966a8849086fc6841cfd4e3da08d4a376fec56c926a90455be9d74d8dd2c9c",
+    "0007_blushing_mystique.sql": "70c089dc9b158851de2a6682f79527231e15e462632c37a424bb2b67adfb89dc",
+    "0008_legal_wrecker.sql": "c6267d7b36deb1214f1d44548d98b48a1ff219d0bc7a50bc23eeebd6cf95e935",
+    "0009_add_project_git_url.sql": "b403a028455ffb2e9d8a9f3b5e8b4e4d69781734de6272e90654265cbf00eb5a",
+    "0010_add_branch_name.sql": "9dcbb207894ce9127eca9a463d8de569fd032415ed021746060763e892905b5e",
+    "0011_daemon_active_task_ids.sql": "86efaccdcb0150d147e58f6ee727c0d956c878be00cfd33f4e442d3b7387585d",
+    "0012_mcp_scope_nodeid.sql": "f5f85e4bcc9c1236bbd82e4a1f2575d73c6368fed0b68950b70daf0cd1b840eb",
+    "0013_requirement_claims_worker_states.sql": "771f41896a54bdafd4b455ba25cea50f9b0da78280a57619ffa9b88833415d4c",
+    "0014_mcp_project_scope.sql": "f7765910afb669a0314da43030139971d65232b15f40dc6b5694c9433d45e6d7",
+    "0015_requirement_dependencies.sql": "ee272c3ec53dd111ef403f864bb0ecb47557a5a6cc2c7d66953b48e22809dec1",
+    "0016_execution_slices.sql": "f314df1e7dd90c51fe81cc952b42b70d249ee3e73783d9fad4f1744b4ab4f02f",
+    "0017_schedules.sql": "8247563a2fa79a92e6a0216d5ea126f031abf90adaeef60cf7c7f34d6b37eb92",
+    "0018_schedule_catch_up_policy.sql": "9ac65ac5ac776c134517fbc39e94cc2497a469856569264fa04e6cdbcb95defc",
+    "0019_personal_spaces.sql": "e421865cb74efc089aa637a4daee3616ec9e9061130998557d4f8cda1f353b47",
+    "0020_pi_agent.sql": "99b09bdf9347a4ac3c5d518b2abe7b6d3ab08e80745e3e581fa19b2416feea94",
+    "0021_pi_agent_policies_task_models.sql": "1a0b0373c3dc0f97c68948d22722a84f7329f35790a9a37ee3a4a78e46b151c2",
+    "0022_assistant_foundations.sql": "16ba06cc3f91d5f5bda7ef347d99fc1de202c48a54443fbc94ed49097828212a",
+    "0023_assistant_policy_controls.sql": "c24f44c4bddd598e2be2a099d04659f09cfecd9b30cd5d5902d3340bed1259f4",
+    "0024_pi_agent_model_base_url.sql": "5a713943ab64fb1c098df18e9bc8e69981052055d2453ecea1dfe9e0226a7917",
+    "0025_ti_server_agent_identity.sql": "68981454788be8c736763e7cb9578c8b8eff17bce43cf56491f9145df47a2c5a",
+    "0026_skill_packages.sql": "0a5becdeb85d248dc64b5f7daa19bbfd58b31db94c318744cb07c00aa6426a8f",
+    "0027_skill_package_activity.sql": "f4bafceba87ab858e4d064a4390c3bae16891e3a10e7dfd65838ce4a0a8744f2",
+    "0028_review_merge_statuses.sql": "b00ff0ba5a075b26e2893378556e23819ee754243723086f80d477172efe7fce",
+    "0029_repository_catalog.sql": "8ca627f37ecdd91f0394cd6a7613c042d439b74ac1bd5daa9ccd763d108f19b4",
+    "0030_remove_project_git_url.sql": "8ab3fd3ab56546cca3c0d3d34782f4c13f5d8b7670c1343ccbcc885cb410d9b4",
+    "0031_daemon_role_identity.sql": "c2e9d9d51c6036e89e8bbadadc1bf207f88190742e0e5d4756f0f8919673242b",
+    "0032_requirement_lease_fencing.sql": "074a470ae83bcdb9fc07369c7f7fe02699e9519edae05e3116f9118889e0934f",
+    "0033_repository_retry_routing.sql": "3f79c5ad00fcee94e58cfdac3a38e8149d16b55ed77b19bd968b6f4ee04bc0bd",
+    "0034_repository_retry_policy.sql": "86760652e9b2616452d016df59bb4130ba603b34bc6276478d49857ff2635f58",
+    "0035_daemon_worker_progress.sql": "3ca4809e0753db737290fcb09ea2656def8bf4ae09394c0758b7e76f164e371c",
+    "0036_daemon_worker_recovery.sql": "f0b1992a6e5d40faad8f12d933143840c0e6becf5ff4f0cdeb3d2930ef78df2a",
+    "0037_repository_operation_checkpoints.sql": "5302a6b67e77c988b43817ec5135650d80a5e0b8b4fac6d0ca646b5675dea934",
+    "0038_execution_slice_parallelism.sql": "3bec9596bc351b18838bbcea783c39a626017d8cb44bc4dad96aa69777071e6e",
+    "0039_daemon_control_state.sql": "b0474a8c325af04b7e6392ac483f1a99df9346b29ab751bb4e34a098c3d36c18",
+    "0040_review_policy_audit_model.sql": "958051d554e0829bac77ef45334ac724b807751d8b31efbb98d3024ba6909c13",
+    "0041_forge_delivery_state.sql": "44ac402b487df807fe34a723565689186057d45987de48cd430fc20aa2429fdb",
+    "0042_embedding_foundation.sql": "d4378eda894c97b3ebf65bc9b4038681eefd09da438eca4d1dc23ccb2f58db37",
+    "0043_embedding_generation_hnsw.sql": "db77bccaace4713e610d70a68ec87d5fa1e8578a3f97981a0b118ff271ed4057",
+    "0044_activity_log_entity_types.sql": "daa71c12a428a51d1ed1435efa76680df36b1f851f3e52838ae0b8bcf6a2ac0b",
+    "0045_pi_agent_retry_schedule.sql": "caf59ac2da40d6cb5137cde852655354e832cc7e17e3cf10200d65edd0fa110f",
+    "0046_agent_usage_runs.sql": "45273c0029be379a3d92208d5e3b98e1fd09257558330d8d5304c7e64b02f0ef",
+    "0047_ti_agent_overhaul.sql": "8f213d8a0331067d6d5f2213c41d5c67294a8c574d52ddd0939795894cc8faff"
+  }
+}

@@ -76,6 +76,7 @@ try {
     [null, "scripts/authenticated-pipeline.postgres-e2e.test.ts"],
     [null, "scripts/execution-delegation.postgres-e2e.test.ts"],
     [null, "scripts/ownership-migration.postgres-e2e.test.ts"],
+    [null, "scripts/upgrade-rehearsal.postgres-e2e.test.ts"],
   ]) {
     if (process.env.TW_AUTH_E2E_TEST_FILTER && !testFile.includes(process.env.TW_AUTH_E2E_TEST_FILTER)) continue;
     const result = spawnSync(
@@ -94,6 +95,7 @@ try {
         env: {
           ...process.env,
           PGOPTIONS: "-c client_min_messages=warning",
+          TW_AUTH_E2E_CONTAINER: name,
           TW_AUTH_E2E_DATABASE_URL: `postgres://fixture:fixture-only@127.0.0.1:${port}/tw_auth_e2e`,
         },
       },

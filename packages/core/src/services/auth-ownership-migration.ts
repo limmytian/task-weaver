@@ -127,7 +127,7 @@ export async function applyOwnershipMigration(db: Database, input: unknown, expe
     await tx.delete(requirementClaims);
     await tx.update(requirements).set({ leaseGeneration: sql`${requirements.leaseGeneration} + 1` });
     await tx.update(executionDelegations).set({ revokedAt: now }).where(isNull(executionDelegations.revokedAt));
-    await tx.update(daemons).set({ status: "offline", controlState: "paused", activeTaskIds: [], activeWorkerStates: [], capabilities: [], controlReason: "Authenticated upgrade requires fresh registration" });
+    await tx.update(daemons).set({ status: "offline", lastHeartbeatAt: new Date(0), controlState: "paused", activeTaskIds: [], activeWorkerStates: [], capabilities: [], controlReason: "Authenticated upgrade requires fresh registration" });
     await tx.update(tiAgentRuns).set({ status: "cancelled", leaseOwnerId: null, leaseOwnerType: null, leaseExpiresAt: null, nextAttemptAt: null, completedAt: now }).where(sql`${tiAgentRuns.status} IN ('queued', 'running')`);
     await tx.update(tiAgentPolicies).set({ enabled: false, executionMode: "disabled", assistantAutoEnabled: false, assistantAutoMode: "disabled" });
     await tx.update(tiAgentModelConfigs).set({ credentialStatus: "unknown", availabilityCheckedAt: null });
