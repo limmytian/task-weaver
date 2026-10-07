@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+<title id="title">Task Weaver candidate E: Easy flow</title>
+<desc id="desc">A soft W moves through two rounded turns. The short T crossbar gives the motion a starting point. Unapproved exploration.</desc>
+<g fill="none" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+<path d="M12 18C14 34 14 48 23 48C31 48 29 33 33 27C37 33 35 48 43 48C52 48 52 31 54 18" stroke="#4f46e5"/>
+<path d="M5 18h21" stroke="#0f766e"/>
+</g>
+</svg>

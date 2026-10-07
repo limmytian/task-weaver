@@ -1,5 +1,9 @@
 # Task Weaver logo candidates
 
+The latest exploration is [round 2](round-2/index.html): four continuous T/W
+studies responding to owner feedback. The first round below is retained as
+history; none of its directions was selected.
+
 Open `index.html` in a browser to compare three unapproved directions: A (open
 weave), B (common ground), C (woven W). Choose a candidate and light/dark or
 single-ink variants to inspect static navigation, login and README/social examples.
