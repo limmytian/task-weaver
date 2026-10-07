@@ -1,0 +1,22 @@
+{
+  "readme-dark.svg": {
+    "sha256": "bf17b6921373fdb76b6f8ba96a1e88ee74caef8e2d614cbf817445fce97ec2c0",
+    "bytes": 63372
+  },
+  "readme-light.svg": {
+    "sha256": "e56b13bf6aa8a3b1bcaa5b04ad6470e0f551a536d3c595e298158dea6ff5fe19",
+    "bytes": 63372
+  },
+  "screenshot-frame.svg": {
+    "sha256": "cb8f0837dd33329f49cbe83ba0c819f86ada18d2c4334fc377594edd2e59feeb",
+    "bytes": 63850
+  },
+  "social-dark.svg": {
+    "sha256": "a0ff307f7772e998eb8539a5021bf3343a5c46bac2f0df0ff9e960df8cb97f7f",
+    "bytes": 63606
+  },
+  "social-light.svg": {
+    "sha256": "03825631248e66e728965e5540946693a3b38e7f37f2b3e98556c715bac27b1d",
+    "bytes": 63606
+  }
+}
