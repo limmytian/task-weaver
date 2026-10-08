@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { assertReplacementEvidence } from "./native-replacement-evidence.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createReadStream, readFileSync, writeFileSync } from "node:fs";
@@ -46,11 +47,7 @@ for (const image of licenses.inventory) {
   assert.ok(source.images.some((entry) => entry.imageId === image.imageId && entry.platform === image.platform));
   assert.ok(deployment.imageIds.some((entry) => entry.imageId === image.imageId && entry.platform === image.platform));
   if (image.nativeLibraryPackages) {
-    assert.equal(replacement.imageId, image.imageId);
-    assert.equal(replacement.platform, image.platform);
-    assert.equal(replacement.passed, true);
-    assert.equal(replacement.markerObserved, true);
-    assert.equal(replacement.missingLibraryControlFailed, true);
+    assertReplacementEvidence(replacement, image);
   }
   images.push({ image: image.image, imageId: image.imageId, platform: image.platform, deliveredNoticeSha256: report.runtimeNoticesSha256,
     sbomSha256: scan.sha256, vulnerabilities: scan.counts, deliveredLayers: layers.layers });

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { assertReplacementEvidence } from "./native-replacement-evidence.mjs";
 import { rustTargets, sourcePlatform } from "./release-platforms.mjs";
 
 import assert from "node:assert/strict";
@@ -15,7 +16,8 @@ const lockBytes = readFileSync(resolve(manifest));
 const lock = JSON.parse(lockBytes);
 const inventory = JSON.parse(readFileSync(resolve(imageEvidence, "inventory.json")));
 const licenses = JSON.parse(readFileSync(resolve(root, "license-extraction.json")));
-const replacement = JSON.parse(readFileSync(resolve(replacementEvidence)));
+const replacementSet = JSON.parse(readFileSync(resolve(replacementEvidence)));
+const replacements = replacementSet.images ?? [replacementSet];
 const noticeCases = JSON.parse(readFileSync(resolve(root, "notice-case-resolutions.json")));
 assert.equal(noticeCases.sourceLockSha256, hash(lockBytes), "Notice handling is for a different source lock");
 assert.equal(noticeCases.noticeBundleSha256, hash(readFileSync(resolve(root, "runtime-source-NOTICES.txt"))));
@@ -55,8 +57,7 @@ for (const image of inventory.inventory) {
       if (name === "sharp") continue;
       assert.ok(lock.components.some((entry) => entry.id === `native-${name}` && entry.version === version), `Native source mapping is incomplete: ${name}`);
     }
-    assert.equal(replacement.imageId, image.imageId, "Replacement evidence is for a different image");
-    assert.equal(replacement.platform, image.platform);
+    assert.ok(assertReplacementEvidence(replacementSet, image).libraryPath, "Replacement library path is required");
   }
 }
 assert.equal(lock.rustVendoring.postEditLockVerified, true);
@@ -101,19 +102,16 @@ if (lock.files.some((file) => file.path.startsWith("rust-crates/"))) {
     assert.ok(!["7f454c46", "0061736d", "cffaedfe", "cefaedfe", "feedfacf", "feedface", "4243c0de"].includes(magic) && bytes.subarray(0, 8).toString() !== "!<arch>\n", "Compiled payload found in source-only delivery");
   }
 }
-assert.equal(replacement.passed, true);
-assert.equal(replacement.markerObserved, true);
-assert.equal(replacement.missingLibraryControlFailed, true);
-if (inventory.inventory.some((image) => {
-  const report = JSON.parse(readFileSync(resolve(imageEvidence, safePath(image.report))));
-  return report.nativeLibraries.length > 0;
-})) {
-  const directory = resolve(replacementEvidence, "..");
-  const filename = replacement.libraryPath.split("/").at(-1);
-  assert.match(filename, /^libvips-cpp\.so\.\d+(?:\.\d+)*$/);
-  assert.equal(hash(readFileSync(resolve(directory, "original.so"))), replacement.originalSha256);
-  assert.equal(hash(readFileSync(resolve(directory, "replacement", filename))), replacement.replacementSha256);
-  assert.equal(hash(readFileSync(resolve(import.meta.dirname, "fixtures/libvips-replacement.c"))), replacement.fixtureSha256);
+for (const replacement of replacements) {
+  assertReplacementEvidence(replacement, replacement);
+  if (replacement.libraryPath) {
+    const directory = resolve(replacementEvidence, "..", replacement.evidenceDirectory ? safePath(replacement.evidenceDirectory) : ".");
+    const filename = replacement.libraryPath.split("/").at(-1);
+    assert.match(filename, /^libvips-cpp\.so\.\d+(?:\.\d+)*$/);
+    assert.equal(hash(readFileSync(resolve(directory, "original.so"))), replacement.originalSha256);
+    assert.equal(hash(readFileSync(resolve(directory, "replacement", filename))), replacement.replacementSha256);
+    assert.equal(hash(readFileSync(resolve(import.meta.dirname, "fixtures/libvips-replacement.c"))), replacement.fixtureSha256);
+  }
 }
 const report = { schemaVersion: 1, sourceLockSha256: hash(lockBytes), images: lock.images,
   sourceFiles: lock.files.length, components: lock.components.length, preservedLicenseFiles: licenses.evidence.length,

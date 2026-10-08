@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 import { releasePlatform, platformArchitecture } from "./release-platforms.mjs";
 
@@ -36,7 +36,13 @@ script("verify-librsvg-lock", `${root}/source-lock.json`);
 script("extract-binary-licenses", `${root}/verified-source-lock.json`);
 script("assemble-runtime-notices", `${root}/verified-source-lock.json`);
 assert.ok(readFileSync(`${root}/runtime-source-NOTICES.txt`).equals(readFileSync("THIRD_PARTY_LICENSES/runtime-source-NOTICES.txt")), "Acquired source notices differ from the reviewed notices delivered in the images");
-script("verify-native-replacement", web, platform);
+const replacements = [];
+for (const [app, image] of [["api", api], ["web", web]]) {
+  const directory = `release-artifacts/native-replacement/${app}`;
+  script("verify-native-replacement", image, platform, directory);
+  replacements.push({ ...JSON.parse(readFileSync(`${directory}/verification.json`)), evidenceDirectory: app });
+}
+writeFileSync("release-artifacts/native-replacement/verification.json", JSON.stringify({ schemaVersion: 2, images: replacements }, null, 2));
 script("verify-binary-source-evidence", `${root}/source-lock.json`, "release-artifacts/binary-licenses", "release-artifacts/native-replacement/verification.json");
 script("package-binary-source-evidence", `${root}/source-lock.json`);
 for (const image of [api, web]) script("verify-runtime-layers", image, platform);

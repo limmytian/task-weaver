@@ -7,8 +7,8 @@ import { resolve } from "node:path";
 import { hash, json } from "./binary-source-lib.mjs";
 import { inspectLocalImage } from "./image-inspection-lib.mjs";
 
-const [image, platform = "linux/arm64"] = process.argv.slice(2);
-if (!image || !/^linux\/(arm64|amd64)$/.test(platform)) throw new Error("Usage: node scripts/verify-native-replacement.mjs <local-web-image> [linux/arm64]");
+const [image, platform = "linux/arm64", outputDirectory = "release-artifacts/native-replacement"] = process.argv.slice(2);
+if (!image || !/^linux\/(arm64|amd64)$/.test(platform)) throw new Error("Usage: node scripts/verify-native-replacement.mjs <local-image> [linux/arm64] [output-directory]");
 const run = (args, options = {}) => {
   const result = spawnSync("docker", args, { encoding: "utf8", maxBuffer: 8 * 1024 * 1024, ...options });
   if (result.status !== 0) throw new Error(`Replacement verification command failed: ${args[0]}\n${result.stderr}`);
@@ -17,7 +17,7 @@ const run = (args, options = {}) => {
 const details = inspectLocalImage(image, platform);
 assert.ok(["node", "1000", "1000:1000"].includes(details.Config.User), "Application image must default to the non-root user");
 const imageId = details.Id;
-const root = resolve("release-artifacts/native-replacement");
+const root = resolve(outputDirectory);
 mkdirSync(resolve(root, "replacement"), { recursive: true });
 const discover = () => {
   const fs = require("node:fs");
