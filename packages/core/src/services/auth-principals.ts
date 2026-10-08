@@ -32,7 +32,7 @@ async function loadPrincipal(
     .from(authActors)
     .where(eq(authActors.id, actorId))
     .limit(1);
-  if (!actor || (requireActive && actor.status !== "active"))
+  if (!actor || (requireActive && (actor.status !== "active" || actor.deletedAt !== null)))
     throw new AuthenticationError("principal_disabled");
   if (actor.type === "human") {
     const [user] = await db

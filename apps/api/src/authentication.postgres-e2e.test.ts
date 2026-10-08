@@ -148,6 +148,31 @@ test(
         assert.equal((await call("auth/me", forged)).response.status, 403);
       },
     );
+    await t.test("Agent routes enforce bounded status queries, project visibility and terminal deletion", async () => {
+      const created = await call("auth/agents", admin.headers, "POST", { displayName: "HTTP managed fixture" });
+      assert.equal(created.response.status, 201);
+      const actorId = created.body.id;
+      assert.equal((await call(`auth/agents/${actorId}`, member.headers)).response.status, 404);
+      assert.equal((await call("auth/agents?pageSize=51", admin.headers)).response.status, 400);
+      assert.ok((await call("auth/agents", admin.headers)).body.some((row: any) => row.id === actorId));
+      assert.equal((await call(`auth/agents/${actorId}/retired`, admin.headers, "DELETE")).response.status, 400);
+      const project = await call("auth/projects", admin.headers, "POST", { name: "HTTP Agent project" });
+      assert.equal(project.response.status, 201);
+      const choices = await call(`auth/agents/${actorId}/projects?view=available&query=HTTP`, admin.headers);
+      assert.equal(choices.response.status, 200);
+      assert.ok(choices.body.some((row: any) => row.project.name === "HTTP Agent project"));
+      assert.equal((await call(`auth/projects/${project.body.id}/members/${actorId}`, admin.headers, "PUT", { role: "member", explicitPermissions: ["execution.run"] })).response.status, 200);
+      assert.equal((await call(`auth/agents/${actorId}/projects`, admin.headers)).body[0].membership.role, "member");
+      assert.equal((await call(`auth/agents/${actorId}`, admin.headers, "DELETE")).response.status, 200);
+      assert.equal((await call("auth/agents", admin.headers)).body.some((row: any) => row.id === actorId), false);
+      assert.equal((await call("auth/agents?status=disabled", admin.headers)).body[0].id, actorId);
+      const missingCsrf = new Headers(admin.headers); missingCsrf.delete("x-csrf-token");
+      assert.equal((await call(`auth/agents/${actorId}/retired`, missingCsrf, "DELETE")).response.status, 403);
+      assert.equal((await call(`auth/agents/${actorId}/retired`, admin.headers, "DELETE")).response.status, 200);
+      assert.equal((await call("auth/agents?status=disabled", admin.headers)).body.length, 0);
+      assert.equal((await call("auth/agents?status=deleted", admin.headers)).body[0].id, actorId);
+      assert.equal((await call(`auth/agents/${actorId}`, admin.headers)).response.status, 404);
+    });
     let key: any;
     await t.test(
       "only scoped subject-bound keys are issued; omission and legacy credentials fail closed",

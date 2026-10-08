@@ -10,6 +10,8 @@ import {
   authUsers,
   projectMemberships,
   authAuditEvents,
+  authActors,
+  apiKeys,
 } from "@task-weaver/db";
 import {
   AuthenticationError,
@@ -287,6 +289,103 @@ test(
         );
       },
     );
+    await t.test("Agent lifecycle is bounded, isolated, irreversible and preserves identity history", async () => {
+      const agent = await identity.createAgent(owner.headers, { displayName: "Retirement duplicate" });
+      await assert.rejects(identity.deleteAgent(owner.headers, agent.id), ValidationError);
+      await assert.rejects(identity.agentDetail(outsider.headers, agent.id), NotFoundError);
+      const keyInput = { name: "Retirement key", expiresAt: null, grants: [{
+        scope: "personal" as const, actorId: owner.account.actorId, permissions: ["resource.read" as const],
+      }] };
+      await identity.setMembership(owner.headers, project.id, agent.id, { role: "member" });
+      const key = await identity.issueKey(owner.headers, agent.id, keyInput);
+      const keyHeaders = new Headers({ authorization: `Bearer ${key.rawKey}` });
+      await identity.disableAgent(owner.headers, agent.id);
+      await assert.rejects(auth.resolve(keyHeaders), AuthenticationError);
+      await assert.rejects(identity.disableAgent(owner.headers, agent.id), ValidationError);
+      await assert.rejects(identity.issueKey(owner.headers, agent.id, keyInput));
+      assert.equal((await identity.listAgents(owner.headers)).some(row => row.id === agent.id), false);
+      assert.equal((await identity.listAgents(owner.headers, { status: "disabled", query: "Retirement" }))[0]?.id, agent.id);
+      await assert.rejects(identity.deleteAgent(outsider.headers, agent.id), NotFoundError);
+      const deleted = await identity.deleteAgent(owner.headers, agent.id);
+      assert.ok(deleted.deletedAt);
+      assert.equal((await identity.listMemberships(owner.headers, project.id)).some(row => row.actor.id === agent.id), false);
+      assert.equal((await identity.listAssignees(owner.headers, project.id)).some(row => row.id === agent.id), false);
+      assert.equal((await identity.listAssignees(owner.headers)).some(row => row.id === agent.id), false);
+      assert.ok((await db.select().from(projectMemberships).where(eq(projectMemberships.actorId, agent.id))).length);
+      await assert.rejects(db.update(authActors).set({ status: "active" }).where(eq(authActors.id, agent.id)));
+      assert.equal((await identity.listAgents(owner.headers, { status: "disabled", query: "Retirement" })).length, 0);
+      assert.equal((await identity.listAgents(owner.headers, { status: "deleted", query: "Retirement" }))[0]?.id, agent.id);
+      await assert.rejects(identity.agentDetail(owner.headers, agent.id), NotFoundError);
+      await assert.rejects(identity.disableAgentAsAdministrator(admin.headers, agent.id), NotFoundError);
+      await assert.rejects(identity.deleteAgent(owner.headers, agent.id), NotFoundError);
+      assert.ok((await db.select().from(authActors).where(eq(authActors.id, agent.id)))[0]?.deletedAt);
+      assert.ok((await db.select().from(apiKeys).where(eq(apiKeys.id, key.id)))[0]?.revokedAt);
+      assert.ok((await db.select().from(authAuditEvents).where(eq(authAuditEvents.subjectActorId, agent.id))).length >= 3);
+      const replacement = await identity.createAgent(owner.headers, { displayName: agent.displayName });
+      assert.notEqual(replacement.id, agent.id);
+      assert.equal((await identity.agentProjects(owner.headers, { actorId: replacement.id })).length, 0);
+      assert.equal((await identity.listKeys(owner.headers, replacement.id)).length, 0);
+      await assert.rejects(auth.resolve(keyHeaders), AuthenticationError);
+      await db.insert(authActors).values(Array.from({ length: 25 }, (_, index) => ({
+        type: "agent" as const, status: "active" as const, displayName: `Paged fixture ${index}`,
+        managedByActorId: owner.account.actorId, managedByActorType: "human" as const,
+      })));
+      const first = await identity.listAgents(owner.headers, { query: "Paged fixture", pageSize: 20 });
+      const second = await identity.listAgents(owner.headers, { query: "Paged fixture", pageSize: 20, page: 2 });
+      assert.equal(first.length, 20); assert.equal(second.length, 5);
+      assert.equal(new Set([...first, ...second].map(row => row.id)).size, 25);
+      assert.equal((await identity.listAgents(outsider.headers, { query: "Paged fixture" })).length, 0);
+      await assert.rejects(identity.listAgents(owner.headers, { pageSize: 51 }));
+      const special = await identity.createAgent(owner.headers, { displayName: "Literal_%" });
+      assert.deepEqual((await identity.listAgents(owner.headers, { query: "_%" })).map(row => row.id), [special.id]);
+    });
+    await t.test("Agent project detail respects directory authorization, live reductions and issued ceilings", async () => {
+      const agent = await identity.createAgent(owner.headers, { displayName: "Permission editor fixture" });
+      const privateProject = await identity.createProject(outsider.headers, { name: "Invisible project" });
+      const available = await identity.agentProjects(owner.headers, { actorId: agent.id, view: "available" });
+      assert.ok(available.some(row => row.project.id === project.id));
+      assert.equal(available.some(row => row.project.id === privateProject.id), false);
+      assert.equal((await identity.agentProjects(owner.headers, { actorId: agent.id, view: "available", query: "Invisible" })).length, 0);
+      assert.ok(available.find(row => row.project.id === project.id)?.grantablePermissions.includes("execution.review"));
+      await assert.rejects(identity.agentProjects(outsider.headers, { actorId: agent.id }), NotFoundError);
+      await identity.setMembership(owner.headers, project.id, agent.id, { role: "member", explicitPermissions: ["execution.run"] });
+      const detail = await identity.agentProjects(owner.headers, { actorId: agent.id });
+      assert.equal(detail[0]?.membership?.role, "member");
+      assert.deepEqual(detail[0]?.membership?.explicitPermissions, ["execution.run"]);
+      assert.ok(detail[0]?.rolePermissions.includes("resource.write"));
+      const readKey = await identity.issueKey(owner.headers, agent.id, { name: "Finite read ceiling", expiresAt: null, grants: [{
+        scope: "project", projectId: project.id, permissions: ["resource.read"],
+      }] });
+      const headers = new Headers({ authorization: `Bearer ${readKey.rawKey}` });
+      await identity.setMembership(owner.headers, project.id, agent.id, { role: "viewer", explicitPermissions: [] });
+      let authority = await getLiveRequestAuthority(db, await auth.resolve(headers));
+      assert.deepEqual(authority.grants.find(grant => grant.scope === "project")?.permissions, ["resource.read"]);
+      await identity.setMembership(owner.headers, project.id, agent.id, { role: "member", explicitPermissions: ["execution.run"] });
+      authority = await getLiveRequestAuthority(db, await auth.resolve(headers));
+      assert.deepEqual(authority.grants.find(grant => grant.scope === "project")?.permissions, ["resource.read"]);
+      await identity.revokeKey(owner.headers, agent.id, readKey.id);
+      await identity.removeMembership(owner.headers, project.id, agent.id);
+      await identity.setMembership(owner.headers, project.id, agent.id, { role: "member" });
+      await assert.rejects(auth.resolve(headers), AuthenticationError);
+      await identity.disableAgent(owner.headers, agent.id);
+      assert.equal((await identity.agentProjects(owner.headers, { actorId: agent.id }))[0]?.canManage, false);
+      await assert.rejects(identity.setMembership(owner.headers, project.id, agent.id, { role: "member" }), NotFoundError);
+    });
+    await t.test("Agent disable serializes with credential issuance and deletion never revives it", async () => {
+      const agent = await identity.createAgent(owner.headers, { displayName: "Concurrent retirement" });
+      const outcomes = await Promise.allSettled([
+        identity.issueKey(owner.headers, agent.id, { name: "Racing key", expiresAt: null, grants: [{
+          scope: "personal", actorId: owner.account.actorId, permissions: ["resource.read"],
+        }] }),
+        identity.disableAgent(owner.headers, agent.id),
+      ]);
+      assert.equal(outcomes[1]?.status, "fulfilled");
+      const issued = outcomes[0];
+      if (issued?.status === "fulfilled" && "rawKey" in issued.value)
+        await assert.rejects(auth.resolve(new Headers({ authorization: `Bearer ${issued.value.rawKey}` })), AuthenticationError);
+      await identity.deleteAgent(owner.headers, agent.id);
+      assert.ok((await identity.listAgents(owner.headers, { status: "deleted", query: "Concurrent retirement" })).length);
+    });
     await t.test(
       "human and agent credentials preserve human ownership and require explicit personal grants",
       async () => {

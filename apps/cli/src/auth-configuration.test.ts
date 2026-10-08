@@ -76,3 +76,44 @@ test('CLI login rejects credentials in URLs, cleartext remote origins and malfor
   assert.equal(validateApiUrl('http://127.0.0.1:3001'), 'http://127.0.0.1:3001')
   await assert.rejects(loginWithApiKey('https://tw.example', 'legacy-key'), /subject-bound/)
 })
+
+
+test('Agent inspection commands use bounded shared contracts and explicit retired filters', async () => {
+  const previousUrl = process.env.TW_API_URL;
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  const urls: URL[] = [];
+  try {
+    process.env.TW_API_URL = 'https://tw.example';
+    globalThis.fetch = async (input) => {
+      urls.push(new URL(String(input)));
+      return Response.json([]);
+    };
+    console.log = () => {};
+    const run = async (args: string[]) => {
+      const program = new Command();
+      registerAuth(program);
+      await program.parseAsync(['auth', 'agents', ...args], { from: 'user' });
+    };
+    await run(['list', '--json']);
+    assert.equal(urls.at(-1)?.searchParams.get('status'), 'active');
+    assert.equal(urls.at(-1)?.searchParams.get('pageSize'), '20');
+    await run(['list', '--status', 'disabled', '--query', 'Duplicate & fixture', '--page', '2', '--json']);
+    assert.equal(urls.at(-1)?.searchParams.get('query'), 'Duplicate & fixture');
+    assert.equal(urls.at(-1)?.searchParams.get('status'), 'disabled');
+    assert.equal(urls.at(-1)?.searchParams.get('page'), '2');
+    const count = urls.length;
+    await assert.rejects(run(['list', '--page-size', '51']));
+    assert.equal(urls.length, count);
+    const actorId = '11111111-1111-4111-8111-111111111111';
+    await run(['projects', actorId, '--view', 'available', '--page-size', '10', '--json']);
+    assert.equal(urls.at(-1)?.pathname, `/api/v1/auth/agents/${actorId}/projects`);
+    assert.equal(urls.at(-1)?.searchParams.get('pageSize'), '10');
+    await assert.rejects(run(['get', 'invalid-id']));
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.log = originalLog;
+    if (previousUrl === undefined) delete process.env.TW_API_URL;
+    else process.env.TW_API_URL = previousUrl;
+  }
+});

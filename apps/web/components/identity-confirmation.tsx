@@ -70,7 +70,10 @@ export function useIdentityConfirmation() {
     <Dialog open={label !== null} onOpenChange={(open) => { if (!open) finish(false); }}>
       <DialogContent onCloseAutoFocus={(event) => {
         event.preventDefault();
-        trigger.current?.focus();
+        // Preserve focus if the completed action already opened its next panel.
+        if (document.activeElement === document.body ||
+          (event.target instanceof HTMLElement && event.target.contains(document.activeElement)))
+          trigger.current?.focus();
       }}>
         <DialogHeader>
           <DialogTitle>Confirm your identity</DialogTitle>

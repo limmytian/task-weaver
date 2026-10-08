@@ -27,6 +27,7 @@ export const authActors = twSchema.table(
     status: text("status", { enum: ["active", "disabled"] })
       .notNull()
       .default("disabled"),
+    deletedAt: time("deleted_at"),
     managedByActorId: uuid("managed_by_actor_id"),
     managedByActorType: text("managed_by_actor_type", { enum: ["human"] }),
     createdAt: time("created_at").notNull().defaultNow(),
@@ -48,6 +49,8 @@ export const authActors = twSchema.table(
       columns: [table.managedByActorId, table.managedByActorType],
       foreignColumns: [table.id, table.type],
     }).onDelete("restrict"),
+    check("auth_actors_deleted_check", sql`${table.deletedAt} IS NULL OR (${table.type} = 'agent' AND ${table.status} = 'disabled')`),
+    index("auth_actors_lifecycle_idx").on(table.managedByActorId, table.status, table.deletedAt, table.createdAt, table.id),
     index("auth_actors_manager_idx").on(table.managedByActorId),
   ],
 );

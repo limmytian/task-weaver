@@ -8,6 +8,8 @@ import {
   changeAccountPasswordSchema,
   changeAccountStateSchema,
   createManagedAgentSchema,
+  managedAgentListSchema,
+  managedAgentProjectsSchema,
   setProjectMembershipSchema,
   transferProjectOwnershipSchema,
   createProjectSchema,
@@ -147,8 +149,17 @@ export const authRouter = router({
         input.state,
       ),
     ),
-  agents: protectedProcedure.query(({ ctx }) =>
-    ctx.auth.identity.listAgents(ctx.req.headers),
+  agents: protectedProcedure.input(managedAgentListSchema.optional()).query(({ ctx, input }) =>
+    ctx.auth.identity.listAgents(ctx.req.headers, input),
+  ),
+  agentDetail: protectedProcedure.input(reference).query(({ ctx, input }) =>
+    ctx.auth.identity.agentDetail(ctx.req.headers, input.id),
+  ),
+  agentProjects: protectedProcedure.input(managedAgentProjectsSchema).query(({ ctx, input }) =>
+    ctx.auth.identity.agentProjects(ctx.req.headers, input),
+  ),
+  deleteAgent: protectedProcedure.input(reference).mutation(({ ctx, input }) =>
+    ctx.auth.identity.deleteAgent(ctx.req.headers, input.id),
   ),
   createAgent: protectedProcedure
     .input(createManagedAgentSchema)

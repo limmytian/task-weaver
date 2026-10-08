@@ -415,3 +415,41 @@ confirmation password stays in the dialog rather than ending a valid session.
 Origin, CSRF, live permission and recent-session checks still run on the server.
 The identity menu exposes account settings and sign out, using the shared browser
 session invalidation boundary for cache, streams and other tabs.
+
+
+### Managed Agent retirement and project permissions
+
+Migration `0059_agent_retirement` adds nullable `auth_actors.deleted_at`, an
+Agent-only disabled-state constraint and a lifecycle listing index. Apply it
+before running the updated services. Existing identity rows and foreign keys
+are preserved; no backfill, credential rotation or policy expansion is required.
+
+`GET /api/v1/auth/agents` defaults to active, non-deleted identities managed by
+the verified human. Explicit `status=disabled` and `status=deleted` queries use
+separate filters. All lists accept a literal name `query`, `page` and `pageSize`
+(default 20, maximum 50), with stable ordering and array responses. Consumers
+must page until a response contains fewer than `pageSize` rows. The Web only
+fetches the selected lifecycle view, and normal assignee queries exclude retired
+Agents in SQL. Deleted Agent memberships remain stored but are omitted from
+normal project member lists.
+
+Disable remains irreversible and revokes credentials/executions under the
+identity lifecycle lock. `DELETE /api/v1/auth/agents/:id/retired` accepts only
+owned, disabled, not-yet-deleted Agents, requires recent human authentication,
+and retains the immutable identity and audit/foreign references. A deleted row
+cannot become active under the database constraint. Reusing a display name
+creates a distinct UUID without old memberships or credentials.
+
+Agent detail project lists disclose only projects within the caller's current
+read or membership-administration authority. Search and paging occur in SQL.
+The Web edits through the existing shared project membership operations, with
+recent confirmation, live role/credential ceilings and execution revocation.
+Role-derived permissions, explicit approvals, and existing personal/global
+policy sources are displayed separately. No new personal/global grant editor
+is introduced. Agent entitlement expansion does not enlarge an issued Key's
+ceiling, and revoked credentials stay revoked after membership changes.
+
+CLI inspection: `tw auth agents list --status disabled --query name --json`,
+`tw auth agents get <id> --json`, and `tw auth agents projects <id> --view available
+--json` use the same bounded REST contracts. Sensitive lifecycle mutations still
+require a browser session rather than an ordinary CLI API key.

@@ -103,7 +103,16 @@ auth.patch("/accounts/:id", async (c) =>
   ),
 );
 auth.get("/agents", async (c) =>
-  send(c, await identity(c).listAgents(headers(c))),
+  send(c, await identity(c).listAgents(headers(c), c.req.query())),
+);
+auth.get("/agents/:id", async (c) =>
+  send(c, await identity(c).agentDetail(headers(c), c.req.param("id"))),
+);
+auth.get("/agents/:id/projects", async (c) =>
+  send(c, await identity(c).agentProjects(headers(c), { ...c.req.query(), actorId: c.req.param("id") })),
+);
+auth.delete("/agents/:id/retired", async (c) =>
+  send(c, await identity(c).deleteAgent(headers(c), c.req.param("id"))),
 );
 auth.post("/agents", async (c) =>
   send(c, await identity(c).createAgent(headers(c), await c.req.json()), 201),

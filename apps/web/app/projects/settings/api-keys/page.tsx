@@ -1,8 +1,9 @@
 "use client";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   issueOwnedApiKeySchema,
+  managedAgentProjectsSchema,
   type AuthorizationGrant,
   type AuthorizationPermission,
 } from "@task-weaver/contracts";
@@ -15,8 +16,20 @@ import { Input } from "@/components/ui/input";
 
 export default function ApiKeysSettingsPage() {
   const identity = useWebIdentity();
-  const agents = trpc.auth.agents.useQuery();
+  const [agentSearch, setAgentSearch] = useState("");
+  const [agentPage, setAgentPage] = useState(1);
+  const agents = trpc.auth.agents.useQuery({ status: "active", query: agentSearch, page: agentPage, pageSize: 20 });
   const [subject, setSubject] = useState(identity.id);
+  const selectedAgent = trpc.auth.agentDetail.useQuery({ id: subject }, { enabled: subject !== identity.id, retry: false });
+  const [linkedAgentId, setLinkedAgentId] = useState<string | null>(null);
+  const linkedAgent = trpc.auth.agentDetail.useQuery({ id: linkedAgentId ?? identity.id }, { enabled: linkedAgentId !== null, retry: false });
+  useEffect(() => {
+    const actorId = new URLSearchParams(window.location.search).get("agent");
+    if (managedAgentProjectsSchema.safeParse({ actorId }).success) setLinkedAgentId(actorId);
+  }, []);
+  useEffect(() => {
+    if (linkedAgent.data?.status === "active") setSubject(linkedAgent.data.id);
+  }, [linkedAgent.data]);
   const target = { actorId: subject };
   const keys = trpc.apiKey.list.useQuery(target);
   const options = trpc.apiKey.grantOptions.useQuery(target);
@@ -97,7 +110,14 @@ export default function ApiKeysSettingsPage() {
         Issuance is limited by your current authority and the subject&apos;s
         rights; membership changes and revocation remain effective.
       </p>
+      {linkedAgentId && (linkedAgent.error || linkedAgent.data?.status === "disabled") && <p role="alert">The requested Agent is unavailable or retired. Choose an active credential owner.</p>}
       <div className="space-y-2">
+        <Input aria-label="Search active credential Agents" placeholder="Search active Agent names" value={agentSearch} onChange={event => { setAgentSearch(event.target.value); setAgentPage(1); }} />
+        <div className="flex items-center gap-2">
+          <Button variant="outline" disabled={agentPage === 1 || agents.isFetching} onClick={() => setAgentPage(agentPage - 1)}>Previous Agents</Button>
+          <span className="text-sm">Page {agentPage}</span>
+          <Button variant="outline" disabled={agents.isFetching || (agents.data?.length ?? 0) < 20} onClick={() => setAgentPage(agentPage + 1)}>Next Agents</Button>
+        </div>
         <label htmlFor="key-subject" className="text-sm font-medium">
           Credential owner
         </label>
@@ -113,11 +133,12 @@ export default function ApiKeysSettingsPage() {
           }}
         >
           <option value={identity.id}>You (human)</option>
+          {selectedAgent.data?.status === "active" && !agents.data?.some(agent => agent.id === selectedAgent.data?.id) && <option value={selectedAgent.data.id}>{selectedAgent.data.displayName} · {selectedAgent.data.id} (managed Agent)</option>}
           {agents.data
             ?.filter((agent) => agent.status === "active")
             .map((agent) => (
               <option key={agent.id} value={agent.id}>
-                {agent.displayName} (managed Agent)
+                {agent.displayName} · {agent.id} (managed Agent)
               </option>
             ))}
         </select>

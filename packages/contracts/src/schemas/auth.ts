@@ -567,8 +567,25 @@ export const managedAgentDtoSchema = z
     id: idSchema,
     type: z.literal("agent"),
     managedByActorId: idSchema,
+    deletedAt: timestampSchema.nullable(),
     displayName: z.string().min(1).max(255),
     status: principalStatusSchema,
     createdAt: timestampSchema,
   })
   .strict();
+
+
+export const managedAgentListSchema = z.object({
+  status: z.enum(["active", "disabled", "deleted"]).default("active"),
+  query: z.string().trim().max(255).default(""),
+  page: z.coerce.number().int().min(1).max(100000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+}).strict();
+
+export const managedAgentProjectsSchema = z.object({
+  actorId: idSchema,
+  view: z.enum(["memberships", "available"]).default("memberships"),
+  query: z.string().trim().max(255).default(""),
+  page: z.coerce.number().int().min(1).max(100000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+}).strict();

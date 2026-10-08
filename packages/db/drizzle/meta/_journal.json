@@ -414,6 +414,13 @@
       "when": 1791280000005,
       "tag": "0058_auth_migration_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1791461457881,
+      "tag": "0059_agent_retirement",
+      "breakpoints": true
     }
   ]
 }

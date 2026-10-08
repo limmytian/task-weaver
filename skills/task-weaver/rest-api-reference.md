@@ -36,7 +36,11 @@ headers are rejected even on public entry points.
 | `POST /auth/reauthenticate`, `POST /auth/password` | Recent authentication and password lifecycle |
 | `GET /auth/sessions`, `DELETE /auth/sessions/:id` | Owner-scoped session metadata/revocation |
 | `GET/POST /auth/accounts`, `PATCH /auth/accounts/:id`, `POST /auth/accounts/:id/recover` | Recently authenticated human administrator; no implicit content access |
-| `GET/POST /auth/agents`, `DELETE /auth/agents/:id` | Owned managed-Agent lifecycle |
+| `GET /auth/agents` | Owned Agents; `status=active` by default, explicit `disabled` / `deleted`; `query`, `page`, `pageSize` (default 20, maximum 50). Array response, stable ordering; continue until fewer than pageSize rows |
+| `POST /auth/agents`, `DELETE /auth/agents/:id` | Create / irreversibly disable an owned Agent |
+| `GET /auth/agents/:id` | Owned non-deleted Agent detail; disabled identities are inspectable |
+| `GET /auth/agents/:id/projects` | Authorized named project memberships or `view=available` member-administration choices; bounded query/page/pageSize; current role-derived and explicit permissions |
+| `DELETE /auth/agents/:id/retired` | Soft delete an owned disabled Agent only; recent session, Origin and CSRF required. Identity/audit references remain |
 | `DELETE /auth/admin/agents/:id` | Explicit administrator disablement; no content grant |
 | `POST /auth/projects`, `GET /auth/projects/:id/members` | Guarded project creation and membership visibility |
 | `PUT/DELETE /auth/projects/:id/members/:actorId`, `POST /auth/projects/:id/owner` | Role/entitlement ceiling, live membership and last human owner protection |

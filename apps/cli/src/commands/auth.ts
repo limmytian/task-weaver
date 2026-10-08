@@ -1,3 +1,4 @@
+import { managedAgentListSchema, managedAgentProjectsSchema } from '@task-weaver/contracts'
 import { Command } from 'commander'
 import * as readline from 'readline/promises'
 import { loadConfig, readStoredConfig, saveConfig, configFilePath } from '../config.js'
@@ -84,6 +85,29 @@ function printIdentity(identity: CliIdentity, json?: boolean): void {
 
 export function registerAuth(program: Command): void {
   const auth = program.command('auth').description('manage CLI authentication')
+  const agents = auth.command('agents').description('inspect managed Agent identities and project permissions')
+  agents.command('list').option('--status <status>', 'active|disabled|deleted', 'active')
+    .option('--query <text>', 'search display names', '').option('--page <number>', 'page', '1')
+    .option('--page-size <number>', 'page size (maximum 50)', '20').option('--json', 'output JSON')
+    .action(async (opts) => {
+      const { json: _json, ...input } = opts
+      const parsed = managedAgentListSchema.parse(input)
+      const query = new URLSearchParams(Object.entries(parsed).map(([key, value]) => [key, String(value)] as [string, string]))
+      console.log(JSON.stringify(await request('GET', `/api/v1/auth/agents?${query}`)))
+    })
+  agents.command('get <id>').option('--json', 'output JSON').action(async (id: string) => {
+    const { actorId } = managedAgentProjectsSchema.parse({ actorId: id })
+    console.log(JSON.stringify(await request('GET', `/api/v1/auth/agents/${actorId}`)))
+  })
+  agents.command('projects <id>').option('--view <view>', 'memberships|available', 'memberships')
+    .option('--query <text>', 'search authorized project names', '').option('--page <number>', 'page', '1')
+    .option('--page-size <number>', 'page size (maximum 50)', '20').option('--json', 'output JSON')
+    .action(async (id: string, opts) => {
+      const { json: _json, ...input } = opts
+      const { actorId, ...parsed } = managedAgentProjectsSchema.parse({ ...input, actorId: id })
+      const query = new URLSearchParams(Object.entries(parsed).map(([key, value]) => [key, String(value)] as [string, string]))
+      console.log(JSON.stringify(await request('GET', `/api/v1/auth/agents/${actorId}/projects?${query}`)))
+    })
   auth.command('setup').description('configure API URL and a verified scoped API key').action(async () => {
     const current = loadConfig()
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout })

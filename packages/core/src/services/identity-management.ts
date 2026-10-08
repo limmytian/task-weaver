@@ -1,5 +1,5 @@
 import { revokeActorExecutions } from './execution-revocation';
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, isNotNull, ilike, inArray, asc } from "drizzle-orm";
 import { z } from "zod";
 import {
   type Database,
@@ -20,6 +20,8 @@ import {
   createProjectSchema,
   createManagedAgentSchema,
   managedAgentDtoSchema,
+  managedAgentListSchema,
+  managedAgentProjectsSchema,
   setProjectMembershipSchema,
   projectMembershipDtoSchema,
   type VerifiedRequestContext,
@@ -70,6 +72,7 @@ const agentDto = (actor: typeof authActors.$inferSelect) =>
     managedByActorId: actor.managedByActorId,
     displayName: actor.displayName,
     status: actor.status,
+    deletedAt: actor.deletedAt?.toISOString() ?? null,
     createdAt: actor.createdAt.toISOString(),
   });
 const noStore = (): Headers => new Headers({ "cache-control": "no-store" });
@@ -165,6 +168,8 @@ export function createIdentityManagementService(
     actor: typeof authActors.$inferSelect,
     byActorId: string,
   ) {
+    if (actor.deletedAt) throw new NotFoundError("Agent not found");
+    if (actor.status !== "active") throw new ValidationError("Agent is already disabled");
     const now = new Date();
     await revokeActorExecutions(dbOrTx, actor.id);
     const [disabled] = await dbOrTx
@@ -235,12 +240,15 @@ export function createIdentityManagementService(
         if (projectId) {
           id(projectId);
           await requireLivePermission(tx, context, { scope: "project", projectId, permissions: ["resource.read"] });
-          actorIds = (await tx.select().from(projectMemberships).where(and(eq(projectMemberships.projectId, projectId), isNull(projectMemberships.removedAt))))
-            .filter(member => member.role !== "viewer").map(member => member.actorId);
+          actorIds = (await tx.select({ member: projectMemberships }).from(projectMemberships)
+            .innerJoin(authActors, eq(authActors.id, projectMemberships.actorId))
+            .where(and(eq(projectMemberships.projectId, projectId), isNull(projectMemberships.removedAt),
+              eq(authActors.status, "active"), isNull(authActors.deletedAt))))
+            .filter(({ member }) => member.role !== "viewer").map(({ member }) => member.actorId);
         } else {
           if (authority.actor.type !== "human") throw new AuthorizationError();
           await requireLivePermission(tx, context, { scope: "personal", actorId: authority.actor.id, permissions: ["resource.read"] });
-          actorIds = [authority.actor.id, ...(await tx.select().from(authActors).where(eq(authActors.managedByActorId, authority.actor.id))).map(actor => actor.id)];
+          actorIds = [authority.actor.id, ...(await tx.select().from(authActors).where(and(eq(authActors.managedByActorId, authority.actor.id), eq(authActors.status, "active"), isNull(authActors.deletedAt)))).map(actor => actor.id)];
         }
         const eligible = [];
         for (const actorId of actorIds) {
@@ -265,15 +273,17 @@ export function createIdentityManagementService(
       });
       return (
         await db
-          .select()
+          .select({ membership: projectMemberships })
           .from(projectMemberships)
+          .innerJoin(authActors, eq(authActors.id, projectMemberships.actorId))
           .where(
             and(
               eq(projectMemberships.projectId, projectId),
               isNull(projectMemberships.removedAt),
+              isNull(authActors.deletedAt),
             ),
           )
-      ).map(membershipDto);
+      ).map(({ membership }) => membershipDto(membership));
     },
     async setMembership(
       headers: Headers,
@@ -533,7 +543,8 @@ export function createIdentityManagementService(
         return agentDto(actor!);
       });
     },
-    async listAgents(headers: Headers) {
+    async listAgents(headers: Headers, input: unknown = {}) {
+      const parsed = managedAgentListSchema.parse(input);
       const context = await authentication.resolve(headers);
       const authority = await getLiveRequestAuthority(db, context);
       if (authority.actor.type !== "human") throw new AuthorizationError();
@@ -550,9 +561,76 @@ export function createIdentityManagementService(
             and(
               eq(authActors.type, "agent"),
               eq(authActors.managedByActorId, authority.actor.id),
+              eq(authActors.status, parsed.status === "deleted" ? "disabled" : parsed.status),
+              parsed.status === "deleted" ? isNotNull(authActors.deletedAt) : isNull(authActors.deletedAt),
+              parsed.query ? ilike(authActors.displayName, `%${parsed.query.replace(/[\\%_]/g, "\\$&")}%`) : undefined,
             ),
           )
+          .orderBy(asc(authActors.createdAt), asc(authActors.id))
+          .limit(parsed.pageSize)
+          .offset((parsed.page - 1) * parsed.pageSize)
       ).map(agentDto);
+    },
+    async agentDetail(headers: Headers, actorId: string) {
+      id(actorId);
+      const context = await authentication.resolve(headers);
+      const { actor } = await ownAgent(db, context, actorId);
+      if (actor.deletedAt) throw new NotFoundError("Agent not found");
+      return agentDto(actor);
+    },
+    async agentProjects(headers: Headers, input: unknown) {
+      const parsed = managedAgentProjectsSchema.parse(input);
+      const context = await authentication.resolve(headers);
+      return db.transaction(async (tx) => {
+        await lockIdentityLifecycle(tx);
+        const { actor } = await ownAgent(tx, context, parsed.actorId);
+        if (actor.deletedAt) throw new NotFoundError("Agent not found");
+        const authority = await getLiveRequestAuthority(tx, context);
+        const eligible = authority.grants.filter((grant) => grant.scope === "project" &&
+          grant.permissions.includes(parsed.view === "available" ? "project.members.manage" : "resource.read"));
+        const projectIds = eligible.flatMap(grant => grant.scope === "project" ? [grant.projectId] : []);
+        if (!projectIds.length) return [];
+        const rows = await tx.select({ project: projects, membership: projectMemberships })
+          .from(projects)
+          .leftJoin(projectMemberships, and(eq(projectMemberships.projectId, projects.id),
+            eq(projectMemberships.actorId, actor.id), isNull(projectMemberships.removedAt)))
+          .where(and(inArray(projects.id, projectIds), eq(projects.status, "active"),
+            parsed.view === "memberships" ? isNotNull(projectMemberships.id) : undefined,
+            parsed.query ? ilike(projects.name, `%${parsed.query.replace(/[\\%_]/g, "\\$&")}%`) : undefined))
+          .orderBy(asc(projects.name), asc(projects.id)).limit(parsed.pageSize)
+          .offset((parsed.page - 1) * parsed.pageSize);
+        return rows.map(({ project, membership }) => {
+          const grant = eligible.find(grant => grant.scope === "project" && grant.projectId === project.id)!;
+          const canOwn = grant.permissions.includes("project.ownership.manage");
+          const canManage = actor.status === "active" && grant.permissions.includes("project.members.manage") &&
+            (canOwn || !membership || (membership.role !== "maintainer" && membership.role !== "owner"));
+          return {
+            project: { id: project.id, name: project.name },
+            membership: membership ? membershipDto(membership) : null,
+            rolePermissions: membership ? [...PROJECT_ROLE_PERMISSIONS[membership.role]] : [],
+            canManage,
+            roles: canOwn ? ["maintainer", "member", "viewer"] as const : ["member", "viewer"] as const,
+            grantablePermissions: (canOwn ? PROJECT_ROLE_GRANTABLE_PERMISSIONS.owner : PROJECT_ROLE_GRANTABLE_PERMISSIONS.maintainer)
+              .filter(permission => context.credential.kind === "session" || grant.permissions.includes(permission)),
+          };
+        });
+      });
+    },
+    async deleteAgent(headers: Headers, actorId: string) {
+      id(actorId);
+      const context = await mutation(headers);
+      return db.transaction(async (tx) => {
+        await lockIdentityLifecycle(tx);
+        await requireRecentSession(tx, context);
+        const { actor, manager } = await ownAgent(tx, context, actorId);
+        if (actor.deletedAt) throw new NotFoundError("Agent not found");
+        if (actor.status !== "disabled") throw new ValidationError("Only disabled Agents can be deleted");
+        await revokeActorExecutions(tx, actor.id);
+        const [deleted] = await tx.update(authActors).set({ deletedAt: new Date(), updatedAt: new Date() })
+          .where(eq(authActors.id, actor.id)).returning();
+        await auditIdentity(tx, "agent.deleted", manager.id, actor.id);
+        return agentDto(deleted!);
+      });
     },
     async disableAgent(headers: Headers, actorId: string) {
       id(actorId);
