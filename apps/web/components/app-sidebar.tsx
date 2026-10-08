@@ -15,7 +15,8 @@ import {
   Search,
   Server,
   Settings,
-  WandSparkles,
+  Sparkles,
+  ChartNoAxesCombined,
   GitFork,
   type LucideIcon,
 } from "lucide-react";
@@ -38,7 +39,8 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import type { NavigationItem } from "@/lib/navigation";
 
 const navigationIcons: Readonly<Record<string, LucideIcon>> = {
-  agent: WandSparkles,
+  agent: Sparkles,
+  analytics: ChartNoAxesCombined,
   brain: Brain,
   cpu: Cpu,
   document: FileText,
@@ -98,7 +100,7 @@ export function AppSidebar({ navigation }: { navigation: readonly NavigationItem
                     tooltip={item.label}
                   >
                     <Link href={item.href}>
-                      <Icon className="h-4 w-4" />
+                      <Icon aria-hidden="true" className="h-4 w-4" />
                       <span>{item.label}</span>
                     </Link>
                   </SidebarMenuButton>

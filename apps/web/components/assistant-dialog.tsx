@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import {
-  Bot,
   CheckCircle2,
   Clock,
   Edit2,
@@ -266,7 +265,7 @@ export function AssistantDialog({
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
           <Button size="sm" variant="outline" className={triggerClassName}>
-            <Sparkles className="mr-1 h-4 w-4" />
+            <Sparkles aria-hidden="true" className="mr-1 h-4 w-4" />
             {label}
           </Button>
         </SheetTrigger>
@@ -275,7 +274,7 @@ export function AssistantDialog({
             <div className="flex items-center justify-between gap-3 pr-8">
               <div className="flex items-center gap-2">
                 <SheetTitle className="flex items-center gap-2 text-left">
-                  <Bot className="h-5 w-5" />
+                  <Sparkles aria-hidden="true" className="h-5 w-5" />
                   Ti assistant
                 </SheetTitle>
                 <Badge variant="outline" className="text-[10px]">
@@ -432,14 +431,15 @@ export function AssistantDialog({
                 <div className="space-y-4 px-5 py-5">
                   {messages.length === 0 ? (
                     <div className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
+                      <Sparkles aria-hidden="true" className="mb-2 h-5 w-5" />
                       Ask about personal tasks, project status, risks, stale work, schedule health, or the next useful maintenance step.
                     </div>
                   ) : (
                     messages.map((message) => (
                       <div key={message.id} className="flex gap-3">
-                        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background">
+                        <div role="img" aria-label={message.role === "assistant" ? "Ti assistant" : "You"} className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background">
                           {message.role === "assistant" ? (
-                            <Bot className="h-4 w-4" />
+                            <Sparkles aria-hidden="true" className="h-4 w-4" />
                           ) : (
                             <UserRound className="h-4 w-4" />
                           )}

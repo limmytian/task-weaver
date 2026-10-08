@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { Bot, CheckCircle2, CircleHelp, ListChecks, Plus, ShieldCheck, Star } from "lucide-react";
+import { Sparkles, CheckCircle2, CircleHelp, ListChecks, Plus, ShieldCheck, Star } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/trpc/client";
 import { Badge } from "@/components/ui/badge";
@@ -69,7 +69,7 @@ export default function AgentsPage() {
         <SidebarTrigger />
         <Separator orientation="vertical" className="mr-2 h-4" />
         <h1 className="flex items-center gap-1.5 text-lg font-semibold">
-          <Bot className="h-5 w-5 text-muted-foreground" />
+          <Sparkles aria-hidden="true" className="h-5 w-5 text-muted-foreground" />
           Ti Agent
         </h1>
         <p className="hidden text-sm text-muted-foreground md:block">
@@ -527,7 +527,7 @@ function RunsCard() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
-          <Bot className="h-4 w-4" />
+          <Sparkles aria-hidden="true" className="h-4 w-4" />
           Recent Ti Runs
         </CardTitle>
         <p className="text-sm text-muted-foreground">
@@ -538,7 +538,8 @@ function RunsCard() {
         {isLoading ? (
           <Skeleton className="h-56" />
         ) : !runs || runs.length === 0 ? (
-          <div className="flex min-h-40 items-center justify-center border border-dashed text-sm text-muted-foreground">
+          <div className="flex min-h-40 flex-col items-center justify-center gap-2 border border-dashed text-sm text-muted-foreground">
+            <Sparkles aria-hidden="true" className="h-5 w-5" />
             No Ti agent runs
           </div>
         ) : (

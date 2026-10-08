@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import { ChartNoAxesCombined } from "lucide-react";
 import { agentUsageQuerySchema } from "@task-weaver/contracts";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
@@ -64,7 +65,7 @@ export default function UsagePage() {
     <>
       <header className="flex h-14 items-center gap-3 border-b px-4">
         <SidebarTrigger />
-        <h1 className="text-lg font-semibold">Agent Usage</h1>
+        <h1 className="flex items-center gap-1.5 text-lg font-semibold"><ChartNoAxesCombined aria-hidden="true" className="h-5 w-5 text-muted-foreground" />Agent Usage</h1>
       </header>
       <main className="mx-auto w-full max-w-6xl space-y-5 p-6">
         <p className="text-sm text-muted-foreground">
