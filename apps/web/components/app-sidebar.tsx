@@ -32,6 +32,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { NavigationItem } from "@/lib/navigation";
 
@@ -76,8 +77,8 @@ export function AppSidebar({ navigation }: { navigation: readonly NavigationItem
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="border-b px-4 py-3 group-data-[collapsible=icon]:px-2">
-        <Link href="/projects" className="flex items-center gap-2 group-data-[collapsible=icon]:justify-center">
-          <FolderKanban className="h-5 w-5" />
+        <Link href="/projects" aria-label="Task Weaver home" className="flex items-center gap-2 rounded-sm group-data-[collapsible=icon]:justify-center">
+          <BrandMark className="h-6 w-6" />
           <span className="text-lg font-bold tracking-tight group-data-[collapsible=icon]:hidden">Task Weaver</span>
         </Link>
       </SidebarHeader>

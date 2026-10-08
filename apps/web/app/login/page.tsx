@@ -10,6 +10,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { trpc } from "@/trpc/client";
 import { announceSessionChange } from "@/lib/browser-session";
 import { Button } from "@/components/ui/button";
+import { BrandMark } from "@/components/brand-mark";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Input } from "@/components/ui/input";
 
 type Mode = "login" | "activate" | "bootstrap";
@@ -62,6 +64,10 @@ export default function LoginPage() {
   }
   return (
     <main className="mx-auto flex min-h-svh max-w-md flex-col justify-center gap-6 px-6 py-12">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 font-semibold"><BrandMark className="h-10 w-10" />Task Weaver</div>
+        <ThemeToggle />
+      </div>
       <div>
         <h1 className="text-2xl font-semibold">
           {mode === "login"

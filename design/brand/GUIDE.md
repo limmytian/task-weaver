@@ -42,7 +42,7 @@ Keep visible keyboard focus, underline links, and pair status color with labels/
 
 The screenshot frame is explicitly a placeholder. Insert only current, sanitized screenshots with no credentials, private accounts, workspace names or infrastructure details. Label actual version/theme and feature; do not present mockups as shipped product evidence. Exported raster copies must be visually checked for text layout and font rendering.
 
-Preparing assets does not upload them to GitHub, change a public repository profile, publish a site, create a release or deploy a product. Integration of Web/CLI/README surfaces is tracked separately; release inclusion remains an owner decision.
+Preparing assets does not upload them to GitHub, change a public repository profile, publish a site, create a release or deploy a product. Web/CLI/README surfaces use this identity. Owner visual acceptance and release inclusion remain separate decisions.
 
 ## Provenance
 

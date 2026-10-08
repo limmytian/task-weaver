@@ -1,5 +1,10 @@
 # Task Weaver
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="design/brand/templates/readme-dark.svg">
+  <img src="design/brand/templates/readme-light.svg" alt="Task Weaver — A shared workspace for humans and AI agents" width="960" height="240">
+</picture>
+
 Task Weaver is a human–AI collaborative project management tool. Humans use the
 Web UI; agents use the `tw` CLI, REST API, or GraphQL API. Both work with the same
 projects, requirements, tasks, documents, and activity history.

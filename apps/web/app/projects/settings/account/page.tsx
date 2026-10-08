@@ -14,6 +14,7 @@ import {
 } from "@/lib/browser-session";
 import { OneTimeSecret } from "@/components/one-time-secret";
 import { Button } from "@/components/ui/button";
+import { BrandMark } from "@/components/brand-mark";
 import { Input } from "@/components/ui/input";
 
 export default function AccountPage() {
@@ -93,7 +94,7 @@ export default function AccountPage() {
     <main className="mx-auto w-full max-w-3xl space-y-8 p-4 md:p-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Account</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-semibold"><BrandMark className="h-6 w-6" />Account</h1>
           <p className="break-all text-sm text-muted-foreground">
             {current.data?.account?.displayName} ·{" "}
             {current.data?.account?.email}
