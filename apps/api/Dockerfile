@@ -6,7 +6,8 @@ COPY . .
 RUN --mount=type=cache,id=tw-public-pnpm,target=/pnpm/store \
     pnpm install --store-dir=/pnpm/store --frozen-lockfile
 RUN --mount=type=cache,id=tw-public-pnpm,target=/pnpm/store pnpm release:licenses
-RUN --mount=type=cache,id=tw-public-pnpm,target=/pnpm/store pnpm --filter @task-weaver/api deploy --prod /runtime
+RUN --mount=type=cache,id=tw-public-pnpm,target=/pnpm/store pnpm --filter @task-weaver/api deploy --prod /runtime \
+    && node scripts/verify-api-runtime-dependencies.mjs /runtime
 
 # Production runner
 # Workspace packages export TypeScript source, so we use tsx at runtime

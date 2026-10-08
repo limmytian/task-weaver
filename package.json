@@ -43,6 +43,7 @@
   "packageManager": "pnpm@9.15.0",
   "pnpm": {
     "overrides": {
+      "better-auth>drizzle-kit": "-",
       "browserslist": "4.28.7",
       "eslint-plugin-react-hooks": "7.0.1",
       "lodash-es": "4.18.0",
