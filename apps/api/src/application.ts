@@ -44,7 +44,7 @@ import webhookRoutes from "./routes/webhooks.js";
 import { mcpPool } from "./mcp-pool.js";
 import { createPartnersGatewayRuntime } from "@task-weaver/partners-gateway/runtime";
 
-export const TASK_WEAVER_VERSION = "0.3.2" as const;
+export const TASK_WEAVER_VERSION = "0.3.3" as const;
 
 interface ApplicationLogger {
   debug(message: string, details?: Record<string, unknown>): void;

@@ -63,6 +63,7 @@ try {
     ],
     ["@task-weaver/api", "src/authentication.postgres-e2e.test.ts"],
     [null, "scripts/auth-transports.postgres-e2e.test.ts"],
+    [null, "scripts/ce-candidate-auth.postgres-e2e.test.ts"],
     [null, "scripts/resource-authorization.postgres-e2e.test.ts"],
     [null, "scripts/retrieval-authorization.postgres-e2e.test.ts"],
     [null, "scripts/asset-authorization.postgres-e2e.test.ts"],
@@ -79,6 +80,9 @@ try {
     [null, "scripts/upgrade-rehearsal.postgres-e2e.test.ts"],
   ]) {
     if (process.env.TW_AUTH_E2E_TEST_FILTER && !testFile.includes(process.env.TW_AUTH_E2E_TEST_FILTER)) continue;
+    const isolatedCandidate = testFile === "scripts/ce-candidate-auth.postgres-e2e.test.ts";
+    const testDatabase = isolatedCandidate ? "tw_ce_candidate_e2e" : "tw_auth_e2e";
+    if (isolatedCandidate) docker("exec", name, "createdb", "-U", "fixture", testDatabase);
     const result = spawnSync(
       "pnpm",
       [
@@ -96,7 +100,7 @@ try {
           ...process.env,
           PGOPTIONS: "-c client_min_messages=warning",
           TW_AUTH_E2E_CONTAINER: name,
-          TW_AUTH_E2E_DATABASE_URL: `postgres://fixture:fixture-only@127.0.0.1:${port}/tw_auth_e2e`,
+          TW_AUTH_E2E_DATABASE_URL: `postgres://fixture:fixture-only@127.0.0.1:${port}/${testDatabase}`,
         },
       },
     );

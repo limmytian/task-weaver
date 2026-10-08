@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { inspectLocalImage } from "./image-inspection-lib.mjs";
+
+import { createCandidateSession } from "./ce-candidate-auth.mjs";
 
 import { releasePlatform } from "./release-platforms.mjs";
 
@@ -15,7 +17,15 @@ const prefix = `tw-ce-candidate-${randomUUID().slice(0, 8)}`;
 const password = randomUUID();
 const url = `postgresql://postgres:${password}@database:5432/postgres`;
 const containers = [];
-const docker = (args) => execFileSync("docker", args, { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 }).trim();
+const authOrigin = "http://127.0.0.1:3001";
+const authEnvironment = {
+  TW_AUTH_SECRET: randomBytes(32).toString("hex"),
+  TW_AUTH_BOOTSTRAP_SECRET: randomBytes(32).toString("hex"),
+  TW_AUTH_BASE_URL: authOrigin,
+  TW_AUTH_TRUSTED_ORIGINS: authOrigin,
+};
+const authArgs = Object.keys(authEnvironment).flatMap((name) => ["-e", name]);
+const docker = (args) => execFileSync("docker", args, { encoding: "utf8", maxBuffer: 8 * 1024 * 1024, env: { ...process.env, ...authEnvironment } }).trim();
 const delay = () => new Promise((done) => setTimeout(done, 1000));
 async function ready(check, label) {
   for (let attempt = 0; attempt < 120; attempt++) {
@@ -44,18 +54,17 @@ try {
       "./node_modules/.bin/tsx", `node_modules/@task-weaver/db/src/${script}`]);
   }
   const api = start("api", ["--network-alias", "api", "-p", "127.0.0.1::3001", "-e", `DATABASE_URL=${url}`,
-    "-e", "TW_DAEMON_MODE=polling", "-e", "SKILL_PACKAGE_STORAGE_DIR=/app/data/skill-packages", "-v", `${prefix}:/app/data`, apiImage]);
+    "-e", "TW_DAEMON_MODE=polling", "-e", "SKILL_PACKAGE_STORAGE_DIR=/app/data/skill-packages", "-v", `${prefix}:/app/data`, ...authArgs, apiImage]);
   const apiUrl = `http://127.0.0.1:${port(api, 3001)}`;
   await ready(async () => (await fetch(`${apiUrl}/health`)).ok, "API health");
-  const web = start("web", ["-p", "127.0.0.1::3000", "-e", `DATABASE_URL=${url}`, "-e", "TW_API_URL=http://api:3001", webImage]);
+  const web = start("web", ["-p", "127.0.0.1::3000", "-e", `DATABASE_URL=${url}`, "-e", "TW_API_URL=http://api:3001", ...authArgs, webImage]);
   await ready(async () => (await fetch(`http://127.0.0.1:${port(web, 3000)}`)).ok, "Web health");
-  const request = async (path, body) => {
-    const response = await fetch(`${apiUrl}/api/v1${path}`, { method: body ? "POST" : "GET",
-      headers: { "Content-Type": "application/json", "X-Actor-Id": "ce-candidate-smoke", "X-Actor-Type": "agent" },
-      ...(body ? { body: JSON.stringify(body) } : {}) });
-    assert.ok(response.ok, `REST smoke failed: ${path} (${response.status})`);
-    return response.json();
-  };
+  for (const headers of [{}, { "X-Actor-Id": "ce-candidate-smoke", "X-Actor-Type": "agent" }]) {
+    const response = await fetch(`${apiUrl}/api/v1/projects`, { headers });
+    assert.equal(response.status, 401, "Anonymous and forged actor access must be denied");
+  }
+  const session = await createCandidateSession(apiUrl, authOrigin, authEnvironment.TW_AUTH_BOOTSTRAP_SECRET);
+  const request = session.request;
   let buildMetadataPassed = false;
   let build = null;
   if (process.argv.includes("--verify-build")) {
@@ -74,17 +83,18 @@ try {
     buildMetadataPassed = true;
     build = { commit, version };
   }
-  const project = await request("/projects", { name: "CE binary candidate smoke" });
+  const project = await request("/auth/projects", { name: "CE binary candidate smoke" });
   const requirement = await request(`/projects/${project.id}/requirements`, { title: "Verify candidate deployment" });
   const task = await request(`/projects/${project.id}/tasks`, { title: "Preserve candidate fixture", requirementId: requirement.id });
   for (const [kind, entry] of [["projects", project], ["requirements", requirement], ["tasks", task]]) {
     assert.equal((await request(`/${kind}/${entry.id}`)).id, entry.id);
   }
+  await session.logout();
   const output = resolve("release-artifacts/deployment-verification.json");
   mkdirSync(resolve("release-artifacts"), { recursive: true });
   writeFileSync(output, `${JSON.stringify({ schemaVersion: 1, mode: "isolated-fresh-install", platform, imageIds: images,
     databaseImage, build, migrationPassed: true, searchSetupPassed: true, apiHealthy: true, webHealthy: true,
-    restCreateReadPassed: true, buildMetadataPassed, passed: true }, null, 2)}\n`);
+    authenticatedSessionPassed: true, anonymousDenied: true, restCreateReadPassed: true, buildMetadataPassed, passed: true }, null, 2)}\n`);
   console.log(output);
 } finally {
   for (const container of containers.reverse()) {

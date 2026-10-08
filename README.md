@@ -12,6 +12,14 @@ projects, requirements, tasks, documents, and activity history.
 The application includes kanban boards, a linked Markdown knowledge base,
 keyword and vector search, agent task execution, and an MCP tool registry.
 
+## 0.3.3 source preparation
+
+The prepared source adds mandatory authentication, explicit ownership migration
+and the approved Open weave identity. Read the [English release notes](docs/releases/0.3.3.md)
+or [Simplified Chinese version](docs/releases/0.3.3.zh-CN.md) before upgrading.
+Existing published images remain unchanged; binary publication and deployment
+require their own verification and approval.
+
 ## v0.3.1 multi-architecture images and version information
 
 Version 0.3.1 adds API and Web OCI indexes for Linux AMD64 and ARM64. Each

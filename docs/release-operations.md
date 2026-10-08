@@ -18,6 +18,13 @@ versioned as `vMAJOR.MINOR.PATCH`, and never moved. Release candidates use an
 
 ## Candidate gate
 
+Version-specific curated notes in `docs/releases/VERSION.md` are canonical when
+present; `release:notes` resolves their documentation links to the exact source
+commit. A separate `docs/releases/VERSION.zh-CN.md` is included as
+`RELEASE_NOTES.zh-CN.md` in the checksummed/signed bundle. Commit-log generation
+remains the fallback for versions without curated notes. Review compatibility and
+maintenance requirements in the curated notes before approving the candidate.
+
 1. Freeze the intended public commit and confirm it is the reviewed allowlist
    export. Run the source, secret, license, vulnerability, module boundary,
    version, build, typecheck, test, and deployment checks.
@@ -26,7 +33,7 @@ versioned as `vMAJOR.MINOR.PATCH`, and never moved. Release candidates use an
    in-process Pro SDK/canary is not a supported consumer. Future plugins must
    validate the actual isolated host. Rehearse a previous-minor database upgrade
    and restore from a verified backup.
-3. Build API and Web images for Linux ARM64, scan the exact local candidates,
+3. Build API and Web images natively for Linux AMD64 and ARM64, scan the exact local candidates,
    and review native license evidence. A scan failure, missing advisory
    database, unknown license, missing notice, or unresolved High/Critical
    finding blocks promotion.
@@ -42,7 +49,9 @@ versioned as `vMAJOR.MINOR.PATCH`, and never moved. Release candidates use an
    native replacement controls, layer checks, a fresh advisory scan, and an
    isolated PostgreSQL deployment. It uploads `ce-binary-candidate` only after
    every gate passes. It requires the protected `ce-candidate` environment and
-   a Linux ARM64 runner with Cargo, Docker, curl, and tar. New acquisition hashes
+   native Linux AMD64 and ARM64 runners with Cargo, Docker, curl, and tar. The
+   workflow aggregates both platform candidates into `ce-binary-candidate` and
+   independently loads/verifies each platform in its consumption job. New acquisition hashes
    and the complete evidence require maintainer review before promotion.
 5. Record the approval, create the annotated tag, then manually dispatch the
    `CE release` workflow with that version, the reviewed `candidate_run_id`,
@@ -56,7 +65,8 @@ images with signed CycloneDX SBOM and source-provenance attestations, and
 Sigstore signatures. It accepts only a successful controlled candidate run
 at the tagged public commit, verifies archive hashes and image identities,
 recomputes the image-bound binary gate and corresponding-source package hash, and
-scans those same images again before pushing. It uses `VERSION-arm64` tags.
+scans those same images again before pushing. It uses `VERSION-amd64` and
+`VERSION-arm64` tags plus a signed `VERSION` multi-platform index.
 The producer verifies the full acquired source tree before packaging. Raw
 acquisition archives, scratch directories, compilation tools, and replacement
 test binaries are omitted from the portable candidate artifact.

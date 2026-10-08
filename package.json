@@ -13,7 +13,7 @@
     "test:daemon-real-smoke": "tsx apps/cli/src/index.ts daemon pipeline smoke --providers github,gitea --json",
     "test:embedding-rollout-smoke": "pnpm --filter @task-weaver/db db:smoke-embedding",
     "check:repository-rollout": "node scripts/check-repository-rollout.mjs",
-    "test:release-gates": "node --test scripts/release-gates.test.mjs scripts/public-deployment.test.mjs scripts/binary-sources.test.mjs scripts/check-ce-artifact-compatibility.test.mjs scripts/ce-publication.test.mjs",
+    "test:release-gates": "node --test scripts/release-gates.test.mjs scripts/public-deployment.test.mjs scripts/binary-sources.test.mjs scripts/check-ce-artifact-compatibility.test.mjs scripts/ce-publication.test.mjs scripts/ce-release-notes.test.mjs",
     "release:licenses": "node scripts/release-gates.mjs licenses",
     "release:sbom": "node scripts/release-gates.mjs sbom",
     "release:provenance": "node scripts/release-gates.mjs provenance",

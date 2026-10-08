@@ -52,6 +52,11 @@ for (const [source, target] of [
   if (!existsSync(path)) throw new Error(`Missing required release evidence: ${source}`);
   copyFileSync(path, join(output, target));
 }
+if (existsSync(resolve(root, `docs/releases/${version}.zh-CN.md`))) {
+  const translatedNotes = resolve(root, "release-artifacts/RELEASE_NOTES.zh-CN.md");
+  if (!existsSync(translatedNotes)) throw new Error("Missing generated Chinese release notes");
+  copyFileSync(translatedNotes, join(output, "RELEASE_NOTES.zh-CN.md"));
+}
 
 const artifacts = readdirSync(output).filter((file) => file !== "ce-release.json")
   .sort().map((file) => {
