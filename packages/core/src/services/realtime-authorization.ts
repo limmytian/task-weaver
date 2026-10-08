@@ -1,3 +1,4 @@
+import { authorizeDaemonOperation } from "./daemon-authorization";
 import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { type Database, schedules, daemonWorkerProgress, daemons, activityLog, documents } from "@task-weaver/db";
@@ -62,6 +63,10 @@ export async function authorizedRealtimeEvent(db: Database, authority: ResourceA
       if (row.currentTaskId) await resource("task", row.currentTaskId, "currentTaskId");
       if (row.executionSliceId) await resource("slice", row.executionSliceId, "executionSliceId");
       output.daemonId = row.daemonId;
+    } else if (event.type === "executor_availability_changed") {
+      await authorizeDaemonOperation(db, authority, "daemon", "listExecutorProfiles", [db, event.daemonId]);
+      output.daemonId = event.daemonId;
+      output.kind = event.kind;
     } else if (event.type === "daemon_status_changed") {
       const [row] = await db.select({ id: daemons.id }).from(daemons).where(and(eq(daemons.id, event.daemonId), metadataReadScope(db, authority).daemon)).limit(1);
       if (!row) return null;

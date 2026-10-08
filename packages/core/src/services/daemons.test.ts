@@ -4,6 +4,7 @@ import { beforeEach, test } from "node:test";
 import { eq } from "drizzle-orm";
 import { subscribe } from "@task-weaver/realtime";
 import {
+  executorAvailability,
   activityLog,
   daemonWorkerProgress,
   daemonWorkerProgressHistory,
@@ -307,6 +308,7 @@ class FakeDb {
   select() {
     return {
       from: (table: unknown) => ({
+        where: () => { assert.equal(table, executorAvailability); return { limit: async () => [] }; },
         innerJoin: () => ({
           where: (condition: unknown) => {
             if (table !== requirementDependencies) {
@@ -1891,6 +1893,7 @@ test("requirement acquisition SQL gates later and unassigned work behind ordered
 
 test("eligibility diagnostics normalize scheduler skip reasons", async () => {
   const diagnosticDb = {
+    select: () => ({ from: () => ({ where: () => ({ limit: async () => [] }) }) }),
     query: {
       daemons: {
         findFirst: async () => ({
@@ -1979,6 +1982,7 @@ test("eligibility diagnostics normalize scheduler skip reasons", async () => {
   assert.equal(diagnostics.selectedCount, 0);
   assert.equal(diagnostics.truncated, false);
   assert.deepEqual(diagnostics.skipCounts, {
+    resource_blocked: 0,
     status: 1,
     dependency: 1,
     claim: 1,
@@ -2150,4 +2154,19 @@ test("expired daemons recover the durable current task without reopening complet
   assert.equal(db.requirementClaims.size, 0);
   assert.equal(db.tasks.get("task-1")?.status, "done");
   assert.equal(db.tasks.get("task-2")?.status, "todo");
+});
+
+
+test("resource interruption recovery preserves progress retry budget", async () => {
+  db.addDaemon(daemonA, { role: "executor", actorId: "agent-a", actorType: "agent" });
+  db.addRequirement("req-resource");
+  db.addTask("task-resource", "req-resource", { status: "in_progress" });
+  db.addTask("task-preserved", "req-resource", { status: "done" });
+  const actor = { id: "agent-a", type: "agent" as const };
+  const claim = await claimRequirement(db as any, "req-resource", actor, 2, { daemonId: daemonA, workerIndex: 0 });
+  await reportWorkerProgress(db as any, daemonA, { runId: claim.id, workerIndex: 0, requirementId: "req-resource", currentTaskId: "task-resource", phase: "executing", workspaceState: "dirty", source: "daemon", leaseGeneration: claim.generation, details: {} }, actor);
+  const result = await reconcileWorkerRun(db as any, daemonA, { runId: claim.id, workerIndex: 0, requirementId: "req-resource", leaseGeneration: claim.generation, resourceInterruption: true, workspaceState: "dirty", reason: "Executor quota interrupted work" }, actor);
+  assert.equal(result.progress.retryCount, 0);
+  assert.equal(db.tasks.get("task-resource")?.status, "todo");
+  assert.equal(db.tasks.get("task-preserved")?.status, "done");
 });

@@ -10,6 +10,7 @@ export interface Config {
   nodeId?: string
   actorId?: string
   daemonInstanceIds?: Partial<Record<'executor' | 'reviewer' | 'merger', string>>
+  executorProfiles?: Record<string, { profileId: string; poolId?: string }>
   repositoryCredentialProfiles?: Record<string, RepositoryCredentialProfile>
 }
 
@@ -79,6 +80,7 @@ export function loadConfig(): Config {
     actorId: fileConfig.actorId,
     daemonInstanceIds: fileConfig.daemonInstanceIds,
     repositoryCredentialProfiles: fileConfig.repositoryCredentialProfiles,
+    ...(fileConfig.executorProfiles ? { executorProfiles: fileConfig.executorProfiles } : {}),
   }
 }
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { ExecutorProfiles } from "./executor-profiles";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -393,6 +394,7 @@ export default function DaemonsPage() {
       </header>
 
       <main className="flex-1 space-y-6 overflow-y-auto p-4 md:p-6">
+        <ExecutorProfiles />
         <section aria-labelledby="now-heading" className="space-y-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>

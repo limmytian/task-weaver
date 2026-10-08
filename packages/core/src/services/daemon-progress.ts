@@ -1,5 +1,5 @@
 import type { MetadataReadScope } from "./metadata-read-scope";
-import { and, desc, eq, gte, inArray, lte, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, or, notInArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   activityLog,
@@ -714,6 +714,7 @@ export async function recordTaskStatusProgress(
 }
 
 interface InterruptedWorkerInput {
+  resourceInterruption?: boolean;
   runId: string;
   workerIndex: number;
   requirementId: string;
@@ -856,7 +857,7 @@ async function reconcileInterruptedWorkerInTransaction(
       status: disposition === "quarantine" ? "in_review" : "todo",
       resultSummary: sliceSummary,
       updatedAt: new Date(),
-    }).where(eq(executionSlices.id, executionSliceId));
+    }).where(and(eq(executionSlices.id, executionSliceId), ...(input.resourceInterruption ? [notInArray(executionSlices.status, ["done", "cancelled"])] : [])));
   }
 
   const progress = await persistWorkerProgress(db, {
@@ -872,7 +873,7 @@ async function reconcileInterruptedWorkerInTransaction(
     message: recoveryReason,
     workspaceState,
     recoveryDisposition: disposition,
-    retryCount: (current?.retryCount ?? 0) + 1,
+    retryCount: (current?.retryCount ?? 0) + (input.resourceInterruption ? 0 : 1),
     lastCompletedTaskId: lastCompletedTask?.id ?? current?.lastCompletedTaskId ?? null,
     pendingDiffSummary: input.pendingDiffSummary ?? current?.pendingDiffSummary ?? null,
     sliceSummary,

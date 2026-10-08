@@ -1,5 +1,5 @@
-import { eq, inArray, sql } from 'drizzle-orm';
-import { daemons, tasks, repositories, type Database } from '@task-weaver/db';
+import { eq, inArray, or, sql } from 'drizzle-orm';
+import { authActors, daemons, tasks, repositories, type Database } from '@task-weaver/db';
 import { AuthorizationError, NotFoundError, type AuthorizationPermission, type DaemonRole } from '@task-weaver/contracts';
 import { canAccessResource, requireResource, type ResourceAuthority } from './resource-authorization';
 import { loadActivePrincipal, loadPrincipalGrants } from './auth-principals';
@@ -31,6 +31,17 @@ function acquisitionFilter(db: Database, authority: ResourceAuthority, role: Dae
 }
 
 export async function authorizeDaemonOperation(db: Database, authority: ResourceAuthority, group: 'daemon' | 'progress', name: string, call: any[]): Promise<boolean> {
+  if (group === 'daemon' && name === 'listExecutorDaemons') {
+    const managed = db.select({ id: sql<string>`${authActors.id}::text` }).from(authActors).where(eq(authActors.managedByActorId, authority.actor.id));
+    const candidates = await db.select({ id: daemons.id }).from(daemons).where(or(eq(daemons.actorId, authority.actor.id), inArray(daemons.actorId, managed))).limit(100);
+    const visible: string[] = [];
+    for (const candidate of candidates) {
+      try { await authorizeDaemonOperation(db, authority, 'daemon', 'listExecutorProfiles', [db, candidate.id]); visible.push(candidate.id); }
+      catch (error) { if (!(error instanceof AuthorizationError || error instanceof NotFoundError)) throw error; }
+    }
+    call[1] = inArray(daemons.id, visible);
+    return true;
+  }
   if (group === 'daemon' && name === 'registerDaemon') {
     const input = call[1];
     if (authority.actor.type !== 'agent' || !executionProjects(authority, input.role).length) throw new AuthorizationError();
@@ -41,20 +52,23 @@ export async function authorizeDaemonOperation(db: Database, authority: Resource
     return true;
   }
   const supported = group === 'daemon'
-    ? ['heartbeatDaemon', 'updateDaemonStatus', 'requestDaemonControl', 'applyTask', 'applyRequirement', 'applyReview', 'applyMerge', 'explainRequirementEligibility']
+    ? ['heartbeatDaemon', 'updateDaemonStatus', 'requestDaemonControl', 'applyTask', 'applyRequirement', 'applyReview', 'applyMerge', 'explainRequirementEligibility', 'reportExecutorObservation', 'listExecutorProfiles', 'requestExecutorRefresh', 'requestExecutorResume', 'listExecutorAvailabilityHistory']
     : ['reportWorkerProgress', 'reconcileWorkerRun'];
   if (!supported.includes(name)) return false;
   const daemon = await db.query.daemons.findFirst({ where: eq(daemons.id, call[1]) });
   if (!daemon || !daemon.actorId || daemon.actorType !== 'agent') throw new NotFoundError('Daemon not found');
   const owner = await loadActivePrincipal(db, daemon.actorId);
   if (owner.type !== 'agent') throw new NotFoundError('Daemon not found');
-  const controls = name === 'requestDaemonControl';
-  if (daemon.actorId !== authority.actor.id && !(controls && owner.managedByActorId === authority.actor.id)) throw new NotFoundError('Daemon not found');
-  if (!controls && (authority.actor.type !== 'agent' || !executionProjects(authority, daemon.role).length)) throw new AuthorizationError();
-  if (controls) {
+  const controls = ['requestDaemonControl', 'requestExecutorRefresh', 'requestExecutorResume'].includes(name);
+  const inspection = ['listExecutorProfiles', 'listExecutorAvailabilityHistory'].includes(name);
+  if (daemon.actorId !== authority.actor.id && !((controls || inspection) && owner.managedByActorId === authority.actor.id)) throw new NotFoundError('Daemon not found');
+  if (!controls && !inspection && (authority.actor.type !== 'agent' || !executionProjects(authority, daemon.role).length)) throw new AuthorizationError();
+  if (inspection && daemon.actorId === authority.actor.id) {
+    if (!executionProjects(authority, daemon.role).length) throw new AuthorizationError();
+  } else if (controls || inspection) {
     const ownerGrants = await loadPrincipalGrants(db, owner.id);
     const projects = ownerGrants.flatMap(grant => grant.scope === 'project' && grant.permissions.includes(rolePermission(daemon.role)) ? [grant.projectId] : []);
-    if (!projects.length || projects.some(projectId => !canAccessResource(authority, { projectId }, 'project.manage'))) throw new AuthorizationError();
+    if (!projects.length || projects.some(projectId => !canAccessResource(authority, { projectId }, controls ? 'project.manage' : 'audit.read'))) throw new AuthorizationError();
   }
   const acquisition = { applyTask: [4, 'executor', true], applyRequirement: [6, 'executor', true], explainRequirementEligibility: [5, 'executor', true], applyReview: [5, 'reviewer', false], applyMerge: [5, 'merger', false] } as const;
   if (name in acquisition) {

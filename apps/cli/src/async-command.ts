@@ -19,6 +19,7 @@ export interface AsyncCommandOptions {
   onOutput?: (event: CommandOutputEvent) => void
   /** Raw stdout observer, before redaction and bounded log retention. */
   onStdout?: (chunk: Buffer) => void
+  onStderr?: (chunk: Buffer) => void
   onSpawn?: () => void
 }
 
@@ -136,6 +137,7 @@ export async function runCommand(
     })
     child.stderr?.on('data', (chunk: Buffer | string) => {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      try { options.onStderr?.(buffer) } catch { /* Observers cannot interrupt execution. */ }
       const appended = appendBounded(stderr, buffer, maxOutputBytes)
       stderr = appended.value
       outputTruncated ||= appended.truncated

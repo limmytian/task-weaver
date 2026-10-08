@@ -1,3 +1,5 @@
+import { ExecutorStatusClient } from '../executor-status-client.js'
+import { ExecutorResourceBlocked } from '../executor-availability.js'
 import { createTaskWorkerAccess } from '../task-worker-access.js'
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync } from 'fs'
 import { createHash, randomUUID } from 'crypto'
@@ -590,6 +592,29 @@ export function registerDaemon(program: Command): void {
       console.log(`\nAvailable tools: ${runnable.join(', ') || 'none'}`)
     })
 
+  daemon.command('executors')
+    .description('inspect executor availability and quota windows for an authorized daemon')
+    .argument('<daemon-id>')
+    .option('--refresh <tool>', 'request a bounded nonbillable status refresh; does not erase cooldown')
+    .option('--resume <tool>', 'authorize a bounded retry after correcting provider resources')
+    .option('--expected-version <n>', 'observed profile version required for resume')
+    .option('--reason <text>', 'operator recovery reason required for resume')
+    .option('--history', 'show the bounded availability timeline')
+    .option('--json', 'output JSON')
+    .action(async (daemonId, opts) => {
+      if (opts.resume) {
+        if (!opts.reason || !opts.expectedVersion) throw new Error('Resume requires --reason and --expected-version')
+        await request('POST', `/api/v1/daemons/${daemonId}/executors/${encodeURIComponent(opts.resume)}/resume`, { expectedVersion: Number(opts.expectedVersion), reason: opts.reason })
+      }
+      if (opts.refresh) await request('POST', `/api/v1/daemons/${daemonId}/executors/${encodeURIComponent(opts.refresh)}/refresh`, {})
+      const result = await get<{ items: any[] }>(`/api/v1/daemons/${daemonId}/executors${opts.history ? '/history' : ''}`)
+      if (opts.json) printJson(result)
+      else printTable(result.items.map(item => ({ tool: item.tool, profile: item.profileId,
+        state: item.observation?.state ?? item.state, source: item.observation?.source ?? '-',
+        reason: item.observation?.reason ?? item.reason, reset: item.observation?.resetAt ?? 'unknown' })),
+        ['tool','profile','state','source','reason','reset'])
+    })
+
   daemon
     .command('start')
     .description('start the local AI task runner daemon')
@@ -671,6 +696,8 @@ export function registerDaemon(program: Command): void {
         pollingBackoffMax: 60_000,
       }
 
+      const executorStatus = new ExecutorStatusClient(daemonId, tools)
+      await executorStatus.refresh()
       const effectiveMode = opts.mode ?? serverConfig.mode
       console.log(`[Daemon] Registered. Mode: ${effectiveMode}, interval: ${serverConfig.pollingIntervalMs}ms, backoff max: ${serverConfig.pollingBackoffMax}ms`)
 
@@ -1013,7 +1040,9 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         if (!lane.runId) throw new Error('Task execution requires a recorded worker run')
         const access = await createTaskWorkerAccess({ config: cliConfig, daemonId, requirementId: requirement.id, taskId: task.id, runId: lane.runId, workerIndex: w.index, leaseGeneration: lane.leaseGeneration, signal })
         let childResult: Awaited<ReturnType<typeof runMeteredAgent>>
-        try { childResult = workspaceQuarantined ? {
+        try {
+        if (!workspaceQuarantined) await executorStatus.assertAvailable(toolCmd)
+        childResult = workspaceQuarantined ? {
           ok: false,
           status: 1,
           stdout: '',
@@ -1044,7 +1073,12 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
             },
           },
           { daemonId, runId: lane.runId, leaseGeneration: lane.leaseGeneration, workerIndex: w.index, projectId: requirement.projectId, requirementId: requirement.id, agent: toolCmd, phase: initialWorkspaceSnapshot.workspaceState === 'dirty' ? 'rework' : 'execution' },
+          undefined, executorStatus.observer(toolCmd),
         )
+        } catch (error) {
+          if (!(error instanceof ExecutorResourceBlocked)) throw error
+          childResult = { ok: false, status: null, stdout: '', stderr: '', command: 'executor-preflight', signal: null,
+            timedOut: false, cancelled: false, outputTruncated: false, durationMs: 0, resourceInterruption: error.observation }
         } finally { await access.close() }
         if (childResult.ok && !signal.aborted) {
           try {
@@ -1110,6 +1144,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
               executionSliceId,
               leaseGeneration: lane.leaseGeneration,
               reason,
+              resourceInterruption: Boolean(childResult.resourceInterruption),
               workspaceState: workspaceSnapshot.workspaceState,
               pendingDiffSummary: workspaceSnapshot.pendingDiffSummary,
               sliceSummary: `${reason}; active work was reconciled from durable progress.`,
@@ -1124,6 +1159,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
               console.error(`[Daemon] Worker ${w.index} durable recovery failed:`, err instanceof Error ? err.message : String(err))
             })
           }
+          if (!reconciled && childResult.resourceInterruption) throw new ExecutorResourceBlocked(childResult.resourceInterruption)
           if (!reconciled) {
             if (executionSliceId) {
               await recoveryPatch(`/api/v1/execution-slices/${executionSliceId}`, {
@@ -1162,8 +1198,8 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         if (requirementId) {
           if (!childResult.ok) {
             await recoverForRetry(
-              `Daemon requirement-lane agent ${outcome}`,
-              childResult.cancelled ? 'agent_cancelled' : childResult.timedOut ? 'agent_timeout' : undefined,
+              childResult.resourceInterruption ? `Executor resource interruption: ${childResult.resourceInterruption.reason}` : `Daemon requirement-lane agent ${outcome}`,
+              childResult.resourceInterruption ? undefined : childResult.cancelled ? 'agent_cancelled' : childResult.timedOut ? 'agent_timeout' : undefined,
             )
           } else {
             try {
@@ -1281,6 +1317,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
             }
           }
 
+          await executorStatus.refresh()
           const res = await daemonPost<{ requirement: any | null; executionSlice?: any | null; task: any | null; tasks: any[]; repositories: RequirementRepositoryEntry[]; executorTool?: string | null; eligibility?: SchedulerEligibilityDiagnostics; leaseGeneration?: number; runId?: string }>(`/api/v1/daemons/${daemonId}/apply-requirement`, {
             projectId: opts.project,
             workerIndex: w.index,
@@ -1327,12 +1364,14 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
               }, operation.signal)
             } catch (error) {
               console.error(`[Daemon] Worker ${w.index} stopped; workspace changes remain available for authorized lease recovery.`)
+              let recoveryRecorded = false
               if (res.runId) await daemonPost(`/api/v1/daemons/${daemonId}/reconcile`, {
                 runId: res.runId, requirementId: res.requirement.id, executionSliceId: res.executionSlice?.id ?? null,
                 workerIndex: w.index, leaseGeneration: res.leaseGeneration,
-                reason: 'Task execution authority or workspace preparation ended', workspaceState: 'unknown',
-              }).catch(() => undefined)
-              await daemonPost(`/api/v1/requirements/${res.requirement.id}/release`, {
+                reason: error instanceof ExecutorResourceBlocked ? error.message : 'Task execution authority or workspace preparation ended', workspaceState: 'unknown',
+                resourceInterruption: error instanceof ExecutorResourceBlocked,
+              }).then(() => { recoveryRecorded = true }).catch(() => undefined)
+              if (!(error instanceof ExecutorResourceBlocked) || recoveryRecorded) await daemonPost(`/api/v1/requirements/${res.requirement.id}/release`, {
                 reason: 'Worker stopped before successful task completion', daemonId, leaseGeneration: res.leaseGeneration,
               }).catch(() => undefined)
               leaseSupervisor.unregister(String(w.index))
@@ -1535,6 +1574,8 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         throw new Error('Authenticated task delegation is not available; daemon stopped before acquisition or execution')
       }
 
+      const executorStatus = new ExecutorStatusClient(daemonId, reviewTool ? [reviewTool] : [])
+      await executorStatus.refresh()
       const reviewDaemonConfig: DaemonConfig = reviewRegistration.config ?? {
         mode: 'polling',
         pollingIntervalMs: 15_000,
@@ -1633,7 +1674,9 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         if (!lane.runId) throw new Error('AI review requires a recorded worker run')
         const access = await createTaskWorkerAccess({ config: cliConfig, daemonId, requirementId: requirement.id, runId: lane.runId, workerIndex, leaseGeneration: lane.leaseGeneration, signal })
         let child: Awaited<ReturnType<typeof runMeteredAgent>>
-        try { child = await runMeteredAgent(
+        try {
+        await executorStatus.assertAvailable(reviewTool)
+        child = await runMeteredAgent(
           reviewTool,
           buildArgv(reviewTool, prompt, cwd, modelMappings[modelTier], thinkMappings[modelTier]),
           {
@@ -1650,8 +1693,10 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
             },
           },
           { daemonId, runId: lane.runId, leaseGeneration: lane.leaseGeneration, workerIndex, projectId: requirement.projectId, requirementId: requirement.id, agent: reviewTool, phase: 'review' },
+          undefined, executorStatus.observer(reviewTool),
         )
         } finally { await access.close() }
+        if (child.resourceInterruption) throw new ExecutorResourceBlocked(child.resourceInterruption)
         const output = [child.stdout, child.stderr].filter(Boolean).join('\n').trim()
         if (!child.ok) {
           return {
@@ -1663,6 +1708,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
       }
 
       const applyReviewCandidate = async (w: ReviewWorkerState) => {
+        await executorStatus.refresh()
         const lane = await daemonPost<{
           requirement: any | null
           tasks: any[]
@@ -1728,6 +1774,9 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           assertLease()
           return daemonPatch<T>(path, { ...body, ...leaseFence })
         }
+        let resourceRecoveryPending = false
+        let activeReviewLinkId: string | null = null
+        let reviewWorkspace: Awaited<ReturnType<typeof provisionCompositeWorkspace>> | null = null
         try {
           const requirementTasks = Array.isArray(lane.tasks) && lane.tasks.length > 0
             ? lane.tasks
@@ -1754,6 +1803,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
             signal,
           })
 
+          reviewWorkspace = workspace
           w.currentRequirementId = requirement.id
           w.requirementTitle = requirement.title
           w.branchName = requirement.branchName ?? `${workspace.repositories.length} repository branches`
@@ -1768,6 +1818,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           for (const repository of workspace.repositories) {
             const entry = entryByLink.get(repository.linkId)
             if (!entry || ['unchanged', 'merged'].includes(entry.link.deliveryStatus)) continue
+            activeReviewLinkId = entry.link.id
             const credential = resolveRepositoryCredential(cliConfig, entry.repository, 'push')
             const adapter = getGitProviderAdapter(
               entry.repository.provider,
@@ -2047,6 +2098,26 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           await fencedPatch(`/api/v1/requirements/${requirement.id}`, { status: nextStatus })
           console.log(`[Daemon] Review worker ${w.index} finished ${requirement.id}: ${failures.length > 0 ? failures.join(', ') : 'approved'}`)
         } catch (err) {
+          if (err instanceof ExecutorResourceBlocked) {
+            resourceRecoveryPending = true
+            assertLease()
+            for (const entry of lane.repositories ?? []) {
+              if (entry.link.id !== activeReviewLinkId) continue
+              await recoveryPatch(`/api/v1/requirement-repositories/${entry.link.id}/delivery`, {
+                deliveryStatus: 'in_review', reviewStatus: 'in_review', failureCode: null, failureSummary: null,
+                operationCheckpoint: { operation: 'review', status: 'in_progress', summary: err.message },
+              })
+            }
+            const snapshot = reviewWorkspace ? await inspectCompositeWorkspace(reviewWorkspace, { config: cliConfig, entries: lane.repositories }) : { workspaceState: 'unknown', pendingDiffSummary: null }
+            await daemonPost(`/api/v1/daemons/${daemonId}/reconcile`, {
+              runId: lane.runId, requirementId, executionSliceId: lane.executionSlice?.id ?? null,
+              workerIndex: w.index, leaseGeneration: lane.leaseGeneration, resourceInterruption: true,
+              reason: `AI reviewer resource interruption: ${err.message}`, workspaceState: snapshot.workspaceState, pendingDiffSummary: snapshot.pendingDiffSummary,
+              handoffSummary: 'Preserved review workspace and completed repository results. Resume review after executor recovery.',
+            })
+            resourceRecoveryPending = false
+            return
+          }
           if (!signal.aborted) throw err
           const reason = cancellationReason(signal) ?? 'operation cancelled'
           for (const entry of lane.repositories ?? []) {
@@ -2066,7 +2137,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           }
         } finally {
           try {
-            await daemonPost(`/api/v1/requirements/${requirementId}/release`, {
+            if (!resourceRecoveryPending) await daemonPost(`/api/v1/requirements/${requirementId}/release`, {
               reason: `review daemon worker ${w.index} finished`,
               ...leaseFence,
             })

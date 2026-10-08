@@ -1,5 +1,6 @@
 "use client";
 
+import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 import { acceptRealtimeSequence } from "@task-weaver/contracts/events";
 import { SESSION_INVALIDATED_EVENT } from "@/lib/browser-session";
@@ -111,6 +112,15 @@ export function useRealtime() {
         });
       }
 
+      es.addEventListener("executor_availability_changed", (event: MessageEvent) => {
+        const accepted = acceptEvent(event);
+        if (!accepted) return;
+        utils.daemon.executorProfiles.invalidate();
+        scheduleDaemonRefresh();
+        const data = accepted.data as { kind?: string };
+        if (data.kind === "first_block" || data.kind === "all_blocked" || data.kind === "action_required") toast.warning("Executor resources require attention. Check Daemons for recovery details.");
+        if (data.kind === "recovered") toast.success("Executor availability recovered.");
+      });
       es.addEventListener("daemon_status_changed", (event: MessageEvent) => {
         if (acceptEvent(event)) scheduleDaemonRefresh();
       });

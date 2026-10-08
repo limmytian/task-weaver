@@ -1,5 +1,8 @@
 import { Hono } from "hono";
 import {
+  executorObservationSchema,
+  resumeExecutorSchema,
+  executorToolSchema,
   createAuthorizedEventStream,
   createResourceServices,
   createExecutionDelegationService,
@@ -179,6 +182,21 @@ daemonsRouter.post("/:id/delegations/:delegationId/renew", async c => {
 });
 daemonsRouter.delete("/:id/delegations/:delegationId", async c => {
   return c.json(await createExecutionDelegationService(c.get("identity")).revoke(c.get("db"), c.req.param("id"), c.req.param("delegationId")));
+});
+
+daemonsRouter.get("/:id/executors", async c => c.json({ items: await createResourceServices(c.get("identity")).daemonService.listExecutorProfiles(c.get("db"), c.req.param("id")) }));
+daemonsRouter.get("/:id/executors/history", async c => c.json({ items: await createResourceServices(c.get("identity")).daemonService.listExecutorAvailabilityHistory(c.get("db"), c.req.param("id")) }));
+daemonsRouter.post("/:id/executors/observations", async c => {
+  const input = executorObservationSchema.parse(await c.req.json());
+  return c.json(await createResourceServices(c.get("identity")).daemonService.reportExecutorObservation(c.get("db"), c.req.param("id"), input));
+});
+daemonsRouter.post("/:id/executors/:tool/resume", async c => {
+  const input = resumeExecutorSchema.parse(await c.req.json());
+  return c.json(await createResourceServices(c.get("identity")).daemonService.requestExecutorResume(c.get("db"), c.req.param("id"), executorToolSchema.parse(c.req.param("tool")), input, c.get("actor")));
+});
+daemonsRouter.post("/:id/executors/:tool/refresh", async c => {
+  const tool = executorToolSchema.parse(c.req.param("tool"));
+  return c.json(await createResourceServices(c.get("identity")).daemonService.requestExecutorRefresh(c.get("db"), c.req.param("id"), tool));
 });
 
 // POST /register - Register or update a daemon

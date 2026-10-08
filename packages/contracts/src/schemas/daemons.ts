@@ -138,6 +138,7 @@ export const reportDaemonProgressSchema = z.object({
 });
 
 export const reconcileDaemonWorkerSchema = z.object({
+  resourceInterruption: z.boolean().optional(),
   runId: z.string().uuid(),
   workerIndex: z.number().int().min(0),
   requirementId: z.string().uuid(),
@@ -208,6 +209,7 @@ export const applyRequirementSchema = z.object({
 });
 
 export const schedulerEligibilityReasonSchema = z.enum([
+  "resource_blocked",
   "status",
   "dependency",
   "claim",

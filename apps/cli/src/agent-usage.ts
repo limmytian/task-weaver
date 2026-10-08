@@ -1,3 +1,5 @@
+import { ExecutorSignalCollector } from './executor-availability.js'
+import { executorToolSchema, type ExecutorObservation } from '@task-weaver/contracts'
 import { randomUUID } from 'node:crypto'
 import { StringDecoder } from 'node:string_decoder'
 import {
@@ -148,9 +150,15 @@ export async function runMeteredAgent(
     request('POST', '/api/v1/agent-usage/runs', body, {
       signal: AbortSignal.timeout(2_500),
     }),
-): Promise<AsyncCommandResult> {
+  availability?: { profileId: string; onObservation: (observation: ExecutorObservation) => Promise<unknown> },
+): Promise<AsyncCommandResult & { resourceInterruption?: ExecutorObservation }> {
   if (options.signal?.aborted) return runCommand(command, argv, options)
+  const observedAt = new Date()
   const processId = randomUUID()
+  const interrupt = new AbortController()
+  const signal = options.signal ? AbortSignal.any([options.signal, interrupt.signal]) : interrupt.signal
+  const tool = executorToolSchema.safeParse(scope.agent)
+  const detector = availability && tool.success ? new ExecutorSignalCollector(tool.data, availability.profileId, () => interrupt.abort('executor_resource_blocked')) : null
   let startedAt = new Date().toISOString()
   let launched = false
   const collector = scope.agent === 'codex' ? new CodexUsageCollector() : null
@@ -186,6 +194,8 @@ export async function runMeteredAgent(
   }
   const result = await runCommand(command, argv, {
     ...options,
+    signal,
+    onStderr: (chunk) => { detector?.push('stderr', chunk); options.onStderr?.(chunk) },
     onSpawn: () => {
       launched = true
       startedAt = new Date().toISOString()
@@ -196,6 +206,7 @@ export async function runMeteredAgent(
       options.onSpawn?.()
     },
     onStdout: (chunk) => {
+      detector?.push('stdout', chunk)
       collector?.push(chunk)
       options.onStdout?.(chunk)
       if (!flushing && Date.now() - lastFlush >= 5_000) {
@@ -208,6 +219,14 @@ export async function runMeteredAgent(
       }
     },
   })
+  const resourceInterruption = detector?.finish() ?? undefined
+  if (resourceInterruption && availability) await availability.onObservation(resourceInterruption)
+  if (!resourceInterruption && result.ok && availability && tool.success) await availability.onObservation({
+    eventId: randomUUID(), tool: tool.data, profileId: availability.profileId, poolId: null, toolVersion: null, authenticationMode: 'unknown',
+    state: 'available', failure: null, source: 'execution_success', confidence: 'high', observedAt: observedAt.toISOString(),
+    staleAt: new Date(observedAt.getTime()+60_000).toISOString(), resetAt: null, retryAfterSeconds: null,
+    reason: 'Executor completed a process successfully. Remaining subscription allowance is unknown.', windows: [],
+  })
   const endedAt = new Date().toISOString()
   if (!launched) return result
   await inFlight
@@ -216,5 +235,5 @@ export async function runMeteredAgent(
     result.cancelled ? 'cancelled' : result.ok ? 'succeeded' : 'failed',
     endedAt,
   )
-  return result
+  return resourceInterruption ? { ...result, ok: false, cancelled: false, resourceInterruption } : result
 }

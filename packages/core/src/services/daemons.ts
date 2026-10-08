@@ -1,3 +1,5 @@
+import { matchDaemonTaskCapabilities } from "./daemon-capabilities";
+import { matchAvailableExecutor, availableDaemonCapabilities, listExecutorProfiles } from "./executor-availability";
 import type { MetadataReadScope } from "./metadata-read-scope";
 import { and, eq, gt, inArray, lt, not, sql, type SQL } from "drizzle-orm";
 import {
@@ -32,7 +34,6 @@ import type {
 } from "@task-weaver/contracts";
 import { emit } from "@task-weaver/realtime";
 import { reconcileInterruptedWorker } from "./daemon-progress";
-import { matchDaemonTaskCapabilities } from "./daemon-capabilities";
 import {
   classifyDaemonQueueRequirement,
   type DaemonQueueDaemonInput,
@@ -51,6 +52,7 @@ const ACQUISITION_CANDIDATE_LIMIT = 200;
 const ELIGIBILITY_CANDIDATE_LIMIT = 200;
 const ELIGIBILITY_SAMPLE_LIMIT = 20;
 const ELIGIBILITY_REASONS: SchedulerEligibilityReason[] = [
+  "resource_blocked",
   "status",
   "dependency",
   "claim",
@@ -506,6 +508,7 @@ export async function cleanExpiredDaemons(db: Database) {
               currentTaskId: progress?.currentTaskId ?? state?.taskId ?? null,
               leaseGeneration,
               reason: "Daemon heartbeat timeout",
+              resourceInterruption: (await listExecutorProfiles(db, d.id)).some(profile => profile.blocked),
               workspaceState: progress?.workspaceState ?? "unknown",
               pendingDiffSummary: progress?.pendingDiffSummary ?? null,
               sliceSummary: progress?.sliceSummary ?? null,
@@ -664,10 +667,11 @@ export async function listDaemonControlPlaneQueues(db: Database, scope?: Metadat
     }),
   ]);
 
-  const queueDaemons: DaemonQueueDaemonInput[] = daemonRows.map((daemon) => ({
+  const queueDaemons: DaemonQueueDaemonInput[] = await Promise.all(daemonRows.map(async (daemon) => ({
     role: daemon.role,
-    capabilities: daemon.capabilities ?? [],
-  }));
+    capabilities: await availableDaemonCapabilities(db, daemon.id, daemon.capabilities ?? []),
+    configuredCapabilities: daemon.capabilities ?? [],
+  })));
   const items = requirementRows
     .map((requirement): DaemonQueueItem | null => classifyDaemonQueueRequirement({
       id: requirement.id,
@@ -969,10 +973,7 @@ export async function applyTask(
   const rows = candidates as unknown as Record<string, unknown>[];
 
   for (const row of rows) {
-    const match = matchDaemonTaskCapabilities(
-      (row.tags ?? []) as string[],
-      daemon.capabilities ?? [],
-    );
+    const match = await matchAvailableExecutor(db, daemon.id, daemon.capabilities ?? [], (row.tags ?? []) as string[], row.project_id as string, { requestedModel: row.requested_model, requestedProvider: row.requested_provider });
     if (!match.eligible) continue;
 
     const taskId = row.id as string;
@@ -1038,7 +1039,9 @@ export async function explainRequirementEligibility(
   const candidates = await db.execute(sql`
     SELECT
       t.id AS task_id,
+      t.project_id,
       t.tags AS task_tags,
+      t.requested_model, t.requested_provider,
       r.id AS requirement_id,
       COUNT(*) OVER() AS candidate_count,
       (r.status NOT IN (${EXECUTOR_REQUIREMENT_STATUSES_SQL})) AS blocked_status,
@@ -1146,10 +1149,8 @@ export async function explainRequirementEligibility(
     if (eligibilityFlag(row, "blocked_dependency")) reasons.push("dependency");
     if (eligibilityFlag(row, "blocked_claim")) reasons.push("claim");
     if (eligibilityFlag(row, "blocked_slice_order")) reasons.push("slice_order");
-    if (!matchDaemonTaskCapabilities(
-      (row.task_tags ?? []) as string[],
-      daemon.capabilities ?? [],
-    ).eligible) reasons.push("capability");
+    if (!matchDaemonTaskCapabilities((row.task_tags ?? []) as string[], daemon.capabilities ?? []).eligible) reasons.push("capability");
+    else if (!(await matchAvailableExecutor(db, daemon.id, daemon.capabilities ?? [], (row.task_tags ?? []) as string[], row.project_id as string, { requestedModel: row.requested_model, requestedProvider: row.requested_provider })).eligible) reasons.push("resource_blocked");
     if (eligibilityFlag(row, "blocked_model_tier")) reasons.push("model_tier");
     if (eligibilityFlag(row, "blocked_retry_time")) reasons.push("retry_time");
     if (eligibilityFlag(row, "blocked_policy")) reasons.push("policy");
@@ -1322,10 +1323,7 @@ export async function applyRequirement(
   const rows = candidates as unknown as Record<string, unknown>[];
 
   for (const row of rows) {
-    const match = matchDaemonTaskCapabilities(
-      (row.tags ?? []) as string[],
-      daemon.capabilities ?? [],
-    );
+    const match = await matchAvailableExecutor(db, daemon.id, daemon.capabilities ?? [], (row.tags ?? []) as string[], row.project_id as string, { requestedModel: row.requested_model, requestedProvider: row.requested_provider });
     if (!match.eligible) continue;
 
     const requirementId = row.requirement_id as string;
@@ -1437,6 +1435,8 @@ export async function applyReview(
   if (caller) assertDaemonActor(daemon, caller);
   assertDaemonRole(daemon, "reviewer");
   if (!daemonAcceptsWork(daemon)) return null;
+  const executorTools = (daemon.capabilities ?? []).filter(tool => ["codex", "claude", "agy", "aider", "cursor"].includes(tool));
+  if (executorTools.length && !(await availableDaemonCapabilities(db, daemon.id, executorTools)).length) return null;
   const actor = daemonActor(daemon);
 
 
@@ -1666,3 +1666,5 @@ export async function applyMerge(
 
   return null;
 }
+
+export { listExecutorDaemons, reportExecutorObservation, listExecutorProfiles, requestExecutorRefresh, requestExecutorResume, listExecutorAvailabilityHistory } from "./executor-availability";

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 export const projects = pgTable("projects", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -7,6 +7,7 @@ export const projects = pgTable("projects", {
   status: text("status", { enum: ["active", "archived"] })
     .default("active")
     .notNull(),
+  executorFallbackPolicy: jsonb("executor_fallback_policy").$type<{ allowedTools: string[]; authenticationMode: "subscription"; allowPaidApi: false }>(),
   pinnedAt: timestamp("pinned_at", { withTimezone: true }),
   createdBy: text("created_by").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })

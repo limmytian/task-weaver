@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 const realtimeEventPayloadSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("executor_availability_changed"), daemonId: z.string().uuid(), kind: z.enum(["first_block", "all_blocked", "action_required", "recovered", "changed"]) }),
   z.object({
     type: z.literal("task_created"),
     projectId: z.string().uuid().nullable(),

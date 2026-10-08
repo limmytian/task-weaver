@@ -348,6 +348,8 @@ async function runDaemonScenario(mode: AgentMode, workers = 1): Promise<Scenario
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const path = url.pathname
+    if (req.method === 'GET' && path === `/api/v1/daemons/${daemonId}/executors`) return sendJson(res, 200, { items: [] })
+    if (req.method === 'POST' && path === `/api/v1/daemons/${daemonId}/executors/observations`) return sendJson(res, 200, { saved: true })
     if (path === '/api/v1/auth/me') return sendJson(res, 200, { actor: { id: '00000000-0000-4000-8000-0000000000aa', type: mode === 'human-key' ? 'human' : 'agent' }, account: null, session: null })
 
     if (req.method === 'POST' && path === `/api/v1/daemons/${daemonId}/delegations`) {

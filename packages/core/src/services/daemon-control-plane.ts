@@ -7,6 +7,7 @@ export type DaemonQueueState = "runnable" | "blocked" | "retrying" | "manual";
 export interface DaemonQueueDaemonInput {
   role: DaemonControlPlaneRole;
   capabilities: string[];
+  configuredCapabilities?: string[];
 }
 
 export interface DaemonQueueDependencyInput {
@@ -319,6 +320,11 @@ export function classifyDaemonQueueRequirement(
   }
 
   if (role !== "executor") {
+    if (role === "reviewer" && roleDaemons.every(daemon => {
+      const configured = daemon.configuredCapabilities ?? daemon.capabilities;
+      const tools = configured.filter(tool => ["codex", "claude", "agy", "aider", "cursor"].includes(tool));
+      return tools.length > 0 && !tools.some(tool => daemon.capabilities.includes(tool));
+    })) return queueItem(requirement, role, "blocked", ["resource_blocked"], ["All eligible AI reviewers are resource blocked"]);
     if (!roleHasCapability(role, requirement.tags ?? [], daemons)) {
       return queueItem(
         requirement,
@@ -392,12 +398,13 @@ export function classifyDaemonQueueRequirement(
   );
   if (!runnableTask) {
     const task = structurallyRunnable[0];
+    const resourceBlocked = roleHasCapability(role, task?.tags ?? [], daemons.map(daemon => ({ ...daemon, capabilities: daemon.configuredCapabilities ?? daemon.capabilities })));
     return queueItem(
       requirement,
       role,
       "blocked",
-      ["capability"],
-      ["No online executor satisfies this task's executor and capability tags"],
+      [resourceBlocked ? "resource_blocked" : "capability"],
+      [resourceBlocked ? "Eligible executor resources are blocked; inspect executor availability" : "No online executor satisfies this task's executor and capability tags"],
       task,
       taskSlice(task, slices),
     );

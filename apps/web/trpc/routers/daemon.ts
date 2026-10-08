@@ -1,6 +1,8 @@
 import { router, resourceProcedure, ordinaryResourceProcedure } from "../init";
 import {
   createResourceServices,
+  executorToolSchema,
+  resumeExecutorSchema,
 
   daemonSloService,
   daemonSloQuerySchema,
@@ -15,6 +17,15 @@ import {
 import { z } from "zod";
 
 export const daemonRouter = router({
+  executorDaemons: ordinaryResourceProcedure.query(({ ctx }) => createResourceServices(ctx.identity).daemonService.listExecutorDaemons(ctx.db)),
+  executorProfiles: ordinaryResourceProcedure.input(z.object({ daemonId: z.string().uuid() }))
+    .query(({ ctx, input }) => createResourceServices(ctx.identity).daemonService.listExecutorProfiles(ctx.db, input.daemonId)),
+  executorHistory: ordinaryResourceProcedure.input(z.object({ daemonId: z.string().uuid() }))
+    .query(({ ctx, input }) => createResourceServices(ctx.identity).daemonService.listExecutorAvailabilityHistory(ctx.db, input.daemonId)),
+  resumeExecutor: ordinaryResourceProcedure.input(z.object({ daemonId: z.string().uuid(), tool: executorToolSchema }).merge(resumeExecutorSchema))
+    .mutation(({ ctx, input }) => createResourceServices(ctx.identity).daemonService.requestExecutorResume(ctx.db, input.daemonId, input.tool, input, ctx.actor)),
+  refreshExecutor: ordinaryResourceProcedure.input(z.object({ daemonId: z.string().uuid(), tool: executorToolSchema }))
+    .mutation(({ ctx, input }) => createResourceServices(ctx.identity).daemonService.requestExecutorRefresh(ctx.db, input.daemonId, input.tool)),
   list: resourceProcedure.query(async ({ ctx }) => {
     return createResourceServices(ctx.identity).daemonService.listOnlineDaemons(ctx.db);
   }),
