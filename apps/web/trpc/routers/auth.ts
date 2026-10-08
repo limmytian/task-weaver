@@ -25,6 +25,9 @@ const membership = z
   .object({ projectId: z.string().uuid(), actorId: z.string().uuid() })
   .strict();
 export const authRouter = router({
+  setupStatus: publicProcedure.query(async ({ ctx }) =>
+    takeAuthenticationResult(await ctx.auth.authentication.setupStatus(), ctx.responseHeaders),
+  ),
   csrf: publicProcedure.query(({ ctx }) =>
     takeAuthenticationResult(
       ctx.auth.authentication.csrfChallenge(ctx.req.headers),

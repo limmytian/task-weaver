@@ -6,8 +6,7 @@ import { createAuthenticationRuntime } from "@task-weaver/core";
 import { appRouter } from "./routers/_app";
 import { createTRPCContextFactory, publicProcedure, router } from "./init";
 
-function fixture(headers = new Headers()) {
-  const db = {} as Database;
+function fixture(headers = new Headers(), db = {} as Database) {
   const auth = createAuthenticationRuntime(db, {
     secret: randomBytes(32).toString("hex"),
     baseURL: "http://localhost:3001",
@@ -58,4 +57,23 @@ test("public procedures require explicit path enrollment and never discard malfo
     () => appRouter.createCaller(context).version.info(),
     (error: unknown) => (error as { code: string }).code === "UNAUTHORIZED",
   );
+});
+
+test("setup readiness is an explicit anonymous, uncached and origin-guarded query", async () => {
+  let reads = 0;
+  const db = { select: () => ({ from: () => ({ where: async () => {
+    reads++;
+    return [{ initializedByUserId: null }];
+  } }) }) } as unknown as Database;
+  const context = await fixture(new Headers(), db);
+  assert.deepEqual(await appRouter.createCaller(context).auth.setupStatus(), { initialized: false });
+  assert.equal(context.responseHeaders.get("cache-control"), "no-store");
+  assert.equal(reads, 1);
+  for (const headers of [
+    new Headers({ origin: "https://untrusted.example" }),
+    new Headers({ authorization: "Bearer malformed" }),
+  ]) {
+    await assert.rejects(() => fixture(headers, db).then(ctx => appRouter.createCaller(ctx).auth.setupStatus()));
+  }
+  assert.equal(reads, 1);
 });

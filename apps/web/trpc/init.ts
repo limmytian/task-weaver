@@ -131,6 +131,7 @@ const safe = t.procedure.use(async ({ ctx, next }) => {
 const publicPaths = new Map([
   ["version.info", "query"],
   ["auth.csrf", "query"],
+  ["auth.setupStatus", "query"],
   ["auth.login", "mutation"],
   ["auth.bootstrap", "mutation"],
   ["auth.activate", "mutation"],

@@ -32,6 +32,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import { AccountMenu } from "@/components/account-menu";
 import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { NavigationItem } from "@/lib/navigation";
@@ -173,7 +174,7 @@ export function AppSidebar({ navigation }: { navigation: readonly NavigationItem
         )}
       </SidebarContent>
       <SidebarFooter className="border-t px-4 py-3 group-data-[collapsible=icon]:px-2">
-        <Link href="/projects/settings/account" className="text-sm underline group-data-[collapsible=icon]:hidden">Account and sign out</Link>
+        <AccountMenu />
         <div className="flex items-center justify-between group-data-[collapsible=icon]:justify-center">
           <span className="text-sm font-medium group-data-[collapsible=icon]:hidden">Theme</span>
           <ThemeToggle />

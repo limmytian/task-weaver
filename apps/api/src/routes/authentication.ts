@@ -30,6 +30,7 @@ const service = (c: Context<Env>) => c.get("auth").authentication;
 const identity = (c: Context<Env>) => c.get("auth").identity;
 const headers = (c: Context<Env>) => c.req.raw.headers;
 
+auth.get("/setup-status", async (c) => send(c, await service(c).setupStatus()));
 auth.get("/csrf", (c) => send(c, service(c).csrfChallenge(headers(c))));
 auth.post("/bootstrap", async (c) =>
   send(

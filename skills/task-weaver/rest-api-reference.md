@@ -28,6 +28,7 @@ headers are rejected even on public entry points.
 
 | Method/path under `/api/v1` | Purpose and boundary |
 | --- | --- |
+| `GET /auth/setup-status` | Public, uncached `{ initialized: boolean }` only; unavailable state fails closed |
 | `GET /auth/csrf` | Public signed browser CSRF challenge |
 | `POST /auth/bootstrap` | One-time first human administrator; deployment bootstrap Secret |
 | `POST /auth/login`, `POST /auth/activate` | Local login or finite one-time activation; no public signup |

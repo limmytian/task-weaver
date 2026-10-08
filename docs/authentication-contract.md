@@ -351,10 +351,10 @@ forwarded address/actor header is trusted. Verified proxy-address support belong
 to a future explicitly configured ingress boundary, not a permissive fallback.
 
 The exact REST public entry points are GET `/health`, GET `/api/v1/version`
-(including its trailing slash), GET `/api/v1/auth/csrf`, and POST
+(including its trailing slash), GET `/api/v1/auth/csrf`, GET `/api/v1/auth/setup-status`, and POST
 `/api/v1/auth/bootstrap`, `/api/v1/auth/login`, `/api/v1/auth/activate`.
 Configured-origin OPTIONS preflights return no business data. tRPC public
-procedures are only query `version.info`, query `auth.csrf`, and mutations
+procedures are only query `version.info`, query `auth.csrf`, query `auth.setupStatus`, and mutations
 `auth.bootstrap`, `auth.login`, `auth.activate`; other procedures default to
 protection. Public endpoints never discard an Authorization header. A new login
 may accept an expired browser cookie, so an expired session cannot prevent
@@ -397,3 +397,21 @@ explicit offline legacy ownership migration, quarantine and runtime fencing,
 with exact-0.3.2 upgrade/full-backup recovery regression. D3 adds the registered
 entry-point credential inventory and cross-actor HTTP matrix. These source checks
 are acceptance evidence, not a version release or deployment instruction.
+
+
+### Contextual browser identity confirmation
+
+The login form uses instance session defaults without a custom lifetime. API
+session overrides remain subject to existing absolute, idle and maximum limits.
+The anonymous setup status returns only `initialized`, with `Cache-Control:
+no-store`; unavailable status hides first setup. The server serializes bootstrap
+and rejects all further setup attempts after initialization.
+
+Sensitive account, Agent, credential and membership actions open a password
+dialog before mutation. Confirmation travels directly through the tRPC client,
+not its mutation cache. Cancellation discards the pending continuation, including
+when authentication is already in flight; success resumes it once. A wrong
+confirmation password stays in the dialog rather than ending a valid session.
+Origin, CSRF, live permission and recent-session checks still run on the server.
+The identity menu exposes account settings and sign out, using the shared browser
+session invalidation boundary for cache, streams and other tabs.

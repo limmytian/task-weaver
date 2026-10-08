@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   accountLoginSchema,
   activateAccountSchema,
@@ -22,6 +22,17 @@ export default function LoginPage() {
   const login = trpc.auth.login.useMutation();
   const activate = trpc.auth.activate.useMutation();
   const bootstrap = trpc.auth.bootstrap.useMutation();
+  const setup = trpc.auth.setupStatus.useQuery(undefined, {
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+    refetchOnWindowFocus: "always",
+    refetchInterval: 15_000,
+  });
+  const canSetup = !setup.isFetching && !setup.isError && setup.data?.initialized === false;
+  useEffect(() => {
+    if (mode === "bootstrap" && (setup.isError || setup.data?.initialized)) setMode("login");
+  }, [mode, setup.isError, setup.data?.initialized]);
   const busy = login.isPending || activate.isPending || bootstrap.isPending;
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -30,26 +41,25 @@ export default function LoginPage() {
     const data = Object.fromEntries(new FormData(form));
     try {
       if (mode === "login") {
-        const { sessionDurationSeconds, ...credentials } = data;
-        await login.mutateAsync(
-          accountLoginSchema.parse({
-            ...credentials,
-            ...(sessionDurationSeconds
-              ? { sessionDurationSeconds: Number(sessionDurationSeconds) }
-              : {}),
-          }),
-        );
+        await login.mutateAsync(accountLoginSchema.parse(data));
         form.reset();
         announceSessionChange();
         window.location.replace("/projects");
       } else {
         if (mode === "activate")
           await activate.mutateAsync(activateAccountSchema.parse(data));
-        else await bootstrap.mutateAsync(bootstrapAccountSchema.parse(data));
+        else {
+          const status = await setup.refetch();
+          if (status.error || status.data?.initialized !== false)
+            throw new Error("First setup is unavailable");
+          await bootstrap.mutateAsync(bootstrapAccountSchema.parse(data));
+          await setup.refetch();
+        }
         form.reset();
         setMode("login");
       }
     } catch {
+      if (mode === "bootstrap") void setup.refetch();
       // Provider and validation errors may contain credentials; display fixed text only.
       setError(
         "Unable to complete this request. Check your details or contact your administrator.",
@@ -84,6 +94,11 @@ export default function LoginPage() {
               : "For a new instance only. Obtain the bootstrap secret from your deployment administrator."}
         </p>
       </div>
+      {mode === "login" && setup.isError && (
+        <p role="status" className="text-sm text-muted-foreground">
+          Instance setup status is unavailable. You can still sign in.
+        </p>
+      )}
       <form key={mode} onSubmit={submit} className="space-y-4">
         {mode !== "activate" && (
           <div className="space-y-2">
@@ -146,33 +161,12 @@ export default function LoginPage() {
             required
           />
         </div>
-        {mode === "login" && (
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="session-duration">
-              Session lifetime
-            </label>
-            <select
-              id="session-duration"
-              name="sessionDurationSeconds"
-              defaultValue=""
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-            >
-              <option value="">Instance default</option>
-              <option value={30 * 86400}>30 days</option>
-              <option value={90 * 86400}>90 days</option>
-            </select>
-            <p className="text-xs text-muted-foreground">
-              Subject to the instance maximum and idle timeout. Sessions remain
-              revocable.
-            </p>
-          </div>
-        )}
         {error && (
           <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
         )}
-        <Button type="submit" disabled={busy} className="w-full">
+        <Button type="submit" disabled={busy || (mode === "bootstrap" && !canSetup)} className="w-full">
           {busy
             ? "Please wait…"
             : mode === "login"
@@ -182,18 +176,19 @@ export default function LoginPage() {
       </form>
       <nav aria-label="Account access" className="flex flex-wrap gap-2">
         {(["login", "activate", "bootstrap"] as const)
-          .filter((item) => item !== mode)
+          .filter((item) => item !== mode && (item !== "bootstrap" || canSetup))
           .map((item) => (
             <Button
               key={item}
-              variant="link"
+              variant={item === "activate" ? "outline" : "link"}
+              disabled={busy}
               onClick={() => {
                 setMode(item);
                 setError("");
               }}
             >
               {item === "login"
-                ? "Sign in"
+                ? "Back to sign in"
                 : item === "activate"
                   ? "Use invitation / recovery token"
                   : "First instance setup"}

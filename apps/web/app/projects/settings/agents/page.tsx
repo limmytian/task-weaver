@@ -2,12 +2,14 @@
 import { type FormEvent, useState } from "react";
 import Link from "next/link";
 import { createManagedAgentSchema } from "@task-weaver/contracts";
+import { useIdentityConfirmation } from "@/components/identity-confirmation";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export default function ManagedAgentsPage() {
   const utils = trpc.useUtils();
+  const confirmation = useIdentityConfirmation();
   const agents = trpc.auth.agents.useQuery();
   const create = trpc.auth.createAgent.useMutation();
   const disable = trpc.auth.disableAgent.useMutation();
@@ -16,6 +18,7 @@ export default function ManagedAgentsPage() {
     event.preventDefault();
     const form = event.currentTarget;
     setError("");
+    if (!(await confirmation.confirm("create Agent"))) return;
     try {
       await create.mutateAsync(
         createManagedAgentSchema.parse(Object.fromEntries(new FormData(form))),
@@ -24,27 +27,25 @@ export default function ManagedAgentsPage() {
       await utils.auth.agents.invalidate();
     } catch {
       setError(
-        "Agent creation denied. Confirm your identity on the Account page and retry.",
+        "Agent creation denied or unavailable. Check your current permission.",
       );
     }
   }
   return (
     <section className="space-y-4">
+      {confirmation.dialog}
       <h1 className="text-xl font-semibold">Your managed Agents</h1>
       <p className="text-sm text-muted-foreground">
         Agents have independent identities. Managing an Agent does not grant
         access to its personal content. Project membership and execution
         permissions are assigned separately.
       </p>
-      <Link className="text-sm underline" href="/projects/settings/account">
-        Confirm identity
-      </Link>
       <form onSubmit={submit} className="space-y-2">
         <label htmlFor="agent-name" className="text-sm font-medium">
           Display name
         </label>
         <Input id="agent-name" name="displayName" maxLength={255} required />
-        <Button disabled={create.isPending}>Create Agent</Button>
+        <Button disabled={confirmation.confirming || create.isPending}>Create Agent</Button>
       </form>
       {(error || agents.error) && (
         <p role="alert" className="text-sm text-destructive">
@@ -66,7 +67,7 @@ export default function ManagedAgentsPage() {
             </Link>
             <Button
               variant="destructive"
-              disabled={disable.isPending || agent.status !== "active"}
+              disabled={confirmation.confirming || disable.isPending || agent.status !== "active"}
               onClick={async () => {
                 if (
                   !window.confirm(
@@ -74,6 +75,7 @@ export default function ManagedAgentsPage() {
                   )
                 )
                   return;
+                if (!(await confirmation.confirm("disable Agent"))) return;
                 try {
                   await disable.mutateAsync({ id: agent.id });
                   await utils.auth.agents.invalidate();

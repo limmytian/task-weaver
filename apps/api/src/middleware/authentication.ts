@@ -12,6 +12,7 @@ const publicRoutes = new Set([
   "GET /api/v1/version",
   "GET /api/v1/version/",
   "GET /api/v1/auth/csrf",
+  "GET /api/v1/auth/setup-status",
   "POST /api/v1/auth/login",
   "POST /api/v1/auth/bootstrap",
   "POST /api/v1/auth/activate",

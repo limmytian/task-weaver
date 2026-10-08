@@ -90,6 +90,10 @@ test(
       );
       return { headers: withSession(headers, result), result };
     };
+    assert.deepEqual(await service.setupStatus().then(({ headers, ...state }) => {
+      assert.equal(headers.get("cache-control"), "no-store");
+      return state;
+    }), { initialized: false });
     let adminId = "";
     await t.test(
       "explicit Secret bootstrap is atomic and public signup has no service surface",
@@ -119,6 +123,13 @@ test(
             )
             .join("; "),
         );
+        const status = await service.setupStatus();
+        assert.equal(status.initialized, true);
+        assert.deepEqual(Object.keys(status).sort(), ["headers", "initialized"]);
+        await assert.rejects(service.bootstrap(client(), {
+          email: "second@example.test", displayName: "Second", password,
+          bootstrapSecret: config.bootstrapSecret,
+        }, "initialized-rejection"), ValidationError);
         const row = await db.select().from(authInstanceState);
         adminId = row[0]!.initializedByUserId!;
         const [account] = await db

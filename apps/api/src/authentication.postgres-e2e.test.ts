@@ -89,6 +89,15 @@ test(
       );
       return { headers, account: body.account, session: body.session };
     }
+    await t.test("anonymous setup readiness is minimal, uncached and origin guarded", async () => {
+      const { response, body } = await call("auth/setup-status", new Headers({ origin }));
+      assert.equal(response.status, 200);
+      assert.deepEqual(body, { initialized: false });
+      const denied = await call("auth/setup-status", new Headers({ origin: "https://untrusted.example" }));
+      assert.equal(denied.response.status, 403);
+      const forged = await call("auth/setup-status", new Headers({ authorization: "Bearer invalid" }));
+      assert.equal(forged.response.status, 401);
+    });
     const email = `${randomUUID()}@example.test`;
     await t.test(
       "bootstrap/login expose safe DTOs and propagate session cookies",
@@ -100,6 +109,7 @@ test(
           { email, password, displayName: "HTTP fixture", bootstrapSecret },
         );
         assert.equal(response.status, 201, JSON.stringify(body));
+        assert.deepEqual((await call("auth/setup-status", new Headers({ origin }))).body, { initialized: true });
         assert.equal(JSON.stringify(body).includes(password), false);
         assert.equal("headers" in body, false);
       },

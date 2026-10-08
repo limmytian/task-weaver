@@ -94,6 +94,8 @@ export function TRPCProvider({ children }: { children: React.ReactNode }) {
             });
             if (
               response.status === 401 &&
+              // A wrong confirmation password does not end an otherwise valid session.
+              !String(url).split("?")[0].endsWith("/auth.reauthenticate") &&
               typeof window !== "undefined" &&
               window.location.pathname.startsWith("/projects")
             ) {

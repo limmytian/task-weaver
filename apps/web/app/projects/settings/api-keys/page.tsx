@@ -1,6 +1,5 @@
 "use client";
 import { useState, type FormEvent } from "react";
-import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   issueOwnedApiKeySchema,
@@ -9,6 +8,7 @@ import {
 } from "@task-weaver/contracts";
 import { useWebIdentity } from "@/components/web-identity-provider";
 import { OneTimeSecret } from "@/components/one-time-secret";
+import { useIdentityConfirmation } from "@/components/identity-confirmation";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,13 +25,14 @@ export default function ApiKeysSettingsPage() {
   const revoke = trpc.apiKey.revoke.useMutation();
   const queryClient = useQueryClient();
   const utils = trpc.useUtils();
+  const confirmation = useIdentityConfirmation();
   const [secret, setSecret] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<
     Record<string, AuthorizationPermission[]>
   >({});
   const [expiry, setExpiry] = useState("90");
-  const busy = create.isPending || rotate.isPending || revoke.isPending;
+  const busy = confirmation.confirming || create.isPending || rotate.isPending || revoke.isPending;
   const grantId = (grant: AuthorizationGrant) =>
     grant.scope === "project"
       ? `project:${grant.projectId}`
@@ -41,6 +42,7 @@ export default function ApiKeysSettingsPage() {
   async function perform(action: () => Promise<void>) {
     setSecret(null);
     setError("");
+    if (!(await confirmation.confirm("save this sensitive change"))) return;
     try {
       await action();
       await utils.apiKey.invalidate();
@@ -88,15 +90,13 @@ export default function ApiKeysSettingsPage() {
   }
   return (
     <section className="space-y-5">
+      {confirmation.dialog}
       <h1 className="text-xl font-semibold">Scoped API Keys</h1>
       <p className="text-sm text-muted-foreground">
         Human Keys act as that human. Agent Keys retain an independent identity.
         Issuance is limited by your current authority and the subject&apos;s
         rights; membership changes and revocation remain effective.
       </p>
-      <Link className="text-sm underline" href="/projects/settings/account">
-        Confirm identity for credential changes
-      </Link>
       <div className="space-y-2">
         <label htmlFor="key-subject" className="text-sm font-medium">
           Credential owner

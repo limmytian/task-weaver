@@ -560,6 +560,14 @@ export function createAuthenticationService(
   return guardAuthenticationOperations({
     csrfChallenge: (headers?: Headers) =>
       headers ? csrf.challengeForRequest(headers) : csrf.challenge(),
+    async setupStatus() {
+      const [state] = await db
+        .select({ initializedByUserId: authInstanceState.initializedByUserId })
+        .from(authInstanceState)
+        .where(eq(authInstanceState.id, "instance"));
+      if (!state) throw new ValidationError("Instance state is unavailable");
+      return { initialized: state.initializedByUserId !== null, headers: noStore() };
+    },
     assertMutation: mutations,
     resolve,
     async bootstrap(headers: Headers, input: unknown, clientAddress: string) {

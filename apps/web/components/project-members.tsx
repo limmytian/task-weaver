@@ -1,6 +1,5 @@
 "use client";
 import { useState, type FormEvent } from "react";
-import Link from "next/link";
 import { z } from "zod";
 import {
   projectRoleSchema,
@@ -8,6 +7,7 @@ import {
   explicitProjectPermissionSchema,
   type ProjectRole,
 } from "@task-weaver/contracts";
+import { useIdentityConfirmation } from "@/components/identity-confirmation";
 import { trpc } from "@/trpc/client";
 import { useWebIdentity } from "@/components/web-identity-provider";
 import { Button } from "@/components/ui/button";
@@ -33,9 +33,11 @@ export function ProjectMembers({ projectId }: { projectId: string }) {
   const transfer = trpc.auth.transferOwnership.useMutation();
   const [error, setError] = useState("");
   const utils = trpc.useUtils();
-  const busy = set.isPending || remove.isPending || transfer.isPending;
+  const confirmation = useIdentityConfirmation();
+  const busy = confirmation.confirming || set.isPending || remove.isPending || transfer.isPending;
   async function perform(action: () => Promise<unknown>) {
     setError("");
+    if (!(await confirmation.confirm("save this sensitive change"))) return;
     try {
       await action();
       await utils.auth.invalidate();
@@ -61,6 +63,7 @@ export function ProjectMembers({ projectId }: { projectId: string }) {
   }
   return (
     <section className="space-y-4 rounded-md border p-4">
+      {confirmation.dialog}
       <h2 className="text-lg font-medium">Project members and permissions</h2>
       <p className="text-sm text-muted-foreground">
         Your role: {current?.role ?? "unavailable"}. Execution and tool actions
@@ -203,12 +206,6 @@ export function ProjectMembers({ projectId }: { projectId: string }) {
             ))}
           </fieldset>
           <Button disabled={busy}>Save membership</Button>
-          <Link
-            href="/projects/settings/account"
-            className="ml-3 text-sm underline"
-          >
-            Confirm identity
-          </Link>
         </form>
       ) : (
         <p className="text-sm text-muted-foreground">

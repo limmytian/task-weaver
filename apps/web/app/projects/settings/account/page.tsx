@@ -4,9 +4,9 @@ import { useState, type FormEvent } from "react";
 import {
   changeAccountPasswordSchema,
   provisionAccountSchema,
-  reauthenticateAccountSchema,
 } from "@task-weaver/contracts";
 import { useQueryClient } from "@tanstack/react-query";
+import { useIdentityConfirmation } from "@/components/identity-confirmation";
 import { trpc } from "@/trpc/client";
 import {
   announceSessionChange,
@@ -20,13 +20,14 @@ import { Input } from "@/components/ui/input";
 export default function AccountPage() {
   const queryClient = useQueryClient();
   const utils = trpc.useUtils();
+  const confirmation = useIdentityConfirmation();
+  const [showAccounts, setShowAccounts] = useState(false);
   const current = trpc.auth.current.useQuery();
   const sessions = trpc.auth.sessions.useQuery();
   const admin = current.data?.account?.instanceRole === "admin";
-  const accounts = trpc.auth.accounts.useQuery(undefined, { enabled: admin });
+  const accounts = trpc.auth.accounts.useQuery(undefined, { enabled: admin && showAccounts, retry: false });
   const logout = trpc.auth.logout.useMutation();
-  const password = trpc.auth.password.useMutation();
-  const recent = trpc.auth.reauthenticate.useMutation();
+  const [changingPassword, setChangingPassword] = useState(false);
   const revoke = trpc.auth.revokeSession.useMutation();
   const provision = trpc.auth.provision.useMutation();
   const recover = trpc.auth.recover.useMutation();
@@ -38,16 +39,15 @@ export default function AccountPage() {
   } | null>(null);
   const busy = [
     logout,
-    password,
-    recent,
     revoke,
     provision,
     recover,
     state,
-  ].some((item) => item.isPending);
-  async function perform(action: () => Promise<unknown>) {
+  ].some((item) => item.isPending) || confirmation.confirming || changingPassword;
+  async function perform(action: () => Promise<unknown>, protectedAction = true) {
     setMessage("");
     setToken(null);
+    if (protectedAction && !(await confirmation.confirm("continue this account action"))) return;
     try {
       await action();
       await utils.auth.invalidate();
@@ -57,8 +57,6 @@ export default function AccountPage() {
       );
     } finally {
       logout.reset();
-      password.reset();
-      recent.reset();
       revoke.reset();
       provision.reset();
       recover.reset();
@@ -68,30 +66,41 @@ export default function AccountPage() {
   }
   async function submit(
     event: FormEvent<HTMLFormElement>,
-    kind: "password" | "recent" | "provision",
+    kind: "password" | "provision",
   ) {
     event.preventDefault();
     const form = event.currentTarget;
     const data = Object.fromEntries(new FormData(form));
+    form.reset();
     await perform(async () => {
       if (kind === "password") {
-        await password.mutateAsync(changeAccountPasswordSchema.parse(data));
-        announceSessionChange();
-        invalidateBrowserSession();
-      } else if (kind === "recent") {
-        await recent.mutateAsync(reauthenticateAccountSchema.parse(data));
-        setMessage("Identity confirmed. Retry your sensitive action.");
+        const credentials = changeAccountPasswordSchema.parse(data);
+        delete data.currentPassword;
+        delete data.newPassword;
+        setChangingPassword(true);
+        try {
+          // This form already asks for the current password; confirm it in context.
+          await utils.client.auth.reauthenticate.mutate({ password: credentials.currentPassword });
+          await utils.client.auth.password.mutate(credentials);
+          announceSessionChange();
+          invalidateBrowserSession();
+        } finally {
+          credentials.currentPassword = "";
+          credentials.newPassword = "";
+          setChangingPassword(false);
+        }
       } else {
         const result = await provision.mutateAsync(
           provisionAccountSchema.parse(data),
         );
         setToken(result);
       }
-    });
+    }, kind !== "password");
     form.reset();
   }
   return (
     <main className="mx-auto w-full max-w-3xl space-y-8 p-4 md:p-8">
+      {confirmation.dialog}
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold"><BrandMark className="h-6 w-6" />Account</h1>
@@ -108,7 +117,7 @@ export default function AccountPage() {
               await logout.mutateAsync();
               announceSessionChange();
               invalidateBrowserSession();
-            })
+            }, false)
           }
         >
           Sign out
@@ -122,30 +131,6 @@ export default function AccountPage() {
           {message}
         </p>
       )}
-      <section className="space-y-3">
-        <h2 className="text-lg font-medium">Confirm your identity</h2>
-        <p className="text-sm text-muted-foreground">
-          Sensitive account and credential actions require a recent password
-          confirmation.
-        </p>
-        <form
-          onSubmit={(event) => void submit(event, "recent")}
-          className="space-y-3"
-        >
-          <label className="text-sm font-medium" htmlFor="confirm-password">
-            Current password
-          </label>
-          <Input
-            id="confirm-password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            maxLength={1024}
-            required
-          />
-          <Button disabled={busy}>Confirm identity</Button>
-        </form>
-      </section>
       <section className="space-y-3">
         <h2 className="text-lg font-medium">Change password</h2>
         <p className="text-sm text-muted-foreground">
@@ -261,6 +246,10 @@ export default function AccountPage() {
               </p>
             </div>
           )}
+          <Button variant="outline" disabled={busy} onClick={() => void perform(async () => {
+            setShowAccounts(true);
+            await accounts.refetch();
+          })}>View account directory</Button>
           {accounts.error && (
             <p role="alert">
               Account list requires current administrator permission and recent
