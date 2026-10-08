@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   AuthenticationError,
   AuthorizationError,
+  ConflictError,
 } from "@task-weaver/contracts";
 import {
   createCsrfPolicy,
@@ -57,6 +58,7 @@ test("authentication boundaries redact unexpected provider/database errors while
     async credential() {
       throw safe;
     },
+    async conflict() { throw new ConflictError("Stale fixture", 2); },
     challenge() {
       return { headers: new Headers() };
     },
@@ -72,6 +74,7 @@ test("authentication boundaries redact unexpected provider/database errors while
     operations.credential(),
     (error: unknown) => error === safe,
   );
+  await assert.rejects(operations.conflict(), ConflictError);
   assert.ok(operations.challenge().headers instanceof Headers);
 });
 

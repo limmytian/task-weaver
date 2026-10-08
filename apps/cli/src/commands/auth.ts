@@ -1,4 +1,4 @@
-import { managedAgentListSchema, managedAgentProjectsSchema } from '@task-weaver/contracts'
+import { managedAgentListSchema, managedAgentProjectsSchema, keyGrantOptionsSchema, updateApiKeyGrantsSchema, credentialSubjectSchema } from '@task-weaver/contracts'
 import { Command } from 'commander'
 import * as readline from 'readline/promises'
 import { loadConfig, readStoredConfig, saveConfig, configFilePath } from '../config.js'
@@ -85,6 +85,24 @@ function printIdentity(identity: CliIdentity, json?: boolean): void {
 
 export function registerAuth(program: Command): void {
   const auth = program.command('auth').description('manage CLI authentication')
+  const keys = auth.command('keys').description('inspect scoped Keys and update ordinary grants')
+  keys.command('options').option('--actor-id <id>').option('--query <text>').option('--page <n>').option('--page-size <n>').option('--json').action(async opts => {
+    const { json: _json, ...input } = opts
+    const parsed = keyGrantOptionsSchema.parse(input)
+    const query = new URLSearchParams(Object.entries(parsed).map(([key, value]) => [key, String(value)] as [string, string]))
+    console.log(JSON.stringify(await request('GET', `/api/v1/api-keys/grant-options?${query}`)))
+  })
+  keys.command('get <id>').option('--actor-id <id>').option('--json').action(async (id: string, opts) => {
+    managedAgentProjectsSchema.shape.actorId.parse(id)
+    const { actorId } = credentialSubjectSchema.parse({ actorId: opts.actorId })
+    console.log(JSON.stringify(await request('GET', `/api/v1/api-keys/${id}${actorId ? `?actorId=${actorId}` : ''}`)))
+  })
+  keys.command('update-grants <id>').requiredOption('--expected-version <n>').requiredOption('--grants <json>').option('--actor-id <id>').option('--json').action(async (id: string, opts) => {
+    managedAgentProjectsSchema.shape.actorId.parse(id)
+    const { actorId } = credentialSubjectSchema.parse({ actorId: opts.actorId })
+    const input = updateApiKeyGrantsSchema.parse({ expectedVersion: Number(opts.expectedVersion), grants: JSON.parse(opts.grants) })
+    console.log(JSON.stringify(await request('PATCH', `/api/v1/api-keys/${id}/grants${actorId ? `?actorId=${actorId}` : ''}`, input)))
+  })
   const agents = auth.command('agents').description('inspect managed Agent identities and project permissions')
   agents.command('list').option('--status <status>', 'active|disabled|deleted', 'active')
     .option('--query <text>', 'search display names', '').option('--page <number>', 'page', '1')

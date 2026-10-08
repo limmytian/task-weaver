@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { randomBytes, randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { createDb, runMigrations, authInstanceState } from "@task-weaver/db";
+import { createDb, runMigrations, authInstanceState, authSessions, authAuditEvents } from "@task-weaver/db";
 import { apiKeyService } from "@task-weaver/core";
 import { createApiApplication } from "./application";
 
@@ -172,6 +172,48 @@ test(
       assert.equal((await call("auth/agents?status=disabled", admin.headers)).body.length, 0);
       assert.equal((await call("auth/agents?status=deleted", admin.headers)).body[0].id, actorId);
       assert.equal((await call(`auth/agents/${actorId}`, admin.headers)).response.status, 404);
+    });
+    await t.test("ordinary Key grants are named, bounded, guarded, versioned and never disclose secret material", async () => {
+      const actorId = admin.account.actorId;
+      const initial = [{ scope: "personal", actorId, permissions: ["resource.read", "resource.write"] }];
+      const created = await call("api-keys", admin.headers, "POST", { name: "Editable HTTP key", grants: initial, expiresAt: null });
+      assert.equal(created.response.status, 201);
+      const id = created.body.id;
+      assert.equal((await call(`api-keys/${id}`, member.headers)).response.status, 404);
+      const summaries = await call("api-keys/summaries?pageSize=1", admin.headers);
+      assert.equal(summaries.response.status, 200);
+      assert.equal(summaries.body.items.length, 1);
+      assert.equal("grants" in summaries.body.items[0], false);
+      assert.equal("keyHash" in summaries.body.items[0], false);
+      const detail = await call(`api-keys/${id}`, admin.headers);
+      assert.equal(detail.body.grantVersion, 1);
+      assert.ok(!JSON.stringify(detail.body).includes(created.body.rawKey));
+      const options = await call("api-keys/grant-options?pageSize=2", admin.headers);
+      assert.equal(options.response.status, 200);
+      assert.ok(options.body.items.every((item: any) => typeof item.label === "string"));
+      assert.equal((await call("api-keys/grant-options?pageSize=51", admin.headers)).response.status, 400);
+      const change = { expectedVersion: 1, grants: [{ scope: "personal", actorId, permissions: ["resource.read"] }] };
+      const csrfMissing = new Headers(admin.headers); csrfMissing.delete("x-csrf-token");
+      assert.equal((await call(`api-keys/${id}/grants`, csrfMissing, "PATCH", change)).response.status, 403);
+      assert.equal((await call(`api-keys/${id}/grants`, admin.headers, "PATCH", { ...change, actorId })).response.status, 400);
+      const changed = await call(`api-keys/${id}/grants`, admin.headers, "PATCH", change);
+      assert.equal(changed.response.status, 200, JSON.stringify(changed.body));
+      assert.equal(changed.body.grantVersion, 2);
+      assert.equal((await call(`api-keys/${id}/grants`, admin.headers, "PATCH", change)).response.status, 409);
+      assert.equal((await call(`api-keys/${id}/grants`, admin.headers, "PATCH", { ...change, expectedVersion: 2 })).body.grantVersion, 2);
+      const [audit] = await db.select().from(authAuditEvents).where(eq(authAuditEvents.entityId, id));
+      const events = await db.select().from(authAuditEvents).where(eq(authAuditEvents.entityId, id));
+      const edited = events.find(event => event.action === "credential.grants_updated")!;
+      assert.equal(edited.metadata!.grantVersion, 2);
+      assert.equal(JSON.stringify(events).includes(created.body.rawKey), false);
+      assert.ok(audit);
+      await db.update(authSessions).set({ authenticatedAt: new Date(Date.now() - 901000) }).where(eq(authSessions.id, admin.session.id));
+      assert.equal((await call(`api-keys/${id}/grants`, admin.headers, "PATCH", { ...change, expectedVersion: 2 })).response.status, 403);
+      await db.update(authSessions).set({ authenticatedAt: new Date() }).where(eq(authSessions.id, admin.session.id));
+      const managing = await call("api-keys", admin.headers, "POST", { name: "CLI reduction fixture", expiresAt: null, grants: [{ scope: "personal", actorId, permissions: ["credential.manage", "resource.read"] }] });
+      const cli = new Headers({ authorization: `Bearer ${managing.body.rawKey}` });
+      assert.equal((await call(`api-keys/${id}/grants`, cli, "PATCH", { expectedVersion: 2, grants: initial })).response.status, 403);
+
     });
     let key: any;
     await t.test(

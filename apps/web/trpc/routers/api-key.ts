@@ -1,12 +1,21 @@
 import { z } from "zod";
 import {
   issueOwnedApiKeySchema,
+  keyGrantOptionsSchema,
+  updateApiKeyGrantsSchema,
   credentialSubjectSchema,
   takeAuthenticationResult,
 } from "@task-weaver/core";
 import { router, protectedProcedure } from "../init";
 const reference = credentialSubjectSchema.extend({ id: z.string().uuid() });
 export const apiKeyRouter = router({
+  summaries: protectedProcedure.input(keyGrantOptionsSchema).query(({ ctx, input }) => ctx.auth.identity.keySummaries(ctx.req.headers, input)),
+  pagedGrantOptions: protectedProcedure.input(keyGrantOptionsSchema).query(({ ctx, input }) => ctx.auth.identity.pagedKeyGrantOptions(ctx.req.headers, input)),
+  detail: protectedProcedure.input(reference).query(({ ctx, input }) => ctx.auth.identity.keyDetail(ctx.req.headers, input.actorId ?? ctx.identity.actor.id, input.id)),
+  updateGrants: protectedProcedure.input(reference.merge(updateApiKeyGrantsSchema)).mutation(({ ctx, input }) => {
+    const { actorId, id, ...change } = input;
+    return ctx.auth.identity.updateKeyGrants(ctx.req.headers, actorId ?? ctx.identity.actor.id, id, change);
+  }),
   grantOptions: protectedProcedure
     .input(credentialSubjectSchema.optional())
     .query(({ ctx, input }) =>

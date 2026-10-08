@@ -453,3 +453,46 @@ CLI inspection: `tw auth agents list --status disabled --query name --json`,
 `tw auth agents get <id> --json`, and `tw auth agents projects <id> --view available
 --json` use the same bounded REST contracts. Sensitive lifecycle mutations still
 require a browser session rather than an ordinary CLI API key.
+
+
+## Ordinary Key grant editing (0.3.4)
+
+Apply migration `0060_key_grant_version` before starting updated services. Existing
+bound Keys start at grant version 1. Safe Key metadata now includes `grantVersion`;
+raw material and verifiers remain excluded. Subject, name, expiry and raw secret
+are immutable through grant editing. Revoked and expired Keys cannot be revived,
+and execution capabilities cannot use this management flow.
+
+`PATCH /api/v1/api-keys/:id/grants?actorId=<authorized-subject>` accepts only
+`{ expectedVersion, grants }`. The identity lifecycle lock serializes membership,
+retirement, issuance and edits. Updates recheck live issuer/subject/ancestor
+ceilings; session mutations require recent identity confirmation, CSRF and Origin.
+Expansions additionally require a recent human session. A stale version returns
+409, without changing grants or revoking descendants. A semantically unchanged
+save keeps the version and derived authority. Each actual change increments the
+version, audits before/after finite grants (never verifier material), permanently
+revokes descendant Keys transitively, and revokes all execution delegations rooted
+in the edited Key or any descendant. Later expansion never revives old authority.
+Existing run/lease/fence checks still apply; completed effects are not rolled back.
+
+`GET /api/v1/api-keys/:id` returns authorized subject metadata and named historical
+grants, with inaccessible projects labeled unavailable and retaining their IDs.
+`GET /api/v1/api-keys/grant-options` supports `actorId`, literal name `query`,
+`page` and `pageSize` (1–50, default 20). It returns up to `pageSize` project scopes
+plus at most three personal/global/instance blocks on the first page, and
+`hasNext`. Names are resolved only for eligible scopes. The shared Web picker
+loads pages on demand, preserves explicit selections across pages, and distinguishes
+this-page, all-matching and all-eligible selection. Cross-page bulk selection is
+explicitly requested and stops if the resulting selection exceeds 100 scopes.
+
+The existing 100-scope credential limit and 32 KiB REST body limit remain in force.
+No wildcard or future-project authority is introduced. CLI inspection/editing uses
+`tw auth keys options`, `get`, and `update-grants --expected-version --grants`.
+API-key-authenticated CLI callers may reduce covered grants; expansions require a
+recent human Web session. The UI refresh action discards a stale draft and reloads
+the latest version for review.
+
+`GET /api/v1/api-keys/summaries` uses the same bounded query parameters and
+returns `{ items, hasNext }`. Summary metadata excludes grants and verifier
+material. The Web Key list uses this endpoint contract and fetches grants only
+when opening detail; the original full metadata listing remains compatible.

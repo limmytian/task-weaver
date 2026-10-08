@@ -108,6 +108,25 @@ test(
     const project = await identity.createProject(owner.headers, {
       name: "Human-owned project",
     });
+    await t.test("named Key options are authorized, bounded and retain explicit scope IDs across pages", async () => {
+      const manager = await human();
+      const target = manager.account.actorId;
+      for (let index = 0; index < 25; index++) await identity.createProject(manager.headers, { name: index < 2 ? "Duplicate scope" : `Paged scope ${String(index).padStart(2, "0")}` });
+      const first = await identity.pagedKeyGrantOptions(manager.headers, { actorId: target, page: 1, pageSize: 20 });
+      const second = await identity.pagedKeyGrantOptions(manager.headers, { actorId: target, page: 2, pageSize: 20 });
+      assert.equal(first.items.filter(item => item.grant.scope === "project").length, 20);
+      assert.equal(second.items.filter(item => item.grant.scope === "project").length, 5);
+      assert.equal(first.hasNext, true); assert.equal(second.hasNext, false);
+      assert.equal(first.limit, 100);
+      const duplicates = await identity.pagedKeyGrantOptions(manager.headers, { actorId: target, query: "Duplicate scope" });
+      assert.equal(duplicates.items.length, 2);
+      assert.equal(new Set(duplicates.items.map(item => item.grant.scope === "project" ? item.grant.projectId : "")).size, 2);
+      assert.equal((await identity.pagedKeyGrantOptions(manager.headers, { actorId: target, query: "Human-owned" })).items.length, 0);
+      assert.equal((await identity.pagedKeyGrantOptions(manager.headers, { actorId: target, query: "%_" })).items.length, 0);
+      await assert.rejects(identity.pagedKeyGrantOptions(manager.headers, { actorId: target, pageSize: 51 }));
+      const personal = first.items.find(item => item.grant.scope === "personal")!;
+      assert.ok(personal.label.includes("Human"));
+    });
     await t.test(
       "active humans create projects with an atomic owner; admins have no implicit project access",
       async () => {

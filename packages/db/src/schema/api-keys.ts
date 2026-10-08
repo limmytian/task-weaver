@@ -3,6 +3,7 @@ import {
   type AnyPgColumn,
   check,
   index,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -29,6 +30,7 @@ export const apiKeys = pgTable(
       { onDelete: "restrict" },
     ),
     grants: jsonb("grants"),
+    grantVersion: integer("grant_version").notNull().default(1),
     parentKeyId: uuid("parent_key_id").references(
       (): AnyPgColumn => apiKeys.id,
       { onDelete: "restrict" },

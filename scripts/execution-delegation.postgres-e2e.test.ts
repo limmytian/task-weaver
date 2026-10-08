@@ -193,6 +193,20 @@ test("execution capabilities enforce immutable task bounds and revocable lease a
     await runtime.identity.setMembership(owner.headers, project.id, agent.id, { role: "member", explicitPermissions: ["execution.run", "execution.review", "execution.merge"] });
     headers = await issue();
   });
+  await t.test("ordinary Key grant edits invalidate execution capabilities permanently, including no-op safety", async () => {
+    headers = await issue();
+    const original = executor.issued;
+    const grants = original.grants;
+    await runtime.identity.updateKeyGrants(owner.headers, agent.id, original.id, { grants, expectedVersion: original.grantVersion });
+    assert.equal((await rest(`tasks/${task.id}`, headers)).status, 200);
+    const narrowed = grants.map((grant: any) => ({ ...grant, permissions: grant.permissions.filter((permission: string) => permission !== "execution.merge") }));
+    await runtime.identity.updateKeyGrants(owner.headers, agent.id, original.id, { grants: narrowed, expectedVersion: original.grantVersion });
+    assert.equal((await rest(`tasks/${task.id}`, headers)).status, 401);
+    assert.equal((await call(`${daemonId}/delegations/${capability.delegation.id}/renew`, executor.headers, {})).response.status, 401);
+    await runtime.identity.updateKeyGrants(owner.headers, agent.id, original.id, { grants, expectedVersion: original.grantVersion + 1 });
+    assert.equal((await rest(`tasks/${task.id}`, headers)).status, 401);
+    headers = await issue();
+  });
   await t.test("expiry, lease supersession and parent revocation reject stale contexts and replays", async () => {
     const stale = await runtime.verify(headers);
     await db.update(executionDelegations).set({ createdAt: new Date(Date.now() - 60_000), expiresAt: new Date(Date.now() - 1000) }).where(eq(executionDelegations.id, capability.delegation.id));

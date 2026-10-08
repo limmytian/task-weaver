@@ -96,7 +96,7 @@ test("only API keys may explicitly select no time-based expiry", () => {
   for (const expiry of [null, "2027-10-05T10:00:00Z"]) {
     assert.equal(issueScopedApiKeySchema.safeParse({ name: "CLI", grants, expiresAt: expiry }).success, true);
     assert.equal(apiKeyDtoSchema.safeParse({
-      id: keyId, actorId, issuedByActorId: actorId, name: "CLI", prefix: "tw_key",
+      id: keyId, actorId, issuedByActorId: actorId, name: "CLI", prefix: "tw_key", grantVersion: 1,
       grants, createdAt, expiresAt: expiry, lastUsedAt: null, revokedAt: null,
     }).success, true);
     assert.equal(requestIdentitySnapshotSchema.safeParse({
@@ -180,7 +180,7 @@ test("review and merge grants preserve phase separation and task bookkeeping", (
 test("public credential/account metadata rejects secrets rather than silently exposing them", () => {
   const account = { id: userId, actorId, email: "user@example.com", displayName: "User", status: "active", instanceRole: "user", createdAt };
   const session = { id: keyId, actorId, createdAt, expiresAt, lastSeenAt: null, revokedAt: null };
-  const key = { id: keyId, actorId, issuedByActorId: actorId, name: "CLI", prefix: "tw_key", grants, createdAt, expiresAt, lastUsedAt: null, revokedAt: null };
+  const key = { id: keyId, actorId, issuedByActorId: actorId, name: "CLI", prefix: "tw_key", grantVersion: 1, grants, createdAt, expiresAt, lastUsedAt: null, revokedAt: null };
   const entries = [[accountDtoSchema, account], [sessionDtoSchema, session], [apiKeyDtoSchema, key], [principalSchema, human]] as const;
   for (const [schema, data] of entries) {
     assert.equal(schema.safeParse(data).success, true);

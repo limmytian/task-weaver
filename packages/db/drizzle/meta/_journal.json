@@ -421,6 +421,13 @@
       "when": 1791461457881,
       "tag": "0059_agent_retirement",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1791462471484,
+      "tag": "0060_key_grant_version",
+      "breakpoints": true
     }
   ]
 }

@@ -4,14 +4,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   issueOwnedApiKeySchema,
   managedAgentProjectsSchema,
-  type AuthorizationGrant,
-  type AuthorizationPermission,
 } from "@task-weaver/contracts";
 import { useWebIdentity } from "@/components/web-identity-provider";
 import { OneTimeSecret } from "@/components/one-time-secret";
 import { useIdentityConfirmation } from "@/components/identity-confirmation";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
+import { KeyGrantPicker, type NamedGrant } from "@/components/key-grant-picker";
+import { KeyDetailDialog } from "@/components/key-detail-dialog";
 import { Input } from "@/components/ui/input";
 
 export default function ApiKeysSettingsPage() {
@@ -31,8 +31,9 @@ export default function ApiKeysSettingsPage() {
     if (linkedAgent.data?.status === "active") setSubject(linkedAgent.data.id);
   }, [linkedAgent.data]);
   const target = { actorId: subject };
-  const keys = trpc.apiKey.list.useQuery(target);
-  const options = trpc.apiKey.grantOptions.useQuery(target);
+  const [keyPage, setKeyPage] = useState(1);
+  const keys = trpc.apiKey.summaries.useQuery({ ...target, page: keyPage, pageSize: 20 });
+  const [detailId, setDetailId] = useState<string | null>(null);
   const create = trpc.apiKey.create.useMutation();
   const rotate = trpc.apiKey.rotate.useMutation();
   const revoke = trpc.apiKey.revoke.useMutation();
@@ -41,17 +42,9 @@ export default function ApiKeysSettingsPage() {
   const confirmation = useIdentityConfirmation();
   const [secret, setSecret] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [selected, setSelected] = useState<
-    Record<string, AuthorizationPermission[]>
-  >({});
+  const [selected, setSelected] = useState<NamedGrant[]>([]);
   const [expiry, setExpiry] = useState("90");
   const busy = confirmation.confirming || create.isPending || rotate.isPending || revoke.isPending;
-  const grantId = (grant: AuthorizationGrant) =>
-    grant.scope === "project"
-      ? `project:${grant.projectId}`
-      : grant.scope === "personal"
-        ? `personal:${grant.actorId}`
-        : grant.scope;
   async function perform(action: () => Promise<void>) {
     setSecret(null);
     setError("");
@@ -75,13 +68,7 @@ export default function ApiKeysSettingsPage() {
     const form = event.currentTarget;
     const data = new FormData(form);
     await perform(async () => {
-      const grants = (options.data ?? []).flatMap((grant) => {
-        const permissions =
-          selected[grantId(grant)]?.filter((permission) =>
-            grant.permissions.includes(permission),
-          ) ?? [];
-        return permissions.length ? [{ ...grant, permissions }] : [];
-      });
+      const grants = selected.map(item => item.grant);
       const expiresAt =
         expiry === "never"
           ? null
@@ -98,12 +85,13 @@ export default function ApiKeysSettingsPage() {
       );
       setSecret(result.rawKey);
       form.reset();
-      setSelected({});
+      setSelected([]);
     });
   }
   return (
     <section className="space-y-5">
       {confirmation.dialog}
+      {detailId && <KeyDetailDialog key={detailId} actorId={subject} id={detailId} onClose={() => setDetailId(null)} />}
       <h1 className="text-xl font-semibold">Scoped API Keys</h1>
       <p className="text-sm text-muted-foreground">
         Human Keys act as that human. Agent Keys retain an independent identity.
@@ -127,7 +115,9 @@ export default function ApiKeysSettingsPage() {
           className="h-9 w-full rounded-md border bg-background px-3 text-sm"
           onChange={(event) => {
             setSubject(event.target.value);
-            setSelected({});
+            setKeyPage(1);
+            setDetailId(null);
+            setSelected([]);
             setSecret(null);
             setError("");
           }}
@@ -151,7 +141,7 @@ export default function ApiKeysSettingsPage() {
           onDismiss={() => setSecret(null)}
         />
       )}
-      {(error || keys.error || options.error) && (
+      {(error || keys.error) && (
         <p role="alert" className="text-sm text-destructive">
           {error ||
             "You cannot manage this subject's credentials, or its current scope is unavailable."}
@@ -186,58 +176,19 @@ export default function ApiKeysSettingsPage() {
             required
           />
         )}
-        <div className="space-y-3">
-          {options.data?.map((grant) => (
-            <fieldset
-              key={grantId(grant)}
-              className="min-w-0 rounded-md border p-3"
-            >
-              <legend className="break-all px-1 text-sm">
-                {grantId(grant)}
-              </legend>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {grant.permissions.map((permission) => (
-                  <label
-                    key={permission}
-                    className="flex items-center gap-2 text-sm"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={
-                        selected[grantId(grant)]?.includes(permission) ?? false
-                      }
-                      onChange={(event) =>
-                        setSelected((previous) => ({
-                          ...previous,
-                          [grantId(grant)]: event.target.checked
-                            ? [...(previous[grantId(grant)] ?? []), permission]
-                            : (previous[grantId(grant)] ?? []).filter(
-                                (item) => item !== permission,
-                              ),
-                        }))
-                      }
-                    />
-                    {permission}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-          ))}
-        </div>
+        <KeyGrantPicker key={subject} actorId={subject} selected={selected} onChange={setSelected} disabled={busy} />
         <Button
           disabled={
             busy ||
-            options.isLoading ||
-            options.isError ||
-            !Object.values(selected).some((value) => value.length)
+            selected.length === 0 || selected.length > 100
           }
         >
           Create scoped Key
         </Button>
       </form>
       <div className="space-y-3">
-        {keys.data
-          ?.filter((key) => !key.revokedAt)
+        {keys.data?.items
+          .filter((key) => !key.revokedAt)
           .map((key) => (
             <div key={key.id} className="space-y-2 rounded-md border p-3">
               <p className="font-medium">{key.name}</p>
@@ -247,14 +198,8 @@ export default function ApiKeysSettingsPage() {
                   ? `Expires ${new Date(key.expiresAt).toLocaleString()}`
                   : "No time-based expiry"}
               </p>
-              <ul className="space-y-1 text-xs">
-                {key.grants.map((grant, index) => (
-                  <li className="break-all" key={index}>
-                    {grantId(grant)}: {grant.permissions.join(", ")}
-                  </li>
-                ))}
-              </ul>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" disabled={busy} onClick={() => { setSecret(null); setDetailId(key.id); }}>Details / edit grants</Button>
                 <Button
                   variant="outline"
                   disabled={busy}
@@ -294,6 +239,7 @@ export default function ApiKeysSettingsPage() {
             </div>
           ))}
       </div>
+      <nav aria-label="Key pages" className="flex items-center gap-2"><Button variant="outline" disabled={busy || keys.isFetching || keyPage === 1} onClick={() => setKeyPage(keyPage - 1)}>Previous Keys</Button><span>Page {keyPage}</span><Button variant="outline" disabled={busy || keys.isFetching || !keys.data?.hasNext} onClick={() => setKeyPage(keyPage + 1)}>Next Keys</Button></nav>
     </section>
   );
 }

@@ -232,6 +232,7 @@ export const apiKeyDtoSchema = z
     issuedByActorId: idSchema,
     name: z.string().trim().min(1).max(255),
     prefix: z.string().min(1).max(32),
+    grantVersion: z.number().int().positive(),
     grants: credentialGrantsSchema,
     createdAt: timestampSchema,
     expiresAt: timestampSchema.nullable(),
@@ -589,3 +590,18 @@ export const managedAgentProjectsSchema = z.object({
   page: z.coerce.number().int().min(1).max(100000).default(1),
   pageSize: z.coerce.number().int().min(1).max(50).default(20),
 }).strict();
+
+/** Optimistic concurrency protects ordinary Key grant edits. */
+export const updateApiKeyGrantsSchema = z.object({
+  grants: credentialGrantsSchema,
+  expectedVersion: z.number().int().positive(),
+}).strict();
+export const keyGrantOptionsSchema = z.object({
+  actorId: idSchema.optional(),
+  query: z.string().trim().max(255).default(""),
+  page: z.coerce.number().int().min(1).max(100000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+}).strict();
+
+/** Bounded list metadata excludes grant payloads; fetch detail only when opened. */
+export const apiKeySummaryDtoSchema = apiKeyDtoSchema.omit({ grants: true });

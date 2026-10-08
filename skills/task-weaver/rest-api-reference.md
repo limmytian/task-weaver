@@ -44,6 +44,7 @@ headers are rejected even on public entry points.
 | `DELETE /auth/admin/agents/:id` | Explicit administrator disablement; no content grant |
 | `POST /auth/projects`, `GET /auth/projects/:id/members` | Guarded project creation and membership visibility |
 | `PUT/DELETE /auth/projects/:id/members/:actorId`, `POST /auth/projects/:id/owner` | Role/entitlement ceiling, live membership and last human owner protection |
+| `GET /api-keys/:id`, `GET /api-keys/grant-options`, `PATCH /api-keys/:id/grants` | Owned Key detail, bounded named scope options, versioned ordinary grant edits; actual changes permanently revoke derived authority |
 | `GET/POST /api-keys`, `POST /api-keys/:id/rotate`, `DELETE /api-keys/:id` | Authorized self/managed-Agent subject; strict scoped grants and explicit expiry; one-time raw secret |
 
 Keys rotate without changing actor identity. No-expiry is explicit `expiresAt:
@@ -2406,3 +2407,27 @@ and output counters. Failed/cancelled/running processes with counters are partia
 Snapshot revisions replace rather than add; changed attribution, decreasing counters,
 conflicting replays and terminal restarts are rejected. No model-call records,
 raw usage events, payloads or monetary fields are accepted.
+
+
+### Ordinary Key grant editing
+
+`PATCH /api/v1/api-keys/:id/grants?actorId=<authorized-subject-uuid>` takes a
+strict `{ "expectedVersion": 1, "grants": [...] }` body. Subject/name/expiry are
+immutable. Safe metadata includes `grantVersion`. A stale version returns 409;
+refresh before retrying. Revoked/expired credentials cannot be edited. Actual
+changes revoke all descendant Keys and rooted execution delegations permanently;
+no-op changes do not. Session edits require recent confirmation/CSRF/Origin;
+expansion requires a recent human session. No raw secret or verifier is returned.
+
+`GET /api/v1/api-keys/grant-options` accepts optional `actorId`, name `query`,
+`page` (default 1) and `pageSize` (default 20, maximum 50). Results contain
+`items: [{ grant, label }]`, `hasNext`, and `limit: 100`. Each page has at most
+`pageSize` project blocks plus three non-project blocks on page 1. Names are
+limited to authorized scopes. `GET /api/v1/api-keys/:id` returns safe detail,
+`subjectName` and `namedGrants`; unavailable project names are not disclosed.
+Finite stored grants remain limited to 100 scopes. The REST body limit is 32 KiB.
+
+`GET /api/v1/api-keys/summaries` uses the same bounded query parameters and
+returns `{ items, hasNext }`. Summary metadata excludes grants and verifier
+material. The Web Key list uses this endpoint contract and fetches grants only
+when opening detail; the original full metadata listing remains compatible.

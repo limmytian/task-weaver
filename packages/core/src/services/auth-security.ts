@@ -16,6 +16,7 @@ import {
   AuthenticationRateLimitError,
   AuthenticationError,
   NotFoundError,
+  ConflictError,
   ValidationError,
   AuthorizationError,
   type AuthorizationGrant,
@@ -224,6 +225,7 @@ export function guardAuthenticationOperations<T extends object>(
       error instanceof AuthorizationError ||
       error instanceof AuthenticationRateLimitError ||
       error instanceof NotFoundError ||
+      error instanceof ConflictError ||
       error instanceof ValidationError ||
       error instanceof ZodError
     )

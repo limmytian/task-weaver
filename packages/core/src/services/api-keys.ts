@@ -1,11 +1,12 @@
 import { revokeActorExecutions } from './execution-revocation';
 import { liveExecutionAuthority, type ExecutionBounds } from './execution-delegations';
-import { eq, and, gt, isNull, or } from "drizzle-orm";
+import { eq, and, gt, isNull, or, inArray } from "drizzle-orm";
 import {
   type Database,
   apiKeys,
   apiKeyEvents,
   authSessions,
+  executionDelegations,
 } from "@task-weaver/db";
 import { createHash, randomBytes } from "node:crypto";
 import {
@@ -13,6 +14,8 @@ import {
   AuthorizationError,
   NotFoundError,
   ValidationError,
+  ConflictError,
+  updateApiKeyGrantsSchema,
   apiKeyDtoSchema,
   credentialGrantsSchema,
   issueScopedApiKeySchema,
@@ -39,7 +42,7 @@ function generateApiKey() {
   const raw = `tw_${randomBytes(32).toString("hex")}`;
   return { raw, prefix: raw.slice(0, 10), hash: hashKey(raw) };
 }
-function publicKey(key: StoredKey) {
+export function publicScopedApiKey(key: StoredKey) {
   return apiKeyDtoSchema.parse({
     id: key.id,
     actorId: key.actorId,
@@ -47,6 +50,7 @@ function publicKey(key: StoredKey) {
     name: key.name,
     prefix: key.keyPrefix,
     grants: key.grants,
+    grantVersion: key.grantVersion,
     createdAt: key.createdAt.toISOString(),
     expiresAt: key.expiresAt?.toISOString() ?? null,
     lastUsedAt: key.lastUsedAt?.toISOString() ?? null,
@@ -214,7 +218,7 @@ export async function getLiveRequestAuthority(
   return { actor: authority.actor, grants: authority.grants, bounds };
 }
 
-async function credentialManager(
+export async function credentialManager(
   db: AuthDatabase,
   context: VerifiedRequestContext,
   actorId: string,
@@ -247,7 +251,7 @@ async function credentialManager(
     throw new AuthorizationError();
   return { ...authority, subject };
 }
-async function keyManager(
+export async function keyManager(
   db: AuthDatabase,
   context: VerifiedRequestContext,
   actorId: string,
@@ -333,7 +337,41 @@ export async function issueScopedApiKey(
       actorId: authority.actor.id,
       action: "issued",
     });
-    return { ...publicKey(created!), rawKey: material.raw };
+    return { ...publicScopedApiKey(created!), rawKey: material.raw };
+  });
+}
+
+/** Grant updates permanently invalidate every descendant, including execution capabilities. */
+export async function updateScopedApiKeyGrants(db: AuthDatabase, context: VerifiedRequestContext, actorId: string, id: string, input: unknown) {
+  const parsed = updateApiKeyGrantsSchema.parse(input);
+  return withCredentialTransaction(db, async tx => {
+    const now = new Date();
+    const [key] = await tx.select().from(apiKeys).where(and(eq(apiKeys.id, id), eq(apiKeys.actorId, actorId))).limit(1).for("update");
+    if (!key) throw new NotFoundError("API key not found");
+    const authority = await keyManager(tx, context, actorId, now);
+    if (authority.bounds) throw new AuthorizationError();
+    await liveKeyAuthority(tx, key, now);
+    if (key.grantVersion !== parsed.expectedVersion) throw new ConflictError("Key grants changed; refresh before saving", key.grantVersion);
+    if (!grantsAreCovered(parsed.grants, authority.grants) || !grantsAreCovered(parsed.grants, await loadPrincipalGrants(tx, actorId))) throw new AuthorizationError();
+    if (key.parentKeyId) {
+      const [parent] = await tx.select().from(apiKeys).where(eq(apiKeys.id, key.parentKeyId)).limit(1);
+      if (!parent || !grantsAreCovered(parsed.grants, (await liveKeyAuthority(tx, parent, now)).grants)) throw new AuthorizationError();
+    }
+    const previous = credentialGrantsSchema.parse(key.grants);
+    if (grantsAreCovered(previous, parsed.grants) && grantsAreCovered(parsed.grants, previous)) {
+      return { key: publicScopedApiKey(key), changed: false };
+    }
+    const descendants = [id];
+    let frontier = [id];
+    while (frontier.length) {
+      const children = await tx.select({ id: apiKeys.id }).from(apiKeys).where(inArray(apiKeys.parentKeyId, frontier));
+      frontier = children.map(child => child.id).filter(child => !descendants.includes(child));
+      descendants.push(...frontier);
+    }
+    if (descendants.length > 1) await tx.update(apiKeys).set({ revokedAt: now, revokedByActorId: authority.actor.id }).where(and(inArray(apiKeys.id, descendants.slice(1)), isNull(apiKeys.revokedAt)));
+    await tx.update(executionDelegations).set({ revokedAt: now }).where(and(inArray(executionDelegations.parentCredentialId, descendants), isNull(executionDelegations.revokedAt)));
+    const [updated] = await tx.update(apiKeys).set({ grants: parsed.grants, grantVersion: key.grantVersion + 1 }).where(eq(apiKeys.id, id)).returning();
+    return { key: publicScopedApiKey(updated!), changed: true };
   });
 }
 
@@ -348,7 +386,7 @@ export async function listScopedApiKeys(
     .from(apiKeys)
     .where(and(eq(apiKeys.actorId, actorId), isNull(apiKeys.revokedAt)))
     .orderBy(apiKeys.createdAt);
-  return keys.map(publicKey);
+  return keys.map(publicScopedApiKey);
 }
 
 export async function revokeScopedApiKey(
@@ -371,7 +409,7 @@ export async function revokeScopedApiKey(
       new Date(),
       true,
     );
-    if (key.revokedAt) return publicKey(key);
+    if (key.revokedAt) return publicScopedApiKey(key);
     await revokeActorExecutions(tx, key.actorId);
     const [revoked] = await tx
       .update(apiKeys)
@@ -381,7 +419,7 @@ export async function revokeScopedApiKey(
     await tx
       .insert(apiKeyEvents)
       .values({ keyId: id, actorId: authority.actor.id, action: "revoked" });
-    return publicKey(revoked!);
+    return publicScopedApiKey(revoked!);
   });
 }
 
@@ -447,7 +485,7 @@ export async function rotateScopedApiKey(
       },
     ]);
     return {
-      ...publicKey(created!),
+      ...publicScopedApiKey(created!),
       rawKey: material.raw,
       previousKeyId: id,
     };

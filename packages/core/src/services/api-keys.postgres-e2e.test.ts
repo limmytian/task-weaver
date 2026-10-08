@@ -18,6 +18,7 @@ import {
   AuthorizationError,
   AuthenticationError,
   NotFoundError,
+  ConflictError,
   type AuthorizationGrant,
   type VerifiedRequestContext,
 } from "@task-weaver/contracts";
@@ -130,6 +131,45 @@ test(
         grants,
         expiresAt,
       });
+
+    await t.test("ordinary grant edits preserve secrets, reject stale writes and permanently revoke descendants", async () => {
+      const parent = await issue([personal, write]);
+      const parentContext = await service.authenticateScopedApiKey(db, parent.rawKey);
+      const child = await service.issueScopedApiKey(db, parentContext, owner.actor.id, { name: "Child", grants: [personal, read], expiresAt: null });
+      const childContext = await service.authenticateScopedApiKey(db, child.rawKey);
+      const grandchild = await service.issueScopedApiKey(db, childContext, owner.actor.id, { name: "Grandchild", grants: [read], expiresAt: null });
+      const [before] = await db.select().from(apiKeys).where(eq(apiKeys.id, parent.id));
+      const unchanged = await service.updateScopedApiKeyGrants(db, owner.context, owner.actor.id, parent.id, { grants: [write, personal], expectedVersion: 1 });
+      assert.equal(unchanged.changed, false);
+      await service.authenticateScopedApiKey(db, grandchild.rawKey);
+      await assert.rejects(service.updateScopedApiKeyGrants(db, childContext, owner.actor.id, parent.id, { grants: [personal, write], expectedVersion: 1 }), AuthorizationError);
+      const updated = await service.updateScopedApiKeyGrants(db, owner.context, owner.actor.id, parent.id, { grants: [personal, read], expectedVersion: 1 });
+      assert.equal(updated.key.grantVersion, 2);
+      assert.equal("rawKey" in updated.key, false);
+      const [after] = await db.select().from(apiKeys).where(eq(apiKeys.id, parent.id));
+      assert.equal(after!.keyHash, before!.keyHash);
+      assert.equal(after!.actorId, before!.actorId);
+      await assert.rejects(service.authenticateScopedApiKey(db, child.rawKey), AuthenticationError);
+      await assert.rejects(service.authenticateScopedApiKey(db, grandchild.rawKey), AuthenticationError);
+      await assert.rejects(service.updateScopedApiKeyGrants(db, owner.context, owner.actor.id, parent.id, { grants: [write], expectedVersion: 1 }), ConflictError);
+      await assert.rejects(service.updateScopedApiKeyGrants(db, other.context, owner.actor.id, parent.id, { grants: [write], expectedVersion: 2 }), NotFoundError);
+      await service.updateScopedApiKeyGrants(db, owner.context, owner.actor.id, parent.id, { grants: [personal, write], expectedVersion: 2 });
+      await assert.rejects(service.authenticateScopedApiKey(db, grandchild.rawKey), AuthenticationError);
+      const concurrent = await Promise.allSettled([read, write].map(grant => service.updateScopedApiKeyGrants(db, owner.context, owner.actor.id, parent.id, { grants: [grant], expectedVersion: 3 })));
+      assert.equal(concurrent.filter(result => result.status === "fulfilled").length, 1);
+      await service.revokeScopedApiKey(db, owner.context, parent.id);
+      await assert.rejects(service.updateScopedApiKeyGrants(db, owner.context, owner.actor.id, parent.id, { grants: [read], expectedVersion: 4 }), AuthenticationError);
+      const [liveProject] = await db.insert(projects).values({ name: "Live grant ceiling", createdBy: owner.actor.id }).returning();
+      const [liveMembership] = await db.insert(projectMemberships).values({ projectId: liveProject!.id, actorId: owner.actor.id, actorType: "human", role: "member" }).returning();
+      const liveWrite: AuthorizationGrant = { scope: "project", projectId: liveProject!.id, permissions: ["resource.read", "resource.write"] };
+      const liveKey = await issue([liveWrite]);
+      await db.update(projectMemberships).set({ role: "viewer" }).where(eq(projectMemberships.id, liveMembership!.id));
+      await assert.rejects(service.updateScopedApiKeyGrants(db, owner.context, owner.actor.id, liveKey.id, { grants: [liveWrite], expectedVersion: 1 }), AuthorizationError);
+      await service.updateScopedApiKeyGrants(db, owner.context, owner.actor.id, liveKey.id, { grants: [{ ...liveWrite, permissions: ["resource.read"] }], expectedVersion: 1 });
+      const expired = await issue([read]);
+      await db.update(apiKeys).set({ createdAt: new Date(Date.now() - 20000), expiresAt: new Date(Date.now() - 10000) }).where(eq(apiKeys.id, expired.id));
+      await assert.rejects(service.updateScopedApiKeyGrants(db, owner.context, owner.actor.id, expired.id, { grants: [read], expectedVersion: 1 }), AuthenticationError);
+    });
 
     await t.test(
       "explicit expiry and strict payloads; no administrator content override",

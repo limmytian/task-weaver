@@ -17,6 +17,9 @@ import {
   PROJECT_ROLE_PERMISSIONS,
   PROJECT_ROLE_GRANTABLE_PERMISSIONS,
   issueScopedApiKeySchema,
+  keyGrantOptionsSchema,
+  apiKeySummaryDtoSchema,
+  updateApiKeyGrantsSchema,
   createProjectSchema,
   createManagedAgentSchema,
   managedAgentDtoSchema,
@@ -52,6 +55,10 @@ import {
   listScopedApiKeys,
   revokeScopedApiKey,
   rotateScopedApiKey,
+  updateScopedApiKeyGrants,
+  publicScopedApiKey,
+  credentialManager,
+  keyManager,
 } from "./api-keys";
 
 type AuthenticationService = ReturnType<typeof createAuthenticationService>;
@@ -666,9 +673,79 @@ export function createIdentityManagementService(
       return db.transaction(async tx => {
         await lockIdentityLifecycle(tx);
         // The same credential-manager check used for listing protects subject metadata.
-        await listScopedApiKeys(tx, context, actorId);
+        await credentialManager(tx, context, actorId, new Date(), true);
         const authority = await getLiveRequestAuthority(tx, context);
         return intersectGrants(authority.grants, await loadPrincipalGrants(tx, actorId));
+      });
+    },
+    async pagedKeyGrantOptions(headers: Headers, input: unknown) {
+      const parsed = keyGrantOptionsSchema.parse(input);
+      const context = await authentication.resolve(headers);
+      const actorId = parsed.actorId ?? context.actor.id;
+      return db.transaction(async tx => {
+        await lockIdentityLifecycle(tx);
+        await credentialManager(tx, context, actorId, new Date(), true);
+        const authority = await getLiveRequestAuthority(tx, context);
+        const eligible = intersectGrants(authority.grants, await loadPrincipalGrants(tx, actorId));
+        const projectIds = eligible.flatMap(grant => grant.scope === "project" ? [grant.projectId] : []);
+        const pattern = `%${parsed.query.replace(/[\\%_]/g, "\\$&")}%`;
+        const namedProjects = projectIds.length ? await tx.select({ id: projects.id, name: projects.name }).from(projects).where(and(inArray(projects.id, projectIds), parsed.query ? ilike(projects.name, pattern) : undefined)).orderBy(asc(projects.name), asc(projects.id)).limit(parsed.pageSize + 1).offset((parsed.page - 1) * parsed.pageSize) : [];
+        const personalIds = eligible.flatMap(grant => grant.scope === "personal" ? [grant.actorId] : []);
+        const humans = personalIds.length ? await tx.select({ id: authActors.id, name: authActors.displayName }).from(authActors).where(inArray(authActors.id, personalIds)) : [];
+        const base = eligible.filter(grant => grant.scope !== "project").map(grant => ({ grant, label: grant.scope === "personal" ? `Personal: ${humans.find(human => human.id === grant.actorId)?.name ?? "Authorized owner"}` : grant.scope === "global" ? "Global resources" : "Instance administration" }));
+        const items = namedProjects.slice(0, parsed.pageSize).map(project => ({ grant: eligible.find(grant => grant.scope === "project" && grant.projectId === project.id)!, label: project.name }));
+        return { items: [...(parsed.page === 1 ? base.filter(item => item.label.toLowerCase().includes(parsed.query.toLowerCase())) : []), ...items], hasNext: namedProjects.length > parsed.pageSize, limit: 100 };
+      });
+    },
+    async keySummaries(headers: Headers, input: unknown) {
+      const parsed = keyGrantOptionsSchema.parse(input);
+      const context = await authentication.resolve(headers);
+      const actorId = parsed.actorId ?? context.actor.id;
+      await credentialManager(db, context, actorId, new Date(), true);
+      const pattern = `%${parsed.query.replace(/[\\%_]/g, "\\$&")}%`;
+      const rows = await db.select({ id: apiKeys.id, actorId: apiKeys.actorId, issuedByActorId: apiKeys.issuedByActorId,
+        name: apiKeys.name, prefix: apiKeys.keyPrefix, grantVersion: apiKeys.grantVersion,
+        createdAt: apiKeys.createdAt, expiresAt: apiKeys.expiresAt, lastUsedAt: apiKeys.lastUsedAt, revokedAt: apiKeys.revokedAt,
+      }).from(apiKeys).where(and(eq(apiKeys.actorId, actorId), isNull(apiKeys.revokedAt), parsed.query ? ilike(apiKeys.name, pattern) : undefined))
+        .orderBy(asc(apiKeys.createdAt), asc(apiKeys.id)).limit(parsed.pageSize + 1).offset((parsed.page - 1) * parsed.pageSize);
+      return { items: rows.slice(0, parsed.pageSize).map(row => apiKeySummaryDtoSchema.parse({ ...row,
+        createdAt: row.createdAt.toISOString(), expiresAt: row.expiresAt?.toISOString() ?? null,
+        lastUsedAt: row.lastUsedAt?.toISOString() ?? null, revokedAt: row.revokedAt?.toISOString() ?? null,
+      })), hasNext: rows.length > parsed.pageSize };
+    },
+    async keyDetail(headers: Headers, actorId: string, keyId: string) {
+      id(actorId); id(keyId);
+      const context = await authentication.resolve(headers);
+      await credentialManager(db, context, actorId, new Date(), true);
+      const [key] = await db.select().from(apiKeys).where(and(eq(apiKeys.id, keyId), eq(apiKeys.actorId, actorId))).limit(1);
+      if (!key) throw new NotFoundError("API key not found");
+      // Resolve only names the caller can currently read, retaining IDs for historical scopes.
+      const authority = await getLiveRequestAuthority(db, context);
+      const projectIds = authority.grants.flatMap(grant => grant.scope === "project" && grant.permissions.includes("resource.read") ? [grant.projectId] : []);
+      const storedGrants = updateApiKeyGrantsSchema.shape.grants.parse(key.grants);
+      const visibleIds = storedGrants.flatMap(grant => grant.scope === "project" && projectIds.includes(grant.projectId) ? [grant.projectId] : []);
+      const names = visibleIds.length ? await db.select({ id: projects.id, name: projects.name }).from(projects).where(inArray(projects.id, visibleIds)) : [];
+      const [subject] = await db.select({ name: authActors.displayName }).from(authActors).where(eq(authActors.id, actorId));
+      return { ...publicScopedApiKey(key), subjectName: subject?.name ?? "Credential owner", namedGrants: storedGrants.map(grant => ({ grant, label: grant.scope === "project" ? names.find(project => project.id === grant.projectId)?.name ?? "Unavailable project" : grant.scope === "personal" ? "Managing human personal space" : grant.scope })) };
+    },
+    async updateKeyGrants(headers: Headers, actorId: string, keyId: string, input: unknown) {
+      id(actorId); id(keyId);
+      const context = await mutation(headers);
+      return db.transaction(async tx => {
+        await lockIdentityLifecycle(tx);
+        await checkCredentialMutation(context, tx);
+        await keyManager(tx, context, actorId, new Date());
+        const parsed = updateApiKeyGrantsSchema.parse(input);
+        const [previous] = await tx.select({ grants: apiKeys.grants }).from(apiKeys).where(and(eq(apiKeys.id, keyId), eq(apiKeys.actorId, actorId)));
+        if (previous && !grantsAreCovered(parsed.grants, updateApiKeyGrantsSchema.shape.grants.parse(previous.grants))) await requireRecentSession(tx, context);
+        const result = await updateScopedApiKeyGrants(tx, context, actorId, keyId, parsed);
+        if (result.changed) await auditIdentity(tx, "credential.grants_updated", context.actor.id, actorId, keyId, {
+          previousVersion: parsed.expectedVersion,
+          grantVersion: result.key.grantVersion,
+          beforeGrants: JSON.stringify(previous!.grants),
+          afterGrants: JSON.stringify(result.key.grants),
+        });
+        return result.key;
       });
     },
     async issueKey(headers: Headers, actorId: string, input: unknown) {

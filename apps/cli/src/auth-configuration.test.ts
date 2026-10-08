@@ -117,3 +117,33 @@ test('Agent inspection commands use bounded shared contracts and explicit retire
     else process.env.TW_API_URL = previousUrl;
   }
 });
+
+
+test('Key CLI uses strict bounded options and versioned grant mutation contracts', async () => {
+  const previous = process.env.TW_API_URL;
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  const calls: { url: URL; method?: string; body?: unknown }[] = [];
+  const id = '00000000-0000-4000-8000-000000000001';
+  try {
+    process.env.TW_API_URL = 'https://tw.example';
+    console.log = () => {};
+    globalThis.fetch = async (input, init) => {
+      calls.push({ url: new URL(String(input)), method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      return Response.json({});
+    };
+    const run = async (args: string[]) => { const program = new Command(); registerAuth(program); await program.parseAsync(['auth', 'keys', ...args], { from: 'user' }); };
+    await run(['options', '--query', 'Project & scope', '--page', '2', '--page-size', '20']);
+    assert.equal(calls[0]!.url.searchParams.get('query'), 'Project & scope');
+    assert.equal(calls[0]!.url.searchParams.get('page'), '2');
+    await assert.rejects(run(['options', '--page-size', '51']));
+    const grants = [{ scope: 'global', permissions: ['resource.read'] }];
+    await run(['update-grants', id, '--expected-version', '2', '--grants', JSON.stringify(grants)]);
+    assert.equal(calls[1]!.method, 'PATCH');
+    assert.deepEqual(calls[1]!.body, { expectedVersion: 2, grants });
+    await assert.rejects(run(['update-grants', id, '--expected-version', '0', '--grants', '[]']));
+  } finally {
+    globalThis.fetch = originalFetch; console.log = originalLog;
+    if (previous === undefined) delete process.env.TW_API_URL; else process.env.TW_API_URL = previous;
+  }
+});
