@@ -17,7 +17,7 @@ and exit codes do not establish quota exhaustion.
 | --- | --- | --- | --- |
 | Codex | CLI 0.161.0 | `app-server --stdio`, initialize, `account/rateLimits/read`; feature-negotiated and bounded | Terminal error/turn.failed envelopes; anchored usage-limit diagnostics |
 | Claude | Not installed | Unsupported; allowance is unknown | Provider error envelopes and anchored limit diagnostics; not a claim of installed-version coverage |
-| agy | 1.2.8 | Unsupported; no verified vendor status contract | Explicit provider error envelopes/diagnostic codes only |
+| agy | 1.2.8 | Not connected in Task Weaver; interactive `/usage` / `/quota` is available | Explicit provider error envelopes/diagnostic codes only |
 | aider | Not installed | Unsupported; allowance is unknown | Explicit provider error envelopes/diagnostic codes only |
 | cursor | Desktop CLI 3.8.11 | Unsupported; this binary does not establish Agent CLI quota-query support | Explicit provider error envelopes/diagnostic codes only |
 
@@ -33,6 +33,8 @@ configured profiles where model/provider resource boundaries differ.
 [Cursor output documentation](https://cursor.com/docs/cli/reference/output-format)
 provide error/output context; they do not establish a portable subscription quota
 inspection API. Additional versions must be verified before expanding detection.
+
+Antigravity supports an interactive [`/usage` (alias `/quota`) panel](https://antigravity.google/docs/cli/commands/usage) that refreshes model quotas from its backend. Task Weaver has not verified a noninteractive quota-query contract for the installed agy version. This integration limitation does not mean Antigravity cannot display quota.
 
 ## Inspect and recover
 
