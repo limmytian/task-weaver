@@ -447,7 +447,7 @@ export function AssistantDialog({
                     </div>
                   ) : (
                     messages.map((message) => (
-                      <div key={message.id} className="flex gap-3">
+                      <div key={message.id} className={`flex gap-3 ${message.role === "user" ? "flex-row-reverse" : ""}`}>
                         <div role="img" aria-label={message.role === "assistant" ? "Ti assistant" : "You"} className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background">
                           {message.role === "assistant" ? (
                             <Sparkles aria-hidden="true" className="h-4 w-4" />
@@ -455,11 +455,11 @@ export function AssistantDialog({
                             <UserRound className="h-4 w-4" />
                           )}
                         </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="mb-1 text-xs font-medium text-muted-foreground">
+                        <div className="min-w-0 max-w-[85%]">
+                          <div className={`mb-1 text-xs font-medium text-muted-foreground ${message.role === "user" ? "text-right" : ""}`}>
                             {message.role === "assistant" ? "Assistant" : "You"}
                           </div>
-                          <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                          <div className={`whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-sm leading-relaxed ${message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
                             {message.content}
                           </div>
                         </div>
