@@ -147,6 +147,26 @@ test("assistant authorization isolates accounts and resources across REST and tR
   const createdDocument = await owner.service.documentService.getDocument(db, confirmedDocument.body.executionResult.entityId);
   assert.equal(createdDocument.content, "Reviewed content");
   assert.equal(createdDocument.needsReview, true);
+  const noteProposal = await rest("assistant/chat", owner.headers, "POST", { ...input, proposedActions: [{ actionType: "add_note", payload: { taskId: task.id, content: "Confirmed Chat note", pinned: true } }] });
+  const confirmedNote = await rest(`assistant/actions/${noteProposal.body.actions[0].id}/execute`, owner.headers, "POST");
+  assert.equal(confirmedNote.status, 200);
+  assert.equal(confirmedNote.body.executionResult.result.content, "Confirmed Chat note");
+  assert.equal(confirmedNote.body.executionResult.result.pinned, true);
+  const scheduleProposal = await rest("assistant/chat", owner.headers, "POST", { ...input, proposedActions: [{ actionType: "create_schedule", payload: { projectId: project.id, requirementId: requirement.id, kind: "one_off", title: "Confirmed Chat schedule", startsAt: new Date(Date.now() + 86_400_000).toISOString(), taskTemplate: { title: "Scheduled follow-up" } } }] });
+  const confirmedSchedule = await rest(`assistant/actions/${scheduleProposal.body.actions[0].id}/execute`, owner.headers, "POST");
+  assert.equal(confirmedSchedule.status, 200);
+  const scheduleId = confirmedSchedule.body.executionResult.entityId;
+  assert.equal((await owner.service.scheduleService.getSchedule(db, scheduleId)).title, "Confirmed Chat schedule");
+  const pauseProposal = await rest("assistant/chat", owner.headers, "POST", { ...input, proposedActions: [{ actionType: "pause_schedule", payload: { scheduleId } }] });
+  const paused = await rest(`assistant/actions/${pauseProposal.body.actions[0].id}/execute`, owner.headers, "POST");
+  assert.equal(paused.status, 200);
+  assert.equal((await owner.service.scheduleService.getSchedule(db, scheduleId)).status, "paused");
+  // Queueing a Ti run must retain the independent execution entitlement check.
+  const queueProposal = await rest("assistant/chat", owner.headers, "POST", { ...input, proposedActions: [{ actionType: "queue_ti_run", payload: { taskId: task.id, assignedAgentId: viewer.actor.id } }] });
+  assert.equal(queueProposal.status, 201);
+  assert.equal(queueProposal.body.actions[0].status, "proposed");
+  const deniedQueue = await rest(`assistant/actions/${queueProposal.body.actions[0].id}/execute`, owner.headers, "POST");
+  assert.equal(deniedQueue.status, 403);
   await runtime.identity.setMembership(owner.headers, project.id, viewer.actor.id, { role: "viewer" });
   const viewerChat = createAssistantService(viewer.context);
   const viewerProposal = await viewerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ ...input, proposedActions: [{ actionType: "update_task", payload: { taskId: task.id, title: "Unauthorized edit" } }] }));
@@ -158,7 +178,7 @@ test("assistant authorization isolates accounts and resources across REST and tR
   const taskPolicy = apiRequire("@task-weaver/core").upsertTiAgentPolicySchema.parse({ enabled: false, executionMode: "disabled", dailyRunLimit: 17 });
   await owner.service.tiAgentService.upsertPolicy(db, taskPolicy, owner.actor);
   assert.equal((await ownerChat.getPolicy(db)).assistantAutoMode, "live");
-  await ownerChat.updatePolicy(db, { assistantDailyActionLimit: 6 });
+  await ownerChat.updatePolicy(db, { assistantDailyActionLimit: 10 });
   assert.equal((await owner.service.tiAgentService.getPolicy(db, {}, owner.actor)).dailyRunLimit, 17);
   assert.equal((await outsiderChat.getPolicy(db)).assistantAutoEnabled, false);
   const automatic = await (await caller(owner.headers)).assistant.sendMessage(sendAssistantMessageSchema.parse({ ...input, proposedActions: [{ actionType: "add_comment", payload: { taskId: task.id, content: "Automatic fixture comment" } }] }));

@@ -15,6 +15,11 @@ the deployment Secret facility. Set an optional `TW_CHAT_CREDENTIAL_KEY_ID` (def
 `primary`). All Web and API processes must use the same key ring. Do not put key
 values in source control, logs, platform documents or command arguments.
 
+The Kubernetes template reads optional keys `master-key`, `key-id` and
+`previous-keys` from `task-weaver-chat-credentials`. Missing configuration does
+not prevent startup, but saving personal keys requires a valid master key.
+Provision that Secret before enabling personal Chat configuration.
+
 Credentials use AES-256-GCM with random 12-byte nonces, authenticated owner/model
 bindings and a versioned ciphertext envelope. Public responses expose only a fixed
 mask and presence metadata. Replacing a key takes effect on the next Chat request;

@@ -27,6 +27,24 @@ spec:
                 secretKeyRef:
                   name: task-weaver-database
                   key: url
+            - name: TW_CHAT_CREDENTIAL_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-chat-credentials
+                  key: master-key
+                  optional: true
+            - name: TW_CHAT_CREDENTIAL_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-chat-credentials
+                  key: key-id
+                  optional: true
+            - name: TW_CHAT_CREDENTIAL_PREVIOUS_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-chat-credentials
+                  key: previous-keys
+                  optional: true
             - name: NODE_ENV
               value: production
             - name: TW_DAEMON_MODE
@@ -81,6 +99,24 @@ spec:
                   key: url
             - name: TW_API_URL
               value: http://task-weaver-api:3001
+            - name: TW_CHAT_CREDENTIAL_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-chat-credentials
+                  key: master-key
+                  optional: true
+            - name: TW_CHAT_CREDENTIAL_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-chat-credentials
+                  key: key-id
+                  optional: true
+            - name: TW_CHAT_CREDENTIAL_PREVIOUS_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-chat-credentials
+                  key: previous-keys
+                  optional: true
             - name: NODE_ENV
               value: production
           readinessProbe:

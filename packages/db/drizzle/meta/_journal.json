@@ -442,6 +442,13 @@
       "when": 1791538200000,
       "tag": "0062_personal_chat_credentials",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1791540000000,
+      "tag": "0063_assistant_ti_action_type",
+      "breakpoints": true
     }
   ]
 }

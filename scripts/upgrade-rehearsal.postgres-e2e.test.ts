@@ -57,8 +57,10 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
   const legacyToken = `tw_${randomBytes(32).toString("hex")}`;
   await db.execute(sql`INSERT INTO task_weaver.api_keys (name, key_hash, key_prefix) VALUES ('Synthetic legacy key', ${createHash("sha256").update(legacyToken).digest("hex")}, 'tw_fixture')`);
   await db.execute(sql`INSERT INTO task_weaver.ti_agent_runs (task_id, status, created_by, lease_owner_id, lease_owner_type, lease_expires_at) VALUES (${task.id}, 'running', 'apikey:synthetic', 'tw-cli', 'agent', now() + interval '10 minutes')`);
-  const [legacyModel] = await db.insert(tiAgentModelConfigs).values({ ownerId: "apikey:synthetic", ownerType: "agent", provider: "fixture", model: "safe", credentialStatus: "valid", isDefaultAgent: true }).returning();
+  const [legacyModel] = await db.execute<{ id: string }>(sql`INSERT INTO task_weaver.ti_agent_model_configs (owner_id, owner_type, provider, model, credential_status, is_default_agent) VALUES ('apikey:synthetic', 'agent', 'fixture', 'safe', 'valid', true) RETURNING id`);
   const [legacyPolicy] = await db.insert(tiAgentPolicies).values({ ownerId: "apikey:synthetic", ownerType: "agent", enabled: true, executionMode: "live" }).returning();
+  const [legacyConversation] = await db.execute<{ id: string }>(sql`INSERT INTO task_weaver.assistant_conversations (project_id, created_by, created_by_type) VALUES (${project.id}, 'tw-cli', 'agent') RETURNING id`);
+  const [legacyAction] = await db.execute<{ id: string }>(sql`INSERT INTO task_weaver.assistant_actions (conversation_id, action_type, status, payload, approval_actor_id, approval_actor_type, approved_at) VALUES (${legacyConversation.id}, 'queue_pi_run', 'approved', '{}'::jsonb, 'tw-cli', 'agent', now()) RETURNING id`);
   // Use the database clock and round up: PostgreSQL timestamps retain sub-millisecond precision.
   const [boundary] = await db.select({ cutoff: sql`date_trunc('milliseconds', clock_timestamp()) + interval '1 millisecond'` }).from(tiAgentPolicies).where(eq(tiAgentPolicies.id, legacyPolicy.id));
   const cutoff = new Date(boundary.cutoff).toISOString();
@@ -71,6 +73,11 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
     assert.equal((await db.select().from(authActors)).length, 0);
     assert.equal((await db.select().from(projectMemberships)).length, 0);
     assert.equal((await db.select().from(projects).where(eq(projects.id, project.id)))[0].createdBy, "tw-cli");
+    const [migratedAction] = await db.execute<{ action_type: string; status: string; approval_actor_id: string | null; approved_at: Date | null }>(sql`SELECT action_type, status, approval_actor_id, approved_at FROM task_weaver.assistant_actions WHERE id = ${legacyAction.id}`);
+    assert.equal(migratedAction.action_type, "queue_ti_run");
+    assert.equal(migratedAction.status, "proposed");
+    assert.equal(migratedAction.approval_actor_id, null);
+    assert.equal(migratedAction.approved_at, null);
   });
   const config = { secret: randomBytes(32).toString("hex"), bootstrapSecret: randomBytes(32).toString("hex"), baseURL: "http://127.0.0.1:3001", trustedOrigins: ["http://127.0.0.1:3000"] };
   const runtime = createAuthenticationRuntime(db, config);
