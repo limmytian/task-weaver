@@ -4,7 +4,7 @@ Task Weaver is a shared workspace where humans and AI agents collaborate as equa
 
 ## Identity and tone
 
-The selected A mark uses two equally weighted paths weaving over and under each other. Preserve both paths, their crossing gaps and their open ends. The selected palette is 02, indigo and blue. Selection applies to geometry and palette; product-level visual acceptance follows application integration.
+The approved weave mark uses two equally weighted paths weaving over and under each other. Preserve both paths, their crossing gaps and their open ends. The brand palette is indigo and blue.
 
 Use calm, capable and approachable language. Prefer concrete verbs and useful context. Explain who acted and what changed without claiming autonomous authority that the product does not grant. Avoid magic, superhuman speed, surveillance, robot mascots and human-over-agent hierarchy.
 
@@ -14,7 +14,7 @@ Canonical descriptor: “A shared workspace for humans and AI agents.” Support
 
 Use the SVG masters in [logo](logo/README.md). Use the full horizontal wordmark where space permits and the standalone mark for navigation and favicons. Minimum mark size is 16 px; prefer 24 px or larger. Minimum wordmark width is 150 px. Keep at least 8 master units of clear space beyond the visible artwork; placement containers must supply it. Transparent PNG and ICO exports are catalogued in [the manifest](logo/manifest.json).
 
-Use the light variant on white/light neutral backgrounds, dark on dark neutral backgrounds, ink for one-color light-background applications and white for one-color dark-background applications. Do not stretch, rotate, flatten crossings, independently change strand weights, add shadows or gradients, or place the mark on visually busy backgrounds. A is the selected identity; B–G and other explorations remain historical candidates and must not be presented as approved alternatives. Do not use strand colors to encode roles or access rights.
+Use the light variant on white/light neutral backgrounds, dark on dark neutral backgrounds, ink for one-color light-background applications and white for one-color dark-background applications. Do not stretch, rotate, flatten crossings, independently change strand weights, add shadows or gradients, or place the mark on visually busy backgrounds. Do not use strand colors to encode roles or access rights.
 
 ## Color and typography
 
@@ -46,4 +46,4 @@ Preparing assets does not upload them to GitHub, change a public repository prof
 
 ## Provenance
 
-Logo geometry is original project artwork. Geist fonts retain their accompanying SIL Open Font License in logo/templates and the existing candidate font directory. SVG source contains no scripts or external fetch dependencies; font data is embedded. Repository LICENSE, NOTICE and TRADEMARKS.md continue to apply. No registration, exclusivity or trademark clearance claim is made.
+Logo geometry is original project artwork. Geist fonts retain their accompanying SIL Open Font License in logo/templates and the font directory. SVG source contains no scripts or external fetch dependencies; font data is embedded. Repository LICENSE, NOTICE and TRADEMARKS.md continue to apply. No registration, exclusivity or trademark clearance claim is made.
