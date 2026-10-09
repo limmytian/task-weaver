@@ -1,7 +1,7 @@
 import { lockIdentityLifecycle } from "./auth-security";
-import { and, eq } from "drizzle-orm";
-import { assistantActions, assistantConversations, tiAgentPolicies, activityLog, type Database } from "@task-weaver/db";
-import { AuthorizationError, NotFoundError, type VerifiedRequestContext, type BuildAssistantContextInput, assistantPolicySchema, updateAssistantPolicySchema } from "@task-weaver/contracts";
+import { and, eq, sql } from "drizzle-orm";
+import { assistantActions, assistantMessages, assistantConversations, tiAgentPolicies, activityLog, type Database } from "@task-weaver/db";
+import { AuthorizationError, NotFoundError, type VerifiedRequestContext, type BuildAssistantContextInput, assistantPolicySchema, updateAssistantPolicySchema, getAssistantMessageResultSchema } from "@task-weaver/contracts";
 import { resourceAuthority, requireResource, requireScope } from "./resource-authorization";
 import { createResourceServices } from "./resource-services";
 import * as implementation from "./assistant";
@@ -89,6 +89,23 @@ export function createAssistantService(identity: VerifiedRequestContext) {
     return row;
   }
   return {
+    async getMessageResult(db: Database, input: { requestId: string }) {
+      const { requestId } = getAssistantMessageResultSchema.parse(input);
+      const actor = await scope(db, {});
+      const [match] = await db.select({ id: assistantMessages.id, conversationId: assistantMessages.conversationId })
+        .from(assistantMessages).innerJoin(assistantConversations, eq(assistantMessages.conversationId, assistantConversations.id))
+        .where(and(eq(assistantMessages.role, "user"), eq(assistantConversations.createdBy, actor.id),
+          eq(assistantConversations.createdByType, actor.type), sql`${assistantMessages.metadata}->>'requestId' = ${requestId}`)).limit(1);
+      if (!match) return { status: "not_found" as const, result: null };
+      const data = await history(db, match.conversationId);
+      const userMessage = data.messages.find(message => message.id === match.id)!;
+      const metadata = userMessage.metadata as Record<string, unknown> | null;
+      const assistantMessage = data.messages.find(message => message.role === "assistant"
+        && (message.metadata as Record<string, unknown> | null)?.responseTo === userMessage.id);
+      if (!assistantMessage || metadata?.processing === "running") return { status: metadata?.processing === "failed" ? "failed" as const : "running" as const, result: null };
+      return { status: "completed" as const, result: { conversation: data.conversation, userMessage, assistantMessage,
+        actions: data.actions.filter(action => action.messageId === userMessage.id || action.messageId === assistantMessage.id) } };
+    },
     async getPolicy(db: Database) {
       const actor = await scope(db, {});
       const row = await db.query.tiAgentPolicies.findFirst({ where: and(eq(tiAgentPolicies.ownerId, actor.id), eq(tiAgentPolicies.ownerType, "human")) });

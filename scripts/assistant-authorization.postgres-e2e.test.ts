@@ -107,11 +107,19 @@ test("assistant authorization isolates accounts and resources across REST and tR
     return request;
   });
   const input = sendAssistantMessageSchema.parse({ context: { projectId: project.id, requirementId: requirement.id }, message: "Summarize this project" });
-  const sent = await (await caller(owner.headers)).assistant.sendMessage(input);
+  const messageRequestId = randomUUID();
+  const sent = await (await caller(owner.headers)).assistant.sendMessage({ ...input, requestId: messageRequestId });
   assert.equal(sent.conversation.createdBy, owner.actor.id);
   assert.equal(sent.assistantMessage.content, "Fixture model reply");
   assert.equal(sent.modelError, null);
   assert.equal(calls, 1);
+  const recovered = await rest(`assistant/messages/${messageRequestId}/result`, owner.headers);
+  assert.equal(recovered.status, 200);
+  assert.equal(recovered.body.status, "completed");
+  assert.equal(recovered.body.result.assistantMessage.id, sent.assistantMessage.id);
+  const foreignResult = await rest(`assistant/messages/${messageRequestId}/result`, outsider.headers);
+  assert.deepEqual(foreignResult.body, { status: "not_found", result: null });
+
   await assert.rejects(outsiderChat.getConversation(db, sent.conversation.id), NotFoundError);
   await assert.rejects(outsiderChat.sendReadOnlyMessage(db, { ...input, conversationId: sent.conversation.id }), NotFoundError);
   await assert.rejects(ownerChat.buildAssistantContext(db, buildAssistantContextSchema.parse({ conversationId: sent.conversation.id, projectId: other.id })), NotFoundError);
@@ -179,7 +187,10 @@ test("assistant authorization isolates accounts and resources across REST and tR
   await assert.rejects(outsiderChat.executeApprovedAction(db, action.id), NotFoundError);
   await assert.rejects(ownerChat.updateActionStatus(db, action.id, { status: "succeeded", executionResult: { forged: true } }), AuthorizationError);
   await ownerChat.updatePolicy(db, { assistantAutoEnabled: true, assistantAutoMode: "live" });
-  const executed = await ownerChat.executeApprovedAction(db, action.id);
+  const concurrentApproval = await Promise.allSettled([ownerChat.executeApprovedAction(db, action.id), ownerChat.executeApprovedAction(db, action.id)]);
+  assert.equal(concurrentApproval.filter(result => result.status === "fulfilled").length, 1);
+  assert.equal(concurrentApproval.filter(result => result.status === "rejected").length, 1);
+  const executed = concurrentApproval.find(result => result.status === "fulfilled")!.value;
   await ownerChat.updatePolicy(db, { assistantAutoEnabled: false });
   assert.equal(executed.status, "succeeded");
   assert.equal((await owner.service.taskService.getTask(db, task.id)).title, "Reviewed task");
@@ -258,8 +269,7 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.equal(empty.actions[0].status, "succeeded");
   assert.equal(empty.actions[0].executionResult.result.content, "Blocked fixture comment");
   modelReplies.push(
-    { content: null, tool_calls: [toolCall("platform_operation_schema", { operation: "create_requirement" })] },
-    { content: null, tool_calls: [toolCall("platform_operation", { operation: "create_requirement", input: { projectId: project.id, title: "Chat-created requirement" } })] },
+    { content: null, tool_calls: [toolCall("create_requirement", { projectId: project.id, title: "Chat-created requirement" })] },
     { content: "Requirement created through a real authorized operation" },
   );
   const naturalRequirement = await rest("assistant/chat", owner.headers, "POST", { message: "Create a requirement for the project", context: { projectId: project.id } });
@@ -268,7 +278,7 @@ test("assistant authorization isolates accounts and resources across REST and tR
   const createdRequirementId = naturalRequirement.body.actions[0].executionResult.entityId;
   assert.equal((await owner.service.requirementService.getRequirement(db, createdRequirementId)).title, "Chat-created requirement");
   modelReplies.push(
-    { content: null, tool_calls: [toolCall("platform_operation", { operation: "create_task", input: { projectId: project.id, requirementId: createdRequirementId, title: "Chat-created task" } })] },
+    { content: null, tool_calls: [toolCall("create_task", { projectId: project.id, requirementId: createdRequirementId, title: "Chat-created task" })] },
     { content: "Task created through a real authorized operation" },
   );
   const naturalTask = await rest("assistant/chat", owner.headers, "POST", { message: "Create its first task", context: { projectId: project.id, requirementId: createdRequirementId } });
@@ -277,30 +287,34 @@ test("assistant authorization isolates accounts and resources across REST and tR
   const createdTaskId = naturalTask.body.actions[0].executionResult.entityId;
   assert.equal((await owner.service.taskService.getTask(db, createdTaskId)).requirementId, createdRequirementId);
   modelReplies.push(
-    { content: null, tool_calls: [toolCall("platform_operation", { operation: "add_task_dependency", input: { taskId: createdTaskId, dependsOnTaskId: task.id, type: "blocks" } })] },
+    { content: null, tool_calls: [toolCall("add_task_dependency", { taskId: createdTaskId, dependsOnTaskId: task.id, type: "blocks" })] },
     { content: "Dependency created" },
   );
   const orchestrated = await rest("assistant/chat", owner.headers, "POST", { message: "Make it depend on the existing task", context: { projectId: project.id } });
   assert.equal(orchestrated.status, 201);
   assert.equal(orchestrated.body.actions[0].status, "succeeded");
   modelReplies.push(
-    { content: null, tool_calls: [toolCall("platform_operation", { operation: "create_execution_slice", input: { requirementId: createdRequirementId, title: "Chat execution plan", taskIds: [createdTaskId], allowParallel: false } })] },
+    { content: null, tool_calls: [toolCall("create_execution_slice", { requirementId: createdRequirementId, title: "Chat execution plan", taskIds: [createdTaskId], allowParallel: false })] },
     { content: "Execution slice created" },
   );
   const sliceOperation = await rest("assistant/chat", owner.headers, "POST", { message: "Put the task in an ordered execution slice", context: { projectId: project.id } });
   assert.equal(sliceOperation.status, 201);
   assert.equal(sliceOperation.body.actions[0].status, "succeeded");
   assert.equal((await owner.service.requirementService.listExecutionSlices(db, createdRequirementId))[0].title, "Chat execution plan");
-  modelReplies.push({ content: null, tool_calls: [toolCall("platform_operation", { operation: "create_requirement", input: { projectId: other.id, title: "Unauthorized requirement" } })] });
+  modelReplies.push({ content: null, tool_calls: [toolCall("create_requirement", { projectId: other.id, title: "Unauthorized requirement" })] });
   const foreignOperation = await rest("assistant/chat", owner.headers, "POST", { message: "Attempt a foreign project write", context: {} });
   assert.equal(foreignOperation.status, 403);
   assert.equal((await outsider.service.requirementService.listRequirements(db, { projectId: other.id })).length, 1);
   await ownerChat.updatePolicy(db, { assistantAutoEnabled: false });
-  modelReplies.push({ content: null, tool_calls: [toolCall("platform_operation", { operation: "create_requirement", input: { projectId: project.id, title: "Forbidden requirement" } })] }, { content: "Operations are disabled" });
+  modelReplies.push({ content: null, tool_calls: [toolCall("create_requirement", { projectId: project.id, title: "Forbidden requirement" })] }, { content: "Operations are disabled" });
   const deniedOperation = await rest("assistant/chat", owner.headers, "POST", { message: "Create while disabled", context: { projectId: project.id } });
   assert.equal(deniedOperation.status, 201);
   assert.equal(deniedOperation.body.actions.length, 0);
-  assert.ok(lastModelPayload.tools.every((tool: any) => !tool.function.name.startsWith("platform_operation")));
+  assert.ok(lastModelPayload.tools.every((tool: any) => !tool.function.name.startsWith("create_")));
+  const failedRequestId = randomUUID();
+  modelReplies.push({ content: "<｜DSML｜function_calls>invalid provider tool markup" });
+  await assert.rejects(ownerChat.sendReadOnlyMessage(db, { ...input, requestId: failedRequestId }), /invalid tool response/);
+  assert.equal((await ownerChat.getMessageResult(db, { requestId: failedRequestId })).status, "failed");
   const configs = await ownerModels.list(db);
   assert.equal(configs[0].hasApiKey, true);
   assert.ok(!JSON.stringify(configs).includes("fixture-personal-key"));
@@ -343,9 +357,11 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.ok(!JSON.stringify(safeTi.body).includes("encryptedApiKey"));
   assert.ok(!JSON.stringify(safeTi.body).includes(expectedKey));
   expectedKey = "fixture-personal-key";
-  const viewerGlobal = await viewerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ message: "List my projects", context: {} }));
+  const viewerRequestId = randomUUID();
+  const viewerGlobal = await viewerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ requestId: viewerRequestId, message: "List my projects", context: {} }));
   await runtime.identity.removeMembership(owner.headers, project.id, viewer.actor.id);
   await assert.rejects(viewerChat.getConversation(db, viewerGlobal.conversation.id), NotFoundError);
+  await assert.rejects(viewerChat.getMessageResult(db, { requestId: viewerRequestId }), NotFoundError);
   const emptyWorkspace = await viewerChat.buildAssistantContext(db, buildAssistantContextSchema.parse({}));
   assert.deepEqual((emptyWorkspace.workspace as any).projectCounts, { active: 0, archived: 0, total: 0 });
   assert.deepEqual((emptyWorkspace.workspace as any).projects, []);

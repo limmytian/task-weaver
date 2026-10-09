@@ -6,7 +6,7 @@ import {
   executeAssistantActionSchema,
   listAssistantConversationsSchema,
   renameAssistantConversationSchema,
-  sendAssistantMessageSchema,
+  sendAssistantMessageSchema, getAssistantMessageResultSchema,
   updateAssistantActionStatusSchema,
 } from "@task-weaver/core";
 import { router, ordinaryResourceProcedure } from "../init";
@@ -41,6 +41,9 @@ export const assistantRouter = router({
   sendMessage: ordinaryResourceProcedure
     .input(sendAssistantMessageSchema)
     .mutation(async ({ ctx, input }) => createAssistantService(ctx.identity).sendReadOnlyMessage(ctx.db, input)),
+
+  messageResult: ordinaryResourceProcedure.input(getAssistantMessageResultSchema)
+    .query(({ ctx, input }) => createAssistantService(ctx.identity).getMessageResult(ctx.db, input)),
 
   executeAction: ordinaryResourceProcedure
     .input(executeAssistantActionSchema)

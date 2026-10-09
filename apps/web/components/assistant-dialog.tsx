@@ -1,5 +1,6 @@
 "use client";
 
+import { canRecoverAssistantRequest, recoverAssistantRequest } from "@/lib/assistant-request";
 import { shouldSendChatMessage } from "@/lib/chat-input";
 import { ChatModelSettings } from "./chat-model-settings";
 import { AssistantSettings } from "./assistant-settings";
@@ -158,7 +159,23 @@ export function AssistantDialog({
         });
       }
     },
-    onError: (err) => {
+    onError: async (err, variables) => {
+      if (variables.requestId && canRecoverAssistantRequest(err)) {
+        toast.info("Still checking the original request", { description: "The connection ended. The assistant may still be working; your request will not be sent again." });
+        const result = await recoverAssistantRequest(
+          () => utils.assistant.messageResult.fetch({ requestId: variables.requestId! }),
+          () => new Promise(resolve => setTimeout(resolve, 1500)),
+        );
+        if (result) {
+          setInput("");
+          setConversationId(result.conversation.id);
+          setMessages(current => [...current, { id: result.userMessage.id, role: "user", content: result.userMessage.content },
+            { id: result.assistantMessage.id, role: "assistant", content: result.assistantMessage.content }]);
+          setActions(current => [...result.actions, ...current]);
+          void utils.invalidate();
+          return;
+        }
+      }
       toast.error("Assistant failed", { description: err.message });
     },
     onSettled: () => { sending.current = false; },
@@ -249,6 +266,7 @@ export function AssistantDialog({
     if (!effectiveMessage || sendMessage.isPending || sending.current || composing.current) return;
     sending.current = true;
     sendMessage.mutate({
+      requestId: crypto.randomUUID(),
       conversationId,
       context,
       message: effectiveMessage,

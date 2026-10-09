@@ -293,6 +293,7 @@ export const assistantActionProposalSchema = z.discriminatedUnion("actionType", 
 ]);
 
 export const sendAssistantMessageSchema = z.object({
+  requestId: z.string().uuid().optional(),
   conversationId: z.string().uuid().optional(),
   context: buildAssistantContextSchema,
   message: z.string().min(1).max(20_000),
@@ -347,3 +348,5 @@ export const saveChatModelSchema = z.object({
   isDefaultAgent: z.boolean().optional(),
 }).strict();
 export const chatModelIdSchema = z.object({ id: z.string().uuid() }).strict();
+
+export const getAssistantMessageResultSchema = z.object({ requestId: z.string().uuid() }).strict();

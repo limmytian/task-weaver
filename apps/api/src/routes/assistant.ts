@@ -7,7 +7,7 @@ import {
   listAssistantConversationsSchema,
   NotFoundError,
   renameAssistantConversationSchema,
-  sendAssistantMessageSchema,
+  sendAssistantMessageSchema, getAssistantMessageResultSchema,
   updateAssistantActionStatusSchema,
   ValidationError,
 } from "@task-weaver/core";
@@ -35,6 +35,12 @@ assistantRoutes.patch("/policy", async c => {
   const input = updateAssistantPolicySchema.safeParse(await c.req.json());
   if (!input.success) return c.json({ error: "Invalid assistant policy" }, 400);
   return c.json(await createAssistantService(c.get("identity")).updatePolicy(c.get("db"), input.data));
+});
+
+assistantRoutes.get("/messages/:requestId/result", async c => {
+  const input = getAssistantMessageResultSchema.safeParse({ requestId: c.req.param("requestId") });
+  if (!input.success) return c.json({ error: "Invalid message request ID" }, 400);
+  return c.json(await createAssistantService(c.get("identity")).getMessageResult(c.get("db"), input.data));
 });
 
 assistantRoutes.get("/conversations", async (c) => {

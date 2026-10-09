@@ -55,20 +55,15 @@ export const assistantOperations: Record<string, Operation> = {
 };
 export function parseAssistantOperation(operationName: string, input: unknown) {
     const operation = assistantOperations[operationName];
-    if (!operation)
+    if (!operation || !Object.hasOwn(assistantOperations, operationName))
         throw new schemas.ValidationError("Unknown platform operation");
     return operation.schema.parse(input);
 }
-export function assistantOperationSchema(name: string) {
-    const operation = assistantOperations[name];
-    if (!operation)
-        throw new schemas.ValidationError("Unknown platform operation");
-    return { operation: name, description: operation.description, inputSchema: zodToJsonSchema(operation.schema, { $refStrategy: "none" }) };
-}
-export const assistantOperationTools = [
-    { type: "function", function: { name: "platform_operation_schema", description: "Read the exact input schema before performing an operation. Available operations: " + Object.entries(assistantOperations).map(([name, value]) => name + ": " + value.description).join("; "), parameters: { type: "object", properties: { operation: { type: "string", enum: Object.keys(assistantOperations) } }, required: ["operation"], additionalProperties: false } } },
-    { type: "function", function: { name: "platform_operation", description: "Execute a permitted platform operation. Read platform_operation_schema first. Chain returned ids to create requirements, tasks, dependencies and execution slices. Never invent ids. Each operation is audited and uses the signed-in account's permissions.", parameters: { type: "object", properties: { operation: { type: "string", enum: Object.keys(assistantOperations) }, input: { type: "object" } }, required: ["operation", "input"], additionalProperties: false } } },
-];
+export const assistantOperationTools = Object.entries(assistantOperations).map(([name, operation]) => {
+    const parameters = zodToJsonSchema(operation.schema, { $refStrategy: "none" });
+    delete parameters.$schema;
+    return { type: "function", function: { name, description: operation.description, parameters } };
+});
 export async function executeAssistantOperation(db: Database, services: Services, operationName: string, input: unknown, actor: Actor) {
     const operation = assistantOperations[operationName];
     const parsed = parseAssistantOperation(operationName, input);

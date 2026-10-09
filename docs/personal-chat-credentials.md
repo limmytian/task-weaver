@@ -61,3 +61,9 @@ project, and requirement on requirement detail pages. Task detail Chat supplies 
 task context; each schedule's Chat button supplies a schedule context. Changing the
 resource starts a separate conversation. Messages scroll independently of the input
 composer; Enter sends, Shift+Enter adds a newline and IME composition does not send.
+
+Operation tools advertise their exact shared input schemas directly to the model.
+The UI assigns a request ID to each send. If the connection times out, it queries
+the original request's account-scoped result while keeping the send guard active;
+it does not resubmit the operation. Failed sends retain the draft. Result queries
+recheck conversation and resource access, including after permission revocation.
