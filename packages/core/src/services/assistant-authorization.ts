@@ -1,7 +1,7 @@
 import { lockIdentityLifecycle } from "./auth-security";
 import { and, eq, sql } from "drizzle-orm";
 import { assistantActions, assistantMessages, assistantConversations, tiAgentPolicies, activityLog, type Database } from "@task-weaver/db";
-import { AuthorizationError, NotFoundError, type VerifiedRequestContext, type BuildAssistantContextInput, assistantPolicySchema, updateAssistantPolicySchema, getAssistantMessageResultSchema } from "@task-weaver/contracts";
+import { AuthorizationError, NotFoundError, ValidationError, ConflictError, type VerifiedRequestContext, type BuildAssistantContextInput, assistantPolicySchema, updateAssistantPolicySchema, getAssistantMessageResultSchema } from "@task-weaver/contracts";
 import { resourceAuthority, requireResource, requireScope } from "./resource-authorization";
 import { createResourceServices } from "./resource-services";
 import * as implementation from "./assistant";
@@ -88,24 +88,25 @@ export function createAssistantService(identity: VerifiedRequestContext) {
     await conversation(db, row.conversationId);
     return row;
   }
+  async function messageResult(db: Database, input: { requestId: string }) {
+    const { requestId } = getAssistantMessageResultSchema.parse(input);
+    const actor = await scope(db, {});
+    const [match] = await db.select({ id: assistantMessages.id, conversationId: assistantMessages.conversationId })
+      .from(assistantMessages).innerJoin(assistantConversations, eq(assistantMessages.conversationId, assistantConversations.id))
+      .where(and(eq(assistantMessages.role, "user"), eq(assistantConversations.createdBy, actor.id),
+        eq(assistantConversations.createdByType, actor.type), sql`${assistantMessages.metadata}->>'requestId' = ${requestId}`)).limit(1);
+    if (!match) return { status: "not_found" as const, result: null };
+    const data = await history(db, match.conversationId);
+    const userMessage = data.messages.find(message => message.id === match.id)!;
+    const metadata = userMessage.metadata as Record<string, unknown> | null;
+    const assistantMessage = data.messages.find(message => message.role === "assistant"
+      && (message.metadata as Record<string, unknown> | null)?.responseTo === userMessage.id);
+    if (!assistantMessage || metadata?.processing === "running") return { status: metadata?.processing === "failed" ? "failed" as const : "running" as const, result: null };
+    return { status: "completed" as const, result: { conversation: data.conversation, userMessage, assistantMessage,
+      actions: data.actions.filter(action => action.messageId === userMessage.id || action.messageId === assistantMessage.id) } };
+  }
   return {
-    async getMessageResult(db: Database, input: { requestId: string }) {
-      const { requestId } = getAssistantMessageResultSchema.parse(input);
-      const actor = await scope(db, {});
-      const [match] = await db.select({ id: assistantMessages.id, conversationId: assistantMessages.conversationId })
-        .from(assistantMessages).innerJoin(assistantConversations, eq(assistantMessages.conversationId, assistantConversations.id))
-        .where(and(eq(assistantMessages.role, "user"), eq(assistantConversations.createdBy, actor.id),
-          eq(assistantConversations.createdByType, actor.type), sql`${assistantMessages.metadata}->>'requestId' = ${requestId}`)).limit(1);
-      if (!match) return { status: "not_found" as const, result: null };
-      const data = await history(db, match.conversationId);
-      const userMessage = data.messages.find(message => message.id === match.id)!;
-      const metadata = userMessage.metadata as Record<string, unknown> | null;
-      const assistantMessage = data.messages.find(message => message.role === "assistant"
-        && (message.metadata as Record<string, unknown> | null)?.responseTo === userMessage.id);
-      if (!assistantMessage || metadata?.processing === "running") return { status: metadata?.processing === "failed" ? "failed" as const : "running" as const, result: null };
-      return { status: "completed" as const, result: { conversation: data.conversation, userMessage, assistantMessage,
-        actions: data.actions.filter(action => action.messageId === userMessage.id || action.messageId === assistantMessage.id) } };
-    },
+    getMessageResult: messageResult,
     async getPolicy(db: Database) {
       const actor = await scope(db, {});
       const row = await db.query.tiAgentPolicies.findFirst({ where: and(eq(tiAgentPolicies.ownerId, actor.id), eq(tiAgentPolicies.ownerType, "human")) });
@@ -167,6 +168,21 @@ export function createAssistantService(identity: VerifiedRequestContext) {
       await write(db);
       const actor = await scope(db, input.context);
       if (input.conversationId) await matchingConversation(db, input.conversationId, input.context);
+      if (input.requestId) {
+        const previous = await db.query.assistantMessages.findFirst({ where: and(eq(assistantMessages.role, "user"),
+          eq(assistantMessages.createdBy, actor.id), eq(assistantMessages.createdByType, actor.type),
+          sql`${assistantMessages.metadata}->>'requestId' = ${input.requestId}`) });
+        if (previous) {
+          await matchingConversation(db, previous.conversationId, input.context);
+          const fingerprint = previous.metadata?.requestFingerprint;
+          if (previous.content !== input.message || (fingerprint && fingerprint !== implementation.assistantRequestFingerprint(input)))
+            throw new ValidationError("A message request ID cannot be reused for different input");
+          const existing = await messageResult(db, { requestId: input.requestId });
+          if (existing.status === "completed" && existing.result) return { ...existing.result,
+            context: existing.result.userMessage.contextSnapshot ?? {}, model: null, modelError: null };
+          throw new ConflictError("The original request already exists; query its result instead of resubmitting", 0);
+        }
+      }
       return implementation.sendReadOnlyMessage(db, input, actor, identity);
     },
     async executeApprovedAction(db: Database, id: string) {

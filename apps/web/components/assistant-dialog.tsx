@@ -13,7 +13,6 @@ import {
   Loader2,
   Plus,
   Send,
-  ShieldCheck,
   Sparkles,
   Trash2,
   UserRound,
@@ -91,6 +90,7 @@ export function AssistantDialog({
   const [input, setInput] = useState("");
   const sending = useRef(false);
   const composing = useRef(false);
+  const pendingRequest = useRef<{ id: string; message: string } | null>(null);
   const [editingConvId, setEditingConvId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [deletingConvId, setDeletingConvId] = useState<string | null>(null);
@@ -135,6 +135,7 @@ export function AssistantDialog({
 
   const sendMessage = trpc.assistant.sendMessage.useMutation({
     onSuccess: (result) => {
+      pendingRequest.current = null;
       setInput("");
       setConversationId(result.conversation.id);
       setMessages((current) => [
@@ -160,13 +161,19 @@ export function AssistantDialog({
       }
     },
     onError: async (err, variables) => {
+      if (err.data?.httpStatus === 400) pendingRequest.current = null;
       if (variables.requestId && canRecoverAssistantRequest(err)) {
         toast.info("Still checking the original request", { description: "The connection ended. The assistant may still be working; your request will not be sent again." });
         const result = await recoverAssistantRequest(
-          () => utils.assistant.messageResult.fetch({ requestId: variables.requestId! }),
+          async () => {
+            const response = await utils.assistant.messageResult.fetch({ requestId: variables.requestId! });
+            if (response.status === "failed") pendingRequest.current = null;
+            return response;
+          },
           () => new Promise(resolve => setTimeout(resolve, 1500)),
         );
         if (result) {
+          pendingRequest.current = null;
           setInput("");
           setConversationId(result.conversation.id);
           setMessages(current => [...current, { id: result.userMessage.id, role: "user", content: result.userMessage.content },
@@ -220,6 +227,7 @@ export function AssistantDialog({
   const handleSelectConversation = async (id: string) => {
     try {
       const data = await utils.assistant.getConversation.fetch({ id });
+      pendingRequest.current = null;
       setConversationId(data.conversation.id);
       setMessages(data.messages.map((m) => ({
         id: m.id,
@@ -242,6 +250,7 @@ export function AssistantDialog({
   };
 
   const handleNewChat = () => {
+    pendingRequest.current = null;
     setConversationId(undefined);
     setMessages([]);
     setActions([]);
@@ -265,8 +274,9 @@ export function AssistantDialog({
     const effectiveMessage = message || workflowLabels.find((item) => item.workflow === workflow)?.label || "";
     if (!effectiveMessage || sendMessage.isPending || sending.current || composing.current) return;
     sending.current = true;
+    if (!pendingRequest.current || pendingRequest.current.message !== effectiveMessage) pendingRequest.current = { id: crypto.randomUUID(), message: effectiveMessage };
     sendMessage.mutate({
-      requestId: crypto.randomUUID(),
+      requestId: pendingRequest.current.id,
       conversationId,
       context,
       message: effectiveMessage,
@@ -306,10 +316,6 @@ export function AssistantDialog({
                 </SheetTitle>
                 <Badge variant="outline" className="text-[10px]">
                   {contextKind}
-                </Badge>
-                <Badge variant="secondary" className="gap-1 text-[10px]">
-                  <ShieldCheck className="h-3 w-3" />
-                  approval
                 </Badge>
               </div>
 

@@ -21,3 +21,9 @@ test("authorization failures and terminal failed requests stop recovery", async 
   }
   assert.equal(await recoverAssistantRequest(async () => ({ status: "failed", result: null }), async () => { throw new Error("Must not retry a failed request"); }), null);
 });
+
+test("offline result checks stop promptly while a running request may continue", async () => {
+  let reads = 0;
+  assert.equal(await recoverAssistantRequest(async () => { reads++; throw new Error("offline"); }, async () => {}), null);
+  assert.equal(reads, 3);
+});

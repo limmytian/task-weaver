@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { assistantOperationTools, assistantOperations, parseAssistantOperation, executeAssistantOperation } from "./assistant-operations";
 import { createChatModelService } from "./chat-models";
 import { assistantReadTools, runAssistantReadTool, type AssistantReadReference } from "./assistant-read-tools";
@@ -56,14 +57,29 @@ function truncate(value: string | null | undefined, limit: number) {
   return value.length > limit ? `${value.slice(0, limit)}...` : value;
 }
 
+export function assistantRequestFingerprint(input: SendAssistantMessageInput) {
+  return createHash("sha256").update(JSON.stringify({ message: input.message, workflow: input.workflow ?? null,
+    context: [input.context.contextKind, input.context.projectId, input.context.requirementId, input.context.taskId, input.context.scheduleId],
+    proposedActions: input.proposedActions, provider: input.requestedProvider ?? null, model: input.requestedModel ?? null })).digest("hex");
+}
+
+function compactPromptContext(value: unknown): unknown {
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map(compactPromptContext);
+  if (!value || typeof value !== "object") return typeof value === "string" ? value.slice(0, 1000) : value;
+  const row = value as Record<string, unknown>;
+  return Object.fromEntries(Object.entries(row).filter(([key]) => !["description", "repositories", "documentLinks", "executionResult"].includes(key))
+    .map(([key, field]) => [key, key === "content" && !row.role ? undefined : compactPromptContext(field)]));
+}
+
 function buildModelPrompt(contextSnapshot: Record<string, unknown>, message: string, workflow?: string) {
   return [
     `User request: ${message}`,
     workflow ? `Workflow shortcut: ${workflow}` : null,
-    "Use the Task Weaver context below. Be concise, concrete, and call out uncertainty.",
+    "Use the compact Task Weaver context below. Full descriptions and resource bodies are omitted; query live read tools when details are needed. Be concise, concrete, and call out uncertainty.",
     "Do not claim to have changed data unless an approved action has actually executed.",
     "Use workspace.projectCounts for exact accessible project totals; workspace.projects is a bounded listing. A null current.project means no project is selected, not that the account has no projects. Counts describe only projects this user can access.",
-    JSON.stringify(redactValue(contextSnapshot), null, 2),
+    JSON.stringify(compactPromptContext(redactValue(contextSnapshot)), null, 2),
   ].filter(Boolean).join("\n\n").slice(0, 24_000);
 }
 
@@ -85,19 +101,19 @@ async function generateModelResponse(
     { role: "user", content: buildModelPrompt(contextSnapshot, input.message, input.workflow) },
   ];
   messages.push({ role: "system", content: `Account operation permission: ${allowed ? "allowed" : "not allowed"}. Use get_project for exact task statistics. Create requirements before their tasks, and use returned identifiers for dependencies.` });
-  const deadline = performance.now() + 120_000;
+  const deadline = performance.now() + 300_000;
   const references: AssistantReadReference[] = [];
   contextSnapshot.toolReads = references;
-  for (let round = 0; round < 10; round++) {
+  for (let round = 0; round < 16; round++) {
     const turn = await requestChatTurn(model.config.baseUrl!, model.apiKey, {
-      model: model.config.model, messages, tools: allowed ? [...assistantReadTools, ...assistantOperationTools] : assistantReadTools, tool_choice: round === 9 ? "none" : "auto", temperature: 0.2,
+      model: model.config.model, messages, tools: allowed ? [...assistantReadTools, ...assistantOperationTools] : assistantReadTools, tool_choice: round === 15 ? "none" : "auto", temperature: 0.2,
     }, deadline);
     if (!turn.toolCalls.length) {
       if (!turn.content) throw new ValidationError("Assistant returned no answer");
       if (turn.content.includes("<｜DSML｜")) throw new ValidationError("The model returned an invalid tool response");
       return turn.content;
     }
-    if (round === 9) throw new ValidationError("Assistant query limit reached; please narrow the request");
+    if (round === 15) throw new ValidationError("Assistant query limit reached; please narrow the request");
     messages.push({ role: "assistant", content: turn.content, tool_calls: turn.toolCalls.map(call => ({ id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } })) });
     for (const call of turn.toolCalls) {
       if (references.length > 200 || performance.now() >= deadline) throw new ValidationError("Assistant query limit reached; please narrow the request");
@@ -139,6 +155,7 @@ async function generateModelResponse(
 }
 
 function redactValue(value: unknown): unknown {
+  if (value instanceof Date) return value.toISOString();
   if (Array.isArray(value)) return value.map(redactValue);
   if (!value || typeof value !== "object") return value;
 
@@ -1286,7 +1303,7 @@ export async function sendReadOnlyMessage(
     role: "user",
     content: input.message,
     contextSnapshot,
-    metadata: { requiresActionAuthorization: true, requestId: input.requestId ?? null, processing: "running" },
+    metadata: { requiresActionAuthorization: true, requestId: input.requestId ?? null, requestFingerprint: assistantRequestFingerprint(input), processing: "running" },
   }, actor);
   const performed: AssistantActionRow[] = [];
   let content: string;
@@ -1294,7 +1311,7 @@ export async function sendReadOnlyMessage(
     content = await generateModelResponse(resolved, contextSnapshot, input, db, identity, conversation.id, userMessage.id, actor, performed);
   } catch (error) {
     if (!performed.some(action => action.status === "succeeded")) {
-      await db.update(assistantMessages).set({ metadata: { requiresActionAuthorization: true, requestId: input.requestId ?? null, processing: "failed" } }).where(eq(assistantMessages.id, userMessage.id));
+      await db.update(assistantMessages).set({ metadata: { ...userMessage.metadata, processing: "failed" } }).where(eq(assistantMessages.id, userMessage.id));
       throw error;
     }
     content = "Platform operations completed, but the model could not finish its summary. Review the recorded operation results below before requesting another change.";
@@ -1376,7 +1393,7 @@ export async function sendReadOnlyMessage(
     }
   }
 
-  userMessage.metadata = { requiresActionAuthorization: true, requestId: input.requestId ?? null, processing: "completed" };
+  userMessage.metadata = { ...userMessage.metadata, processing: "completed" };
   await db.update(assistantMessages).set({ metadata: userMessage.metadata }).where(eq(assistantMessages.id, userMessage.id));
 
   return {

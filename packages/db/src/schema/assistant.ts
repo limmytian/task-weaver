@@ -1,4 +1,5 @@
-import { index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { uniqueIndex, index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { activityLog } from "./activity";
 import { actorTypeEnum } from "./enums";
 import { tiAgentRuns } from "./ti-agent";
@@ -60,6 +61,8 @@ export const assistantMessages = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
+    uniqueIndex("idx_assistant_messages_request").on(table.createdBy, table.createdByType, sql`(${table.metadata}->>'requestId')`)
+      .where(sql`${table.role} = 'user' AND ${table.metadata}->>'requestId' IS NOT NULL`),
     index("idx_assistant_messages_conversation").on(table.conversationId),
     index("idx_assistant_messages_ti_run").on(table.tiAgentRunId),
     index("idx_assistant_messages_created").on(table.createdAt),

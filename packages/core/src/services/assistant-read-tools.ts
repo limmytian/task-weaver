@@ -27,10 +27,39 @@ export const assistantReadTools = [
 export async function runAssistantReadTool(db: Database, identity: VerifiedRequestContext, name: string, raw: unknown) {
   const service = createResourceServices(identity);
   const references: AssistantReadReference[] = [];
-  const record = (kind: AssistantReadReference["kind"], value: any) => {
-    const rows = Array.isArray(value) ? value : value?.items ?? [value];
-    for (const row of rows) if (typeof row?.id === "string") references.push({ kind, id: row.id });
-    return value;
+  const clean = (value: any): any => {
+    if (value instanceof Date) return value.toISOString();
+    if (Array.isArray(value)) return value.map(clean);
+    if (!value || typeof value !== "object") return value;
+    const truncated: Record<string, number> = {};
+    const entries = Object.entries(value).filter(([key]) => key !== "repositories").map(([key, field]) => {
+      if (["tasks", "dependencies", "dependents", "executionSlices", "documentLinks"].includes(key) && Array.isArray(field) && field.length > 20) {
+        truncated[key] = field.length;
+        return [key, clean(field.slice(0, 20))];
+      }
+      return [key, clean(field)];
+    });
+    return { ...Object.fromEntries(entries), ...(Object.keys(truncated).length ? { relatedDataTruncated: truncated } : {}) };
+  };
+  const record = (kind: AssistantReadReference["kind"], value: any): any => {
+    const cleaned = clean(value);
+    const rows = Array.isArray(cleaned) ? cleaned : cleaned?.items ?? [cleaned];
+    for (const row of rows) {
+      if (typeof row?.id === "string" && !references.some(reference => reference.kind === kind && reference.id === row.id)) references.push({ kind, id: row.id });
+      if (row?.project) record("project", row.project);
+      if (row?.requirement) record("requirement", row.requirement);
+      for (const task of row?.tasks ?? []) record("task", task);
+      for (const slice of row?.executionSlices ?? []) for (const task of slice.tasks ?? []) record("task", task);
+      for (const link of row?.documentLinks ?? []) if (link.document) record("document", link.document);
+      if (kind === "task" || kind === "requirement") {
+        for (const dependency of row?.dependencies ?? []) if (dependency.dependsOn) record(kind, dependency.dependsOn);
+        for (const dependent of row?.dependents ?? []) {
+          const resource = kind === "task" ? dependent.task : dependent.requirement;
+          if (resource) record(kind, resource);
+        }
+      }
+    }
+    return cleaned;
   };
   const singleId = (key: string) => z.object({ [key]: z.string().uuid() }).strict().parse(raw)[key]!;
   let data: unknown;
@@ -56,7 +85,10 @@ export async function runAssistantReadTool(db: Database, identity: VerifiedReque
     case "list_execution_slices": {
       const requirementId = singleId("requirementId");
       record("requirement", await service.requirementService.getRequirement(db, requirementId));
-      data = await service.requirementService.listExecutionSlices(db, requirementId); break;
+      const slices = await service.requirementService.listExecutionSlices(db, requirementId);
+      const bounded = clean(slices.slice(0, 20));
+      for (const slice of bounded) record("task", slice.tasks);
+      data = { items: bounded, total: slices.length }; break;
     }
     case "get_requirement": data = record("requirement", await service.requirementService.getRequirement(db, singleId("requirementId"))); break;
     case "list_documents": {

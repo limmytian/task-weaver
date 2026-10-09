@@ -67,3 +67,11 @@ The UI assigns a request ID to each send. If the connection times out, it querie
 the original request's account-scoped result while keeping the send guard active;
 it does not resubmit the operation. Failed sends retain the draft. Result queries
 recheck conversation and resource access, including after permission revocation.
+
+A request ID is unique within its verified account. Retrying the same completed
+request returns its recorded result without another model call or resource write.
+Different input cannot reuse an existing ID. The database enforces uniqueness for
+concurrent submissions. Tool execution has a five-minute budget for multi-step
+operations; connection recovery waits for that original request. Compact model
+context omits full resource bodies, while live reads record related resource IDs
+for authorization checks on both the response and later history reads.

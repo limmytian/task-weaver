@@ -9,7 +9,7 @@ import { createApiApplication } from "../apps/api/src/application";
 import { createTRPCContextFactory } from "../apps/web/trpc/init";
 import { appRouter } from "../apps/web/trpc/routers/_app";
 const apiRequire = createRequire(new URL("../apps/api/package.json", import.meta.url));
-const { createDb, runMigrations, authInstanceState, authRateLimits, repositories, requirementRepositories, taskRepositories, agentUsageRuns, tiAgentModelConfigs, reviewRuns, activityLog, projectMemberships, requirementClaims, schedules, scheduleRuns, tiAgentRuns, daemons, daemonWorkerProgress, daemonWorkerProgressHistory } = apiRequire("@task-weaver/db");
+const { createDb, runMigrations, authInstanceState, authRateLimits, repositories, requirementRepositories, taskRepositories, agentUsageRuns, assistantMessages, tiAgentModelConfigs, reviewRuns, activityLog, projectMemberships, requirementClaims, schedules, scheduleRuns, tiAgentRuns, daemons, daemonWorkerProgress, daemonWorkerProgressHistory } = apiRequire("@task-weaver/db");
 const { createAuthenticationRuntime, createResourceServices, createAssistantService, createChatModelService, sendAssistantMessageSchema, buildAssistantContextSchema, NotFoundError, AuthorizationError, listRepositoriesSchema, createRepositorySchema, agentUsageQuerySchema, upsertTiModelConfigSchema, createReviewRunSchema, evaluateReviewRunSchema, createScheduleSchema, listSchedulesSchema, daemonHistoryQuerySchema, daemonObservabilityQuerySchema, daemonMetricsQuerySchema } = apiRequire("@task-weaver/core");
 const { eq, like } = apiRequire("drizzle-orm");
 const databaseUrl = process.env.TW_AUTH_E2E_DATABASE_URL;
@@ -113,6 +113,13 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.equal(sent.assistantMessage.content, "Fixture model reply");
   assert.equal(sent.modelError, null);
   assert.equal(calls, 1);
+  const repeated = await (await caller(owner.headers)).assistant.sendMessage({ ...input, requestId: messageRequestId });
+  assert.equal(repeated.userMessage.id, sent.userMessage.id);
+  assert.equal(repeated.assistantMessage.id, sent.assistantMessage.id);
+  assert.equal(calls, 1);
+  await assert.rejects(ownerChat.sendReadOnlyMessage(db, { ...input, requestId: messageRequestId, message: "Different request" }), /different input/);
+  await assert.rejects(db.insert(assistantMessages).values({ ...sent.userMessage, id: randomUUID() }),
+    (error: any) => (error.cause?.code ?? error.code) === "23505");
   const recovered = await rest(`assistant/messages/${messageRequestId}/result`, owner.headers);
   assert.equal(recovered.status, 200);
   assert.equal(recovered.body.status, "completed");
@@ -177,9 +184,9 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.ok(!JSON.stringify(deniedResults).includes(hiddenDoc.content));
   assert.equal((await owner.service.taskService.getTask(db, task.id)).title, "Task");
   const beforeLoop = calls;
-  for (let round = 0; round < 10; round++) modelReplies.push({ content: null, tool_calls: [toolCall("list_projects", {})] });
+  for (let round = 0; round < 16; round++) modelReplies.push({ content: null, tool_calls: [toolCall("list_projects", {})] });
   await assert.rejects(ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ message: "Unbounded query fixture", context: {} })), /query limit reached/);
-  assert.equal(calls - beforeLoop, 10);
+  assert.equal(calls - beforeLoop, 16);
   assert.equal(lastModelPayload.tool_choice, "none");
   const proposed = await ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ ...input, proposedActions: [{ actionType: "update_task", payload: { taskId: task.id, title: "Reviewed task" } }] }));
   const action = proposed.actions[0];
