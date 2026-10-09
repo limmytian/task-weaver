@@ -5,9 +5,9 @@ import { mcpServerPredicate } from "./mcp-authorization";
 import { createResourceServices } from './resource-services';
 import { getLiveRequestAuthority } from './api-keys';
 import { lockIdentityLifecycle } from './auth-security';
-import { resourcePredicate, taskResourcePredicate, memoryResourcePredicate, requireResource, requireScope } from './resource-authorization';
+import { projectPredicate, resourcePredicate, taskResourcePredicate, memoryResourcePredicate, requireResource, requireScope } from './resource-authorization';
 import { AuthorizationError, type VerifiedRequestContext } from '@task-weaver/contracts';
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import {
   type Database,
   activityLog,
@@ -60,6 +60,7 @@ function buildModelPrompt(contextSnapshot: Record<string, unknown>, message: str
     workflow ? `Workflow shortcut: ${workflow}` : null,
     "Use the Task Weaver context below. Be concise, concrete, and call out uncertainty.",
     "Do not claim to have changed data unless an approved action has actually executed.",
+    "Use workspace.projectCounts for exact accessible project totals; workspace.projects is a bounded listing. A null current.project means no project is selected, not that the account has no projects. Counts describe only projects this user can access.",
     JSON.stringify(redactValue(contextSnapshot), null, 2),
   ].filter(Boolean).join("\n\n").slice(0, 24_000);
 }
@@ -233,6 +234,18 @@ export async function buildAssistantContext(
   const projectId = scope.project?.id;
   const intent = input.intent?.trim();
 
+  const visibleProjects = projectPredicate(authority);
+  const projectCounts = await db.select({ status: projects.status, total: count() })
+    .from(projects).where(visibleProjects).groupBy(projects.status);
+  const workspaceProjects = await db.query.projects.findMany({
+    where: visibleProjects,
+    orderBy: (project, { desc }) => [desc(project.updatedAt)],
+    limit: 50,
+  });
+  const activeProjects = projectCounts.find(row => row.status === "active")?.total ?? 0;
+  const archivedProjects = projectCounts.find(row => row.status === "archived")?.total ?? 0;
+
+
   const requirementRows = projectId && limits.requirements > 0
     ? await db.query.requirements.findMany({
       where: and(eq(requirements.projectId, projectId), resourcePredicate(authority, requirements)),
@@ -404,6 +417,11 @@ export async function buildAssistantContext(
       requirement: compactRequirement(scope.requirement, limits.textChars),
       task: compactTask(scope.task, limits.textChars),
       schedule: compactSchedule(scope.schedule, limits.textChars),
+    },
+    workspace: {
+      projectCounts: { active: activeProjects, archived: archivedProjects, total: activeProjects + archivedProjects },
+      projects: workspaceProjects.map(row => ({ id: row.id, name: row.name, status: row.status })),
+      projectsTruncated: activeProjects + archivedProjects > workspaceProjects.length,
     },
     projectState: {
       requirements: requirementRows.map((row) => compactRequirement(row, limits.textChars)),

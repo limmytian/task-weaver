@@ -43,6 +43,10 @@ export function createAssistantService(identity: VerifiedRequestContext) {
     for (const message of result.messages) {
       const snapshot = record(message.contextSnapshot);
       const current = record(snapshot.current);
+      const workspace = record(snapshot.workspace);
+      for (const row of Array.isArray(workspace.projects) ? workspace.projects : []) {
+        if (row.id) await requireResource(db, live, "project", row.id);
+      }
       const state = record(snapshot.projectState);
       const retrieval = record(snapshot.retrieval);
       for (const kind of ["project", "requirement", "task"] as const) {

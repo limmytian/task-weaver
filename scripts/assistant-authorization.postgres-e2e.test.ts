@@ -83,6 +83,7 @@ test("assistant authorization isolates accounts and resources across REST and tR
   const savedModel = await ownerModels.save(db, modelSettings);
   await createChatModelService(viewer.context).save(db, modelSettings);
   let calls = 0;
+  let lastModelPrompt = "";
   let expectedKey = "fixture-personal-key";
   let responseStatus = 200;
   let dnsAddress = "8.8.8.8";
@@ -92,7 +93,8 @@ test("assistant authorization isolates accounts and resources across REST and tR
     assert.equal(options.headers.authorization, `Bearer ${expectedKey}`);
     calls++;
     const request = new EventEmitter() as any;
-    request.end = () => {
+    request.end = (body: string) => {
+      lastModelPrompt = JSON.parse(body).messages.map((message: any) => message.content).join("\n");
       const response = new EventEmitter() as any;
       response.statusCode = responseStatus;
       response.resume = () => {};
@@ -110,6 +112,18 @@ test("assistant authorization isolates accounts and resources across REST and tR
   await assert.rejects(outsiderChat.getConversation(db, sent.conversation.id), NotFoundError);
   await assert.rejects(outsiderChat.sendReadOnlyMessage(db, { ...input, conversationId: sent.conversation.id }), NotFoundError);
   await assert.rejects(ownerChat.buildAssistantContext(db, buildAssistantContextSchema.parse({ conversationId: sent.conversation.id, projectId: other.id })), NotFoundError);
+  const globalContext = await ownerChat.buildAssistantContext(db, buildAssistantContextSchema.parse({}));
+  const workspace = globalContext.workspace as any;
+  assert.deepEqual(workspace.projectCounts, { active: 1, archived: 0, total: 1 });
+  assert.deepEqual(workspace.projects.map((row: any) => row.id), [project.id]);
+  assert.equal(workspace.projectsTruncated, false);
+  assert.equal((globalContext.current as any).project, null);
+  assert.ok(!JSON.stringify(workspace).includes(other.id));
+  const outsiderContext = await outsiderChat.buildAssistantContext(db, buildAssistantContextSchema.parse({}));
+  assert.deepEqual((outsiderContext.workspace as any).projects.map((row: any) => row.id), [other.id]);
+  const globalRest = await rest("assistant/context", owner.headers, "POST", {});
+  assert.equal(globalRest.status, 200);
+  assert.deepEqual(globalRest.body.workspace.projectCounts, workspace.projectCounts);
   const ownerContext = await ownerChat.buildAssistantContext(db, buildAssistantContextSchema.parse({ projectId: project.id }));
   assert.ok(!JSON.stringify(ownerContext).includes("Hidden wiki target"));
   const denied = await rest(`assistant/conversations/${sent.conversation.id}`, outsider.headers);
@@ -121,6 +135,12 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.equal(restChat.status, 201);
   const deniedContext = await rest("assistant/context", outsider.headers, "POST", { projectId: project.id });
   assert.equal(deniedContext.status, 404);
+  const globalChat = await rest("assistant/chat", owner.headers, "POST", { message: "How many projects can I access?", context: {} });
+  assert.equal(globalChat.status, 201);
+  assert.ok(lastModelPrompt.includes('"active": 1'));
+  assert.ok(lastModelPrompt.includes(project.name));
+  assert.ok(!lastModelPrompt.includes(other.name));
+  assert.ok(lastModelPrompt.includes("no project is selected"));
   const proposed = await ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ ...input, proposedActions: [{ actionType: "update_task", payload: { taskId: task.id, title: "Reviewed task" } }] }));
   const action = proposed.actions[0];
   assert.ok(action);
@@ -231,4 +251,26 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.equal(safeTi.status, 200);
   assert.ok(!JSON.stringify(safeTi.body).includes("encryptedApiKey"));
   assert.ok(!JSON.stringify(safeTi.body).includes(expectedKey));
+  expectedKey = "fixture-personal-key";
+  const viewerGlobal = await viewerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ message: "List my projects", context: {} }));
+  await runtime.identity.removeMembership(owner.headers, project.id, viewer.actor.id);
+  await assert.rejects(viewerChat.getConversation(db, viewerGlobal.conversation.id), NotFoundError);
+  const emptyWorkspace = await viewerChat.buildAssistantContext(db, buildAssistantContextSchema.parse({}));
+  assert.deepEqual((emptyWorkspace.workspace as any).projectCounts, { active: 0, archived: 0, total: 0 });
+  assert.deepEqual((emptyWorkspace.workspace as any).projects, []);
+  for (let index = 0; index < 51; index++) {
+    const inventoryProject = await owner.service.projectService.createProject(db, { name: `Inventory ${index}` }, owner.actor);
+    if (index === 0) await owner.service.projectService.updateProject(db, inventoryProject.id, { status: "archived" }, owner.actor);
+  }
+  const visibleInventory = await owner.service.projectService.listProjects(db, {});
+  const boundedWorkspace = await ownerChat.buildAssistantContext(db, buildAssistantContextSchema.parse({}));
+  assert.deepEqual((boundedWorkspace.workspace as any).projectCounts, {
+    active: visibleInventory.filter((row: any) => row.status === "active").length,
+    archived: visibleInventory.filter((row: any) => row.status === "archived").length,
+    total: visibleInventory.length,
+  });
+  assert.equal(visibleInventory.length, 51);
+  assert.equal((boundedWorkspace.workspace as any).projects.length, 50);
+  assert.equal((boundedWorkspace.workspace as any).projectsTruncated, true);
+
 });
