@@ -580,7 +580,7 @@ export function AssistantDialog({
                       }
                     }}
                     placeholder="Ask about status, risks, or next steps (Enter to send, Shift+Enter for newline)"
-                    className="min-h-20 resize-none"
+                    className="min-h-20 max-h-48 resize-none overflow-y-auto"
                     disabled={sendMessage.isPending}
                   />
                   <Button
