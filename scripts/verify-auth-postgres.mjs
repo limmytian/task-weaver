@@ -72,6 +72,7 @@ try {
     [null, "scripts/mcp-authorization.postgres-e2e.test.ts"],
     [null, "scripts/repository-authorization.postgres-e2e.test.ts"],
     [null, "scripts/metadata-authorization.postgres-e2e.test.ts"],
+    [null, "scripts/assistant-authorization.postgres-e2e.test.ts"],
     [null, "scripts/realtime-authorization.postgres-e2e.test.ts"],
     [null, "scripts/webhook-authorization.postgres-e2e.test.ts"],
     [null, "scripts/daemon-authorization.postgres-e2e.test.ts"],

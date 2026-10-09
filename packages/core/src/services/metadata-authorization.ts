@@ -188,7 +188,7 @@ export async function authorizeMetadataOperation(db: Database, authority: Resour
   throw new AuthorizationError();
 }
 
-function schedulePredicate(authority: ResourceAuthority) {
+export function schedulePredicate(authority: ResourceAuthority) {
   return and(resourcePredicate(authority, schedules), sql`(
     (${schedules.targetScope} = 'personal' AND ${schedules.projectId} IS NULL AND ${schedules.requirementId} IS NULL AND ${schedules.personalOwnerType} = 'human')
     OR (${schedules.targetScope} = 'project' AND ${schedules.projectId} IS NOT NULL AND ${schedules.personalOwnerId} IS NULL AND ${schedules.personalOwnerType} IS NULL AND EXISTS (SELECT 1 FROM requirements r WHERE r.id = ${schedules.requirementId} AND r.project_id = ${schedules.projectId}))

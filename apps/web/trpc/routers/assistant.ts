@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  assistantService,
+  createAssistantService,
   buildAssistantContextSchema,
   executeAssistantActionSchema,
   listAssistantConversationsSchema,
@@ -8,38 +8,38 @@ import {
   sendAssistantMessageSchema,
   updateAssistantActionStatusSchema,
 } from "@task-weaver/core";
-import { router, resourceProcedure } from "../init";
+import { router, ordinaryResourceProcedure } from "../init";
 
 export const assistantRouter = router({
-  listConversations: resourceProcedure
+  listConversations: ordinaryResourceProcedure
     .input(listAssistantConversationsSchema)
-    .query(async ({ ctx, input }) => assistantService.listConversations(ctx.db, input, ctx.actor)),
+    .query(async ({ ctx, input }) => createAssistantService(ctx.identity).listConversations(ctx.db, input)),
 
-  getConversation: resourceProcedure
+  getConversation: ordinaryResourceProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(async ({ ctx, input }) => assistantService.getConversation(ctx.db, input.id, ctx.actor)),
+    .query(async ({ ctx, input }) => createAssistantService(ctx.identity).getConversation(ctx.db, input.id)),
 
-  renameConversation: resourceProcedure
+  renameConversation: ordinaryResourceProcedure
     .input(renameAssistantConversationSchema)
-    .mutation(async ({ ctx, input }) => assistantService.renameConversation(ctx.db, input, ctx.actor)),
+    .mutation(async ({ ctx, input }) => createAssistantService(ctx.identity).renameConversation(ctx.db, input)),
 
-  deleteConversation: resourceProcedure
+  deleteConversation: ordinaryResourceProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(async ({ ctx, input }) => assistantService.deleteConversation(ctx.db, input.id, ctx.actor)),
+    .mutation(async ({ ctx, input }) => createAssistantService(ctx.identity).deleteConversation(ctx.db, input.id)),
 
-  buildContext: resourceProcedure
+  buildContext: ordinaryResourceProcedure
     .input(buildAssistantContextSchema)
-    .query(async ({ ctx, input }) => assistantService.buildAssistantContext(ctx.db, input, ctx.actor)),
+    .query(async ({ ctx, input }) => createAssistantService(ctx.identity).buildAssistantContext(ctx.db, input)),
 
-  sendMessage: resourceProcedure
+  sendMessage: ordinaryResourceProcedure
     .input(sendAssistantMessageSchema)
-    .mutation(async ({ ctx, input }) => assistantService.sendReadOnlyMessage(ctx.db, input, ctx.actor)),
+    .mutation(async ({ ctx, input }) => createAssistantService(ctx.identity).sendReadOnlyMessage(ctx.db, input)),
 
-  executeAction: resourceProcedure
+  executeAction: ordinaryResourceProcedure
     .input(executeAssistantActionSchema)
-    .mutation(async ({ ctx, input }) => assistantService.executeApprovedAction(ctx.db, input.id, ctx.actor, ctx.identity)),
+    .mutation(async ({ ctx, input }) => createAssistantService(ctx.identity).executeApprovedAction(ctx.db, input.id)),
 
-  updateActionStatus: resourceProcedure
+  updateActionStatus: ordinaryResourceProcedure
     .input(executeAssistantActionSchema.extend({ data: updateAssistantActionStatusSchema }))
-    .mutation(async ({ ctx, input }) => assistantService.updateActionStatus(ctx.db, input.id, input.data, ctx.actor)),
+    .mutation(async ({ ctx, input }) => createAssistantService(ctx.identity).updateActionStatus(ctx.db, input.id, input.data)),
 });

@@ -127,5 +127,9 @@ export function isOrdinaryResourceRoute(method: string, path: string) {
   if (method === "POST" && /^\/api\/v1\/ti\/runs(?:\/acquire|\/[0-9a-fA-F-]{36}\/(?:complete|heartbeat|progress|retry|delegations(?:\/[0-9a-fA-F-]{36}\/renew)?))?\/?$/.test(path)) return true;
   if (method === "POST" && /^\/api\/v1\/schedules\/[0-9a-fA-F-]{36}\/run-now$/.test(path)) return true;
   if (method === "POST" && /^\/api\/v1\/assistant\/actions\/[0-9a-fA-F-]{36}\/execute$/.test(path)) return true;
+  if (method === "GET" && /^\/api\/v1\/assistant\/conversations(?:\/[0-9a-fA-F-]{36})?$/.test(path)) return true;
+  if (["PATCH", "DELETE"].includes(method) && /^\/api\/v1\/assistant\/conversations\/[0-9a-fA-F-]{36}$/.test(path)) return true;
+  if (method === "POST" && /^\/api\/v1\/assistant\/(?:context|chat)$/.test(path)) return true;
+  if (method === "PATCH" && /^\/api\/v1\/assistant\/actions\/[0-9a-fA-F-]{36}\/status$/.test(path)) return true;
   return ordinaryRoutes.some(([verb, pattern]) => verb === method && pattern.test(path));
 }

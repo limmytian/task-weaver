@@ -1,7 +1,9 @@
+import { authorizeMetadataOperation, schedulePredicate } from "./metadata-authorization";
+import { mcpServerPredicate } from "./mcp-authorization";
 import { createResourceServices } from './resource-services';
 import { getLiveRequestAuthority } from './api-keys';
 import { lockIdentityLifecycle } from './auth-security';
-import { requireResource } from './resource-authorization';
+import { resourcePredicate, taskResourcePredicate, memoryResourcePredicate, requireResource } from './resource-authorization';
 import { AuthorizationError, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import {
@@ -297,7 +299,10 @@ export async function buildAssistantContext(
   db: Database,
   input: BuildAssistantContextInput,
   actor: Actor,
+  identity?: VerifiedRequestContext,
 ) {
+  if (!identity) throw new AuthorizationError();
+  const authority = await getLiveRequestAuthority(db, identity);
   const limits = input.limits;
   const scope = await resolveScope(db, input);
   const projectId = scope.project?.id;
@@ -305,7 +310,7 @@ export async function buildAssistantContext(
 
   const requirementRows = projectId && limits.requirements > 0
     ? await db.query.requirements.findMany({
-      where: eq(requirements.projectId, projectId),
+      where: and(eq(requirements.projectId, projectId), resourcePredicate(authority, requirements)),
       orderBy: (requirement, { desc }) => [desc(requirement.updatedAt)],
       limit: limits.requirements,
     })
@@ -317,7 +322,7 @@ export async function buildAssistantContext(
 
   const taskRows = taskConditions.length > 0 && limits.tasks > 0
     ? await db.query.tasks.findMany({
-      where: and(...taskConditions),
+      where: and(...taskConditions, taskResourcePredicate(authority)),
       orderBy: (task, { desc }) => [desc(task.updatedAt)],
       limit: limits.tasks,
     })
@@ -329,13 +334,13 @@ export async function buildAssistantContext(
 
   const scheduleRows = scheduleConditions.length > 0 && limits.schedules > 0
     ? await db.query.schedules.findMany({
-      where: and(...scheduleConditions),
+      where: and(...scheduleConditions, schedulePredicate(authority)),
       orderBy: (schedule, { desc }) => [desc(schedule.updatedAt)],
       limit: limits.schedules,
     })
     : [];
 
-  const docConditions = [projectOrGlobalCondition(projectId, input.includeGlobal)];
+  const docConditions = [projectOrGlobalCondition(projectId, input.includeGlobal), resourcePredicate(authority, documents)];
   if (intent) docConditions.push(textSearchCondition(documents, intent)!);
   const documentRows = limits.documents > 0
     ? await db
@@ -374,6 +379,7 @@ export async function buildAssistantContext(
 
   const memoryConditions = [
     or(...memoryScopes)!,
+    memoryResourcePredicate(authority),
     or(isNull(memories.expiresAt), sql`${memories.expiresAt} > now()`)!,
   ];
   if (intent) memoryConditions.push(textSearchCondition(memories, intent)!);
@@ -416,7 +422,7 @@ export async function buildAssistantContext(
       })
       .from(mcpTools)
       .innerJoin(mcpServers, eq(mcpTools.serverId, mcpServers.id))
-      .where(and(eq(mcpServers.active, true), mcpScope))
+      .where(and(eq(mcpServers.active, true), mcpScope, mcpServerPredicate(authority, identity)))
       .limit(limits.mcpTools)
     : [];
 
@@ -438,7 +444,7 @@ export async function buildAssistantContext(
     })
     : [];
 
-  const recentActivity = projectId && limits.recentActivity > 0
+  const recentActivity = projectId && !authority.bounds && authority.grants.some(g => g.scope === "project" && g.projectId === projectId && g.permissions.includes("audit.read")) && limits.recentActivity > 0
     ? await db
       .select()
       .from(activityLog)
@@ -1229,7 +1235,9 @@ export async function sendReadOnlyMessage(
   db: Database,
   input: SendAssistantMessageInput,
   actor: Actor,
+  identity?: VerifiedRequestContext,
 ) {
+  if (!identity) throw new AuthorizationError();
   const conversation = input.conversationId
     ? await db.query.assistantConversations.findFirst({
       where: eq(assistantConversations.id, input.conversationId),
@@ -1253,6 +1261,7 @@ export async function sendReadOnlyMessage(
       intent: input.context.intent ?? input.message,
     },
     actor,
+    identity,
   ) as Record<string, unknown>;
 
   const userMessage = await createMessage(db, {
@@ -1266,11 +1275,9 @@ export async function sendReadOnlyMessage(
   let model: ResolvedTiModel | null = null;
   let modelError: string | null = null;
   try {
-    model = await resolveModel(db, {
-      requestedProvider: input.requestedProvider,
-      requestedModel: input.requestedModel,
-      target: "chat",
-    }, actor);
+    const modelCall = [db, { requestedProvider: input.requestedProvider, requestedModel: input.requestedModel, target: "chat" }, actor];
+    await authorizeMetadataOperation(db, await getLiveRequestAuthority(db, identity), "ti", "resolveModel", modelCall);
+    model = await resolveModel(db, modelCall[1] as Parameters<typeof resolveModel>[1], actor);
   } catch (err) {
     modelError = err instanceof Error ? err.message : "Ti model resolution failed";
   }
