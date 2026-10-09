@@ -62,6 +62,7 @@ type AssistantAction = {
   actionType: string;
   status: string;
   preview: string | null;
+  payload?: Record<string, unknown>;
   errorMessage?: string | null;
 };
 
@@ -97,7 +98,7 @@ export function AssistantDialog({
 
   const utils = trpc.useUtils();
   const operationPolicy = trpc.assistant.getPolicy.useQuery(undefined, { enabled: open });
-  const operationsAllowed = !!operationPolicy.data?.assistantAutoEnabled && operationPolicy.data.assistantAutoMode === "live";
+  const operationsAllowed = !!operationPolicy.data?.assistantAutoEnabled && ["live", "confirm"].includes(operationPolicy.data.assistantAutoMode);
 
   const context = useMemo(() => ({
     contextKind,
@@ -509,6 +510,12 @@ export function AssistantDialog({
                               <p className="text-sm leading-relaxed">
                                 {action.preview ?? "Assistant action proposal"}
                               </p>
+                              {action.actionType === "platform_operation" && action.status === "proposed" && (
+                                <details className="mt-2 text-xs">
+                                  <summary className="cursor-pointer">Review operation parameters</summary>
+                                  <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2">{JSON.stringify(action.payload, null, 2)}</pre>
+                                </details>
+                              )}
                               {action.errorMessage && (
                                 <p className="mt-1 text-xs text-destructive">{action.errorMessage}</p>
                               )}

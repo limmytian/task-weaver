@@ -121,7 +121,7 @@ export const tiAgentPolicies = pgTable(
     deniedTools: text("denied_tools").array(),
     assistantAutoEnabled: boolean("assistant_auto_enabled").default(false).notNull(),
     assistantAutoMode: text("assistant_auto_mode", {
-      enum: ["disabled", "dry_run", "live"],
+      enum: ["disabled", "dry_run", "confirm", "live"],
     }).default("disabled").notNull(),
     assistantActionAllowlist: text("assistant_action_allowlist").array(),
     assistantDailyActionLimit: integer("assistant_daily_action_limit").default(10).notNull(),

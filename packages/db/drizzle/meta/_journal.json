@@ -463,6 +463,13 @@
       "when": 1791565760774,
       "tag": "0065_assistant_request_deduplication",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1791568784901,
+      "tag": "0066_assistant_confirmation_mode",
+      "breakpoints": true
     }
   ]
 }

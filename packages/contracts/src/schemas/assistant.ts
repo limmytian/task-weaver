@@ -326,7 +326,7 @@ export type ExecuteAssistantActionInput = z.infer<typeof executeAssistantActionS
 
 export const assistantPolicySchema = z.object({
   assistantAutoEnabled: z.boolean(),
-  assistantAutoMode: z.enum(["disabled", "dry_run", "live"]),
+  assistantAutoMode: z.enum(["disabled", "dry_run", "confirm", "live"]),
   assistantActionAllowlist: z.array(assistantActionTypeSchema).max(8),
   assistantDailyActionLimit: z.number().int().min(0).max(100_000),
   assistantRunTimeoutSeconds: z.number().int().min(30).max(86_400),
