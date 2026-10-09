@@ -101,13 +101,7 @@ function PolicyCard() {
   const [monthlyRunLimit, setMonthlyRunLimit] = useState("500");
   const [runTimeoutSeconds, setRunTimeoutSeconds] = useState("600");
   const [defaultMaxRetries, setDefaultMaxRetries] = useState("0");
-  const [assistantAutoEnabled, setAssistantAutoEnabled] = useState("false");
-  const [assistantAutoMode, setAssistantAutoMode] = useState<"disabled" | "dry_run" | "live">("disabled");
-  const [assistantActionAllowlist, setAssistantActionAllowlist] = useState("create_task,add_comment,add_note,draft_document");
-  const [assistantDailyActionLimit, setAssistantDailyActionLimit] = useState("10");
-  const [assistantRunTimeoutSeconds, setAssistantRunTimeoutSeconds] = useState("300");
-  const [assistantDefaultMaxRetries, setAssistantDefaultMaxRetries] = useState("0");
-  const [assistantUncertainToReview, setAssistantUncertainToReview] = useState("true");
+
 
   /* eslint-disable react-hooks/set-state-in-effect -- Sync loaded policy into editable form controls. */
   useEffect(() => {
@@ -119,13 +113,6 @@ function PolicyCard() {
     setMonthlyRunLimit(String(policy.monthlyRunLimit));
     setRunTimeoutSeconds(String(policy.runTimeoutSeconds));
     setDefaultMaxRetries(String(policy.defaultMaxRetries));
-    setAssistantAutoEnabled(String(policy.assistantAutoEnabled ?? false));
-    setAssistantAutoMode(policy.assistantAutoMode ?? "disabled");
-    setAssistantActionAllowlist((policy.assistantActionAllowlist ?? []).join(","));
-    setAssistantDailyActionLimit(String(policy.assistantDailyActionLimit ?? 10));
-    setAssistantRunTimeoutSeconds(String(policy.assistantRunTimeoutSeconds ?? 300));
-    setAssistantDefaultMaxRetries(String(policy.assistantDefaultMaxRetries ?? 0));
-    setAssistantUncertainToReview(String(policy.assistantUncertainToReview ?? true));
   }, [policy]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -147,16 +134,7 @@ function PolicyCard() {
       monthlyRunLimit: Number(monthlyRunLimit),
       runTimeoutSeconds: Number(runTimeoutSeconds),
       defaultMaxRetries: Number(defaultMaxRetries),
-      assistantAutoEnabled: assistantAutoEnabled === "true",
-      assistantAutoMode,
-      assistantActionAllowlist: assistantActionAllowlist
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean),
-      assistantDailyActionLimit: Number(assistantDailyActionLimit),
-      assistantRunTimeoutSeconds: Number(assistantRunTimeoutSeconds),
-      assistantDefaultMaxRetries: Number(assistantDefaultMaxRetries),
-      assistantUncertainToReview: assistantUncertainToReview === "true",
+
     });
   };
 
@@ -227,63 +205,6 @@ function PolicyCard() {
               <NumberField label="Monthly limit" help="Maximum Ti runs per month. Use 0 to block all monthly runs." value={monthlyRunLimit} onChange={setMonthlyRunLimit} min={0} />
             </div>
             <NumberField label="Default retries" help="How many times a failed Ti run may be retried when a task or schedule does not override it." value={defaultMaxRetries} onChange={setDefaultMaxRetries} min={0} />
-            <Separator />
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <p className="text-sm font-medium">Assistant maintenance</p>
-                    <HelpTooltip>Controls whether chat assistant proposals can be applied automatically. Manual chat responses still work when this is disabled.</HelpTooltip>
-                  </div>
-                  <p className="text-xs text-muted-foreground">Automatic execution is disabled unless explicitly enabled.</p>
-                </div>
-                <Select value={assistantAutoEnabled} onValueChange={setAssistantAutoEnabled}>
-                  <SelectTrigger className="w-[120px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="false">Disabled</SelectItem>
-                    <SelectItem value="true">Enabled</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <Select
-                value={assistantAutoMode}
-                onValueChange={(value: "disabled" | "dry_run" | "live") => setAssistantAutoMode(value)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="disabled">No automatic actions</SelectItem>
-                  <SelectItem value="dry_run">Dry-run proposals only</SelectItem>
-                  <SelectItem value="live">Live allowed actions</SelectItem>
-                </SelectContent>
-              </Select>
-              <label className="space-y-1.5">
-                <FieldLabel label="Action allowlist" help="Comma-separated assistant action types that may be proposed or auto-applied, such as create_task or draft_document." />
-                <Input value={assistantActionAllowlist} onChange={(event) => setAssistantActionAllowlist(event.target.value)} />
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <NumberField label="Daily actions" help="Maximum assistant actions per day. Use 0 to block automatic assistant actions." value={assistantDailyActionLimit} onChange={setAssistantDailyActionLimit} min={0} />
-                <NumberField label="Action timeout" help="Maximum seconds an assistant action may run before it is treated as expired." value={assistantRunTimeoutSeconds} onChange={setAssistantRunTimeoutSeconds} min={30} />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <NumberField label="Action retries" help="How many times a failed assistant action may retry." value={assistantDefaultMaxRetries} onChange={setAssistantDefaultMaxRetries} min={0} />
-                <label className="space-y-1.5">
-                  <FieldLabel label="Uncertain actions" help="When enabled, low-confidence assistant actions require review even if live mode is allowed." />
-                  <Select value={assistantUncertainToReview} onValueChange={setAssistantUncertainToReview}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="true">Route to review</SelectItem>
-                      <SelectItem value="false">Use policy mode</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </label>
-              </div>
-            </div>
             <Button type="submit" className="w-full" disabled={savePolicy.isPending}>
               Save Policy
             </Button>
@@ -449,13 +370,6 @@ function ModelConfigCard() {
 function ModelListCard() {
   const utils = trpc.useUtils();
   const { data: configs, isLoading } = trpc.tiAgent.listConfigs.useQuery({ includeDisabled: true });
-  const updateCredentials = trpc.tiAgent.upsertConfig.useMutation({
-    onSuccess: () => {
-      toast.success("Credential status updated");
-      utils.tiAgent.listConfigs.invalidate();
-    },
-    onError: (err) => toast.error(err.message),
-  });
   const setDefault = trpc.tiAgent.setDefaultConfig.useMutation({
     onSuccess: () => {
       toast.success("Default model updated");
@@ -496,33 +410,9 @@ function ModelListCard() {
                       </Badge>
                     )}
                     <Badge variant={config.enabled ? "outline" : "secondary"}>{config.enabled ? "enabled" : "disabled"}</Badge>
-                    <Select
-                      value={config.credentialStatus}
-                      disabled={updateCredentials.isPending}
-                      onValueChange={(credentialStatus: "unknown" | "valid" | "invalid" | "missing") => {
-                        updateCredentials.mutate({
-                          provider: config.provider,
-                          model: config.model,
-                          credentialStatus,
-                          enabled: config.enabled,
-                          isDefaultChat: config.isDefaultChat,
-                          isDefaultAgent: config.isDefaultAgent,
-                        });
-                      }}
-                    >
-                      <SelectTrigger
-                        className="w-[120px]"
-                        aria-label={`Credential status for ${config.label || `${config.provider}:${config.model}`}`}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="unknown">Unknown</SelectItem>
-                        <SelectItem value="valid">Valid</SelectItem>
-                        <SelectItem value="invalid">Invalid</SelectItem>
-                        <SelectItem value="missing">Missing</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Badge variant={config.credentialStatus === "invalid" || config.credentialStatus === "missing" ? "destructive" : "secondary"}>
+                      {config.credentialStatus}
+                    </Badge>
                   </div>
                   <div className="mt-1 truncate text-xs text-muted-foreground">
                     {config.provider}:{config.model}

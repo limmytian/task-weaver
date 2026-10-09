@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   createAssistantService,
+  updateAssistantPolicySchema,
   buildAssistantContextSchema,
   executeAssistantActionSchema,
   listAssistantConversationsSchema,
@@ -11,6 +12,8 @@ import {
 import { router, ordinaryResourceProcedure } from "../init";
 
 export const assistantRouter = router({
+  getPolicy: ordinaryResourceProcedure.query(({ ctx }) => createAssistantService(ctx.identity).getPolicy(ctx.db)),
+  updatePolicy: ordinaryResourceProcedure.input(updateAssistantPolicySchema).mutation(({ ctx, input }) => createAssistantService(ctx.identity).updatePolicy(ctx.db, input)),
   listConversations: ordinaryResourceProcedure
     .input(listAssistantConversationsSchema)
     .query(async ({ ctx, input }) => createAssistantService(ctx.identity).listConversations(ctx.db, input)),

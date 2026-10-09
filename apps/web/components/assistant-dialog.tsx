@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { AssistantSettings } from "./assistant-settings";
+import { useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   Clock,
@@ -86,6 +87,8 @@ export function AssistantDialog({
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [actions, setActions] = useState<AssistantAction[]>([]);
   const [input, setInput] = useState("");
+  const sending = useRef(false);
+  const composing = useRef(false);
   const [editingConvId, setEditingConvId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [deletingConvId, setDeletingConvId] = useState<string | null>(null);
@@ -128,6 +131,7 @@ export function AssistantDialog({
 
   const sendMessage = trpc.assistant.sendMessage.useMutation({
     onSuccess: (result) => {
+      setInput("");
       setConversationId(result.conversation.id);
       setMessages((current) => [
         ...current,
@@ -153,6 +157,7 @@ export function AssistantDialog({
     onError: (err) => {
       toast.error("Assistant failed", { description: err.message });
     },
+    onSettled: () => { sending.current = false; },
   });
 
   const renameMutation = trpc.assistant.renameConversation.useMutation({
@@ -237,8 +242,8 @@ export function AssistantDialog({
   ) => {
     const message = input.trim();
     const effectiveMessage = message || workflowLabels.find((item) => item.workflow === workflow)?.label || "";
-    if (!effectiveMessage || sendMessage.isPending) return;
-    setInput("");
+    if (!effectiveMessage || sendMessage.isPending || sending.current || composing.current) return;
+    sending.current = true;
     sendMessage.mutate({
       conversationId,
       context,
@@ -287,6 +292,7 @@ export function AssistantDialog({
               </div>
 
               <div className="flex items-center gap-1">
+                <AssistantSettings />
                 <Button
                   size="sm"
                   variant="ghost"
@@ -534,13 +540,15 @@ export function AssistantDialog({
                   <Textarea
                     value={input}
                     onChange={(event) => setInput(event.target.value)}
+                    onCompositionStart={() => { composing.current = true; }}
+                    onCompositionEnd={() => { composing.current = false; }}
                     onKeyDown={(event) => {
-                      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                      if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !composing.current) {
                         event.preventDefault();
                         submit();
                       }
                     }}
-                    placeholder="Ask about status, risks, or next steps"
+                    placeholder="Ask about status, risks, or next steps (Enter to send, Shift+Enter for newline)"
                     className="min-h-20 resize-none"
                     disabled={sendMessage.isPending}
                   />

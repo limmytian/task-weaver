@@ -243,13 +243,6 @@ export async function upsertPolicy(
       allowNetwork: input.allowNetwork,
       allowedTools: input.allowedTools,
       deniedTools: input.deniedTools,
-      assistantAutoEnabled: input.assistantAutoEnabled,
-      assistantAutoMode: input.assistantAutoMode,
-      assistantActionAllowlist: input.assistantActionAllowlist,
-      assistantDailyActionLimit: input.assistantDailyActionLimit,
-      assistantRunTimeoutSeconds: input.assistantRunTimeoutSeconds,
-      assistantDefaultMaxRetries: input.assistantDefaultMaxRetries,
-      assistantUncertainToReview: input.assistantUncertainToReview,
     })
     .onConflictDoUpdate({
       target: [tiAgentPolicies.ownerId, tiAgentPolicies.ownerType],
@@ -265,13 +258,6 @@ export async function upsertPolicy(
         allowNetwork: input.allowNetwork,
         allowedTools: input.allowedTools,
         deniedTools: input.deniedTools,
-        assistantAutoEnabled: input.assistantAutoEnabled,
-        assistantAutoMode: input.assistantAutoMode,
-        assistantActionAllowlist: input.assistantActionAllowlist,
-        assistantDailyActionLimit: input.assistantDailyActionLimit,
-        assistantRunTimeoutSeconds: input.assistantRunTimeoutSeconds,
-        assistantDefaultMaxRetries: input.assistantDefaultMaxRetries,
-        assistantUncertainToReview: input.assistantUncertainToReview,
         updatedAt: new Date(),
       }),
     })
@@ -288,8 +274,6 @@ export async function upsertPolicy(
       ownerType: targetOwner.ownerType,
       enabled: input.enabled,
       executionMode: input.executionMode,
-      assistantAutoEnabled: input.assistantAutoEnabled,
-      assistantAutoMode: input.assistantAutoMode,
     },
   });
 

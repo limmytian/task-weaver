@@ -64,13 +64,7 @@ export const upsertTiAgentPolicySchema = z.object({
   allowNetwork: z.boolean().default(false),
   allowedTools: z.array(z.string().min(1).max(200)).optional(),
   deniedTools: z.array(z.string().min(1).max(200)).optional(),
-  assistantAutoEnabled: z.boolean().default(false),
-  assistantAutoMode: tiAgentExecutionModeSchema.default("disabled"),
-  assistantActionAllowlist: z.array(z.string().min(1).max(200)).default([]),
-  assistantDailyActionLimit: z.number().int().min(0).max(100_000).default(10),
-  assistantRunTimeoutSeconds: z.number().int().min(30).max(86_400).default(300),
-  assistantDefaultMaxRetries: z.number().int().min(0).max(20).default(0),
-  assistantUncertainToReview: z.boolean().default(true),
+
 }).superRefine((data, ctx) => {
   if (data.enabled && data.executionMode === "disabled") {
     ctx.addIssue({
@@ -79,13 +73,7 @@ export const upsertTiAgentPolicySchema = z.object({
       message: "Enabled Ti agent policies must use dry_run or live execution mode",
     });
   }
-  if (data.assistantAutoEnabled && data.assistantAutoMode === "disabled") {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["assistantAutoMode"],
-      message: "Enabled assistant automatic maintenance must use dry_run or live mode",
-    });
-  }
+
 });
 
 export const resolveTiModelSchema = z.object({

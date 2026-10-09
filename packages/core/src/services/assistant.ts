@@ -991,6 +991,8 @@ export async function executeApprovedAction(
   id: string,
   actor: Actor,
   context?: VerifiedRequestContext,
+  automatic = false,
+  uncertain = true,
 ) {
   if (!context) throw new AuthorizationError();
   return db.transaction(async tx => {
@@ -1002,6 +1004,17 @@ export async function executeApprovedAction(
     if (!action || !conversation || conversation.createdBy !== actor.id || conversation.createdByType !== actor.type) throw new NotFoundError("Resource not found");
     for (const [kind, resourceId] of [["project", conversation.projectId], ["requirement", conversation.requirementId], ["task", conversation.taskId]] as const) {
       if (resourceId) await requireResource(tx as unknown as Database, authority, kind, resourceId);
+    }
+    if (automatic) {
+      const policy = await tx.query.tiAgentPolicies.findFirst({ where: and(eq(tiAgentPolicies.ownerId, actor.id), eq(tiAgentPolicies.ownerType, actor.type)) });
+      if (!policy?.assistantAutoEnabled || policy.assistantAutoMode !== "live" || !policy.assistantActionAllowlist?.includes(action.actionType)
+        || (uncertain && policy.assistantUncertainToReview)) throw new AuthorizationError();
+      const counts = await tx.select({ count: sql<number>`count(*)::int` }).from(assistantActions)
+        .innerJoin(assistantConversations, eq(assistantActions.conversationId, assistantConversations.id))
+        .where(and(eq(assistantConversations.createdBy, actor.id), eq(assistantConversations.createdByType, actor.type),
+          inArray(assistantActions.status, ["succeeded", "executing"]), sql`${assistantActions.executedAt} >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`));
+      if ((counts[0]?.count ?? 0) >= policy.assistantDailyActionLimit) throw new AuthorizationError();
+      await tx.execute(sql`select set_config('statement_timeout', ${String(policy.assistantRunTimeoutSeconds * 1000)}, true)`);
     }
     if (!["proposed", "approved"].includes(action.status)) throw new ValidationError("Assistant action cannot execute from its current status");
     // No caller can supply approval identity, execution results, force flags, or completion state.
@@ -1312,11 +1325,32 @@ export async function sendReadOnlyMessage(
     },
   }, actor);
 
-  const proposedActions = [];
+  const proposedActions: AssistantActionRow[] = [];
   for (const proposal of workflowProposals(contextSnapshot, input)) {
     proposedActions.push(
       await createProposedAction(db, conversation.id, assistantMessage.id, proposal, actor),
     );
+  }
+
+  const policy = await db.query.tiAgentPolicies.findFirst({ where: and(eq(tiAgentPolicies.ownerId, actor.id), eq(tiAgentPolicies.ownerType, actor.type)) });
+  if (policy?.assistantAutoEnabled && policy.assistantAutoMode === "live") {
+    for (let index = 0; index < proposedActions.length; index++) {
+      const action = proposedActions[index]!;
+      if (!policy.assistantActionAllowlist?.includes(action.actionType)) continue;
+      // Explicit typed user proposals are certain; inferred workflow suggestions require review by default.
+      const uncertain = !input.proposedActions.some(proposal => proposal.actionType === action.actionType && JSON.stringify(proposal.payload) === JSON.stringify(action.payload));
+      if (uncertain && policy.assistantUncertainToReview) continue;
+      for (let attempt = 0; attempt <= policy.assistantDefaultMaxRetries; attempt++) {
+        try {
+          proposedActions[index] = await executeApprovedAction(db, action.id, actor, identity, true, uncertain);
+          break;
+        } catch (error) {
+          // Retry only database concurrency failures: every attempted write rolled back.
+          const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+          if (!["40001", "40P01"].includes(String(code)) || attempt === policy.assistantDefaultMaxRetries) break;
+        }
+      }
+    }
   }
 
   return {

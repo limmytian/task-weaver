@@ -1,5 +1,6 @@
+import { updateAssistantPolicySchema } from "@task-weaver/contracts"
 import { Command } from 'commander'
-import { get, post, put } from '../client.js'
+import { get, post, put, patch } from '../client.js'
 import { printJson, printKv, printTable } from '../output.js'
 
 function delay(ms: number) {
@@ -8,6 +9,17 @@ function delay(ms: number) {
 
 export function registerTiAgent(program: Command): void {
   const ti = program.command('ti').description('manage Ti server agent configuration, runs, and sandbox')
+
+  ti.command('assistant-policy').description('read or partially update account-wide Chat action settings')
+    .option('--data <json>', 'assistant-only policy patch as JSON')
+    .option('--json', 'output raw JSON')
+    .action(async opts => {
+      const data = opts.data
+        ? await patch('/api/v1/assistant/policy', updateAssistantPolicySchema.parse(JSON.parse(opts.data)))
+        : await get('/api/v1/assistant/policy')
+      if (opts.json) return printJson(data)
+      printKv(data as Record<string, unknown>)
+    })
 
   const config = ti.command('config').description('manage Ti provider/model configs')
 

@@ -320,3 +320,15 @@ export type UpdateAssistantActionStatusInput = z.infer<typeof updateAssistantAct
 export type AssistantActionProposal = z.infer<typeof assistantActionProposalSchema>;
 export type SendAssistantMessageInput = z.infer<typeof sendAssistantMessageSchema>;
 export type ExecuteAssistantActionInput = z.infer<typeof executeAssistantActionSchema>;
+
+export const assistantPolicySchema = z.object({
+  assistantAutoEnabled: z.boolean(),
+  assistantAutoMode: z.enum(["disabled", "dry_run", "live"]),
+  assistantActionAllowlist: z.array(assistantActionTypeSchema).max(8),
+  assistantDailyActionLimit: z.number().int().min(0).max(100_000),
+  assistantRunTimeoutSeconds: z.number().int().min(30).max(86_400),
+  assistantDefaultMaxRetries: z.number().int().min(0).max(20),
+  assistantUncertainToReview: z.boolean(),
+}).strict();
+export const updateAssistantPolicySchema = assistantPolicySchema.partial().strict();
+export type AssistantPolicy = z.infer<typeof assistantPolicySchema>;

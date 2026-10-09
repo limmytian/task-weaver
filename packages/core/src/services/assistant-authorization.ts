@@ -1,6 +1,7 @@
+import { lockIdentityLifecycle } from "./auth-security";
 import { and, eq } from "drizzle-orm";
-import { assistantActions, assistantConversations, type Database } from "@task-weaver/db";
-import { AuthorizationError, NotFoundError, type VerifiedRequestContext, type BuildAssistantContextInput } from "@task-weaver/contracts";
+import { assistantActions, assistantConversations, tiAgentPolicies, activityLog, type Database } from "@task-weaver/db";
+import { AuthorizationError, NotFoundError, type VerifiedRequestContext, type BuildAssistantContextInput, assistantPolicySchema, updateAssistantPolicySchema } from "@task-weaver/contracts";
 import { resourceAuthority, requireResource, requireScope } from "./resource-authorization";
 import { createResourceServices } from "./resource-services";
 import * as implementation from "./assistant";
@@ -43,6 +44,34 @@ export function createAssistantService(identity: VerifiedRequestContext) {
     return row;
   }
   return {
+    async getPolicy(db: Database) {
+      const actor = await scope(db, {});
+      const row = await db.query.tiAgentPolicies.findFirst({ where: and(eq(tiAgentPolicies.ownerId, actor.id), eq(tiAgentPolicies.ownerType, "human")) });
+      const known = assistantPolicySchema.shape.assistantActionAllowlist.element;
+      return {
+        assistantAutoEnabled: row?.assistantAutoEnabled ?? false,
+        assistantAutoMode: row?.assistantAutoMode ?? "disabled" as const,
+        assistantActionAllowlist: (row?.assistantActionAllowlist ?? []).filter(value => known.safeParse(value).success),
+        assistantDailyActionLimit: row?.assistantDailyActionLimit ?? 10,
+        assistantRunTimeoutSeconds: row?.assistantRunTimeoutSeconds ?? 300,
+        assistantDefaultMaxRetries: row?.assistantDefaultMaxRetries ?? 0,
+        assistantUncertainToReview: row?.assistantUncertainToReview ?? true,
+        unsupportedActions: (row?.assistantActionAllowlist ?? []).filter(value => !known.safeParse(value).success),
+      };
+    },
+    async updatePolicy(db: Database, input: Parameters<typeof updateAssistantPolicySchema.parse>[0]) {
+      const patch = updateAssistantPolicySchema.parse(input);
+      await write(db);
+      const actor = await scope(db, {});
+      return db.transaction(async tx => {
+        await lockIdentityLifecycle(tx);
+        await write(tx as unknown as Database);
+        const [row] = await tx.insert(tiAgentPolicies).values({ ownerId: actor.id, ownerType: "human", ...patch })
+          .onConflictDoUpdate({ target: [tiAgentPolicies.ownerId, tiAgentPolicies.ownerType], set: { ...patch, updatedAt: new Date() } }).returning();
+        await tx.insert(activityLog).values({ entityType: "ti_agent_policy", entityId: row!.id, action: "assistant_policy_updated", actorId: actor.id, actorType: "human", metadata: { fields: Object.keys(patch) } });
+        return { saved: true };
+      });
+    },
     async listConversations(db: Database, input: Parameters<typeof implementation.listConversations>[1]) {
       const actor = await scope(db, { ...input, projectId: input.projectId ?? undefined,
         requirementId: input.requirementId ?? undefined, taskId: input.taskId ?? undefined, scheduleId: input.scheduleId ?? undefined });

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import {
   createAssistantService,
+  updateAssistantPolicySchema,
   buildAssistantContextSchema,
   executeAssistantActionSchema,
   listAssistantConversationsSchema,
@@ -13,6 +14,12 @@ import {
 import type { Env } from "../middleware/actor.js";
 
 const assistantRoutes = new Hono<Env>();
+assistantRoutes.get("/policy", async c => c.json(await createAssistantService(c.get("identity")).getPolicy(c.get("db"))));
+assistantRoutes.patch("/policy", async c => {
+  const input = updateAssistantPolicySchema.safeParse(await c.req.json());
+  if (!input.success) return c.json({ error: "Invalid assistant policy" }, 400);
+  return c.json(await createAssistantService(c.get("identity")).updatePolicy(c.get("db"), input.data));
+});
 
 assistantRoutes.get("/conversations", async (c) => {
   const db = c.get("db");

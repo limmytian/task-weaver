@@ -131,5 +131,6 @@ export function isOrdinaryResourceRoute(method: string, path: string) {
   if (["PATCH", "DELETE"].includes(method) && /^\/api\/v1\/assistant\/conversations\/[0-9a-fA-F-]{36}$/.test(path)) return true;
   if (method === "POST" && /^\/api\/v1\/assistant\/(?:context|chat)$/.test(path)) return true;
   if (method === "PATCH" && /^\/api\/v1\/assistant\/actions\/[0-9a-fA-F-]{36}\/status$/.test(path)) return true;
+  if (["GET", "PATCH"].includes(method) && path === "/api/v1/assistant/policy") return true;
   return ordinaryRoutes.some(([verb, pattern]) => verb === method && pattern.test(path));
 }
