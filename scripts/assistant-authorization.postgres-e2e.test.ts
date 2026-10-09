@@ -84,6 +84,8 @@ test("assistant authorization isolates accounts and resources across REST and tR
   await createChatModelService(viewer.context).save(db, modelSettings);
   let calls = 0;
   let lastModelPrompt = "";
+  let lastModelPayload: any;
+  const modelReplies: any[] = [];
   let expectedKey = "fixture-personal-key";
   let responseStatus = 200;
   let dnsAddress = "8.8.8.8";
@@ -94,12 +96,13 @@ test("assistant authorization isolates accounts and resources across REST and tR
     calls++;
     const request = new EventEmitter() as any;
     request.end = (body: string) => {
-      lastModelPrompt = JSON.parse(body).messages.map((message: any) => message.content).join("\n");
+      lastModelPayload = JSON.parse(body);
+      lastModelPrompt = lastModelPayload.messages.map((message: any) => message.content).join("\n");
       const response = new EventEmitter() as any;
       response.statusCode = responseStatus;
       response.resume = () => {};
       callback(response);
-      queueMicrotask(() => { response.emit("data", Buffer.from(JSON.stringify({ choices: [{ message: { content: "Fixture model reply" } }] }))); response.emit("end"); });
+      queueMicrotask(() => { response.emit("data", Buffer.from(JSON.stringify({ choices: [{ message: modelReplies.shift() ?? { content: "Fixture model reply" } }] }))); response.emit("end"); });
     };
     return request;
   });
@@ -141,6 +144,35 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.ok(lastModelPrompt.includes(project.name));
   assert.ok(!lastModelPrompt.includes(other.name));
   assert.ok(lastModelPrompt.includes("no project is selected"));
+  const toolCall = (name: string, args: unknown) => ({ id: randomUUID(), type: "function", function: { name, arguments: JSON.stringify(args) } });
+  modelReplies.push(
+    { content: null, tool_calls: [toolCall("list_projects", { query: "Owned" })] },
+    { content: null, tool_calls: [toolCall("get_project", { projectId: project.id }), toolCall("list_tasks", { projectId: project.id })] },
+    { content: "Live project status checked" },
+  );
+  const queried = await rest("assistant/chat", owner.headers, "POST", { message: "Check Owned project status", context: {} });
+  assert.equal(queried.status, 201);
+  assert.equal(queried.body.assistantMessage.content, "Live project status checked");
+  const results = lastModelPayload.messages.filter((row: any) => row.role === "tool").map((row: any) => JSON.parse(row.content));
+  assert.equal(results.length, 3);
+  assert.equal(results[0].total, 1);
+  assert.equal(results[1].project.id, project.id);
+  assert.equal(results[1].statistics.totalTasks, 1);
+  assert.ok(JSON.stringify(results[2]).includes(task.id));
+  assert.ok(!JSON.stringify(results).includes(other.id));
+  assert.ok(lastModelPayload.tools.every((row: any) => !row.function.name.startsWith("create_") && !row.function.name.startsWith("update_")));
+  modelReplies.push({ content: null, tool_calls: [toolCall("get_project", { projectId: other.id }), toolCall("get_document", { documentId: hiddenDoc.id }), toolCall("update_task", { taskId: task.id, title: "Malicious mutation" })] }, { content: "Those resources are unavailable" });
+  const deniedTools = await rest("assistant/chat", owner.headers, "POST", { message: "Try inaccessible queries", context: {} });
+  assert.equal(deniedTools.status, 201);
+  const deniedResults = lastModelPayload.messages.filter((row: any) => row.role === "tool").map((row: any) => JSON.parse(row.content));
+  assert.ok(deniedResults.every((row: any) => row.error));
+  assert.ok(!JSON.stringify(deniedResults).includes(hiddenDoc.content));
+  assert.equal((await owner.service.taskService.getTask(db, task.id)).title, "Task");
+  const beforeLoop = calls;
+  for (let round = 0; round < 6; round++) modelReplies.push({ content: null, tool_calls: [toolCall("list_projects", {})] });
+  await assert.rejects(ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ message: "Unbounded query fixture", context: {} })), /query limit reached/);
+  assert.equal(calls - beforeLoop, 6);
+  assert.equal(lastModelPayload.tool_choice, "none");
   const proposed = await ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ ...input, proposedActions: [{ actionType: "update_task", payload: { taskId: task.id, title: "Reviewed task" } }] }));
   const action = proposed.actions[0];
   assert.ok(action);

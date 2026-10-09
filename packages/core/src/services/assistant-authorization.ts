@@ -42,6 +42,9 @@ export function createAssistantService(identity: VerifiedRequestContext) {
     const record = (value: unknown): Record<string, any> => value && typeof value === "object" ? value as Record<string, any> : {};
     for (const message of result.messages) {
       const snapshot = record(message.contextSnapshot);
+      for (const reference of Array.isArray(snapshot.toolReads) ? snapshot.toolReads : []) {
+        if (["project", "requirement", "task", "document"].includes(reference.kind)) await requireResource(db, live, reference.kind, reference.id);
+      }
       const current = record(snapshot.current);
       const workspace = record(snapshot.workspace);
       for (const row of Array.isArray(workspace.projects) ? workspace.projects : []) {

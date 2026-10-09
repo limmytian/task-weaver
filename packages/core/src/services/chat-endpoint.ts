@@ -23,18 +23,20 @@ export function chatEndpoint(baseUrl: string) {
 }
 
 /** Pin the validated DNS address to the TLS request; never follow redirects with credentials. */
-export async function requestChatCompletion(baseUrl: string, apiKey: string, payload: unknown) {
+export type ChatTurn = { content: string | null; toolCalls: { id: string; name: string; arguments: string }[] };
+
+export async function requestChatTurn(baseUrl: string, apiKey: string, payload: unknown, deadline = performance.now() + 45_000) {
   const endpoint = chatEndpoint(baseUrl);
-  const deadline = performance.now() + 45_000;
+  if (performance.now() >= deadline) throw new ChatConfigurationError("chat_connection_failed");
   let timer: ReturnType<typeof setTimeout> | undefined;
   const addresses = await Promise.race([
     dns.lookup(endpoint.hostname, { all: true }),
-    new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new ChatConfigurationError("chat_endpoint_unresolved")), 5000); }),
+    new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new ChatConfigurationError("chat_endpoint_unresolved")), Math.max(1, Math.min(5000, Math.floor(deadline - performance.now())))); }),
   ]).catch(() => { throw new ChatConfigurationError("chat_endpoint_unresolved"); }).finally(() => { if (timer) clearTimeout(timer); });
   if (!addresses.length || addresses.some(row => !isPublicChatAddress(row.address))) throw new ChatConfigurationError("chat_endpoint_private");
   const address = addresses[0]!;
   const body = JSON.stringify(payload);
-  return new Promise<string>((resolve, reject) => {
+  return new Promise<ChatTurn>((resolve, reject) => {
     const failure = (code: ConstructorParameters<typeof ChatConfigurationError>[0]) => reject(new ChatConfigurationError(code));
     const request = https.request(endpoint, {
       method: "POST", agent: false, family: address.family, signal: AbortSignal.timeout(Math.max(1, Math.floor(deadline - performance.now()))),
@@ -54,13 +56,29 @@ export async function requestChatCompletion(baseUrl: string, apiKey: string, pay
       response.on("end", () => {
         try {
           const result = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-          const content = result.choices?.[0]?.message?.content;
-          if (typeof content !== "string" || !content.trim()) throw new Error();
-          resolve(content.trim().split(apiKey).join("[redacted]"));
+          const message = result.choices?.[0]?.message;
+          const content = typeof message?.content === "string" ? message.content.trim().split(apiKey).join("[redacted]") : null;
+          const rawCalls = message?.tool_calls ?? [];
+          if (!Array.isArray(rawCalls) || rawCalls.length > 8) throw new Error();
+          const toolCalls = rawCalls.map((call: any) => {
+            if (call.type !== "function" || typeof call.id !== "string" || call.id.length > 200
+              || typeof call.function?.name !== "string" || call.function.name.length > 100
+              || typeof call.function.arguments !== "string" || call.function.arguments.length > 10_000) throw new Error();
+            return { id: call.id, name: call.function.name, arguments: call.function.arguments };
+          });
+          if (!content && !toolCalls.length) throw new Error();
+          resolve({ content, toolCalls });
         } catch { failure("chat_response_invalid"); }
       });
     });
     request.on("error", () => failure("chat_connection_failed"));
     request.end(body);
   });
+}
+
+/** Credential tests require an ordinary text completion, not tool execution. */
+export async function requestChatCompletion(baseUrl: string, apiKey: string, payload: unknown) {
+  const turn = await requestChatTurn(baseUrl, apiKey, payload);
+  if (!turn.content || turn.toolCalls.length) throw new ChatConfigurationError("chat_response_invalid");
+  return turn.content;
 }
