@@ -194,6 +194,7 @@ export const listSkillPackagesSchema = skillPackageScopeFieldsSchema.partial().e
   allProjects: queryBooleanSchema.default(false),
   status: skillPackageStatusSchema.optional(),
   tag: z.string().optional(),
+  query: z.string().trim().min(1).max(500).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 }).superRefine(validateSkillPackageScope);

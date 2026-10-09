@@ -111,6 +111,10 @@ export async function registerPackage(
 
 export async function listPackages(db: Database, input: ListSkillPackagesInput, authorizedPredicate?: SQL) {
   const conditions = [buildPackageVisibilityCondition(input), authorizedPredicate];
+  if (input.query) {
+    const pattern = `%${input.query.replace(/[%_\\]/g, "\\$&")}%`;
+    conditions.push(or(sql`${skillPackages.name} ILIKE ${pattern}`, sql`${skillPackages.description} ILIKE ${pattern}`, sql`${skillPackages.summary} ILIKE ${pattern}`));
+  }
   if (input.status) {
     conditions.push(eq(skillPackages.status, input.status));
   }

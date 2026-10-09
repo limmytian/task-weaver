@@ -4,10 +4,13 @@ import { canRecoverAssistantRequest, recoverAssistantRequest } from "@/lib/assis
 import { shouldSendChatMessage } from "@/lib/chat-input";
 import { ChatModelSettings } from "./chat-model-settings";
 import { AssistantSettings } from "./assistant-settings";
-import { useMemo, useRef, useState } from "react";
+import { AssistantActionCard, type AssistantActionView } from "./assistant-action-card";
+import { AssistantMessageContent } from "./assistant-message";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  CheckCircle2,
+  ChevronDown,
   Clock,
+  Copy,
   Edit2,
   History,
   Loader2,
@@ -16,7 +19,6 @@ import {
   Sparkles,
   Trash2,
   UserRound,
-  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/trpc/client";
@@ -43,28 +45,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 
 type AssistantContextKind = "global" | "project" | "requirement" | "task" | "schedule";
-type AssistantWorkflow =
-  | "project_health"
-  | "stale_tasks"
-  | "failed_ti_runs"
-  | "schedule_maintenance"
-  | "requirement_next_steps"
-  | "personal_inbox_cleanup";
-
 type AssistantMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  responseTo?: string;
+  localStatus?: "sending" | "failed";
 };
 
-type AssistantAction = {
-  id: string;
-  actionType: string;
-  status: string;
-  preview: string | null;
-  payload?: Record<string, unknown>;
-  errorMessage?: string | null;
-};
+type AssistantAction = AssistantActionView;
 
 export function AssistantDialog({
   contextKind,
@@ -96,6 +85,11 @@ export function AssistantDialog({
   const [editingTitle, setEditingTitle] = useState("");
   const [deletingConvId, setDeletingConvId] = useState<string | null>(null);
 
+  const messageScroller = useRef<HTMLDivElement>(null);
+  const textarea = useRef<HTMLTextAreaElement>(null);
+  const nearBottom = useRef(true);
+  const [showJump, setShowJump] = useState(false);
+  const [activeRequestId, setActiveRequestId] = useState<string>();
   const utils = trpc.useUtils();
   const operationPolicy = trpc.assistant.getPolicy.useQuery(undefined, { enabled: open });
   const operationsAllowed = !!operationPolicy.data?.assistantAutoEnabled && ["live", "confirm"].includes(operationPolicy.data.assistantAutoMode);
@@ -137,10 +131,10 @@ export function AssistantDialog({
   const sendMessage = trpc.assistant.sendMessage.useMutation({
     onSuccess: (result) => {
       pendingRequest.current = null;
-      setInput("");
+      setActiveRequestId(undefined);
       setConversationId(result.conversation.id);
       setMessages((current) => [
-        ...current,
+        ...current.filter(message => !message.id.startsWith("pending:")),
         {
           id: result.userMessage.id,
           role: "user",
@@ -150,16 +144,12 @@ export function AssistantDialog({
           id: result.assistantMessage.id,
           role: "assistant",
           content: result.assistantMessage.content,
+          responseTo: result.userMessage.id,
         },
       ]);
-      setActions((current) => [...result.actions, ...current]);
+      setActions((current) => [...current.filter(action => !result.actions.some(next => next.id === action.id)), ...result.actions]);
       utils.assistant.listConversations.invalidate();
       if (result.actions.some(action => action.status === "succeeded")) void utils.invalidate();
-      if (result.modelError) {
-        toast.info("Assistant answered without a configured Ti model", {
-          description: result.modelError,
-        });
-      }
     },
     onError: async (err, variables) => {
       if (err.data?.httpStatus === 400) pendingRequest.current = null;
@@ -175,16 +165,19 @@ export function AssistantDialog({
         );
         if (result) {
           pendingRequest.current = null;
-          setInput("");
+          setActiveRequestId(undefined);
           setConversationId(result.conversation.id);
-          setMessages(current => [...current, { id: result.userMessage.id, role: "user", content: result.userMessage.content },
-            { id: result.assistantMessage.id, role: "assistant", content: result.assistantMessage.content }]);
-          setActions(current => [...result.actions, ...current]);
+          setMessages(current => [...current.filter(message => !message.id.startsWith("pending:")), { id: result.userMessage.id, role: "user", content: result.userMessage.content },
+            { id: result.assistantMessage.id, role: "assistant", content: result.assistantMessage.content, responseTo: result.userMessage.id }]);
+          setActions(current => [...current.filter(action => !result.actions.some(next => next.id === action.id)), ...result.actions]);
           void utils.invalidate();
           return;
         }
       }
-      toast.error("Assistant failed", { description: err.message });
+      setActiveRequestId(undefined);
+      setInput(current => current || variables.message);
+      setMessages(current => current.map(message => message.id === "pending:" + variables.requestId ? { ...message, localStatus: "failed" } : message));
+      toast.error("Assistant request could not finish", { description: err.message });
     },
     onSettled: () => { sending.current = false; },
   });
@@ -213,9 +206,15 @@ export function AssistantDialog({
   const executeAction = trpc.assistant.executeAction.useMutation({
     onSuccess: (updated) => {
       setActions((current) => current.map((action) => action.id === updated.id ? updated : action));
-      toast.success("Assistant action executed");
+      void utils.invalidate();
+      toast.success("Operation completed");
     },
-    onError: (err) => toast.error("Action failed", { description: err.message }),
+    onError: async (err) => {
+      if (conversationId) {
+        try { const data = await utils.assistant.getConversation.fetch({ id: conversationId }); setActions(data.actions); } catch { /* Keep the last visible state if access changed. */ }
+      }
+      toast.error("Operation could not complete", { description: err.message });
+    },
   });
 
   const rejectAction = trpc.assistant.updateActionStatus.useMutation({
@@ -234,14 +233,10 @@ export function AssistantDialog({
         id: m.id,
         role: m.role as "user" | "assistant",
         content: m.content,
+        responseTo: typeof (m.metadata as Record<string, unknown> | null)?.responseTo === "string" ? (m.metadata as Record<string, string>).responseTo : undefined,
       })));
-      setActions(data.actions.map((a) => ({
-        id: a.id,
-        actionType: a.actionType,
-        status: a.status,
-        preview: a.preview,
-        errorMessage: a.errorMessage,
-      })));
+      setActions(data.actions);
+      nearBottom.current = true;
       setShowHistory(false);
     } catch (err: unknown) {
       toast.error("Failed to load conversation", {
@@ -252,6 +247,7 @@ export function AssistantDialog({
 
   const handleNewChat = () => {
     pendingRequest.current = null;
+    setActiveRequestId(undefined);
     setConversationId(undefined);
     setMessages([]);
     setActions([]);
@@ -259,43 +255,38 @@ export function AssistantDialog({
     setShowHistory(false);
   };
 
-  const workflowLabels: Array<{ workflow: AssistantWorkflow; label: string }> = [
-    { workflow: "project_health", label: "Health" },
-    { workflow: "stale_tasks", label: "Stale" },
-    { workflow: "failed_ti_runs", label: "Ti runs" },
-    { workflow: "schedule_maintenance", label: "Schedules" },
-    { workflow: "requirement_next_steps", label: "Next steps" },
-  ];
-
-  const submit = (
-    mode: "ask" | "propose_task" = "ask",
-    workflow?: AssistantWorkflow,
-  ) => {
+  const requestProgress = trpc.assistant.messageResult.useQuery(
+    { requestId: activeRequestId ?? "00000000-0000-0000-0000-000000000000" },
+    { enabled: open && !!activeRequestId, refetchInterval: activeRequestId ? 2000 : false, retry: false },
+  );
+  useEffect(() => {
+    const scroller = messageScroller.current;
+    if (!scroller || !open || showHistory) return;
+    const sync = () => {
+      if (nearBottom.current) { scroller.scrollTop = scroller.scrollHeight; setShowJump(false); }
+      else setShowJump(true);
+    };
+    const observer = new ResizeObserver(sync);
+    observer.observe(scroller);
+    if (scroller.firstElementChild) observer.observe(scroller.firstElementChild);
+    const frame = requestAnimationFrame(sync);
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
+  }, [open, showHistory]);
+  const submit = () => {
     const message = input.trim();
-    const effectiveMessage = message || workflowLabels.find((item) => item.workflow === workflow)?.label || "";
-    if (!effectiveMessage || sendMessage.isPending || sending.current || composing.current) return;
+    if (!message || sendMessage.isPending || sending.current || composing.current) return;
     sending.current = true;
-    if (!pendingRequest.current || pendingRequest.current.message !== effectiveMessage) pendingRequest.current = { id: crypto.randomUUID(), message: effectiveMessage };
-    sendMessage.mutate({
-      requestId: pendingRequest.current.id,
-      conversationId,
-      context,
-      message: effectiveMessage,
-      workflow,
-      proposedActions: mode === "propose_task" && projectId && requirementId
-        ? [{
-          actionType: "create_task",
-          payload: {
-            projectId,
-            requirementId,
-            title: effectiveMessage.slice(0, 120),
-            description: effectiveMessage,
-            priority: "medium",
-          },
-          preview: `Create follow-up task: ${effectiveMessage.slice(0, 160)}`,
-        }]
-        : [],
-    });
+    if (!pendingRequest.current || pendingRequest.current.message !== message) pendingRequest.current = { id: crypto.randomUUID(), message };
+    const requestId = pendingRequest.current.id;
+    setActiveRequestId(requestId);
+    nearBottom.current = true;
+    setMessages(current => [...current.filter(item => item.id !== "pending:" + requestId && item.localStatus !== "failed"), { id: "pending:" + requestId, role: "user", content: message, localStatus: "sending" }]);
+    setInput("");
+    sendMessage.mutate({ requestId, conversationId, context, message, proposedActions: [] });
+  };
+  const copyMessage = async (content: string) => {
+    try { await navigator.clipboard.writeText(content); toast.success("Message copied"); }
+    catch { toast.error("Could not copy the message"); }
   };
 
   return (
@@ -465,15 +456,20 @@ export function AssistantDialog({
             </div>
           ) : (
             <>
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                <div className="space-y-4 px-5 py-5">
+              <div ref={messageScroller} className="min-h-0 flex-1 overflow-y-auto overscroll-contain" onScroll={event => {
+                const node = event.currentTarget; nearBottom.current = node.scrollHeight - node.scrollTop - node.clientHeight < 96;
+                if (nearBottom.current) setShowJump(false);
+              }}>
+                <div className="space-y-5 px-4 py-5">
                   {messages.length === 0 ? (
-                    <div className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
-                      <Sparkles aria-hidden="true" className="mb-2 h-5 w-5" />
-                      Ask about personal tasks, project status, risks, stale work, schedule health, or the next useful maintenance step.
+                    <div className="mx-auto max-w-sm space-y-3 px-4 py-12 text-center">
+                      <Sparkles aria-hidden="true" className="mx-auto h-7 w-7 text-primary"/>
+                      <p className="text-sm font-medium">What would you like to work on?</p>
+                      <p className="text-sm leading-relaxed text-muted-foreground">Ask about your projects or personal tasks, find a memory, load a skill, or request a platform operation. Your account permissions apply.</p>
                     </div>
                   ) : (
                     messages.map((message) => (
+                      <div key={message.id} className="space-y-3">
                       <div key={message.id} className={`flex gap-3 ${message.role === "user" ? "flex-row-reverse" : ""}`}>
                         <div role="img" aria-label={message.role === "assistant" ? "Ti assistant" : "You"} className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background">
                           {message.role === "assistant" ? (
@@ -486,96 +482,45 @@ export function AssistantDialog({
                           <div className={`mb-1 text-xs font-medium text-muted-foreground ${message.role === "user" ? "text-right" : ""}`}>
                             {message.role === "assistant" ? "Assistant" : "You"}
                           </div>
-                          <div className={`whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-sm leading-relaxed ${message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-                            {message.content}
+                          <div className={`break-words rounded-xl px-3 py-2.5 text-sm leading-relaxed ${message.role === "user" ? "whitespace-pre-wrap bg-primary text-primary-foreground" : "bg-muted"}`}>
+                            {message.role === "assistant" ? <AssistantMessageContent content={message.content}/> : message.content}
+                          </div>
+                          <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground">
+                            {message.localStatus === "sending" && <span>Sending · assistant working</span>}
+                            {message.localStatus === "failed" && <span>Request interrupted · original text retained</span>}
+                            <Button variant="ghost" size="icon" className="h-6 w-6" aria-label="Copy message" onClick={() => copyMessage(message.content)}><Copy className="h-3 w-3"/></Button>
                           </div>
                         </div>
                       </div>
+                      {message.role === "assistant" && actions.filter(action => action.messageId === message.id || action.messageId === message.responseTo).map(action => (
+                        <AssistantActionCard key={action.id} action={action} allowed={operationsAllowed} busy={executeAction.isPending || rejectAction.isPending}
+                          onApprove={() => executeAction.mutate({ id: action.id })} onReject={() => rejectAction.mutate({ id: action.id, data: { status: "rejected" } })}/>
+                      ))}
+                      </div>
                     ))
                   )}
-                  {actions.length > 0 && (
-                    <div className="space-y-2">
-                      {actions.map((action) => (
-                        <div key={action.id} className="rounded-md border bg-background p-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="mb-1 flex items-center gap-2">
-                                <Badge variant="outline" className="text-[10px]">
-                                  {action.actionType}
-                                </Badge>
-                                <Badge variant={action.status === "failed" ? "destructive" : "secondary"} className="text-[10px]">
-                                  {action.status}
-                                </Badge>
-                              </div>
-                              <p className="text-sm leading-relaxed">
-                                {action.preview ?? "Assistant action proposal"}
-                              </p>
-                              {action.actionType === "platform_operation" && action.status === "proposed" && (
-                                <details className="mt-2 text-xs">
-                                  <summary className="cursor-pointer">Review operation parameters</summary>
-                                  <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2">{JSON.stringify(action.payload, null, 2)}</pre>
-                                </details>
-                              )}
-                              {action.errorMessage && (
-                                <p className="mt-1 text-xs text-destructive">{action.errorMessage}</p>
-                              )}
-                            </div>
-                            {action.status === "proposed" && (
-                              <div className="flex shrink-0 items-center gap-1">
-                                <Button
-                                  size="icon"
-                                  variant="outline"
-                                  className="h-8 w-8"
-                                  title={operationsAllowed ? "Approve" : "Enable operations in assistant settings first"}
-                                  onClick={() => executeAction.mutate({ id: action.id })}
-                                  disabled={!operationsAllowed || executeAction.isPending || rejectAction.isPending}
-                                >
-                                  <CheckCircle2 className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  className="h-8 w-8"
-                                  title="Reject"
-                                  onClick={() => rejectAction.mutate({ id: action.id, data: { status: "rejected" } })}
-                                  disabled={executeAction.isPending || rejectAction.isPending}
-                                >
-                                  <XCircle className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {actions.filter(action => !action.messageId).map(action => (
+                    <AssistantActionCard key={action.id} action={action} allowed={operationsAllowed} busy={executeAction.isPending || rejectAction.isPending}
+                      onApprove={() => executeAction.mutate({ id: action.id })} onReject={() => rejectAction.mutate({ id: action.id, data: { status: "rejected" } })}/>
+                  ))}
+                  {requestProgress.data?.status === "running" && requestProgress.data.progress?.actions.map(action => (
+                    <AssistantActionCard key={action.id} action={action} allowed={false} busy={true} onApprove={() => {}} onReject={() => {}}/>
+                  ))}
                   {sendMessage.isPending && (
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Reading current context...
+                      Working on your request...
                     </div>
                   )}
                 </div>
               </div>
 
               <div className="shrink-0 border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-                <div className="mb-3 flex flex-wrap gap-1.5">
-                  {workflowLabels.map((item) => (
-                    <Button
-                      key={item.workflow}
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      onClick={() => submit("ask", item.workflow)}
-                      disabled={sendMessage.isPending}
-                    >
-                      {item.label}
-                    </Button>
-                  ))}
-                </div>
+                {showJump && <Button variant="outline" size="sm" className="mb-3 h-7 gap-1 text-xs" onClick={() => { const node = messageScroller.current; if (node) node.scrollTo({ top: node.scrollHeight, behavior: "smooth" }); nearBottom.current = true; setShowJump(false); }}><ChevronDown className="h-3 w-3"/>Latest messages</Button>}
                 <div className="flex gap-2">
                   <Textarea
+                    ref={textarea}
+                    aria-label="Message the assistant"
                     value={input}
                     onChange={(event) => setInput(event.target.value)}
                     onCompositionStart={() => { composing.current = true; }}
@@ -586,9 +531,8 @@ export function AssistantDialog({
                         submit();
                       }
                     }}
-                    placeholder="Ask about status, risks, or next steps (Enter to send, Shift+Enter for newline)"
+                    placeholder={sendMessage.isPending ? "Draft your next message..." : "Message the assistant..."}
                     className="min-h-20 max-h-48 resize-none overflow-y-auto"
-                    disabled={sendMessage.isPending}
                   />
                   <Button
                     size="icon"
@@ -604,18 +548,7 @@ export function AssistantDialog({
                     )}
                   </Button>
                 </div>
-                {projectId && requirementId && (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="mt-2"
-                    onClick={() => submit("propose_task")}
-                    disabled={!input.trim() || sendMessage.isPending}
-                  >
-                    Propose task
-                  </Button>
-                )}
+                <p className="mt-2 text-[10px] text-muted-foreground">Enter to send · Shift+Enter for a new line</p>
               </div>
             </>
           )}

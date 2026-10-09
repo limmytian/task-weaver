@@ -6,6 +6,7 @@ import { lockIdentityLifecycle } from "./auth-security";
 import { resourceAuthority } from "./resource-authorization";
 import { credentialBinding, requireLocalHost, requireMcpServer } from "./mcp-authorization";
 import { callTool, type McpPool } from "./mcp-registry";
+import { redactAssistantValues } from "./assistant-assets";
 
 async function requireQueuedTool(db: Database, item: typeof mcpLocalRequests.$inferSelect) {
   const tool = item.toolId ? await db.query.mcpTools.findFirst({ where: eq(mcpTools.id, item.toolId) }) : undefined;
@@ -29,11 +30,7 @@ export async function invokeMcpTool(db: Database, context: VerifiedRequestContex
     if (!server.active || server.expiresAt && server.expiresAt <= new Date()) throw new NotFoundError("Resource not found");
     if (server.transport !== "stdio") {
       const partition = actor.id + ":" + credentialBinding(context);
-      const result = await callTool(database, toolId, args, actor, {
-        getOrConnect: record => pool.getOrConnect({ ...record, authorizationPartition: partition }),
-        disconnect: id => pool.disconnect(id), isConnected: id => pool.isConnected(id),
-      });
-      return { result };
+      return { remote: { server, tool, partition } };
     }
     requireLocalHost(server, context);
     await tx.update(mcpLocalRequests).set({ status: "cancelled", arguments: null, result: null, callerContext: {}, leaseHash: null })
@@ -48,7 +45,32 @@ export async function invokeMcpTool(db: Database, context: VerifiedRequestContex
     }).returning();
     return { request: request! };
   });
-  if ("result" in prepared) return prepared.result!;
+  if ("remote" in prepared) {
+    const remote = prepared.remote!;
+    const revalidate = async () => db.transaction(async tx => {
+      await lockIdentityLifecycle(tx);
+      const database = tx as unknown as Database;
+      const authority = await resourceAuthority(database, context);
+      const server = await requireMcpServer(database, authority, context, remote.server.id, "mcp.invoke");
+      const tool = await tx.query.mcpTools.findFirst({ where: eq(mcpTools.id, toolId) });
+      if (!server.active || server.expiresAt && server.expiresAt <= new Date() || !tool
+        || tool.serverId !== remote.server.id || tool.name !== remote.tool.name
+        || server.transport !== remote.server.transport || JSON.stringify(server.config) !== JSON.stringify(remote.server.config)) throw new AuthorizationError();
+    });
+    // External connections/calls must not hold lifecycle locks needed by cancellation or progress reads.
+    const result = await callTool(db, toolId, args, actor, {
+      getOrConnect: async record => {
+        await revalidate();
+        if (record.id !== remote.server.id) throw new AuthorizationError();
+        const client = await pool.getOrConnect({ ...remote.server, authorizationPartition: remote.partition });
+        return { listTools: () => client.listTools(), callTool: async input => { await revalidate(); return client.callTool(input); } };
+      },
+      disconnect: id => pool.disconnect(id), isConnected: id => pool.isConnected(id),
+    });
+    await revalidate();
+    const headers = (remote.server.config as { headers?: Record<string, string> }).headers ?? {};
+    return redactAssistantValues(result, Object.values(headers));
+  }
   const request = prepared.request;
   try {
     while (Date.now() < request.expiresAt.getTime()) {

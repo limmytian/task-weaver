@@ -1,3 +1,5 @@
+import { authorizeAssistantReadReference, type AssistantReadReference } from "./assistant-read-tools";
+import { assistantDeletedReference } from "./assistant-assets";
 import { lockIdentityLifecycle } from "./auth-security";
 import { and, eq, sql } from "drizzle-orm";
 import { assistantActions, assistantMessages, assistantConversations, tiAgentPolicies, activityLog, type Database } from "@task-weaver/db";
@@ -43,7 +45,8 @@ export function createAssistantService(identity: VerifiedRequestContext) {
     for (const message of result.messages) {
       const snapshot = record(message.contextSnapshot);
       for (const reference of Array.isArray(snapshot.toolReads) ? snapshot.toolReads : []) {
-        if (["project", "requirement", "task", "document"].includes(reference.kind)) await requireResource(db, live, reference.kind, reference.id);
+        if (!await assistantDeletedReference(db, result.actions, reference.kind, reference.id))
+          await authorizeAssistantReadReference(db, identity, reference as AssistantReadReference);
       }
       const current = record(snapshot.current);
       const workspace = record(snapshot.workspace);
@@ -56,16 +59,19 @@ export function createAssistantService(identity: VerifiedRequestContext) {
         if (current[kind]?.id) await requireResource(db, live, kind, current[kind].id);
       }
       for (const [kind, rows] of [["requirement", state.requirements], ["task", state.tasks], ["document", retrieval.documents], ["memory", retrieval.memories]] as const) {
-        for (const row of Array.isArray(rows) ? rows : []) if (row.id) await requireResource(db, live, kind, row.id);
+        for (const row of Array.isArray(rows) ? rows : []) if (row.id && !await assistantDeletedReference(db, result.actions, kind, row.id)) await requireResource(db, live, kind, row.id);
       }
       for (const row of Array.isArray(state.schedules) ? state.schedules : []) await services.scheduleService.getSchedule(db, row.id);
       if (current.schedule?.id) await services.scheduleService.getSchedule(db, current.schedule.id);
-      for (const row of Array.isArray(retrieval.mcpTools) ? retrieval.mcpTools : []) await requireResource(db, live, "mcp", row.serverId);
+      for (const row of Array.isArray(retrieval.mcpTools) ? retrieval.mcpTools : []) {
+        if (!await assistantDeletedReference(db, result.actions, "mcp", row.serverId)) await requireResource(db, live, "mcp", row.serverId);
+      }
     }
     for (const action of result.actions) {
       const execution = record(action.executionResult);
-      if (["project", "requirement", "task", "document"].includes(execution.entityType) && execution.entityId)
-        await requireResource(db, live, execution.entityType, execution.entityId);
+      if (["project", "requirement", "task", "document", "memory", "package", "mcp"].includes(execution.entityType) && execution.entityId
+        && !await assistantDeletedReference(db, result.actions, execution.entityType, execution.entityId))
+        await authorizeAssistantReadReference(db, identity, { kind: execution.entityType, id: execution.entityId });
       if (execution.entityType === "schedule") await services.scheduleService.getSchedule(db, execution.entityId);
       if (execution.entityType === "ti_agent_run") await services.tiAgentService.getRun(db, execution.entityId);
     }
@@ -95,14 +101,14 @@ export function createAssistantService(identity: VerifiedRequestContext) {
       .from(assistantMessages).innerJoin(assistantConversations, eq(assistantMessages.conversationId, assistantConversations.id))
       .where(and(eq(assistantMessages.role, "user"), eq(assistantConversations.createdBy, actor.id),
         eq(assistantConversations.createdByType, actor.type), sql`${assistantMessages.metadata}->>'requestId' = ${requestId}`)).limit(1);
-    if (!match) return { status: "not_found" as const, result: null };
+    if (!match) return { status: "not_found" as const, result: null, progress: null };
     const data = await history(db, match.conversationId);
     const userMessage = data.messages.find(message => message.id === match.id)!;
     const metadata = userMessage.metadata as Record<string, unknown> | null;
     const assistantMessage = data.messages.find(message => message.role === "assistant"
       && (message.metadata as Record<string, unknown> | null)?.responseTo === userMessage.id);
-    if (!assistantMessage || metadata?.processing === "running") return { status: metadata?.processing === "failed" ? "failed" as const : "running" as const, result: null };
-    return { status: "completed" as const, result: { conversation: data.conversation, userMessage, assistantMessage,
+    if (!assistantMessage || metadata?.processing === "running") return { status: metadata?.processing === "failed" ? "failed" as const : "running" as const, result: null, progress: { actions: data.actions.filter(action => action.messageId === userMessage.id) } };
+    return { status: "completed" as const, progress: null, result: { conversation: data.conversation, userMessage, assistantMessage,
       actions: data.actions.filter(action => action.messageId === userMessage.id || action.messageId === assistantMessage.id) } };
   }
   return {
