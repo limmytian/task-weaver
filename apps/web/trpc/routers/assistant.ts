@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  createAssistantService,
+  createAssistantService, createChatModelService, saveChatModelSchema, chatModelIdSchema,
   updateAssistantPolicySchema,
   buildAssistantContextSchema,
   executeAssistantActionSchema,
@@ -12,6 +12,10 @@ import {
 import { router, ordinaryResourceProcedure } from "../init";
 
 export const assistantRouter = router({
+  listModels: ordinaryResourceProcedure.query(({ ctx }) => createChatModelService(ctx.identity).list(ctx.db)),
+  saveModel: ordinaryResourceProcedure.input(saveChatModelSchema).mutation(({ ctx, input }) => createChatModelService(ctx.identity).save(ctx.db, input)),
+  deleteModelKey: ordinaryResourceProcedure.input(chatModelIdSchema).mutation(({ ctx, input }) => createChatModelService(ctx.identity).deleteKey(ctx.db, input.id)),
+  testModel: ordinaryResourceProcedure.input(chatModelIdSchema).mutation(({ ctx, input }) => createChatModelService(ctx.identity).test(ctx.db, input.id)),
   getPolicy: ordinaryResourceProcedure.query(({ ctx }) => createAssistantService(ctx.identity).getPolicy(ctx.db)),
   updatePolicy: ordinaryResourceProcedure.input(updateAssistantPolicySchema).mutation(({ ctx, input }) => createAssistantService(ctx.identity).updatePolicy(ctx.db, input)),
   listConversations: ordinaryResourceProcedure

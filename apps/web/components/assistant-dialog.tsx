@@ -1,5 +1,7 @@
 "use client";
 
+import { shouldSendChatMessage } from "@/lib/chat-input";
+import { ChatModelSettings } from "./chat-model-settings";
 import { AssistantSettings } from "./assistant-settings";
 import { useMemo, useRef, useState } from "react";
 import {
@@ -276,7 +278,7 @@ export function AssistantDialog({
         </SheetTrigger>
         <SheetContent className="flex w-full flex-col p-0 sm:max-w-xl">
           <SheetHeader className="border-b px-5 py-4">
-            <div className="flex items-center justify-between gap-3 pr-8">
+            <div className="flex flex-wrap items-center justify-between gap-2 pr-8">
               <div className="flex items-center gap-2">
                 <SheetTitle className="flex items-center gap-2 text-left">
                   <Sparkles aria-hidden="true" className="h-5 w-5" />
@@ -291,12 +293,14 @@ export function AssistantDialog({
                 </Badge>
               </div>
 
-              <div className="flex items-center gap-1">
+              <div className="flex flex-wrap items-center gap-1">
+                <ChatModelSettings compact />
                 <AssistantSettings />
                 <Button
                   size="sm"
                   variant="ghost"
                   className="h-8 gap-1.5 px-2.5 text-xs"
+                  disabled={sendMessage.isPending}
                   onClick={handleNewChat}
                   title="Start a new conversation"
                 >
@@ -308,6 +312,7 @@ export function AssistantDialog({
                   variant={showHistory ? "secondary" : "ghost"}
                   className="h-8 gap-1.5 px-2.5 text-xs"
                   onClick={() => setShowHistory(!showHistory)}
+                  disabled={sendMessage.isPending}
                   title="View conversation history"
                 >
                   <History className="h-3.5 w-3.5" />
@@ -543,7 +548,7 @@ export function AssistantDialog({
                     onCompositionStart={() => { composing.current = true; }}
                     onCompositionEnd={() => { composing.current = false; }}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !composing.current) {
+                      if (shouldSendChatMessage({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode }, composing.current)) {
                         event.preventDefault();
                         submit();
                       }

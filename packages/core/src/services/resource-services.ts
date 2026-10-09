@@ -728,5 +728,5 @@ function redactRepositoryResult(result: any): any {
 function redactMetadataResult(value: any, group: string): any {
   if (Array.isArray(value)) return value.map(item => redactMetadataResult(item, group));
   if (!value || typeof value !== "object" || value instanceof Date) return value;
-  return Object.fromEntries(Object.entries(value).filter(([key]) => !["authorization", "apiKeyRef", "baseUrl", "sandboxSessionId", "eventLog", "errorMessage", "leaseOwnerId", "leaseOwnerType", "leaseExpiresAt"].includes(key)).map(([key, item]) => [key, group === "activity" && key === "metadata" ? {} : redactMetadataResult(item, group)]));
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !["authorization", "apiKeyRef", "encryptedApiKey", "baseUrl", "sandboxSessionId", "eventLog", "errorMessage", "leaseOwnerId", "leaseOwnerType", "leaseExpiresAt"].includes(key)).map(([key, item]) => [key, group === "activity" && key === "metadata" ? {} : redactMetadataResult(item, group)]));
 }

@@ -19,7 +19,7 @@ const safeText = (value: string) => value.replace(/(?:tw|twd|twb)_[0-9a-f]{64}/g
 function redact(value: any): any {
   if (typeof value === 'string') return safeText(value);
   if (Array.isArray(value)) return value.map(redact);
-  if (value && Object.getPrototypeOf(value) === Object.prototype) return Object.fromEntries(Object.entries(value).filter(([key]) => !['authorization', 'apiKeyRef', 'baseUrl'].includes(key)).map(([key, item]) => [key, redact(item)]));
+  if (value && Object.getPrototypeOf(value) === Object.prototype) return Object.fromEntries(Object.entries(value).filter(([key]) => !['authorization', 'apiKeyRef', 'encryptedApiKey', 'baseUrl'].includes(key)).map(([key, item]) => [key, redact(item)]));
   return value;
 }
 

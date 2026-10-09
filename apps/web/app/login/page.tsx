@@ -99,7 +99,7 @@ export default function LoginPage() {
           Instance setup status is unavailable. You can still sign in.
         </p>
       )}
-      <form key={mode} onSubmit={submit} className="space-y-4">
+      <form key={mode} method="post" onSubmit={submit} className="space-y-4">
         {mode !== "activate" && (
           <div className="space-y-2">
             <label className="text-sm font-medium" htmlFor="email">

@@ -1,9 +1,11 @@
-import { authorizeMetadataOperation, schedulePredicate } from "./metadata-authorization";
+import { createChatModelService } from "./chat-models";
+import { requestChatCompletion } from "./chat-endpoint";
+import { schedulePredicate } from "./metadata-authorization";
 import { mcpServerPredicate } from "./mcp-authorization";
 import { createResourceServices } from './resource-services';
 import { getLiveRequestAuthority } from './api-keys';
 import { lockIdentityLifecycle } from './auth-security';
-import { resourcePredicate, taskResourcePredicate, memoryResourcePredicate, requireResource } from './resource-authorization';
+import { resourcePredicate, taskResourcePredicate, memoryResourcePredicate, requireResource, requireScope } from './resource-authorization';
 import { AuthorizationError, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import {
@@ -37,7 +39,6 @@ import type {
   UpdateAssistantActionStatusInput,
 } from "@task-weaver/contracts";
 import type { TaskStatus } from "@task-weaver/contracts";
-import { resolveModel } from "./ti-agent";
 
 
 const REDACTED = "[redacted]";
@@ -48,49 +49,9 @@ type RequirementRow = typeof requirements.$inferSelect;
 type TaskRow = typeof tasks.$inferSelect;
 type ScheduleRow = typeof schedules.$inferSelect;
 type AssistantActionRow = typeof assistantActions.$inferSelect;
-type ResolvedTiModel = Awaited<ReturnType<typeof resolveModel>>;
-
-type ChatCompletionResponse = {
-  choices?: Array<{
-    message?: {
-      content?: string | null;
-    };
-    text?: string | null;
-  }>;
-  error?: {
-    message?: string;
-  };
-};
-
 function truncate(value: string | null | undefined, limit: number) {
   if (!value) return value ?? null;
   return value.length > limit ? `${value.slice(0, limit)}...` : value;
-}
-
-function resolveApiKey(ref: string | null | undefined, provider: string) {
-  const normalizedRef = ref?.trim();
-  const candidates = [];
-
-  if (normalizedRef?.startsWith("env://")) candidates.push(normalizedRef.slice("env://".length));
-  else if (normalizedRef?.startsWith("env:")) candidates.push(normalizedRef.slice("env:".length));
-  else if (normalizedRef && /^[A-Z][A-Z0-9_]*$/.test(normalizedRef)) candidates.push(normalizedRef);
-  else if (normalizedRef?.startsWith("sk-")) return normalizedRef;
-
-  candidates.push(`${provider.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`);
-  if (provider === "openai") candidates.push("OPENAI_API_KEY");
-
-  const env = globalThis.process?.env ?? {};
-  const keyName = candidates.find((candidate) => env[candidate]);
-  if (!keyName) {
-    throw new ValidationError(`No API key found for ${provider}. Set apiKeyRef to an environment variable name.`);
-  }
-  return env[keyName]!;
-}
-
-function resolveBaseUrl(baseUrl: string | null | undefined, provider: string) {
-  if (baseUrl) return baseUrl.replace(/\/+$/, "");
-  if (provider === "openai") return "https://api.openai.com/v1";
-  throw new ValidationError(`No base URL configured for ${provider}`);
 }
 
 function buildModelPrompt(contextSnapshot: Record<string, unknown>, message: string, workflow?: string) {
@@ -104,53 +65,17 @@ function buildModelPrompt(contextSnapshot: Record<string, unknown>, message: str
 }
 
 async function generateModelResponse(
-  resolved: ResolvedTiModel,
+  model: Awaited<ReturnType<ReturnType<typeof createChatModelService>["resolve"]>>,
   contextSnapshot: Record<string, unknown>,
   input: SendAssistantMessageInput,
 ) {
-  if (!resolved.config) throw new ValidationError("Resolved Ti model has no stored configuration");
-
-  const provider = resolved.config.provider;
-  const baseUrl = resolveBaseUrl(resolved.config.baseUrl, provider);
-  const apiKey = resolveApiKey(resolved.config.apiKeyRef, provider);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45_000);
-
-  try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: resolved.config.model,
-        messages: [
-          {
-            role: "system",
-            content: "You are the Task Weaver assistant inside a project management app. Answer from the provided context and propose reviewable next steps when useful.",
-          },
-          {
-            role: "user",
-            content: buildModelPrompt(contextSnapshot, input.message, input.workflow),
-          },
-        ],
-        temperature: 0.2,
-      }),
-      signal: controller.signal,
-    });
-
-    const payload = await response.json().catch(() => ({})) as ChatCompletionResponse;
-    if (!response.ok) {
-      throw new ValidationError(payload.error?.message ?? `Model request failed with ${response.status}`);
-    }
-
-    const content = payload.choices?.[0]?.message?.content ?? payload.choices?.[0]?.text;
-    if (!content?.trim()) throw new ValidationError("Model response did not include assistant content");
-    return content.trim();
-  } finally {
-    clearTimeout(timeout);
-  }
+  return requestChatCompletion(model.config.baseUrl!, model.apiKey, {
+    model: model.config.model,
+    messages: [
+      { role: "system", content: "You are the Task Weaver assistant. Answer from the provided context and propose reviewable next steps." },
+      { role: "user", content: buildModelPrompt(contextSnapshot, input.message, input.workflow) },
+    ], temperature: 0.2,
+  });
 }
 
 function redactValue(value: unknown): unknown {
@@ -341,6 +266,7 @@ export async function buildAssistantContext(
     : [];
 
   const docConditions = [projectOrGlobalCondition(projectId, input.includeGlobal), resourcePredicate(authority, documents)];
+  if (!input.includePersonal) docConditions.push(isNull(documents.personalOwnerId));
   if (intent) docConditions.push(textSearchCondition(documents, intent)!);
   const documentRows = limits.documents > 0
     ? await db
@@ -1251,6 +1177,7 @@ export async function sendReadOnlyMessage(
   identity?: VerifiedRequestContext,
 ) {
   if (!identity) throw new AuthorizationError();
+  const resolved = await createChatModelService(identity).resolve(db, input.requestedProvider, input.requestedModel);
   const conversation = input.conversationId
     ? await db.query.assistantConversations.findFirst({
       where: eq(assistantConversations.id, input.conversationId),
@@ -1277,33 +1204,31 @@ export async function sendReadOnlyMessage(
     identity,
   ) as Record<string, unknown>;
 
+
+
+  const content = await generateModelResponse(resolved, contextSnapshot, input);
+  const model = { requestedProvider: input.requestedProvider ?? null, requestedModel: input.requestedModel ?? null,
+    actualProvider: resolved.config.provider, actualModel: resolved.config.model, fallbackReason: null };
+  const modelError = null;
+
+  // A model request can outlive a membership or credential revocation.
+  const live = await getLiveRequestAuthority(db, identity);
+  if (live.actor.id !== actor.id || live.actor.type !== actor.type) throw new AuthorizationError();
+  requireScope(live, { personalOwnerId: actor.id, personalOwnerType: "human" }, "resource.write");
+  const current = getContextRecord(contextSnapshot.current);
+  for (const kind of ["project", "requirement", "task"] as const) {
+    const resource = getContextRecord(current[kind]);
+    if (typeof resource.id === "string") await requireResource(db, live, kind, resource.id);
+  }
+  if (input.context.scheduleId) await createResourceServices(identity).scheduleService.getSchedule(db, input.context.scheduleId);
+
   const userMessage = await createMessage(db, {
     conversationId: conversation.id,
     role: "user",
     content: input.message,
     contextSnapshot,
-    metadata: { readOnly: true },
+    metadata: { requiresActionAuthorization: true },
   }, actor);
-
-  let model: ResolvedTiModel | null = null;
-  let modelError: string | null = null;
-  try {
-    const modelCall = [db, { requestedProvider: input.requestedProvider, requestedModel: input.requestedModel, target: "chat" }, actor];
-    await authorizeMetadataOperation(db, await getLiveRequestAuthority(db, identity), "ti", "resolveModel", modelCall);
-    model = await resolveModel(db, modelCall[1] as Parameters<typeof resolveModel>[1], actor);
-  } catch (err) {
-    modelError = err instanceof Error ? err.message : "Ti model resolution failed";
-  }
-
-  const workflowPrompt = getWorkflowPrompt(input.workflow);
-  let content = generateReadOnlyResponse(contextSnapshot, workflowPrompt ?? input.message, input.workflow);
-  if (model && !modelError) {
-    try {
-      content = await generateModelResponse(model, contextSnapshot, input);
-    } catch (err) {
-      modelError = err instanceof Error ? err.message : "Ti model request failed";
-    }
-  }
 
   const assistantMessage = await createMessage(db, {
     conversationId: conversation.id,
@@ -1312,7 +1237,7 @@ export async function sendReadOnlyMessage(
     provider: model?.actualProvider ?? null,
     model: model?.actualModel ?? null,
     metadata: {
-      readOnly: true,
+      requiresActionAuthorization: true,
       workflow: input.workflow ?? null,
       tiBacked: modelError ? false : true,
       requestedProvider: model?.requestedProvider ?? input.requestedProvider ?? null,
@@ -1321,7 +1246,6 @@ export async function sendReadOnlyMessage(
       actualModel: model?.actualModel ?? null,
       fallbackReason: model?.fallbackReason ?? null,
       modelError,
-      actionExecutionAllowed: false,
     },
   }, actor);
 

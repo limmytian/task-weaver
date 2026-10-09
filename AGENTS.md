@@ -106,8 +106,8 @@ pnpm typecheck        # Type check all packages
 ## Development and Delivery
 
 - GitHub `limmytian/task-weaver` is the canonical product source repository.
-- Develop the next patch release directly on `0.3.4`, based on the latest
-  canonical `0.3.3` code. Push each completed requirement to the remote `0.3.4`
+- Develop the next patch release directly on `0.3.5`, based on the latest
+  canonical `0.3.4` code. Push each completed requirement to the remote `0.3.5`
   branch. Do not merge to `main` until the owner authorizes the version release
   merge.
 - Every commit must include a DCO signoff (`git commit -s`).

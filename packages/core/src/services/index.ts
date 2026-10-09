@@ -63,3 +63,5 @@ export { createTiExecutionService } from "./ti-execution";
 export { inspectOwnershipMigration, applyOwnershipMigration, ownershipMigrationManifestSchema } from "./auth-ownership-migration";
 
 export { createAssistantService } from "./assistant-authorization";
+
+export { createChatModelService } from "./chat-models";

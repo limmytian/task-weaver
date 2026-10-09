@@ -1,6 +1,7 @@
-import { updateAssistantPolicySchema } from "@task-weaver/contracts"
+import { readFile } from "node:fs/promises"
+import { saveChatModelSchema, updateAssistantPolicySchema } from "@task-weaver/contracts"
 import { Command } from 'commander'
-import { get, post, put, patch } from '../client.js'
+import { get, post, put, patch, del } from '../client.js'
 import { printJson, printKv, printTable } from '../output.js'
 
 function delay(ms: number) {
@@ -20,6 +21,30 @@ export function registerTiAgent(program: Command): void {
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)
     })
+
+  const chatModels = ti.command('chat-model').description('manage personal Chat models and encrypted keys')
+  chatModels.command('list').option('--json', 'output raw JSON').action(async opts => {
+    const data = await get('/api/v1/assistant/models')
+    if (opts.json) return printJson(data)
+    printTable(data as Record<string, unknown>[], ['id', 'provider', 'model', 'credentialStatus', 'hasApiKey', 'isDefaultChat'])
+  })
+  chatModels.command('save').requiredOption('--file <path>', 'protected JSON file with model settings and optional API key')
+    .option('--json', 'output masked model metadata').action(async opts => {
+      const input = saveChatModelSchema.parse(JSON.parse(await readFile(opts.file, 'utf8')))
+      const data = await post('/api/v1/assistant/models', input)
+      if (opts.json) return printJson(data)
+      printKv(data as Record<string, unknown>)
+    })
+  chatModels.command('delete-key <id>').option('--json', 'output raw JSON').action(async (id, opts) => {
+    const data = await del(`/api/v1/assistant/models/${id}/key`)
+    if (opts.json) return printJson(data)
+    printKv(data as Record<string, unknown>)
+  })
+  chatModels.command('test <id>').option('--json', 'output connection result').action(async (id, opts) => {
+    const data = await post(`/api/v1/assistant/models/${id}/test`, {})
+    if (opts.json) return printJson(data)
+    printKv(data as Record<string, unknown>)
+  })
 
   const config = ti.command('config').description('manage Ti provider/model configs')
 

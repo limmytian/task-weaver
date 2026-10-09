@@ -24,6 +24,8 @@ export const tiAgentModelConfigs = pgTable(
     baseUrl: text("base_url"),
     label: text("label"),
     apiKeyRef: text("api_key_ref"),
+    encryptedApiKey: text("encrypted_api_key"),
+    apiKeyMask: text("api_key_mask"),
     credentialStatus: text("credential_status", {
       enum: ["unknown", "valid", "invalid", "missing"],
     }).default("unknown").notNull(),

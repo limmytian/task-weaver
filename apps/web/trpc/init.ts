@@ -112,7 +112,7 @@ const t = initTRPC.context<TRPCContext>().create({
     return {
       ...shape,
       message:
-        shape.data.code === "BAD_REQUEST" ? "Invalid request" : shape.message,
+        shape.data.code === "BAD_REQUEST" && !authCode?.startsWith("chat_") ? "Invalid request" : shape.message,
       data: { ...data, authCode },
     };
   },

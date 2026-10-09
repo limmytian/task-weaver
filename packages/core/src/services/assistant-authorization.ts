@@ -33,6 +33,44 @@ export function createAssistantService(identity: VerifiedRequestContext) {
       taskId: row.taskId ?? undefined, scheduleId: row.scheduleId ?? undefined });
     return row;
   }
+  async function history(db: Database, id: string) {
+    await conversation(db, id);
+    const actor = await scope(db, {});
+    const result = await implementation.getConversation(db, id, actor);
+    const live = await authority(db);
+    const services = createResourceServices(identity);
+    const record = (value: unknown): Record<string, any> => value && typeof value === "object" ? value as Record<string, any> : {};
+    for (const message of result.messages) {
+      const snapshot = record(message.contextSnapshot);
+      const current = record(snapshot.current);
+      const state = record(snapshot.projectState);
+      const retrieval = record(snapshot.retrieval);
+      for (const kind of ["project", "requirement", "task"] as const) {
+        if (current[kind]?.id) await requireResource(db, live, kind, current[kind].id);
+      }
+      for (const [kind, rows] of [["requirement", state.requirements], ["task", state.tasks], ["document", retrieval.documents], ["memory", retrieval.memories]] as const) {
+        for (const row of Array.isArray(rows) ? rows : []) if (row.id) await requireResource(db, live, kind, row.id);
+      }
+      for (const row of Array.isArray(state.schedules) ? state.schedules : []) await services.scheduleService.getSchedule(db, row.id);
+      if (current.schedule?.id) await services.scheduleService.getSchedule(db, current.schedule.id);
+      for (const row of Array.isArray(retrieval.mcpTools) ? retrieval.mcpTools : []) await requireResource(db, live, "mcp", row.serverId);
+    }
+    for (const action of result.actions) {
+      const execution = record(action.executionResult);
+      if (["project", "requirement", "task", "document"].includes(execution.entityType) && execution.entityId)
+        await requireResource(db, live, execution.entityType, execution.entityId);
+      if (execution.entityType === "schedule") await services.scheduleService.getSchedule(db, execution.entityId);
+      if (execution.entityType === "ti_agent_run") await services.tiAgentService.getRun(db, execution.entityId);
+    }
+    return result;
+  }
+  async function matchingConversation(db: Database, id: string, input: BuildAssistantContextInput) {
+    const row = await conversation(db, id);
+    for (const field of ["projectId", "requirementId", "taskId", "scheduleId"] as const) {
+      if ((input[field] ?? null) !== row[field]) throw new AuthorizationError();
+    }
+    await history(db, id);
+  }
   async function write(db: Database) {
     const live = await authority(db);
     requireScope(live, { personalOwnerId: live.actor.id, personalOwnerType: "human" }, "resource.write");
@@ -84,8 +122,7 @@ export function createAssistantService(identity: VerifiedRequestContext) {
       return visible;
     },
     async getConversation(db: Database, id: string) {
-      await conversation(db, id);
-      return implementation.getConversation(db, id, await scope(db, {}));
+      return history(db, id);
     },
     async renameConversation(db: Database, input: Parameters<typeof implementation.renameConversation>[1]) {
       await write(db);
@@ -99,13 +136,13 @@ export function createAssistantService(identity: VerifiedRequestContext) {
     },
     async buildAssistantContext(db: Database, input: BuildAssistantContextInput) {
       const actor = await scope(db, input);
-      if (input.conversationId) await conversation(db, input.conversationId);
+      if (input.conversationId) await matchingConversation(db, input.conversationId, input);
       return implementation.buildAssistantContext(db, input, actor, identity);
     },
     async sendReadOnlyMessage(db: Database, input: Parameters<typeof implementation.sendReadOnlyMessage>[1]) {
       await write(db);
       const actor = await scope(db, input.context);
-      if (input.conversationId) await conversation(db, input.conversationId);
+      if (input.conversationId) await matchingConversation(db, input.conversationId, input.context);
       return implementation.sendReadOnlyMessage(db, input, actor, identity);
     },
     async executeApprovedAction(db: Database, id: string) {

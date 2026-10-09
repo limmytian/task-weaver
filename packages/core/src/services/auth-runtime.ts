@@ -7,6 +7,7 @@ import {
   ConflictError,
   NotFoundError,
   ValidationError,
+  ChatConfigurationError,
 } from "@task-weaver/contracts";
 import {
   createAuthenticationService,
@@ -71,6 +72,7 @@ export function requireResourceAuthorization(): never {
 
 /** Unexpected errors can carry SQL parameters, passwords or provider tokens. */
 export function authenticationFailure(error: unknown) {
+  if (error instanceof ChatConfigurationError) return { status: 400 as const, error: error.message, code: error.code };
   if (error instanceof AuthenticationError)
     return { status: 401 as const, error: error.message, code: error.code };
   if (error instanceof AuthorizationError)

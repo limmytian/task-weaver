@@ -332,3 +332,16 @@ export const assistantPolicySchema = z.object({
 }).strict();
 export const updateAssistantPolicySchema = assistantPolicySchema.partial().strict();
 export type AssistantPolicy = z.infer<typeof assistantPolicySchema>;
+
+export const saveChatModelSchema = z.object({
+  provider: z.string().trim().min(1).max(120),
+  model: z.string().trim().min(1).max(200),
+  baseUrl: z.string().url().max(500).optional(),
+  label: z.string().max(200).nullable().optional(),
+  apiKey: z.string().trim().min(1).max(4096).regex(/^[^\s\x00-\x1f\x7f]+$/, "API keys cannot contain whitespace or control characters").optional(),
+  credentialStatus: z.enum(["unknown", "valid", "invalid", "missing"]).optional(),
+  enabled: z.boolean().optional(),
+  isDefaultChat: z.boolean().optional(),
+  isDefaultAgent: z.boolean().optional(),
+}).strict();
+export const chatModelIdSchema = z.object({ id: z.string().uuid() }).strict();

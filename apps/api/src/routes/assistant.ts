@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import {
-  createAssistantService,
+  createAssistantService, createChatModelService, saveChatModelSchema, chatModelIdSchema,
   updateAssistantPolicySchema,
   buildAssistantContextSchema,
   executeAssistantActionSchema,
@@ -14,6 +14,22 @@ import {
 import type { Env } from "../middleware/actor.js";
 
 const assistantRoutes = new Hono<Env>();
+assistantRoutes.get("/models", async c => c.json(await createChatModelService(c.get("identity")).list(c.get("db"))));
+assistantRoutes.post("/models", async c => {
+  const input = saveChatModelSchema.safeParse(await c.req.json());
+  if (!input.success) return c.json({ error: "Invalid Chat model settings" }, 400);
+  return c.json(await createChatModelService(c.get("identity")).save(c.get("db"), input.data));
+});
+assistantRoutes.delete("/models/:id/key", async c => {
+  const input = chatModelIdSchema.safeParse({ id: c.req.param("id") });
+  if (!input.success) return c.json({ error: "Invalid model ID" }, 400);
+  return c.json(await createChatModelService(c.get("identity")).deleteKey(c.get("db"), input.data.id));
+});
+assistantRoutes.post("/models/:id/test", async c => {
+  const input = chatModelIdSchema.safeParse({ id: c.req.param("id") });
+  if (!input.success) return c.json({ error: "Invalid model ID" }, 400);
+  return c.json(await createChatModelService(c.get("identity")).test(c.get("db"), input.data.id));
+});
 assistantRoutes.get("/policy", async c => c.json(await createAssistantService(c.get("identity")).getPolicy(c.get("db"))));
 assistantRoutes.patch("/policy", async c => {
   const input = updateAssistantPolicySchema.safeParse(await c.req.json());
