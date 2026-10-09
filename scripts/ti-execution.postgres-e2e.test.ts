@@ -154,6 +154,8 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     const [action] = await db.insert(assistantActions).values({ conversationId: conversation.id, actionType: "add_comment", payload: { taskId: task.id, content: "Approved work" } }).returning();
     await assert.rejects(() => assistantService.executeApprovedAction(db, action.id, owner.actor));
     await assert.rejects(() => assistantService.executeApprovedAction(db, action.id, outsider.actor, outsider.context));
+    await assert.rejects(() => assistantService.executeApprovedAction(db, action.id, owner.actor, owner.context));
+    await db.update(tiAgentPolicies).set({ assistantAutoEnabled: true, assistantAutoMode: "live" }).where(eq(tiAgentPolicies.ownerId, owner.actor.id));
     const completed = await assistantService.executeApprovedAction(db, action.id, owner.actor, owner.context);
     assert.equal(completed.status, "succeeded");
     assert.equal(completed.approvalActorId, owner.actor.id);
