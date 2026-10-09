@@ -449,6 +449,13 @@
       "when": 1791540000000,
       "tag": "0063_assistant_ti_action_type",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1791562715159,
+      "tag": "0064_assistant_platform_operations",
+      "breakpoints": true
     }
   ]
 }

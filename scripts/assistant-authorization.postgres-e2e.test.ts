@@ -169,16 +169,18 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.ok(!JSON.stringify(deniedResults).includes(hiddenDoc.content));
   assert.equal((await owner.service.taskService.getTask(db, task.id)).title, "Task");
   const beforeLoop = calls;
-  for (let round = 0; round < 6; round++) modelReplies.push({ content: null, tool_calls: [toolCall("list_projects", {})] });
+  for (let round = 0; round < 10; round++) modelReplies.push({ content: null, tool_calls: [toolCall("list_projects", {})] });
   await assert.rejects(ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ message: "Unbounded query fixture", context: {} })), /query limit reached/);
-  assert.equal(calls - beforeLoop, 6);
+  assert.equal(calls - beforeLoop, 10);
   assert.equal(lastModelPayload.tool_choice, "none");
   const proposed = await ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ ...input, proposedActions: [{ actionType: "update_task", payload: { taskId: task.id, title: "Reviewed task" } }] }));
   const action = proposed.actions[0];
   assert.ok(action);
   await assert.rejects(outsiderChat.executeApprovedAction(db, action.id), NotFoundError);
   await assert.rejects(ownerChat.updateActionStatus(db, action.id, { status: "succeeded", executionResult: { forged: true } }), AuthorizationError);
+  await ownerChat.updatePolicy(db, { assistantAutoEnabled: true, assistantAutoMode: "live" });
   const executed = await ownerChat.executeApprovedAction(db, action.id);
+  await ownerChat.updatePolicy(db, { assistantAutoEnabled: false });
   assert.equal(executed.status, "succeeded");
   assert.equal((await owner.service.taskService.getTask(db, task.id)).title, "Reviewed task");
   // Exercise the same structured task proposal and confirmation routes used by Chat.
@@ -186,42 +188,54 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.equal(taskProposal.actions[0].status, "proposed");
   const foreignExecution = await rest(`assistant/actions/${taskProposal.actions[0].id}/execute`, outsider.headers, "POST");
   assert.equal(foreignExecution.status, 404);
+  await ownerChat.updatePolicy(db, { assistantAutoEnabled: true, assistantAutoMode: "live" });
   const confirmedTask = await (await caller(owner.headers)).assistant.executeAction({ id: taskProposal.actions[0].id });
   assert.equal(confirmedTask.status, "succeeded");
   const createdTask = await owner.service.taskService.getTask(db, confirmedTask.executionResult.entityId);
   assert.equal(createdTask.title, "Confirmed Chat task");
   assert.equal(createdTask.requirementId, requirement.id);
+  await ownerChat.updatePolicy(db, { assistantAutoEnabled: false });
   const documentProposal = await rest("assistant/chat", owner.headers, "POST", { ...input, proposedActions: [{ actionType: "draft_document", payload: { projectId: project.id, title: "Confirmed Chat draft", content: "Reviewed content" } }] });
   assert.equal(documentProposal.status, 201);
+  await ownerChat.updatePolicy(db, { assistantAutoEnabled: true, assistantAutoMode: "live" });
   const confirmedDocument = await rest(`assistant/actions/${documentProposal.body.actions[0].id}/execute`, owner.headers, "POST");
   assert.equal(confirmedDocument.status, 200);
   assert.equal(confirmedDocument.body.status, "succeeded");
   const createdDocument = await owner.service.documentService.getDocument(db, confirmedDocument.body.executionResult.entityId);
   assert.equal(createdDocument.content, "Reviewed content");
   assert.equal(createdDocument.needsReview, true);
+  await ownerChat.updatePolicy(db, { assistantAutoEnabled: false });
   const noteProposal = await rest("assistant/chat", owner.headers, "POST", { ...input, proposedActions: [{ actionType: "add_note", payload: { taskId: task.id, content: "Confirmed Chat note", pinned: true } }] });
+  await ownerChat.updatePolicy(db, { assistantAutoEnabled: true, assistantAutoMode: "live" });
   const confirmedNote = await rest(`assistant/actions/${noteProposal.body.actions[0].id}/execute`, owner.headers, "POST");
   assert.equal(confirmedNote.status, 200);
   assert.equal(confirmedNote.body.executionResult.result.content, "Confirmed Chat note");
   assert.equal(confirmedNote.body.executionResult.result.pinned, true);
+  await ownerChat.updatePolicy(db, { assistantAutoEnabled: false });
   const scheduleProposal = await rest("assistant/chat", owner.headers, "POST", { ...input, proposedActions: [{ actionType: "create_schedule", payload: { projectId: project.id, requirementId: requirement.id, kind: "one_off", title: "Confirmed Chat schedule", startsAt: new Date(Date.now() + 86_400_000).toISOString(), taskTemplate: { title: "Scheduled follow-up" } } }] });
+  await ownerChat.updatePolicy(db, { assistantAutoEnabled: true, assistantAutoMode: "live" });
   const confirmedSchedule = await rest(`assistant/actions/${scheduleProposal.body.actions[0].id}/execute`, owner.headers, "POST");
   assert.equal(confirmedSchedule.status, 200);
   const scheduleId = confirmedSchedule.body.executionResult.entityId;
   assert.equal((await owner.service.scheduleService.getSchedule(db, scheduleId)).title, "Confirmed Chat schedule");
+  await ownerChat.updatePolicy(db, { assistantAutoEnabled: false });
   const pauseProposal = await rest("assistant/chat", owner.headers, "POST", { ...input, proposedActions: [{ actionType: "pause_schedule", payload: { scheduleId } }] });
+  await ownerChat.updatePolicy(db, { assistantAutoEnabled: true, assistantAutoMode: "live" });
   const paused = await rest(`assistant/actions/${pauseProposal.body.actions[0].id}/execute`, owner.headers, "POST");
   assert.equal(paused.status, 200);
   assert.equal((await owner.service.scheduleService.getSchedule(db, scheduleId)).status, "paused");
   // Queueing a Ti run must retain the independent execution entitlement check.
+  await ownerChat.updatePolicy(db, { assistantAutoEnabled: false });
   const queueProposal = await rest("assistant/chat", owner.headers, "POST", { ...input, proposedActions: [{ actionType: "queue_ti_run", payload: { taskId: task.id, assignedAgentId: viewer.actor.id } }] });
   assert.equal(queueProposal.status, 201);
   assert.equal(queueProposal.body.actions[0].status, "proposed");
+  await ownerChat.updatePolicy(db, { assistantAutoEnabled: true, assistantAutoMode: "live" });
   const deniedQueue = await rest(`assistant/actions/${queueProposal.body.actions[0].id}/execute`, owner.headers, "POST");
   assert.equal(deniedQueue.status, 403);
   await runtime.identity.setMembership(owner.headers, project.id, viewer.actor.id, { role: "viewer" });
   const viewerChat = createAssistantService(viewer.context);
   const viewerProposal = await viewerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ ...input, proposedActions: [{ actionType: "update_task", payload: { taskId: task.id, title: "Unauthorized edit" } }] }));
+  await viewerChat.updatePolicy(db, { assistantAutoEnabled: true, assistantAutoMode: "live" });
   await assert.rejects(viewerChat.executeApprovedAction(db, viewerProposal.actions[0].id), AuthorizationError);
   const deniedWrite = await rest(`assistant/actions/${viewerProposal.actions[0].id}/execute`, viewer.headers, "POST");
   assert.equal(deniedWrite.status, 403);
@@ -241,7 +255,52 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.equal(preview.actions[0].status, "proposed");
   await ownerChat.updatePolicy(db, { assistantAutoMode: "live", assistantActionAllowlist: [] });
   const empty = await ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ ...input, proposedActions: [{ actionType: "add_comment", payload: { taskId: task.id, content: "Blocked fixture comment" } }] }));
-  assert.equal(empty.actions[0].status, "proposed");
+  assert.equal(empty.actions[0].status, "succeeded");
+  assert.equal(empty.actions[0].executionResult.result.content, "Blocked fixture comment");
+  modelReplies.push(
+    { content: null, tool_calls: [toolCall("platform_operation_schema", { operation: "create_requirement" })] },
+    { content: null, tool_calls: [toolCall("platform_operation", { operation: "create_requirement", input: { projectId: project.id, title: "Chat-created requirement" } })] },
+    { content: "Requirement created through a real authorized operation" },
+  );
+  const naturalRequirement = await rest("assistant/chat", owner.headers, "POST", { message: "Create a requirement for the project", context: { projectId: project.id } });
+  assert.equal(naturalRequirement.status, 201);
+  assert.equal(naturalRequirement.body.actions[0].status, "succeeded");
+  const createdRequirementId = naturalRequirement.body.actions[0].executionResult.entityId;
+  assert.equal((await owner.service.requirementService.getRequirement(db, createdRequirementId)).title, "Chat-created requirement");
+  modelReplies.push(
+    { content: null, tool_calls: [toolCall("platform_operation", { operation: "create_task", input: { projectId: project.id, requirementId: createdRequirementId, title: "Chat-created task" } })] },
+    { content: "Task created through a real authorized operation" },
+  );
+  const naturalTask = await rest("assistant/chat", owner.headers, "POST", { message: "Create its first task", context: { projectId: project.id, requirementId: createdRequirementId } });
+  assert.equal(naturalTask.status, 201);
+  assert.equal(naturalTask.body.actions[0].status, "succeeded");
+  const createdTaskId = naturalTask.body.actions[0].executionResult.entityId;
+  assert.equal((await owner.service.taskService.getTask(db, createdTaskId)).requirementId, createdRequirementId);
+  modelReplies.push(
+    { content: null, tool_calls: [toolCall("platform_operation", { operation: "add_task_dependency", input: { taskId: createdTaskId, dependsOnTaskId: task.id, type: "blocks" } })] },
+    { content: "Dependency created" },
+  );
+  const orchestrated = await rest("assistant/chat", owner.headers, "POST", { message: "Make it depend on the existing task", context: { projectId: project.id } });
+  assert.equal(orchestrated.status, 201);
+  assert.equal(orchestrated.body.actions[0].status, "succeeded");
+  modelReplies.push(
+    { content: null, tool_calls: [toolCall("platform_operation", { operation: "create_execution_slice", input: { requirementId: createdRequirementId, title: "Chat execution plan", taskIds: [createdTaskId], allowParallel: false } })] },
+    { content: "Execution slice created" },
+  );
+  const sliceOperation = await rest("assistant/chat", owner.headers, "POST", { message: "Put the task in an ordered execution slice", context: { projectId: project.id } });
+  assert.equal(sliceOperation.status, 201);
+  assert.equal(sliceOperation.body.actions[0].status, "succeeded");
+  assert.equal((await owner.service.requirementService.listExecutionSlices(db, createdRequirementId))[0].title, "Chat execution plan");
+  modelReplies.push({ content: null, tool_calls: [toolCall("platform_operation", { operation: "create_requirement", input: { projectId: other.id, title: "Unauthorized requirement" } })] });
+  const foreignOperation = await rest("assistant/chat", owner.headers, "POST", { message: "Attempt a foreign project write", context: {} });
+  assert.equal(foreignOperation.status, 403);
+  assert.equal((await outsider.service.requirementService.listRequirements(db, { projectId: other.id })).length, 1);
+  await ownerChat.updatePolicy(db, { assistantAutoEnabled: false });
+  modelReplies.push({ content: null, tool_calls: [toolCall("platform_operation", { operation: "create_requirement", input: { projectId: project.id, title: "Forbidden requirement" } })] }, { content: "Operations are disabled" });
+  const deniedOperation = await rest("assistant/chat", owner.headers, "POST", { message: "Create while disabled", context: { projectId: project.id } });
+  assert.equal(deniedOperation.status, 201);
+  assert.equal(deniedOperation.body.actions.length, 0);
+  assert.ok(lastModelPayload.tools.every((tool: any) => !tool.function.name.startsWith("platform_operation")));
   const configs = await ownerModels.list(db);
   assert.equal(configs[0].hasApiKey, true);
   assert.ok(!JSON.stringify(configs).includes("fixture-personal-key"));

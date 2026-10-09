@@ -27,6 +27,7 @@ export const assistantActionTypeSchema = z.enum([
   "add_comment",
   "add_note",
   "draft_document",
+  "platform_operation",
 ]);
 export const assistantActionStatusSchema = z.enum([
   "proposed",
@@ -248,6 +249,7 @@ const draftDocumentActionPayloadSchema = z.object({
 });
 
 export const assistantActionProposalSchema = z.discriminatedUnion("actionType", [
+  z.object({ actionType: z.literal("platform_operation"), payload: z.object({ operation: z.string().min(1).max(100), input: z.record(z.unknown()) }).strict(), preview: z.string().optional() }),
   z.object({
     actionType: z.literal("create_task"),
     payload: createTaskActionPayloadSchema,

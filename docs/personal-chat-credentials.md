@@ -46,5 +46,18 @@ policy and are not supported by this self-service interface.
 
 Assistant action settings apply across all chats for the current account. Task and
 assistant policy writes change separate columns; saving either does not reset the
-other. Preview mode creates reviewable proposals without automatically applying
-resource changes. Manual approval always rechecks live resource permissions.
+other. Chat presents a single operation permission: read only or operations allowed.
+When allowed, the model can use validated platform operations for projects,
+requirements, tasks, dependencies, execution slices, documents, notes and schedules.
+Operations use the same verified business services as REST and the CLI, with the
+signed-in account as the actor. Existing action allowlists and daily assistant limits
+do not restrict this permission. Project execution policies, resource permissions,
+active leases and dependency rules remain independent and are rechecked for each
+operation. Each operation records its actual outcome in the conversation. Local CLI
+process management and shell execution are not Chat tools.
+
+Page Chat follows the current route: global outside a project, project within a
+project, and requirement on requirement detail pages. Task detail Chat supplies a
+task context; each schedule's Chat button supplies a schedule context. Changing the
+resource starts a separate conversation. Messages scroll independently of the input
+composer; Enter sends, Shift+Enter adds a newline and IME composition does not send.

@@ -22,7 +22,6 @@ import { toast } from "sonner";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sheet,
   SheetContent,
@@ -96,6 +95,8 @@ export function AssistantDialog({
   const [deletingConvId, setDeletingConvId] = useState<string | null>(null);
 
   const utils = trpc.useUtils();
+  const operationPolicy = trpc.assistant.getPolicy.useQuery(undefined, { enabled: open });
+  const operationsAllowed = !!operationPolicy.data?.assistantAutoEnabled && operationPolicy.data.assistantAutoMode === "live";
 
   const context = useMemo(() => ({
     contextKind,
@@ -150,6 +151,7 @@ export function AssistantDialog({
       ]);
       setActions((current) => [...result.actions, ...current]);
       utils.assistant.listConversations.invalidate();
+      if (result.actions.some(action => action.status === "succeeded")) void utils.invalidate();
       if (result.modelError) {
         toast.info("Assistant answered without a configured Ti model", {
           description: result.modelError,
@@ -276,8 +278,8 @@ export function AssistantDialog({
             {label}
           </Button>
         </SheetTrigger>
-        <SheetContent className="flex w-full flex-col p-0 sm:max-w-xl">
-          <SheetHeader className="border-b px-5 py-4">
+        <SheetContent className="flex h-dvh min-h-0 w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
+          <SheetHeader className="shrink-0 border-b px-5 py-4">
             <div className="flex flex-wrap items-center justify-between gap-2 pr-8">
               <div className="flex items-center gap-2">
                 <SheetTitle className="flex items-center gap-2 text-left">
@@ -323,12 +325,12 @@ export function AssistantDialog({
           </SheetHeader>
 
           {showHistory ? (
-            <div className="flex flex-1 flex-col overflow-hidden bg-muted/10">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/10">
               <div className="flex items-center justify-between border-b px-5 py-2.5 text-xs text-muted-foreground">
                 <span className="font-medium">Previous Conversations</span>
                 <span>{conversationsQuery.data?.length ?? 0} saved</span>
               </div>
-              <ScrollArea className="flex-1">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 <div className="space-y-1 p-3">
                   {conversationsQuery.isLoading ? (
                     <div className="flex items-center justify-center p-8 text-sm text-muted-foreground">
@@ -434,11 +436,11 @@ export function AssistantDialog({
                     })
                   )}
                 </div>
-              </ScrollArea>
+              </div>
             </div>
           ) : (
             <>
-              <ScrollArea className="flex-1">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 <div className="space-y-4 px-5 py-5">
                   {messages.length === 0 ? (
                     <div className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
@@ -493,9 +495,9 @@ export function AssistantDialog({
                                   size="icon"
                                   variant="outline"
                                   className="h-8 w-8"
-                                  title="Approve"
+                                  title={operationsAllowed ? "Approve" : "Enable operations in assistant settings first"}
                                   onClick={() => executeAction.mutate({ id: action.id })}
-                                  disabled={executeAction.isPending || rejectAction.isPending}
+                                  disabled={!operationsAllowed || executeAction.isPending || rejectAction.isPending}
                                 >
                                   <CheckCircle2 className="h-4 w-4" />
                                 </Button>
@@ -523,9 +525,9 @@ export function AssistantDialog({
                     </div>
                   )}
                 </div>
-              </ScrollArea>
+              </div>
 
-              <div className="border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              <div className="shrink-0 border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
                 <div className="mb-3 flex flex-wrap gap-1.5">
                   {workflowLabels.map((item) => (
                     <Button

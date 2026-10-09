@@ -1,5 +1,7 @@
 "use client";
 
+import { AssistantDialog } from "@/components/assistant-dialog";
+
 import { use, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Archive, CalendarClock, Play, Plus, RefreshCw } from "lucide-react";
@@ -352,6 +354,7 @@ export default function ProjectSchedulesPage({
                       </div>
                     </div>
                     <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
+                      <AssistantDialog contextKind="schedule" projectId={id} requirementId={schedule.requirementId ?? undefined} scheduleId={schedule.id} label="Chat" />
                       <Button size="sm" variant="outline" onClick={() => runNow.mutate({ id: schedule.id })}>
                         <Play className="mr-1 h-4 w-4" />
                         Run

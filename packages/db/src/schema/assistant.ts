@@ -86,6 +86,7 @@ export const assistantActions = pgTable(
         "add_comment",
         "add_note",
         "draft_document",
+        "platform_operation",
       ],
     }).notNull(),
     status: text("status", {

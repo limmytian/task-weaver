@@ -7,5 +7,5 @@ import { assistantPageContext } from "@/lib/assistant-page-context";
 export function PageAssistant() {
   const context = assistantPageContext(usePathname());
   // Scope changes start a new conversation instead of reusing an incompatible history.
-  return <AssistantDialog key={context.projectId ?? "global"} {...context} label="Chat" triggerClassName="shadow-md" />;
+  return <AssistantDialog key={context.requirementId ?? context.projectId ?? "global"} {...context} label="Chat" triggerClassName="shadow-md" />;
 }

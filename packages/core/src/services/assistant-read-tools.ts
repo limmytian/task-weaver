@@ -16,8 +16,9 @@ export const assistantReadTools = [
   definition("list_projects", "List projects accessible to the signed-in user. Returns exact total and paginated summaries; use query to find a named project.", { query, page, status: { type: "string", enum: ["active", "archived"] } }),
   definition("get_project", "Read an accessible project's details and live task/requirement statistics.", { projectId: id }, ["projectId"]),
   definition("list_tasks", "List accessible project tasks with pagination. Total is for the supplied filters; omit status to see all statuses.", { projectId: id, requirementId: id, query, page, status: { type: "string", enum: ["todo", "in_progress", "in_review", "done", "cancelled"] } }, ["projectId"]),
-  definition("get_task", "Read one accessible task's current details.", { taskId: id }, ["taskId"]),
+  definition("get_task", "Read one accessible task's details, dependencies, comments and notes.", { taskId: id }, ["taskId"]),
   definition("list_requirements", "List accessible project requirements with pagination and exact filtered total.", { projectId: id, query, page }, ["projectId"]),
+  definition("list_execution_slices", "Read the requirement execution plan, task membership, order and parallelism.", { requirementId: id }, ["requirementId"]),
   definition("get_requirement", "Read one accessible requirement's current details.", { requirementId: id }, ["requirementId"]),
   definition("list_documents", "Find accessible documents by title query, optionally in a project, including this account's personal documents and accessible global documents.", { projectId: id, query, page }),
   definition("get_document", "Read an accessible document's content. Long content may be truncated.", { documentId: id }, ["documentId"]),
@@ -47,10 +48,15 @@ export async function runAssistantReadTool(db: Database, identity: VerifiedReque
       const args = z.object({ projectId: z.string().uuid(), requirementId: z.string().uuid().optional(), query: z.string().min(1).max(500).optional(), page: z.number().int().min(1).optional(), status: z.enum(["todo", "in_progress", "in_review", "done", "cancelled"]).optional() }).strict().parse(raw);
       data = record("task", await service.taskService.listTasks(db, listTasksSchema.parse({ ...args, view: "summary", pageSize: 20, completedWithinDays: 0 }))); break;
     }
-    case "get_task": data = record("task", await service.taskService.getTask(db, singleId("taskId"))); break;
+    case "get_task": data = record("task", await service.taskService.getTaskDetail(db, singleId("taskId"))); break;
     case "list_requirements": {
       const args = listRequirementsSchema.pick({ projectId: true, query: true, page: true }).strict().parse(raw);
       data = record("requirement", await service.requirementService.listRequirements(db, { ...args, view: "summary", pageSize: 20, completedWithinDays: 0 })); break;
+    }
+    case "list_execution_slices": {
+      const requirementId = singleId("requirementId");
+      record("requirement", await service.requirementService.getRequirement(db, requirementId));
+      data = await service.requirementService.listExecutionSlices(db, requirementId); break;
     }
     case "get_requirement": data = record("requirement", await service.requirementService.getRequirement(db, singleId("requirementId"))); break;
     case "list_documents": {

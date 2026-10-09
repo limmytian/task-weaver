@@ -287,6 +287,9 @@ importers:
       zod:
         specifier: ^3.24.0
         version: 3.25.76
+      zod-to-json-schema:
+        specifier: 3.25.1
+        version: 3.25.1(zod@3.25.76)
     devDependencies:
       '@types/node':
         specifier: ^25.3.3
@@ -12147,7 +12150,7 @@ snapshots:
       tsconfig-paths: 4.2.0
       validate-npm-package-name: 7.0.2
       zod: 3.25.76
-      zod-to-json-schema: 3.25.1(zod@3.25.76)
+      zod-to-json-schema: 3.25.2(zod@3.25.76)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - '@types/node'
