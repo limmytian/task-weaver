@@ -65,10 +65,10 @@ test(
       migrationsSchema: "task_weaver",
       migrationsTable: "__drizzle_migrations",
     });
-    const [legacyProject] = await db
-      .insert(projects)
-      .values({ name: "Legacy", createdBy: "unmapped-human" })
-      .returning();
+    // The legacy schema predates current ORM columns, so seed only its original contract.
+    const [legacyProject] = await db.execute<{ id: string }>(
+      sql`INSERT INTO task_weaver.projects (name, created_by) VALUES ('Legacy', 'unmapped-human') RETURNING id`,
+    );
     // Use the pre-upgrade columns explicitly; later API-key additions must leave these values intact.
     await db.execute(
       sql`INSERT INTO task_weaver.api_keys (name, key_hash, key_prefix) VALUES ('legacy', ${"a".repeat(64)}, 'tw_legacy')`,

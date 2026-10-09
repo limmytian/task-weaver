@@ -144,7 +144,7 @@ test(
       );
       const publicRoutes = new Set([
         "GET /health", "GET /api/v1/version", "GET /api/v1/version/",
-        "GET /api/v1/auth/csrf", "POST /api/v1/auth/login",
+        "GET /api/v1/auth/csrf", "GET /api/v1/auth/setup-status", "POST /api/v1/auth/login",
         "POST /api/v1/auth/bootstrap", "POST /api/v1/auth/activate",
       ]);
       const inventory = new Set<string>();
@@ -164,7 +164,7 @@ test(
         }
       }
       assert.ok(inventory.size > 200, "The registered REST/GraphQL inventory must not silently become empty");
-      const publicProcedures = new Set(["version.info", "auth.csrf", "auth.login", "auth.bootstrap", "auth.activate"]);
+      const publicProcedures = new Set(["version.info", "auth.setupStatus", "auth.csrf", "auth.login", "auth.bootstrap", "auth.activate"]);
       const procedures = Object.entries(appRouter._def.procedures);
       assert.ok(procedures.length > 100, "The tRPC inventory must not silently become empty");
       for (const [path, procedure] of procedures) {

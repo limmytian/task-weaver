@@ -43,8 +43,9 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
     await db.execute(sql`CREATE SCHEMA task_weaver`);
     await migrate(db, { migrationsFolder: folder, migrationsSchema: "task_weaver", migrationsTable: "__drizzle_migrations" });
   });
-  const [project] = await db.insert(projects).values({ name: "Sanitized legacy A", createdBy: "tw-cli" }).returning();
-  const [other] = await db.insert(projects).values({ name: "Sanitized legacy B", createdBy: "anonymous" }).returning();
+  // Seed the pinned legacy schema without referencing columns introduced by later migrations.
+  const [project] = await db.execute<{ id: string }>(sql`INSERT INTO task_weaver.projects (name, created_by) VALUES ('Sanitized legacy A', 'tw-cli') RETURNING id`);
+  const [other] = await db.execute<{ id: string }>(sql`INSERT INTO task_weaver.projects (name, created_by) VALUES ('Sanitized legacy B', 'anonymous') RETURNING id`);
   const [requirement] = await db.insert(requirements).values({ projectId: project.id, title: "Recover lane", status: "approved", leaseGeneration: 5, createdBy: "tw-cli" }).returning();
   const [task] = await db.insert(tasks).values({ projectId: project.id, requirementId: requirement.id, title: "Recover task", tags: ["capability:tw-v0.3.3-development"], createdBy: "apikey:synthetic" }).returning();
   const [privateDoc] = await db.insert(documents).values({ title: "Sanitized private note", content: "Synthetic fixture only", personalOwnerId: "apikey:synthetic", personalOwnerType: "agent", createdBy: "apikey:synthetic" }).returning();
@@ -231,7 +232,7 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
     execFileSync("docker", ["exec", "-i", container, "psql", "-U", "fixture", "-d", "tw_auth_e2e", "-v", "ON_ERROR_STOP=1"], { input: backup, stdio: ["pipe", "pipe", "pipe"], maxBuffer: 16 * 1024 * 1024 });
     const state = await db.execute(sql`SELECT to_regclass('task_weaver.auth_actors') AS actors`);
     assert.equal(state[0].actors, null);
-    assert.equal((await db.select().from(projects)).length, 2);
+    assert.equal((await db.select({ id: projects.id }).from(projects)).length, 2);
     assert.equal((await db.select().from(requirements)).length, 1);
     assert.equal((await db.select().from(documents)).length, 2);
     assert.equal((await db.select().from(daemons).where(eq(daemons.id, active.id)))[0].actorId, "tw-cli");

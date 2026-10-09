@@ -53,6 +53,7 @@ try {
   const port = JSON.parse(docker("inspect", name))[0].NetworkSettings.Ports[
     "5432/tcp"
   ][0].HostPort;
+  let defaultDatabaseUsed = false;
   for (const [packageName, testFile] of [
     ["@task-weaver/db", "src/auth.postgres-e2e.test.ts"],
     ["@task-weaver/core", "src/services/api-keys.postgres-e2e.test.ts"],
@@ -62,6 +63,7 @@ try {
       "src/services/identity-management.postgres-e2e.test.ts",
     ],
     ["@task-weaver/api", "src/authentication.postgres-e2e.test.ts"],
+    ["@task-weaver/core", "src/services/executor-availability.postgres-e2e.test.ts"],
     [null, "scripts/auth-transports.postgres-e2e.test.ts"],
     [null, "scripts/ce-candidate-auth.postgres-e2e.test.ts"],
     [null, "scripts/resource-authorization.postgres-e2e.test.ts"],
@@ -83,6 +85,14 @@ try {
     const isolatedCandidate = testFile === "scripts/ce-candidate-auth.postgres-e2e.test.ts";
     const testDatabase = isolatedCandidate ? "tw_ce_candidate_e2e" : "tw_auth_e2e";
     if (isolatedCandidate) docker("exec", name, "createdb", "-U", "fixture", testDatabase);
+    else {
+      // Suites exercise real instance-wide rate limits and must not inherit previous bootstrap attempts.
+      if (defaultDatabaseUsed) {
+        docker("exec", name, "dropdb", "--force", "-U", "fixture", testDatabase);
+        docker("exec", name, "createdb", "-U", "fixture", testDatabase);
+      }
+      defaultDatabaseUsed = true;
+    }
     const result = spawnSync(
       "pnpm",
       [
