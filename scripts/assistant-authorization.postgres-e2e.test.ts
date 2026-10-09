@@ -293,6 +293,17 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.equal(naturalTask.body.actions[0].status, "succeeded");
   const createdTaskId = naturalTask.body.actions[0].executionResult.entityId;
   assert.equal((await owner.service.taskService.getTask(db, createdTaskId)).requirementId, createdRequirementId);
+  const invalidAssignment = { projectId: project.id, requirementId: createdRequirementId, title: "Invalid assignment", assignee: "null" };
+  modelReplies.push(
+    { content: null, tool_calls: [toolCall("create_task", invalidAssignment)] },
+    { content: null, tool_calls: [toolCall("create_task", { assignee: "null", title: "Invalid assignment", requirementId: createdRequirementId, projectId: project.id })] },
+    { content: "The invalid assignee must be omitted before retrying" },
+  );
+  const invalidTask = await rest("assistant/chat", owner.headers, "POST", { message: "Create an unassigned task", context: { projectId: project.id } });
+  assert.equal(invalidTask.status, 201);
+  assert.equal(invalidTask.body.actions.length, 1);
+  assert.equal(invalidTask.body.actions[0].status, "failed");
+  assert.match(invalidTask.body.actions[0].errorMessage, /omit assignee and assigneeType/);
   modelReplies.push(
     { content: null, tool_calls: [toolCall("add_task_dependency", { taskId: createdTaskId, dependsOnTaskId: task.id, type: "blocks" })] },
     { content: "Dependency created" },
