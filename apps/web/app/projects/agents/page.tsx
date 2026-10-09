@@ -449,6 +449,13 @@ function ModelConfigCard() {
 function ModelListCard() {
   const utils = trpc.useUtils();
   const { data: configs, isLoading } = trpc.tiAgent.listConfigs.useQuery({ includeDisabled: true });
+  const updateCredentials = trpc.tiAgent.upsertConfig.useMutation({
+    onSuccess: () => {
+      toast.success("Credential status updated");
+      utils.tiAgent.listConfigs.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
   const setDefault = trpc.tiAgent.setDefaultConfig.useMutation({
     onSuccess: () => {
       toast.success("Default model updated");
@@ -489,9 +496,33 @@ function ModelListCard() {
                       </Badge>
                     )}
                     <Badge variant={config.enabled ? "outline" : "secondary"}>{config.enabled ? "enabled" : "disabled"}</Badge>
-                    <Badge variant={config.credentialStatus === "invalid" || config.credentialStatus === "missing" ? "destructive" : "secondary"}>
-                      {config.credentialStatus}
-                    </Badge>
+                    <Select
+                      value={config.credentialStatus}
+                      disabled={updateCredentials.isPending}
+                      onValueChange={(credentialStatus: "unknown" | "valid" | "invalid" | "missing") => {
+                        updateCredentials.mutate({
+                          provider: config.provider,
+                          model: config.model,
+                          credentialStatus,
+                          enabled: config.enabled,
+                          isDefaultChat: config.isDefaultChat,
+                          isDefaultAgent: config.isDefaultAgent,
+                        });
+                      }}
+                    >
+                      <SelectTrigger
+                        className="w-[120px]"
+                        aria-label={`Credential status for ${config.label || `${config.provider}:${config.model}`}`}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unknown">Unknown</SelectItem>
+                        <SelectItem value="valid">Valid</SelectItem>
+                        <SelectItem value="invalid">Invalid</SelectItem>
+                        <SelectItem value="missing">Missing</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="mt-1 truncate text-xs text-muted-foreground">
                     {config.provider}:{config.model}
