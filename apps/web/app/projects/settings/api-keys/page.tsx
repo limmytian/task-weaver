@@ -12,6 +12,7 @@ import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { KeyGrantPicker, type NamedGrant } from "@/components/key-grant-picker";
 import { KeyDetailDialog } from "@/components/key-detail-dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 
 export default function ApiKeysSettingsPage() {
@@ -109,29 +110,16 @@ export default function ApiKeysSettingsPage() {
         <label htmlFor="key-subject" className="text-sm font-medium">
           Credential owner
         </label>
-        <select
-          id="key-subject"
-          value={subject}
-          className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-          onChange={(event) => {
-            setSubject(event.target.value);
-            setKeyPage(1);
-            setDetailId(null);
-            setSelected([]);
-            setSecret(null);
-            setError("");
-          }}
-        >
-          <option value={identity.id}>You (human)</option>
-          {selectedAgent.data?.status === "active" && !agents.data?.some(agent => agent.id === selectedAgent.data?.id) && <option value={selectedAgent.data.id}>{selectedAgent.data.displayName} · {selectedAgent.data.id} (managed Agent)</option>}
-          {agents.data
-            ?.filter((agent) => agent.status === "active")
-            .map((agent) => (
-              <option key={agent.id} value={agent.id}>
-                {agent.displayName} · {agent.id} (managed Agent)
-              </option>
-            ))}
-        </select>
+        <Select value={subject} onValueChange={value => {
+          setSubject(value); setKeyPage(1); setDetailId(null); setSelected([]); setSecret(null); setError("");
+        }}>
+          <SelectTrigger id="key-subject" className="w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={identity.id}>You (human)</SelectItem>
+            {selectedAgent.data?.status === "active" && !agents.data?.some(agent => agent.id === selectedAgent.data?.id) && <SelectItem value={selectedAgent.data.id}>{selectedAgent.data.displayName} (managed Agent)</SelectItem>}
+            {agents.data?.filter(agent => agent.status === "active").map(agent => <SelectItem key={agent.id} value={agent.id}>{agent.displayName} (managed Agent)</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
       {secret && (
         <OneTimeSecret
@@ -156,18 +144,16 @@ export default function ApiKeysSettingsPage() {
         <label className="text-sm font-medium" htmlFor="key-expiry">
           Expiry
         </label>
-        <select
-          id="key-expiry"
-          value={expiry}
-          onChange={(event) => setExpiry(event.target.value)}
-          className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-        >
-          <option value="30">30 days</option>
-          <option value="90">90 days</option>
-          <option value="365">One year</option>
-          <option value="custom">Custom date</option>
-          <option value="never">Never (still revocable)</option>
-        </select>
+        <Select value={expiry} onValueChange={setExpiry}>
+          <SelectTrigger id="key-expiry" className="w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="30">30 days</SelectItem>
+            <SelectItem value="90">90 days</SelectItem>
+            <SelectItem value="365">One year</SelectItem>
+            <SelectItem value="custom">Custom date</SelectItem>
+            <SelectItem value="never">Never (still revocable)</SelectItem>
+          </SelectContent>
+        </Select>
         {expiry === "custom" && (
           <Input
             aria-label="Custom expiry"
