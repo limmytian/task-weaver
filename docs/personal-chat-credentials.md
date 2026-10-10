@@ -5,7 +5,9 @@ API key saved in that account's model settings, when one is provided. API keys a
 optional for every provider. Without a saved key, no Authorization header is sent.
 Credential status is informational; connection tests and Chat requests determine
 whether the server accepts the configuration. Connection tests send a short request
-to the saved model without changing its status.
+to the saved model without changing its status. A valid token-limited empty reply
+from a thinking model can confirm connectivity; ordinary Chat still requires
+readable content or complete tool calls.
 
 The upgrade adds nullable encrypted credential columns. Existing provider, model,
 base URL, defaults and conversations remain intact. Old environment references do

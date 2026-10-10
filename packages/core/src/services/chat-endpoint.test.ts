@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { requestChatTurn } from "./chat-endpoint";
+import { requestChatTurn, requestChatConnection } from "./chat-endpoint";
 
 test("local HTTP models stream without credentials and still refuse redirects", async () => {
   let redirected = false;
@@ -22,5 +22,18 @@ test("local HTTP models stream without credentials and still refuse redirects", 
     assert.equal(turn.content, "Local model reply"); assert.equal(streamed, turn.content);
     redirected = true;
     await assert.rejects(requestChatTurn(url, "", {}, performance.now() + 5000), /Model request failed/);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+test("connection tests accept bounded thinking responses while Chat rejects empty replies", async () => {
+  const server = createServer((_request, response) => {
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "", reasoning: "Fixture thinking" }, finish_reason: "length" }] }));
+  });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  try {
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`;
+    await requestChatConnection(url, "", "fixture");
+    await assert.rejects(requestChatTurn(url, "", {}, performance.now() + 5000), /did not include readable content/);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });

@@ -4,7 +4,7 @@ import { AuthorizationError, NotFoundError, ChatConfigurationError, saveChatMode
 import { resourceAuthority, requireScope } from "./resource-authorization";
 import { lockIdentityLifecycle } from "./auth-security";
 import { chatKeyBinding, encryptChatKey, decryptChatKey } from "./chat-credentials";
-import { chatEndpoint, requestChatCompletion } from "./chat-endpoint";
+import { chatEndpoint, requestChatConnection } from "./chat-endpoint";
 
 function modelKey(config: Config) {
   return config.encryptedApiKey ? decryptChatKey(config.encryptedApiKey, chatKeyBinding(config)) : "";
@@ -71,7 +71,7 @@ export function createChatModelService(identity: VerifiedRequestContext) {
       const config = await get(db, id);
       const key = modelKey(config);
       if (!config.baseUrl) throw new ChatConfigurationError("chat_url_required");
-      await requestChatCompletion(config.baseUrl, key, { model: config.model, messages: [{ role: "user", content: "Reply with OK." }], max_tokens: 8 });
+      await requestChatConnection(config.baseUrl, key, config.model);
       return { connected: true };
     },
     async resolve(db: Database, provider?: string | null, model?: string | null) {

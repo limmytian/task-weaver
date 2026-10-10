@@ -16,7 +16,7 @@ export function chatEndpoint(baseUrl: string) {
 /** Pin the resolved address for each request; never follow redirects with credentials. */
 export type ChatTurn = { content: string | null; toolCalls: { id: string; name: string; arguments: string }[] };
 
-export async function requestChatTurn(baseUrl: string, apiKey: string, payload: unknown, deadline = performance.now() + 45_000, onText?: (text: string) => Promise<void>) {
+export async function requestChatTurn(baseUrl: string, apiKey: string, payload: unknown, deadline = performance.now() + 45_000, onText?: (text: string) => Promise<void>, connectionTest = false) {
   const endpoint = chatEndpoint(baseUrl);
   if (performance.now() >= deadline) throw new ChatConfigurationError("chat_connection_failed");
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -63,7 +63,7 @@ export async function requestChatTurn(baseUrl: string, apiKey: string, payload: 
               || typeof call.function.arguments !== "string" || call.function.arguments.length > 10_000) throw new Error();
             return { id: call.id, name: call.function.name, arguments: call.function.arguments };
           });
-          if (!content && !toolCalls.length) throw new Error();
+          if (!content && !toolCalls.length && !(connectionTest && typeof message?.content === "string" && ["stop", "length"].includes(result.choices?.[0]?.finish_reason))) throw new Error();
           resolve({ content, toolCalls });
         } catch { failure("chat_response_invalid"); }
       });
@@ -78,4 +78,9 @@ export async function requestChatCompletion(baseUrl: string, apiKey: string, pay
   const turn = await requestChatTurn(baseUrl, apiKey, payload);
   if (!turn.content || turn.toolCalls.length) throw new ChatConfigurationError("chat_response_invalid");
   return turn.content;
+}
+
+/** A bounded connection test accepts a valid token-limited response from thinking models. */
+export async function requestChatConnection(baseUrl: string, apiKey: string, model: string) {
+  await requestChatTurn(baseUrl, apiKey, { model, messages: [{ role: "user", content: "Reply with OK." }], max_tokens: 8 }, performance.now() + 45_000, undefined, true);
 }
