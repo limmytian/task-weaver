@@ -6,7 +6,7 @@ import { createApiApplication } from "../apps/api/src/application";
 import { createTRPCContextFactory } from "../apps/web/trpc/init";
 import { appRouter } from "../apps/web/trpc/routers/_app";
 const apiRequire = createRequire(new URL("../apps/api/package.json", import.meta.url));
-const { createDb, runMigrations, authInstanceState, projects, documents, memories, tasks, documentLinks } = apiRequire("@task-weaver/db");
+const { createDb, runMigrations, authInstanceState, projects, documents, memories, tasks, documentLinks, projectMemberships, apiKeys } = apiRequire("@task-weaver/db");
 const { createAuthenticationRuntime, createResourceServices, NotFoundError, AuthorizationError, ValidationError } = apiRequire("@task-weaver/core");
 const { eq } = apiRequire("drizzle-orm");
 const webRequire = createRequire(new URL("../apps/web/package.json", import.meta.url));
@@ -353,4 +353,48 @@ test("ordinary resources enforce live authorization consistently across transpor
     const globals = await admin.service.documentService.listDocuments(db, { includeGlobal: true, includePersonal: false });
     assert.ok(!globals.some((row: any) => row.id === stored.id));
   });
+  await t.test("archive inventories and counts honor membership and credential ceilings", async () => {
+    const archived = await owner.service.projectService.createProject(db, { name: "Manual archive inventory" }, owner.actor);
+    const req = await owner.service.requirementService.createRequirement(db, { projectId: archived.id, title: "Archived requirement" }, owner.actor);
+    await owner.service.taskService.createTask(db, { projectId: archived.id, requirementId: req.id, title: "Archived task" }, owner.actor);
+    await runtime.identity.setMembership(owner.headers, archived.id, viewer.actor.id, { role: "viewer" });
+    const key = await runtime.identity.issueKey(viewer.headers, viewer.actor.id, { name: "Archive inventory read", grants: [
+      { scope: "project", projectId: archived.id, permissions: ["resource.read"] },
+      { scope: "personal", actorId: viewer.actor.id, permissions: ["resource.read"] },
+    ], expiresAt: null });
+    const keyHeaders = new Headers({ authorization: `Bearer ${key.rawKey}` });
+    const keyServices = createResourceServices(await runtime.verify(keyHeaders));
+    const narrow = await runtime.identity.issueKey(owner.headers, owner.actor.id, { name: "Other project only", grants: [
+      { scope: "project", projectId: project.id, permissions: ["resource.read"] },
+    ], expiresAt: null });
+    const narrowServices = createResourceServices(await runtime.verify(new Headers({ authorization: `Bearer ${narrow.rawKey}` })));
+    await owner.service.projectService.updateProject(db, archived.id, { status: "archived" }, owner.actor);
+    const deleted = await owner.service.projectService.createProject(db, { name: "Chat lifecycle archive inventory" }, owner.actor);
+    await owner.service.projectService.deleteProject(db, deleted.id, owner.actor);
+    const inventory = await owner.service.projectService.listProjects(db, { status: "archived" });
+    assert.deepEqual(new Set(inventory.map((row: any) => row.id)), new Set([archived.id, deleted.id]));
+    assert(!(await owner.service.projectService.listProjects(db, { status: "active" })).some((row: any) => row.id === archived.id || row.id === deleted.id));
+    assert((await owner.service.projectService.listProjects(db, {})).some((row: any) => row.id === archived.id));
+    assert.deepEqual(await owner.service.projectService.getProjectCounts(db, [archived.id, other.id]), [{ projectId: archived.id, taskCount: 1, requirementCount: 1 }]);
+    assert((await viewer.service.projectService.listProjects(db, { status: "archived" })).some((row: any) => row.id === archived.id));
+    assert(!(await admin.service.projectService.listProjects(db, { status: "archived" })).some((row: any) => row.id === archived.id));
+    assert(!(await outsider.service.projectService.listProjects(db, { status: "archived" })).some((row: any) => row.id === archived.id));
+    assert((await keyServices.projectService.listProjects(db, { status: "archived" })).some((row: any) => row.id === archived.id));
+    assert.deepEqual(await narrowServices.projectService.listProjects(db, { status: "archived" }), []);
+    const restInventory = await rest("projects?status=archived", owner.headers);
+    assert.equal(restInventory.status, 200);
+    assert(restInventory.body.some((row: any) => row.id === archived.id));
+    const trpcInventory = await trpcRead("project.list", { status: "archived" }, owner.headers);
+    assert.equal(trpcInventory.status, 200);
+    assert(trpcInventory.body.result.data.json.some((row: any) => row.id === archived.id));
+    await assert.rejects(owner.service.projectService.updateProject(db, archived.id, { name: "Forbidden write" }, owner.actor), NotFoundError);
+    await assert.rejects(owner.service.taskService.getTask(db, (await db.select().from(tasks).where(eq(tasks.projectId, archived.id)))[0].id), NotFoundError);
+    // Remove archived membership directly in this fixture: archived management stays closed.
+    await db.update(projectMemberships).set({ removedAt: new Date() }).where(eq(projectMemberships.projectId, archived.id));
+    assert(!(await owner.service.projectService.listProjects(db, { status: "archived" })).some((row: any) => row.id === archived.id));
+    assert.deepEqual(await keyServices.projectService.listProjects(db, { status: "archived" }), []);
+    await db.update(apiKeys).set({ revokedAt: new Date() }).where(eq(apiKeys.id, key.id));
+    await assert.rejects(keyServices.projectService.listProjects(db, { status: "archived" }));
+  });
+
 });

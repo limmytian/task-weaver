@@ -8,7 +8,7 @@ import { requestChatTurn } from "./chat-endpoint";
 import { schedulePredicate } from "./metadata-authorization";
 import { mcpServerPredicate } from "./mcp-authorization";
 import { createResourceServices } from './resource-services';
-import { getLiveRequestAuthority, getHistoricalReadAuthority } from './api-keys';
+import { getLiveRequestAuthority, getHistoricalReadAuthority, getProjectInventoryAuthority } from './api-keys';
 import { lockIdentityLifecycle } from './auth-security';
 import { projectPredicate, resourcePredicate, taskResourcePredicate, memoryResourcePredicate, requireResource, requireScope } from './resource-authorization';
 import { AuthorizationError, type VerifiedRequestContext } from '@task-weaver/contracts';
@@ -338,7 +338,7 @@ export async function buildAssistantContext(
   const projectId = scope.project?.id;
   const intent = input.intent?.trim();
 
-  const visibleProjects = projectPredicate(authority);
+  const visibleProjects = projectPredicate(await getProjectInventoryAuthority(db, identity));
   const projectCounts = await db.select({ status: projects.status, total: count() })
     .from(projects).where(visibleProjects).groupBy(projects.status);
   const workspaceProjects = await db.query.projects.findMany({

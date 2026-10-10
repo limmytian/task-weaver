@@ -220,13 +220,20 @@ export async function getLiveRequestAuthority(
   return { actor: authority.actor, grants: authority.grants, bounds };
 }
 
-/** Historical snapshots retain archived membership reads without granting live operations. */
-export async function getHistoricalReadAuthority(db: AuthDatabase, context: VerifiedRequestContext) {
+/** Project inventory can include archived memberships without granting live operations. */
+export async function getProjectInventoryAuthority(db: AuthDatabase, context: VerifiedRequestContext) {
   const authority = await currentAuthority(db, context, new Date(), true);
-  if (authority.bounds || authority.actor.type !== "human") throw new AuthorizationError();
+  if (authority.bounds) throw new AuthorizationError();
   return { actor: authority.actor, grants: authority.grants.map(grant => ({
     ...grant, permissions: grant.permissions.filter(permission => permission === "resource.read"),
   })).filter(grant => grant.permissions.length > 0), bounds: null };
+}
+
+/** Historical snapshots retain archived membership reads under current credential ceilings. */
+export async function getHistoricalReadAuthority(db: AuthDatabase, context: VerifiedRequestContext) {
+  const authority = await getProjectInventoryAuthority(db, context);
+  if (authority.actor.type !== "human") throw new AuthorizationError();
+  return authority;
 }
 
 export async function credentialManager(

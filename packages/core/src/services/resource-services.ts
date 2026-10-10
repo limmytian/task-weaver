@@ -1,3 +1,4 @@
+import { getProjectInventoryAuthority } from "./api-keys";
 import { requireDaemonLease } from './daemon-lease-authorization';
 import { createTiExecutionService, isTiExecutionOperation } from './ti-execution';
 import { inArray, and, eq, isNull, sql, desc } from "drizzle-orm";
@@ -94,7 +95,9 @@ function bindServices(context?: VerifiedRequestContext) {
           // Serialize policy mutations with resource operations, including reads and nested relations.
           await lockIdentityLifecycle(tx);
           const txDb = tx as unknown as Database;
-          const authority = await resourceAuthority(tx, context);
+          const live = await resourceAuthority(tx, context);
+          const authority = group === "project" && ["listProjects", "getProjectCounts"].includes(name) && !live.bounds
+            ? await getProjectInventoryAuthority(tx, context) : live;
           const actor: Actor = { id: authority.actor.id, type: authority.actor.type };
           for (const arg of args.slice(1)) {
             if (arg && typeof arg === "object" && "id" in arg && "type" in arg && ["human", "agent"].includes(arg.type)) {

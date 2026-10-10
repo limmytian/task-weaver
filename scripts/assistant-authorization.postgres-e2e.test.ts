@@ -728,7 +728,8 @@ test("assistant authorization isolates accounts and resources across REST and tR
     archived: visibleInventory.filter((row: any) => row.status === "archived").length,
     total: visibleInventory.length,
   });
-  assert.equal(visibleInventory.length, 51);
+  assert.equal(visibleInventory.filter((row: any) => row.name.startsWith("Inventory ")).length, 51);
+  assert.equal(visibleInventory.filter((row: any) => row.status === "archived").length, 2);
   assert.equal((boundedWorkspace.workspace as any).projects.length, 50);
   assert.equal((boundedWorkspace.workspace as any).projectsTruncated, true);
 
