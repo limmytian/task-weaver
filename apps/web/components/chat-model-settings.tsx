@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@/trpc/routers/_app";
@@ -64,13 +65,17 @@ export function ChatModelSettings({ compact = false }: { compact?: boolean }) {
     <form className="space-y-3 border-t pt-4" onSubmit={event => { event.preventDefault(); submitModel(); }}>
       <h3 className="font-medium">{editing ? "Edit saved model" : "Add model"}</h3>
       <div className="grid gap-3 sm:grid-cols-2">{(["provider", "model", "baseUrl", "label"] as const).map(field => <label key={field} className="space-y-1 text-sm">{{ provider: "Provider", model: "Model", baseUrl: "Base URL", label: "Display name" }[field]}<Input required={field !== "label"} disabled={!!editing && (field === "provider" || field === "model")} value={draft[field]} onChange={event => setDraft({ ...draft, [field]: event.target.value })} /></label>)}</div>
-      <label className="block space-y-1 text-sm">Proxy<select className="ml-2 rounded border bg-background p-2" value={draft.proxyMode} onChange={event => setDraft({ ...draft, proxyMode: event.target.value as Model["proxyMode"] })}>
-        <option value="inherit">Use deployment default</option><option value="direct">Direct connection</option><option value="custom">Custom proxy</option>
-      </select></label>
+      <div className="space-y-1 text-sm">Proxy<Select value={draft.proxyMode} onValueChange={value => setDraft({ ...draft, proxyMode: value as Model["proxyMode"] })}>
+        <SelectTrigger aria-label="Proxy" className="w-full bg-popover text-popover-foreground"><SelectValue /></SelectTrigger>
+        <SelectContent><SelectItem value="inherit">Use deployment default</SelectItem><SelectItem value="direct">Direct connection</SelectItem><SelectItem value="custom">Custom proxy</SelectItem></SelectContent>
+      </Select></div>
       {draft.proxyMode === "custom" && <label className="block space-y-1 text-sm">Proxy URL<Input required type="url" placeholder="http://proxy.example.com:7890" value={draft.proxyUrl} onChange={event => setDraft({ ...draft, proxyUrl: event.target.value })} /></label>}
       <p className="text-xs text-muted-foreground">The server uses this setting for connection tests and all replies. A custom proxy overrides deployment bypass rules. Direct connection bypasses deployment proxies.</p>
       <label className="block space-y-1 text-sm">API key (optional)<Input type="password" autoComplete="new-password" value={apiKey} onChange={event => setApiKey(event.target.value)} placeholder={editing?.hasApiKey ? "Leave blank to preserve the saved key" : "Leave blank if your server does not require a key"} /></label>
-      <label className="flex items-center gap-2 text-sm">Credentials<select value={draft.credentialStatus} onChange={event => setDraft({ ...draft, credentialStatus: event.target.value as Model["credentialStatus"] })} className="rounded border bg-background p-2">{["unknown", "valid", "invalid", "missing"].map(status => <option key={status}>{status}</option>)}</select></label>
+      <div className="space-y-1 text-sm">Credentials<Select value={draft.credentialStatus} onValueChange={value => setDraft({ ...draft, credentialStatus: value as Model["credentialStatus"] })}>
+        <SelectTrigger aria-label="Credentials" className="w-full bg-popover text-popover-foreground"><SelectValue /></SelectTrigger>
+        <SelectContent>{["unknown", "valid", "invalid", "missing"].map(status => <SelectItem key={status} value={status}>{status}</SelectItem>)}</SelectContent>
+      </Select></div>
       <p className="text-xs text-muted-foreground">Credential status is informational. Test the connection to verify whether your server accepts the saved settings.</p>
       <div className="flex flex-wrap gap-3">{(["enabled", "isDefaultChat"] as const).map(field => <label key={field} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft[field]} onChange={event => setDraft({ ...draft, [field]: event.target.checked })} />{{ enabled: "Enabled", isDefaultChat: "Default Chat", isDefaultAgent: "Default task model" }[field]}</label>)}</div>
       <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={save.isPending} onClick={() => { setDraft(empty); setEditing(null); setApiKey(""); }}>Cancel edits</Button><Button type="submit" disabled={save.isPending}>{editing ? "Save changes" : "Save model"}</Button></div>

@@ -51,7 +51,12 @@ export async function readChatStream(source: AsyncIterable<Uint8Array>, apiKey: 
           for (const [field, fragment] of [["id", item.id], ["type", item.type], ["name", item.function?.name], ["arguments", item.function?.arguments]] as const) {
             if (fragment !== undefined) {
               if (typeof fragment !== "string") throw new ChatConfigurationError("chat_response_invalid");
-              call[field] += fragment;
+              if (field === "arguments") call[field] += fragment;
+              else if (fragment) {
+                // Some compatible gateways repeat fixed metadata on argument deltas.
+                if (call[field] && call[field] !== fragment) throw new ChatConfigurationError("chat_response_invalid");
+                call[field] = fragment;
+              }
             }
           }
           if (call.id.length > 200 || call.name.length > 100 || call.arguments.length > 10_000 || call.type.length > 20) throw new ChatConfigurationError("chat_response_invalid");

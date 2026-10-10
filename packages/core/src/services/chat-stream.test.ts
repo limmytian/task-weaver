@@ -36,3 +36,17 @@ test("SSE framing accepts comments and multiline data and rejects truncated/over
   const partial = new SseDecoder(); partial.push("data: incomplete\n"); assert.throws(() => partial.finish());
   assert.throws(() => new SseDecoder(5).push("data: too large\n\n"));
 });
+
+test("compatible gateways can repeat tool metadata without corrupting argument assembly", async () => {
+  const initial = { index: 0, id: "call-1", type: "function", function: { name: "get_project", arguments: "" } };
+  const continuation = { ...initial, function: { name: "get_project", arguments: '{"projectId":"fixture"}' } };
+  const stream = (next: unknown) => delta({ tool_calls: [initial] }) + delta({ tool_calls: [next] }) + delta({}, "tool_calls") + "data: [DONE]\n\n";
+  const turn = await readChatStream(bytes(stream(continuation)), "credential", async () => { assert.fail("Tool arguments are not display text"); });
+  assert.deepEqual(turn.toolCalls, [{ id: "call-1", name: "get_project", arguments: '{"projectId":"fixture"}' }]);
+  for (const conflicting of [
+    { ...continuation, id: "another-call" },
+    { ...continuation, type: "other" },
+    { ...continuation, function: { ...continuation.function, name: "create_task" } },
+  ]) await assert.rejects(readChatStream(bytes(stream(conflicting)), "credential", async () => {}));
+  await assert.rejects(readChatStream(bytes(stream(continuation).replace("data: [DONE]\n\n", "")), "credential", async () => {}));
+});

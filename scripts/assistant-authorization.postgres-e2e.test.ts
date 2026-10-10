@@ -121,7 +121,7 @@ test("assistant authorization isolates accounts and resources across REST and tR
           }
           for (const [index, call] of (reply.tool_calls ?? []).entries()) {
             yield encode({ choices: [{ delta: { tool_calls: [{ index, id: call.id, type: call.type, function: { name: call.function.name, arguments: call.function.arguments.slice(0, 4) } }] } }] });
-            yield encode({ choices: [{ delta: { tool_calls: [{ index, function: { arguments: call.function.arguments.slice(4) } }] } }] });
+            yield encode({ choices: [{ delta: { tool_calls: [{ index, type: call.type, function: { arguments: call.function.arguments.slice(4) } }] } }] });
           }
           if (!truncated) {
             yield encode({ choices: [{ delta: {}, finish_reason: reply.tool_calls?.length ? "tool_calls" : "stop" }] });
