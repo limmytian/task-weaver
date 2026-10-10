@@ -6,6 +6,7 @@ export class SecretTextBuffer {
   private pending = "";
   constructor(private readonly secret: string) {}
   push(text: string) {
+    if (!this.secret) return text;
     this.pending = (this.pending + text).split(this.secret).join("[redacted]");
     let held = Math.min(this.pending.length, this.secret.length - 1);
     while (held > 0 && !this.pending.endsWith(this.secret.slice(0, held))) held--;

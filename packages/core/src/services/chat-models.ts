@@ -6,12 +6,17 @@ import { lockIdentityLifecycle } from "./auth-security";
 import { chatKeyBinding, encryptChatKey, decryptChatKey } from "./chat-credentials";
 import { chatEndpoint, requestChatCompletion } from "./chat-endpoint";
 
+function allowsKeyless(provider: string) { return provider.trim().toLowerCase() === "ollama"; }
+function modelKey(config: Config) {
+  return !config.encryptedApiKey && allowsKeyless(config.provider) ? "" : decryptChatKey(config.encryptedApiKey, chatKeyBinding(config));
+}
+
 type Config = typeof tiAgentModelConfigs.$inferSelect;
 function publicModel(row: Config) {
   return { id: row.id, provider: row.provider, model: row.model, baseUrl: row.baseUrl, label: row.label,
     credentialStatus: row.credentialStatus, enabled: row.enabled, isDefaultChat: row.isDefaultChat,
     isDefaultAgent: row.isDefaultAgent, hasApiKey: !!row.encryptedApiKey, apiKeyMask: row.encryptedApiKey ? row.apiKeyMask : null,
-    requiresKeyEntry: !row.encryptedApiKey };
+    requiresKeyEntry: !row.encryptedApiKey && !allowsKeyless(row.provider) };
 }
 export function createChatModelService(identity: VerifiedRequestContext) {
   async function authorize(db: Database, permission: "resource.read" | "resource.write" | "credential.manage" = "resource.read") {
@@ -65,7 +70,7 @@ export function createChatModelService(identity: VerifiedRequestContext) {
     },
     async test(db: Database, id: string) {
       const config = await get(db, id);
-      const key = decryptChatKey(config.encryptedApiKey, chatKeyBinding(config));
+      const key = modelKey(config);
       if (!config.baseUrl) throw new ChatConfigurationError("chat_url_required");
       await requestChatCompletion(config.baseUrl, key, { model: config.model, messages: [{ role: "user", content: "Reply with OK." }], max_tokens: 8 });
       return { connected: true };
@@ -76,8 +81,8 @@ export function createChatModelService(identity: VerifiedRequestContext) {
       const config = provider || model ? rows.find(row => row.provider === provider && row.model === model) : rows.find(row => row.isDefaultChat);
       if (!config || !config.enabled) throw new ChatConfigurationError("chat_model_required");
       if (!config.baseUrl) throw new ChatConfigurationError("chat_url_required");
-      if (["missing", "invalid"].includes(config.credentialStatus)) throw new ChatConfigurationError("chat_key_review");
-      return { config, apiKey: decryptChatKey(config.encryptedApiKey, chatKeyBinding(config)) };
+      if (config.credentialStatus === "invalid" || (config.credentialStatus === "missing" && !allowsKeyless(config.provider))) throw new ChatConfigurationError("chat_key_review");
+      return { config, apiKey: modelKey(config) };
     },
   };
 }

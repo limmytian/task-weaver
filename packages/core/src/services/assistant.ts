@@ -161,7 +161,7 @@ async function generateModelResponse(
           const executed = performed.find(row => row.id === action.id)!;
           if (observer) await emit({ type: "tool", name: operationName, status: executed.status === "failed" ? "failed" : executed.status === "proposed" ? "proposed" : "completed" });
           result = { status: executed.status, actionId: executed.id, error: executed.errorMessage, ...getContextRecord(executed.executionResult) };
-          messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(redactValue(result)).split(model.apiKey).join(REDACTED) });
+          messages.push({ role: "tool", tool_call_id: call.id, content: (model.apiKey ? JSON.stringify(redactValue(result)).split(model.apiKey).join(REDACTED) : JSON.stringify(redactValue(result))) });
           continue;
         }
         if (observer && assistantReadTools.some(tool => tool.function.name === call.name)) await emit({ type: "tool", name: call.name, status: "reading" });
@@ -174,7 +174,7 @@ async function generateModelResponse(
         if (error instanceof AuthorizationError) throw error;
         result = { error: error instanceof NotFoundError ? "Resource not found or inaccessible" : "Invalid or unavailable platform query or operation" };
       }
-      messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(redactValue(result)).split(model.apiKey).join(REDACTED) });
+      messages.push({ role: "tool", tool_call_id: call.id, content: (model.apiKey ? JSON.stringify(redactValue(result)).split(model.apiKey).join(REDACTED) : JSON.stringify(redactValue(result))) });
     }
     if (confirmationRequired && performed.some(action => action.status === "proposed"))
       return "Review the proposed operations below. No platform changes have been made. Approve an operation to execute it; dependent steps can be planned after it succeeds.";

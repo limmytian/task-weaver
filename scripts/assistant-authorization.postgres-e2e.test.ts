@@ -594,12 +594,32 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.equal(replaced.assistantMessage.content, "Fixture model reply");
   const beforePrivate = calls;
   dnsAddress = "127.0.0.1";
-  await assert.rejects(ownerModels.test(db, savedModel.id), /Private model endpoints/);
-  assert.equal(calls, beforePrivate);
+  await ownerModels.test(db, savedModel.id);
+  assert.equal(calls, beforePrivate + 1);
   dnsAddress = "8.8.8.8";
   responseStatus = 302;
   await assert.rejects(ownerModels.test(db, savedModel.id), error => error instanceof Error && !error.message.includes(expectedKey) && /Model request failed/.test(error.message));
   responseStatus = 200;
+  await t.test("Ollama resolves and tests without a saved API key over local HTTP", async () => {
+    const localModel = createServer((req, res) => {
+      assert.equal(req.url, "/v1/chat/completions");
+      assert.equal(req.headers.authorization, undefined);
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ choices: [{ message: { content: "OK" } }] }));
+    });
+    localModel.listen(0, "127.0.0.1"); await once(localModel, "listening");
+    try {
+      dnsAddress = "127.0.0.1";
+      const port = (localModel.address() as { port: number }).port;
+      const local = await ownerModels.save(db, { provider: "Ollama", model: "local-fixture", baseUrl: `http://127.0.0.1:${port}/v1`, enabled: true });
+      assert.equal(local.hasApiKey, false); assert.equal(local.requiresKeyEntry, false);
+      assert.equal((await ownerModels.resolve(db, "Ollama", "local-fixture")).apiKey, "");
+      await ownerModels.test(db, local.id);
+      await ownerModels.deleteKey(db, local.id);
+      await ownerModels.resolve(db, "Ollama", "local-fixture");
+      await assert.rejects(createChatModelService(outsider.context).test(db, local.id), NotFoundError);
+    } finally { dnsAddress = "8.8.8.8"; localModel.closeAllConnections(); await new Promise<void>(resolve => localModel.close(() => resolve())); }
+  });
   const legacyId = randomUUID();
   await db.insert(tiAgentModelConfigs).values({ id: legacyId, ownerId: owner.actor.id, ownerType: "human", provider: "legacy", model: "legacy-chat", baseUrl: "https://model.example.test/v1", apiKeyRef: "FIXTURE_CHAT_UPGRADE_KEY", credentialStatus: "unknown", enabled: true });
   process.env.FIXTURE_CHAT_UPGRADE_KEY = "fixture-never-imported";

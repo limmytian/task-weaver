@@ -58,7 +58,7 @@ const chatErrorMessages = {
   chat_encryption_unavailable: "Chat credential encryption is not configured. Ask an administrator to configure the master key.",
   chat_key_required: "Save an API key in your model settings before using Chat. Previous environment references require key re-entry.",
   chat_key_unreadable: "Saved Chat key cannot be decrypted. Restore the encryption key or replace your saved API key.",
-  chat_endpoint_invalid: "Use a public HTTPS base URL on port 443 without credentials, query parameters or fragments.",
+  chat_endpoint_invalid: "Use an HTTP or HTTPS base URL without credentials, query parameters or fragments.",
   chat_endpoint_private: "Private model endpoints are not allowed.",
   chat_endpoint_unresolved: "Model endpoint could not be resolved.",
   chat_key_rejected: "Model rejected the API key. Replace it or check provider access.",

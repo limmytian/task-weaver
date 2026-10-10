@@ -1,7 +1,8 @@
 # Personal Chat credentials
 
 Chat resolves the authenticated account's selected or default model. It uses only an
-API key saved in that account's model settings. Unknown credential status allows a
+API key saved in that account's model settings, except that Provider `Ollama` may
+connect without a key. Unknown credential status allows a
 saved key; missing or invalid status asks the user to review it. Connection tests
 send a short request to the saved model without changing its status.
 
@@ -37,12 +38,21 @@ replacing a saved key encrypts it under the current key. Keep previous keys whil
 any stored envelope or retained backup still needs them. This release does not
 perform an automatic bulk re-encryption.
 
-Custom model endpoints must use public HTTPS on port 443. DNS results are checked
-and pinned to the TLS connection; private, loopback, metadata and special-use
-addresses are rejected. Redirects are not followed. Requests have a 45-second
-absolute timeout and responses are limited to 1 MiB. Provider error bodies are not
-returned to users or logged. Private gateways require a separately designed trust
-policy and are not supported by this self-service interface.
+Custom model endpoints support HTTP, HTTPS, local addresses and custom ports.
+Saving a model opens a confirmation showing the configured address and explaining
+that requests originate from the server and HTTP does not encrypt messages or keys.
+“Don’t show again on this device” stores only a warning preference in that browser's
+local storage; it does not change account or resource permissions. Addresses are
+resolved and pinned for each connection, and redirects are not followed. URLs must
+not contain embedded credentials, query parameters or fragments. Requests retain
+bounded timeouts and 1 MiB response limits. Provider error bodies are not returned
+to users or logged.
+
+For local Ollama, set Provider to `Ollama`, use the installed model name and set Base
+URL to `http://<host>:11434/v1` (or the server's configured port). Leave API Key blank
+unless a gateway requires it. Connection tests are available without a saved key.
+The Web/API containers must be able to reach the endpoint; confirming a URL does
+not change network routing or the Ollama server's listening address.
 
 Assistant action settings apply across all chats for the current account. Task and
 assistant policy writes change separate columns; saving either does not reset the
