@@ -27,11 +27,14 @@ export async function requestChatTurn(baseUrl: string, apiKey: string, payload: 
   if (!addresses.length) throw new ChatConfigurationError("chat_endpoint_unresolved");
   const address = addresses[0]!;
   const body = JSON.stringify(onText ? { ...(payload as Record<string, unknown>), stream: true } : payload);
+  const transport = endpoint.protocol === "http:" ? http : https;
+  // Explicit agents honor deployment proxies and NO_PROXY without changing global networking.
+  const agent = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy
+    ? new transport.Agent({ proxyEnv: process.env, keepAlive: false }) : undefined;
   return new Promise<ChatTurn>((resolve, reject) => {
     const failure = (code: ConstructorParameters<typeof ChatConfigurationError>[0]) => reject(new ChatConfigurationError(code));
-    const transport = endpoint.protocol === "http:" ? http : https;
     const request = transport.request(endpoint, {
-      method: "POST", agent: false, family: address.family, signal: AbortSignal.timeout(Math.max(1, Math.floor(deadline - performance.now()))),
+      method: "POST", agent: agent ?? false, family: address.family, signal: AbortSignal.timeout(Math.max(1, Math.floor(deadline - performance.now()))),
       lookup: (_hostname, _options, callback) => callback(null, address.address, address.family),
       headers: { ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}), "content-type": "application/json", "content-length": Buffer.byteLength(body) },
     }, response => {
@@ -70,7 +73,7 @@ export async function requestChatTurn(baseUrl: string, apiKey: string, payload: 
     });
     request.on("error", () => failure("chat_connection_failed"));
     request.end(body);
-  });
+  }).finally(() => agent?.destroy());
 }
 
 /** Credential tests require an ordinary text completion, not tool execution. */

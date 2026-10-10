@@ -88,3 +88,11 @@ concurrent submissions. Tool execution has a five-minute budget for multi-step
 operations; connection recovery waits for that original request. Compact model
 context omits full resource bodies, while live reads record related resource IDs
 for authorization checks on both the response and later history reads.
+
+Model requests honor deployment `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`
+(and their lowercase equivalents) through a dedicated HTTP(S) agent. This requires
+Node.js 24.5 or newer when a proxy is configured. The proxy applies to connection
+tests, ordinary replies and streaming replies in both Web and API. Set `NO_PROXY`
+for local model endpoints and internal services. Direct connections retain DNS
+pinning; HTTPS proxy connections retain certificate verification. Redirects remain
+rejected, and proxy configuration does not change account or resource permissions.
