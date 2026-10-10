@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 
@@ -18,9 +18,17 @@ function CopyErrorDetails() {
 }
 
 const Toaster = ({ ...props }: ToasterProps) => {
+  useEffect(() => {
+    // Allow focus to enter a notification without the modal immediately pulling it back.
+    const allowToastFocus = (event: FocusEvent) => {
+      if (event.relatedTarget instanceof Element && event.relatedTarget.closest("[data-sonner-toaster]")) event.stopPropagation();
+    };
+    document.addEventListener("focusout", allowToastFocus, true);
+    return () => document.removeEventListener("focusout", allowToastFocus, true);
+  }, []);
   return (
     // Keep toast gestures from stealing text selection or dismissing an open modal.
-    <div onPointerDownCapture={event => event.stopPropagation()}>
+    <div onPointerDownCapture={event => event.stopPropagation()} onFocusCapture={event => event.stopPropagation()}>
       <Sonner
         className="toaster group pointer-events-auto [&_[data-title]]:select-text [&_[data-description]]:select-text [&_[data-description]]:max-h-48 [&_[data-description]]:overflow-y-auto [&_[data-description]]:whitespace-pre-wrap [&_[data-icon]]:h-auto"
         style={
