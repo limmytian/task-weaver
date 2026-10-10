@@ -100,6 +100,24 @@ test("repository catalog separates visibility, relations and readiness", { skip:
     const context = await runtime.verify(new Headers({ authorization: `Bearer ${key.rawKey}` }));
     assert.equal((await createResourceServices(context).repositoryService.listRepositories(db, input, owner.actor)).total, 0);
   });
+  await t.test("migrated personal ownership survives legacy creator attribution without opening other catalogs", async () => {
+    const legacy = await fixture("private", owner);
+    const foreign = await fixture("private", outsider);
+    const unowned = await fixture("instance", admin);
+    const attribution = "apikey:" + randomUUID();
+    for (const row of [legacy, foreign, unowned]) await db.update(repositories).set({ createdBy: attribution }).where(eq(repositories.id, row.id));
+    const listed = await owner.service.repositoryService.listRepositories(db, listRepositoriesSchema.parse({ pageSize: 100 }), owner.actor);
+    assert.ok(listed.items.some((row: any) => row.id === legacy.id));
+    assert.ok(!listed.items.some((row: any) => row.id === foreign.id || row.id === unowned.id));
+    assert.equal((await rest(`repositories/${legacy.id}`, owner.headers)).status, 200);
+    assert.equal((await (await caller(owner.headers)).repository.get({ id: legacy.id, operation: "read" })).id, legacy.id);
+    await owner.service.repositoryService.updateRepository(db, legacy.id, { displayName: "Recovered owned catalog" }, owner.actor);
+    await assert.rejects(outsider.service.repositoryService.getRepository(db, legacy.id, outsider.actor), NotFoundError);
+    await assert.rejects(admin.service.repositoryService.getRepository(db, legacy.id, admin.actor), NotFoundError);
+    const key = await runtime.identity.issueKey(owner.headers, owner.actor.id, { name: "Legacy catalog project-only", grants: [{ scope: "project", projectId: project.id, permissions: ["resource.read"] }], expiresAt: null });
+    const service = createResourceServices(await runtime.verify(new Headers({ authorization: `Bearer ${key.rawKey}` })));
+    await assert.rejects(service.repositoryService.getRepository(db, legacy.id, owner.actor), NotFoundError);
+  });
   await t.test("REST and tRPC share the catalog scope and deny unauthorized mutations", async () => {
     assert.equal((await rest(`repositories/${hidden.id}`, owner.headers)).status, 404);
     const response = await rest(`repositories/${shared.id}`, admin.headers);

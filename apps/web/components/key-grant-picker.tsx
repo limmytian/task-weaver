@@ -45,7 +45,7 @@ export function KeyGrantPicker({ actorId, selected, onChange, disabled = false }
     <p className="text-sm">{selected.length} scopes · {count} permissions selected. Maximum 100 explicit scopes per Key; future projects are never included.</p>
     <Input aria-label="Search permission scopes" placeholder="Search authorized project or scope names" value={query} disabled={disabled} onChange={event => { setQuery(event.target.value); setPage(1); }} />
     <div className="flex flex-wrap items-center gap-2">
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" aria-label="Select all permissions on this page" disabled={disabled || !pageTotal} checked={pageTotal > 0 && pageCount === pageTotal} ref={node => { if (node) node.indeterminate = pageCount > 0 && pageCount < pageTotal; }} onChange={event => toggle(items, event.target.checked)} />This page ({pageCount}/{pageTotal})</label>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="size-4 shrink-0 accent-primary" aria-label="Select all permissions on this page" disabled={disabled || !pageTotal} checked={pageTotal > 0 && pageCount === pageTotal} ref={node => { if (node) node.indeterminate = pageCount > 0 && pageCount < pageTotal; }} onChange={event => toggle(items, event.target.checked)} />This page ({pageCount}/{pageTotal})</label>
       <Button type="button" variant="outline" disabled={disabled} onClick={() => toggle(items, false)}>Clear this page</Button>
       <Button type="button" variant="outline" disabled={disabled || !selected.length} onClick={() => onChange([])}>Clear all selections</Button>
     </div>
@@ -58,15 +58,15 @@ export function KeyGrantPicker({ actorId, selected, onChange, disabled = false }
     {items.map(item => {
       const current = selected.find(value => grantId(value.grant) === grantId(item.grant));
       const permissions = current?.grant.permissions ?? [];
-      return <details key={grantId(item.grant)} className="min-w-0 rounded-md border p-3">
+      return <details key={grantId(item.grant)} className="min-w-0 rounded-md border bg-muted/30 p-3">
         <summary className="cursor-pointer break-words text-sm">{item.label} · {permissions.length}/{item.grant.permissions.length} selected</summary>
         <p className="my-2 break-all text-xs text-muted-foreground">{grantId(item.grant)}</p>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" aria-label={`All permissions for ${item.label}`} disabled={disabled} checked={item.grant.permissions.every(permission => permissions.includes(permission))} ref={node => { if (node) node.indeterminate = permissions.length > 0 && !item.grant.permissions.every(permission => permissions.includes(permission)); }} onChange={event => toggle([item], event.target.checked)} />All in this scope</label>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">{item.grant.permissions.map(permission => <label key={permission} className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={disabled} checked={permissions.includes(permission)} onChange={event => {
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="size-4 shrink-0 accent-primary" aria-label={`All permissions for ${item.label}`} disabled={disabled} checked={item.grant.permissions.every(permission => permissions.includes(permission))} ref={node => { if (node) node.indeterminate = permissions.length > 0 && !item.grant.permissions.every(permission => permissions.includes(permission)); }} onChange={event => toggle([item], event.target.checked)} />All in this scope</label>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">{item.grant.permissions.map(permission => <label key={permission} className="flex items-center gap-2 text-sm"><input type="checkbox" className="size-4 shrink-0 accent-primary" disabled={disabled} checked={permissions.includes(permission)} onChange={event => {
           const next = event.target.checked ? [...new Set([...permissions, permission])] : permissions.filter(value => value !== permission);
           const others = selected.filter(value => grantId(value.grant) !== grantId(item.grant));
           onChange(next.length ? [...others, { ...item, grant: { ...item.grant, permissions: next } }] : others);
-        }} />{permission}</label>)}</div>
+        }} />{permission.replaceAll(".", " ")}</label>)}</div>
       </details>;
     })}
     <nav aria-label="Permission pages" className="flex items-center gap-2"><Button type="button" variant="outline" disabled={disabled || page === 1 || options.isFetching} onClick={() => setPage(page - 1)}>Previous scopes</Button><span>Page {page}</span><Button type="button" variant="outline" disabled={disabled || !options.data?.hasNext || options.isFetching} onClick={() => setPage(page + 1)}>Next scopes</Button></nav>

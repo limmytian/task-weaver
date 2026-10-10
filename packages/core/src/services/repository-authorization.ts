@@ -9,10 +9,10 @@ export function repositoryPredicate(authority: ResourceAuthority): SQL {
   if (authority.bounds) return authority.bounds.repositoryIds.length ? inArray(repositories.id, authority.bounds.repositoryIds) : sql`false`;
   const scopes: SQL[] = [];
   if (canAccessResource(authority, {}, "resource.read"))
-    scopes.push(and(eq(repositories.visibility, "instance"), isNull(repositories.ownerId), isNull(repositories.ownerType))!);
+    scopes.push(and(eq(repositories.visibility, "instance"), isNull(repositories.ownerId), isNull(repositories.ownerType), sql`EXISTS (SELECT 1 FROM ${authActors} WHERE ${authActors.id}::text = ${repositories.createdBy})`)!);
   const owners = authority.grants.flatMap(grant => grant.scope === "personal" && grant.permissions.includes("resource.read") ? [grant.actorId] : []);
-  if (owners.length) scopes.push(and(inArray(repositories.visibility, ["private", "restricted"]), inArray(repositories.ownerId, owners), eq(repositories.ownerType, "human"))!);
-  return and(or(...scopes) ?? sql`false`, sql`EXISTS (SELECT 1 FROM ${authActors} WHERE ${authActors.id}::text = ${repositories.createdBy})`)!;
+  if (owners.length) scopes.push(and(inArray(repositories.visibility, ["private", "restricted"]), inArray(repositories.ownerId, owners), eq(repositories.ownerType, "human"), sql`EXISTS (SELECT 1 FROM ${authActors} WHERE ${authActors.id}::text = ${repositories.ownerId} AND ${authActors.type} = 'human')`)!);
+  return or(...scopes) ?? sql`false`;
 }
 
 export async function requireRepository(db: Database, authority: ResourceAuthority, id: string) {
