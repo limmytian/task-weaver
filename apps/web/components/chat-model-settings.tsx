@@ -33,7 +33,6 @@ export function ChatModelSettings({ compact = false }: { compact?: boolean }) {
     setSkipEndpointWarning(false);
     setConfirmEndpoint(true);
   };
-  const keyless = draft.provider.trim().toLowerCase() === "ollama";
   const refresh = () => utils.assistant.listModels.invalidate();
   const save = trpc.assistant.saveModel.useMutation({ onSuccess: () => { refresh(); setApiKey(""); setEditing(null); setDraft(empty); toast.success("Model settings saved"); }, onError: error => toast.error(error.message) });
   const remove = trpc.assistant.deleteModelKey.useMutation({ onSuccess: () => { refresh(); toast.success("API key deleted"); }, onError: error => toast.error(error.message) });
@@ -50,23 +49,23 @@ export function ChatModelSettings({ compact = false }: { compact?: boolean }) {
         }}>Confirm and save</AlertDialogAction></AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-    <p className="text-sm text-muted-foreground">Your models and keys belong to your account. Keys are encrypted and never displayed. Ollama can be used without an API key. Old environment references require key re-entry.</p>
+    <p className="text-sm text-muted-foreground">Your models and keys belong to your account. Keys are encrypted and never displayed. API keys are optional. Leave the key blank if your server does not require one, then test the connection. Deployment keys are not imported.</p>
     {query.isError && <p role="alert" className="text-destructive">{query.error.message}</p>}
     <div className="space-y-3">{query.data?.map(model => <div key={model.id} className="rounded-md border p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2"><strong>{model.label || model.model}</strong><Badge variant="secondary">{model.credentialStatus}</Badge>{model.isDefaultChat && <Badge>Default Chat</Badge>}{!model.enabled && <Badge variant="outline">Disabled</Badge>}</div>
       <p className="break-all text-xs text-muted-foreground">{model.provider} · {model.model} · {model.baseUrl || "Base URL required"}</p>
-      <p className="mt-1 text-xs">{model.requiresKeyEntry ? "API key required — enter or replace it below." : model.hasApiKey ? `Saved API key: ${model.apiKeyMask}` : "No API key required"}</p>
+      <p className="mt-1 text-xs">{model.hasApiKey ? `Saved API key: ${model.apiKeyMask}` : "No API key saved — test the connection to check whether your server requires one."}</p>
       <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => { setEditing(model); setDraft({ provider: model.provider, model: model.model, baseUrl: model.baseUrl ?? "", label: model.label ?? "", credentialStatus: model.credentialStatus, enabled: model.enabled, isDefaultChat: model.isDefaultChat, isDefaultAgent: model.isDefaultAgent }); setApiKey(""); }}>Edit</Button>
-        <Button size="sm" variant="outline" disabled={model.requiresKeyEntry || test.isPending} onClick={() => test.mutate({ id: model.id })}>Test connection</Button>
+        <Button size="sm" variant="outline" disabled={test.isPending} onClick={() => test.mutate({ id: model.id })}>Test connection</Button>
         <Button size="sm" variant="outline" disabled={!model.hasApiKey || remove.isPending} onClick={() => remove.mutate({ id: model.id })}>Delete key</Button>
       </div>
     </div>)}</div>
     <form className="space-y-3 border-t pt-4" onSubmit={event => { event.preventDefault(); submitModel(); }}>
       <h3 className="font-medium">{editing ? "Edit saved model" : "Add model"}</h3>
       <div className="grid gap-3 sm:grid-cols-2">{(["provider", "model", "baseUrl", "label"] as const).map(field => <label key={field} className="space-y-1 text-sm">{{ provider: "Provider", model: "Model", baseUrl: "Base URL", label: "Display name" }[field]}<Input required={field !== "label"} disabled={!!editing && (field === "provider" || field === "model")} value={draft[field]} onChange={event => setDraft({ ...draft, [field]: event.target.value })} /></label>)}</div>
-      <label className="block space-y-1 text-sm">API key{keyless && " (optional for Ollama)"}<Input type="password" autoComplete="new-password" value={apiKey} onChange={event => setApiKey(event.target.value)} placeholder={editing?.hasApiKey ? "Leave blank to preserve the saved key" : keyless ? "Optional — leave blank for local Ollama" : "Enter your provider API key"} /></label>
+      <label className="block space-y-1 text-sm">API key (optional)<Input type="password" autoComplete="new-password" value={apiKey} onChange={event => setApiKey(event.target.value)} placeholder={editing?.hasApiKey ? "Leave blank to preserve the saved key" : "Leave blank if your server does not require a key"} /></label>
       <label className="flex items-center gap-2 text-sm">Credentials<select value={draft.credentialStatus} onChange={event => setDraft({ ...draft, credentialStatus: event.target.value as Model["credentialStatus"] })} className="rounded border bg-background p-2">{["unknown", "valid", "invalid", "missing"].map(status => <option key={status}>{status}</option>)}</select></label>
-      <p className="text-xs text-muted-foreground">Unknown allows Chat with a saved key, or without one for Ollama. Invalid requires review; other providers also require a saved key.</p>
+      <p className="text-xs text-muted-foreground">Credential status is informational. Test the connection to verify whether your server accepts the saved settings.</p>
       <div className="flex flex-wrap gap-3">{(["enabled", "isDefaultChat"] as const).map(field => <label key={field} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft[field]} onChange={event => setDraft({ ...draft, [field]: event.target.checked })} />{{ enabled: "Enabled", isDefaultChat: "Default Chat", isDefaultAgent: "Default task model" }[field]}</label>)}</div>
       <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={save.isPending} onClick={() => { setDraft(empty); setEditing(null); setApiKey(""); }}>Cancel edits</Button><Button type="submit" disabled={save.isPending}>{editing ? "Save changes" : "Save model"}</Button></div>
     </form>

@@ -101,7 +101,7 @@ test("assistant authorization isolates accounts and resources across REST and tR
   t.mock.method(dns, "lookup", async () => [{ address: dnsAddress, family: 4 }]);
   t.mock.method(https, "request", (url: URL, options: any, callback: any) => {
     assert.equal(String(url), "https://model.example.test/v1/chat/completions");
-    assert.equal(options.headers.authorization, `Bearer ${expectedKey}`);
+    assert.equal(options.headers.authorization, expectedKey ? `Bearer ${expectedKey}` : undefined);
     calls++;
     const request = new EventEmitter() as any;
     request.destroy = () => {};
@@ -584,8 +584,10 @@ test("assistant authorization isolates accounts and resources across REST and tR
   await assert.rejects(createChatModelService(outsider.context).deleteKey(db, savedModel.id), NotFoundError);
   await ownerModels.deleteKey(db, savedModel.id);
   const beforeMissing = calls;
-  await assert.rejects(ownerChat.sendReadOnlyMessage(db, input));
-  assert.equal(calls, beforeMissing);
+  expectedKey = ""; responseStatus = 401;
+  await assert.rejects(ownerChat.sendReadOnlyMessage(db, input), /Model rejected/);
+  assert.equal(calls, beforeMissing + 1);
+  expectedKey = "fixture-personal-key"; responseStatus = 200;
   await ownerModels.save(db, { ...modelSettings, apiKey: "fixture-personal-key" });
   await ownerModels.test(db, savedModel.id);
   await ownerModels.save(db, { provider: "fixture", model: "fixture-chat", apiKey: "fixture-replaced-key" });
@@ -600,7 +602,7 @@ test("assistant authorization isolates accounts and resources across REST and tR
   responseStatus = 302;
   await assert.rejects(ownerModels.test(db, savedModel.id), error => error instanceof Error && !error.message.includes(expectedKey) && /Model request failed/.test(error.message));
   responseStatus = 200;
-  await t.test("Ollama resolves and tests without a saved API key over local HTTP", async () => {
+  await t.test("arbitrary providers resolve and test without a saved API key over local HTTP", async () => {
     const localModel = createServer((req, res) => {
       assert.equal(req.url, "/v1/chat/completions");
       assert.equal(req.headers.authorization, undefined);
@@ -611,12 +613,12 @@ test("assistant authorization isolates accounts and resources across REST and tR
     try {
       dnsAddress = "127.0.0.1";
       const port = (localModel.address() as { port: number }).port;
-      const local = await ownerModels.save(db, { provider: "Ollama", model: "local-fixture", baseUrl: `http://127.0.0.1:${port}/v1`, enabled: true });
+      const local = await ownerModels.save(db, { provider: "ollama-local", model: "local-fixture", baseUrl: `http://127.0.0.1:${port}/v1`, enabled: true });
       assert.equal(local.hasApiKey, false); assert.equal(local.requiresKeyEntry, false);
-      assert.equal((await ownerModels.resolve(db, "Ollama", "local-fixture")).apiKey, "");
+      assert.equal((await ownerModels.resolve(db, "ollama-local", "local-fixture")).apiKey, "");
       await ownerModels.test(db, local.id);
       await ownerModels.deleteKey(db, local.id);
-      await ownerModels.resolve(db, "Ollama", "local-fixture");
+      await ownerModels.resolve(db, "ollama-local", "local-fixture");
       await assert.rejects(createChatModelService(outsider.context).test(db, local.id), NotFoundError);
     } finally { dnsAddress = "8.8.8.8"; localModel.closeAllConnections(); await new Promise<void>(resolve => localModel.close(() => resolve())); }
   });
@@ -625,11 +627,13 @@ test("assistant authorization isolates accounts and resources across REST and tR
   process.env.FIXTURE_CHAT_UPGRADE_KEY = "fixture-never-imported";
   t.after(() => { delete process.env.FIXTURE_CHAT_UPGRADE_KEY; });
   const beforeLegacy = calls;
-  await assert.rejects(ownerChat.sendReadOnlyMessage(db, { ...input, requestedProvider: "legacy", requestedModel: "legacy-chat" }), /key re-entry/);
-  assert.equal(calls, beforeLegacy);
+  expectedKey = ""; responseStatus = 401;
+  await assert.rejects(ownerChat.sendReadOnlyMessage(db, { ...input, requestedProvider: "legacy", requestedModel: "legacy-chat" }), /Model rejected/);
+  assert.equal(calls, beforeLegacy + 1);
+  expectedKey = "fixture-replaced-key"; responseStatus = 200;
   const legacy = (await ownerModels.list(db)).find((row: any) => row.id === legacyId);
   assert.equal(legacy.baseUrl, "https://model.example.test/v1");
-  assert.equal(legacy.requiresKeyEntry, true);
+  assert.equal(legacy.requiresKeyEntry, false);
   const safeTi = await rest("ti/configs?includeDisabled=true", owner.headers);
   assert.equal(safeTi.status, 200);
   assert.ok(!JSON.stringify(safeTi.body).includes("encryptedApiKey"));

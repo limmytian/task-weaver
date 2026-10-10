@@ -1,14 +1,15 @@
 # Personal Chat credentials
 
 Chat resolves the authenticated account's selected or default model. It uses only an
-API key saved in that account's model settings, except that Provider `Ollama` may
-connect without a key. Unknown credential status allows a
-saved key; missing or invalid status asks the user to review it. Connection tests
-send a short request to the saved model without changing its status.
+API key saved in that account's model settings, when one is provided. API keys are
+optional for every provider. Without a saved key, no Authorization header is sent.
+Credential status is informational; connection tests and Chat requests determine
+whether the server accepts the configuration. Connection tests send a short request
+to the saved model without changing its status.
 
 The upgrade adds nullable encrypted credential columns. Existing provider, model,
 base URL, defaults and conversations remain intact. Old environment references do
-not provide Chat credentials: users must enter their own keys. Deployment secrets
+not provide Chat credentials: users must enter their own keys if the server requires them. Deployment secrets
 are never imported. Task executor provider configuration is a separate interface.
 
 Configure `TW_CHAT_CREDENTIAL_MASTER_KEY` as a base64-encoded, random 32-byte key in
@@ -48,7 +49,7 @@ not contain embedded credentials, query parameters or fragments. Requests retain
 bounded timeouts and 1 MiB response limits. Provider error bodies are not returned
 to users or logged.
 
-For local Ollama, set Provider to `Ollama`, use the installed model name and set Base
+For local Ollama, choose any Provider label, use the installed model name and set Base
 URL to `http://<host>:11434/v1` (or the server's configured port). Leave API Key blank
 unless a gateway requires it. Connection tests are available without a saved key.
 The Web/API containers must be able to reach the endpoint; confirming a URL does
