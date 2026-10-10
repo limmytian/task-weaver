@@ -29,8 +29,9 @@ export async function requestChatTurn(baseUrl: string, apiKey: string, payload: 
   const body = JSON.stringify(onText ? { ...(payload as Record<string, unknown>), stream: true } : payload);
   const transport = endpoint.protocol === "http:" ? http : https;
   // Explicit agents honor deployment proxies and NO_PROXY without changing global networking.
+  const agentOptions = { proxyEnv: process.env, keepAlive: false };
   const agent = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy
-    ? new transport.Agent({ proxyEnv: process.env, keepAlive: false }) : undefined;
+    ? new transport.Agent(agentOptions) : undefined;
   return new Promise<ChatTurn>((resolve, reject) => {
     const failure = (code: ConstructorParameters<typeof ChatConfigurationError>[0]) => reject(new ChatConfigurationError(code));
     const request = transport.request(endpoint, {
