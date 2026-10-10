@@ -615,6 +615,25 @@ test("assistant authorization isolates accounts and resources across REST and tR
       const port = (localModel.address() as { port: number }).port;
       const local = await ownerModels.save(db, { provider: "ollama-local", model: "local-fixture", baseUrl: `http://127.0.0.1:${port}/v1`, enabled: true });
       assert.equal(local.hasApiKey, false); assert.equal(local.requiresKeyEntry, false);
+      assert.equal(local.proxyMode, "inherit"); assert.equal(local.proxyUrl, null);
+      const proxy = createServer((_req, res) => {
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ choices: [{ message: { content: "Proxy OK" } }] }));
+      });
+      proxy.listen(0, "127.0.0.1"); await once(proxy, "listening");
+      try {
+        const proxyUrl = `http://127.0.0.1:${(proxy.address() as { port: number }).port}`;
+        await ownerModels.save(db, { provider: "ollama-local", model: "local-fixture", proxyMode: "custom", proxyUrl });
+        await ownerModels.save(db, { provider: "ollama-local", model: "local-fixture", label: "Proxy preserved" });
+        const resolved = await ownerModels.resolve(db, "ollama-local", "local-fixture");
+        assert.equal(resolved.config.proxyMode, "custom"); assert.equal(resolved.config.proxyUrl, proxyUrl);
+        assert.equal((await ownerModels.list(db)).find((m: any) => m.id === local.id).proxyUrl, proxyUrl);
+        assert(!(await createChatModelService(outsider.context).list(db)).some((m: any) => m.id === local.id));
+        await ownerModels.test(db, local.id);
+        await ownerModels.save(db, { provider: "ollama-local", model: "local-fixture", proxyMode: "direct" });
+        const direct = await ownerModels.resolve(db, "ollama-local", "local-fixture");
+        assert.equal(direct.config.proxyMode, "direct"); assert.equal(direct.config.proxyUrl, null);
+      } finally { proxy.closeAllConnections(); await new Promise<void>(resolve => proxy.close(() => resolve())); }
       assert.equal((await ownerModels.resolve(db, "ollama-local", "local-fixture")).apiKey, "");
       await ownerModels.test(db, local.id);
       await ownerModels.deleteKey(db, local.id);

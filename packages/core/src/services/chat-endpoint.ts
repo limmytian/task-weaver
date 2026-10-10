@@ -2,7 +2,7 @@ import https from "node:https";
 import http from "node:http";
 import { readChatStream } from "./chat-stream";
 import dns from "node:dns/promises";
-import { ChatConfigurationError } from "@task-weaver/contracts";
+import { ChatConfigurationError, chatProxyUrlSchema, type ChatProxySettings } from "@task-weaver/contracts";
 
 export function chatEndpoint(baseUrl: string) {
   let url: URL;
@@ -16,7 +16,7 @@ export function chatEndpoint(baseUrl: string) {
 /** Pin the resolved address for each request; never follow redirects with credentials. */
 export type ChatTurn = { content: string | null; toolCalls: { id: string; name: string; arguments: string }[] };
 
-export async function requestChatTurn(baseUrl: string, apiKey: string, payload: unknown, deadline = performance.now() + 45_000, onText?: (text: string) => Promise<void>, connectionTest = false) {
+export async function requestChatTurn(baseUrl: string, apiKey: string, payload: unknown, deadline = performance.now() + 45_000, onText?: (text: string) => Promise<void>, connectionTest = false, proxy: ChatProxySettings = {}) {
   const endpoint = chatEndpoint(baseUrl);
   if (performance.now() >= deadline) throw new ChatConfigurationError("chat_connection_failed");
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -29,8 +29,11 @@ export async function requestChatTurn(baseUrl: string, apiKey: string, payload: 
   const body = JSON.stringify(onText ? { ...(payload as Record<string, unknown>), stream: true } : payload);
   const transport = endpoint.protocol === "http:" ? http : https;
   // Explicit agents honor deployment proxies and NO_PROXY without changing global networking.
-  const agentOptions = { proxyEnv: process.env, keepAlive: false };
-  const agent = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy
+  const proxyEnv: Record<string, string | undefined> = proxy.proxyMode === "direct" ? {} : proxy.proxyMode === "custom"
+    ? { HTTP_PROXY: chatProxyUrlSchema.parse(proxy.proxyUrl), HTTPS_PROXY: chatProxyUrlSchema.parse(proxy.proxyUrl) }
+    : process.env;
+  const agentOptions = { proxyEnv, keepAlive: false };
+  const agent = proxyEnv.HTTPS_PROXY || proxyEnv.https_proxy || proxyEnv.HTTP_PROXY || proxyEnv.http_proxy
     ? new transport.Agent(agentOptions) : undefined;
   return new Promise<ChatTurn>((resolve, reject) => {
     const failure = (code: ConstructorParameters<typeof ChatConfigurationError>[0]) => reject(new ChatConfigurationError(code));
@@ -85,6 +88,6 @@ export async function requestChatCompletion(baseUrl: string, apiKey: string, pay
 }
 
 /** A bounded connection test accepts a valid token-limited response from thinking models. */
-export async function requestChatConnection(baseUrl: string, apiKey: string, model: string) {
-  await requestChatTurn(baseUrl, apiKey, { model, messages: [{ role: "user", content: "Reply with OK." }], max_tokens: 8 }, performance.now() + 45_000, undefined, true);
+export async function requestChatConnection(baseUrl: string, apiKey: string, model: string, proxy: ChatProxySettings = {}) {
+  await requestChatTurn(baseUrl, apiKey, { model, messages: [{ role: "user", content: "Reply with OK." }], max_tokens: 8 }, performance.now() + 45_000, undefined, true, proxy);
 }

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
+import { saveChatModelSchema } from "@task-weaver/contracts";
 import { once } from "node:events";
 import { requestChatTurn, requestChatConnection } from "./chat-endpoint";
 
@@ -44,6 +45,12 @@ test("deployment proxies route model requests while NO_PROXY keeps local models 
   const proxy = createServer((request, response) => {
     paths.push(request.url!);
     assert.equal(request.headers.authorization, "Bearer fixture-key");
+    if (request.url === "http://localhost:2/v1/chat/completions") {
+      response.setHeader("Content-Type", "text/event-stream");
+      response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "Proxy stream" }, finish_reason: null }] })}\n\n`);
+      response.end(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+      return;
+    }
     response.setHeader("Content-Type", "application/json");
     response.end(JSON.stringify({ choices: [{ message: { content: "Proxy reply" } }] }));
   });
@@ -62,9 +69,32 @@ test("deployment proxies route model requests while NO_PROXY keeps local models 
     process.env.NO_PROXY = "127.0.0.1,localhost";
     assert.equal((await requestChatTurn(`http://127.0.0.1:${(direct.address() as { port: number }).port}/v1`, "", {})).content, "Direct reply");
     assert.equal(paths.length, 1);
+    process.env.NO_PROXY = "*";
+    const settings = { proxyMode: "custom" as const, proxyUrl: process.env.HTTP_PROXY };
+    assert.equal((await requestChatTurn("http://localhost:1/v1", "fixture-key", {}, performance.now() + 5000, undefined, false, settings)).content, "Proxy reply");
+    assert.equal(paths.length, 2);
+    let streamed = "";
+    const turn = await requestChatTurn("http://localhost:2/v1", "fixture-key", {}, performance.now() + 5000,
+      async delta => { streamed += delta; }, false, settings);
+    assert.equal(turn.content, "Proxy stream"); assert.equal(streamed, turn.content);
+    process.env.HTTP_PROXY = "http://127.0.0.1:1";
+    process.env.NO_PROXY = "";
+    assert.equal((await requestChatTurn(`http://127.0.0.1:${(direct.address() as { port: number }).port}/v1`, "", {}, performance.now() + 5000, undefined, false, { proxyMode: "direct" })).content, "Direct reply");
+    assert.equal(paths.length, 3);
   } finally {
     for (const [name, value] of Object.entries(original)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
     proxy.closeAllConnections(); direct.closeAllConnections();
     await Promise.all([new Promise<void>(resolve => proxy.close(() => resolve())), new Promise<void>(resolve => direct.close(() => resolve()))]);
+  }
+});
+
+
+test("custom proxy settings require a valid noncredentialed HTTP(S) proxy URL", () => {
+  const model = { provider: "fixture", model: "fixture" };
+  assert(saveChatModelSchema.safeParse({ ...model, proxyMode: "inherit" }).success);
+  assert(saveChatModelSchema.safeParse({ ...model, proxyMode: "direct", proxyUrl: null }).success);
+  assert(saveChatModelSchema.safeParse({ ...model, proxyMode: "custom", proxyUrl: "http://localhost:7890" }).success);
+  for (const proxyUrl of [undefined, null, "invalid", "socks5://localhost:7890", "http://user:secret@localhost:7890", "http://localhost:7890/path", "http://localhost:7890/?key=secret"]) {
+    assert.equal(saveChatModelSchema.safeParse({ ...model, proxyMode: "custom", proxyUrl }).success, false);
   }
 });

@@ -125,7 +125,7 @@ async function generateModelResponse(
     }, deadline, observer ? async delta => {
       text += delta;
       if (text.length >= 64 || performance.now() - lastFlush >= 100) await flush();
-    } : undefined);
+    } : undefined, false, model.config);
     if (observer) await flush();
     if (!turn.toolCalls.length) {
       if (!turn.content) throw new ValidationError("Assistant returned no answer");

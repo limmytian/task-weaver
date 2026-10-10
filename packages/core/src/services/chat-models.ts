@@ -12,7 +12,7 @@ function modelKey(config: Config) {
 
 type Config = typeof tiAgentModelConfigs.$inferSelect;
 function publicModel(row: Config) {
-  return { id: row.id, provider: row.provider, model: row.model, baseUrl: row.baseUrl, label: row.label,
+  return { id: row.id, provider: row.provider, model: row.model, baseUrl: row.baseUrl, label: row.label, proxyMode: row.proxyMode, proxyUrl: row.proxyUrl,
     credentialStatus: row.credentialStatus, enabled: row.enabled, isDefaultChat: row.isDefaultChat,
     isDefaultAgent: row.isDefaultAgent, hasApiKey: !!row.encryptedApiKey, apiKeyMask: row.encryptedApiKey ? row.apiKeyMask : null,
     requiresKeyEntry: false };
@@ -44,7 +44,7 @@ export function createChatModelService(identity: VerifiedRequestContext) {
         const ownerId = await authorize(txDb, "resource.write");
         if (input.apiKey) await authorize(txDb, "credential.manage");
         const encryptedApiKey = input.apiKey ? encryptChatKey(input.apiKey, chatKeyBinding({ ownerId, ...input })) : undefined;
-        const patch = { ...input, credentialStatus: input.credentialStatus ?? (input.apiKey ? "unknown" as const : undefined), apiKey: undefined, apiKeyRef: null, encryptedApiKey,
+        const patch = { ...input, proxyUrl: input.proxyMode && input.proxyMode !== "custom" ? null : input.proxyUrl, credentialStatus: input.credentialStatus ?? (input.apiKey ? "unknown" as const : undefined), apiKey: undefined, apiKeyRef: null, encryptedApiKey,
           apiKeyMask: input.apiKey ? "••••••••" : undefined, updatedAt: new Date() };
         // Plaintext is never passed to the database, audit log or return value.
         const { apiKey: _apiKey, ...stored } = patch;
@@ -71,7 +71,7 @@ export function createChatModelService(identity: VerifiedRequestContext) {
       const config = await get(db, id);
       const key = modelKey(config);
       if (!config.baseUrl) throw new ChatConfigurationError("chat_url_required");
-      await requestChatConnection(config.baseUrl, key, config.model);
+      await requestChatConnection(config.baseUrl, key, config.model, config);
       return { connected: true };
     },
     async resolve(db: Database, provider?: string | null, model?: string | null) {

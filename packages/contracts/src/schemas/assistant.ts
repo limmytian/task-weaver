@@ -336,17 +336,30 @@ export const assistantPolicySchema = z.object({
 export const updateAssistantPolicySchema = assistantPolicySchema.partial().strict();
 export type AssistantPolicy = z.infer<typeof assistantPolicySchema>;
 
+export const chatProxyModeSchema = z.enum(["inherit", "direct", "custom"]);
+export const chatProxyUrlSchema = z.string().trim().url().max(500).refine(value => {
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password
+      && !url.search && !url.hash && url.pathname === "/";
+  } catch { return false; }
+}, "Use an HTTP or HTTPS proxy URL without credentials, path, query or fragment");
+export type ChatProxySettings = { proxyMode?: z.infer<typeof chatProxyModeSchema>; proxyUrl?: string | null };
+
 export const saveChatModelSchema = z.object({
   provider: z.string().trim().min(1).max(120),
   model: z.string().trim().min(1).max(200),
   baseUrl: z.string().url().max(500).optional(),
   label: z.string().max(200).nullable().optional(),
+  proxyMode: chatProxyModeSchema.optional(),
+  proxyUrl: chatProxyUrlSchema.nullable().optional(),
   apiKey: z.string().trim().min(1).max(4096).regex(/^[^\s\x00-\x1f\x7f]+$/, "API keys cannot contain whitespace or control characters").optional(),
   credentialStatus: z.enum(["unknown", "valid", "invalid", "missing"]).optional(),
   enabled: z.boolean().optional(),
   isDefaultChat: z.boolean().optional(),
   isDefaultAgent: z.boolean().optional(),
-}).strict();
+}).strict().refine(input => input.proxyMode !== "custom" || !!input.proxyUrl,
+  { message: "A custom proxy requires a proxy URL", path: ["proxyUrl"] });
 export const chatModelIdSchema = z.object({ id: z.string().uuid() }).strict();
 
 export const getAssistantMessageResultSchema = z.object({ requestId: z.string().uuid() }).strict();

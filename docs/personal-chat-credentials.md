@@ -96,3 +96,13 @@ tests, ordinary replies and streaming replies in both Web and API. Set `NO_PROXY
 for local model endpoints and internal services. Direct connections retain DNS
 pinning; HTTPS proxy connections retain certificate verification. Redirects remain
 rejected, and proxy configuration does not change account or resource permissions.
+
+Each personal model can choose its own proxy mode: deployment default, direct
+connection, or custom HTTP(S) proxy. Existing models use the deployment default.
+A custom proxy overrides deployment proxy and bypass rules for this model;
+direct connection bypasses all deployment proxies. These settings apply to saved
+model connection tests, ordinary replies and streaming replies in Web and API.
+Proxy URLs do not support embedded credentials. They are visible only through the
+account-authorized configuration APIs and are not imported from deployment settings.
+Saving unrelated model fields preserves the proxy configuration. Switching to
+inherit or direct clears the custom proxy URL.

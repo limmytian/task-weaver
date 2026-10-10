@@ -470,6 +470,13 @@
       "when": 1791568784901,
       "tag": "0066_assistant_confirmation_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1791600000000,
+      "tag": "0067_chat_model_proxy",
+      "breakpoints": true
     }
   ]
 }

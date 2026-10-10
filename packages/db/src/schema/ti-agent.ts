@@ -23,6 +23,8 @@ export const tiAgentModelConfigs = pgTable(
     model: text("model").notNull(),
     baseUrl: text("base_url"),
     label: text("label"),
+    proxyMode: text("proxy_mode", { enum: ["inherit", "direct", "custom"] }).default("inherit").notNull(),
+    proxyUrl: text("proxy_url"),
     apiKeyRef: text("api_key_ref"),
     encryptedApiKey: text("encrypted_api_key"),
     apiKeyMask: text("api_key_mask"),

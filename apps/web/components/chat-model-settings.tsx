@@ -15,7 +15,7 @@ import type { AppRouter } from "@/trpc/routers/_app";
 type RouterOutputs = inferRouterOutputs<AppRouter>;
 
 type Model = RouterOutputs["assistant"]["listModels"][number];
-const empty = { provider: "", model: "", baseUrl: "", label: "", credentialStatus: "unknown" as Model["credentialStatus"], enabled: true, isDefaultChat: false, isDefaultAgent: false };
+const empty = { provider: "", model: "", baseUrl: "", label: "", proxyMode: "inherit" as Model["proxyMode"], proxyUrl: "", credentialStatus: "unknown" as Model["credentialStatus"], enabled: true, isDefaultChat: false, isDefaultAgent: false };
 
 export function ChatModelSettings({ compact = false }: { compact?: boolean }) {
   const utils = trpc.useUtils();
@@ -27,7 +27,7 @@ export function ChatModelSettings({ compact = false }: { compact?: boolean }) {
   const [confirmEndpoint, setConfirmEndpoint] = useState(false);
   const [skipEndpointWarning, setSkipEndpointWarning] = useState(false);
   const warningPreference = "task-weaver:chat-model-endpoint-warning-disabled";
-  const persistModel = () => save.mutate({ ...draft, label: draft.label || null, apiKey: apiKey.trim() || undefined });
+  const persistModel = () => save.mutate({ ...draft, label: draft.label || null, proxyUrl: draft.proxyMode === "custom" ? draft.proxyUrl.trim() : null, apiKey: apiKey.trim() || undefined });
   const submitModel = () => {
     try { if (localStorage.getItem(warningPreference) === "true") { persistModel(); return; } } catch { /* Confirmation remains available without local storage. */ }
     setSkipEndpointWarning(false);
@@ -40,8 +40,8 @@ export function ChatModelSettings({ compact = false }: { compact?: boolean }) {
   const content = <div className="space-y-5">
     <AlertDialog open={confirmEndpoint} onOpenChange={setConfirmEndpoint}>
       <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Use this model endpoint?</AlertDialogTitle>
-        <AlertDialogDescription>The server will connect to the address you configured, including local network addresses. HTTP does not encrypt messages or API keys in transit. Only use a server you trust.</AlertDialogDescription>
-      </AlertDialogHeader><p className="break-all text-sm">{draft.baseUrl}</p>
+        <AlertDialogDescription>The server will connect to the address you configured, including local network addresses. A custom proxy will also carry these requests. HTTP does not encrypt messages or API keys in transit. Only use a server you trust.</AlertDialogDescription>
+      </AlertDialogHeader><p className="break-all text-sm">{draft.baseUrl}{draft.proxyMode === "custom" && <> · Proxy: {draft.proxyUrl}</>}</p>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={skipEndpointWarning} onChange={event => setSkipEndpointWarning(event.target.checked)} />Don’t show again on this device</label>
         <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => {
           if (skipEndpointWarning) { try { localStorage.setItem(warningPreference, "true"); } catch { /* Save is independent of browser storage availability. */ } }
@@ -54,8 +54,9 @@ export function ChatModelSettings({ compact = false }: { compact?: boolean }) {
     <div className="space-y-3">{query.data?.map(model => <div key={model.id} className="rounded-md border p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2"><strong>{model.label || model.model}</strong><Badge variant="secondary">{model.credentialStatus}</Badge>{model.isDefaultChat && <Badge>Default Chat</Badge>}{!model.enabled && <Badge variant="outline">Disabled</Badge>}</div>
       <p className="break-all text-xs text-muted-foreground">{model.provider} · {model.model} · {model.baseUrl || "Base URL required"}</p>
+      <p className="mt-1 text-xs text-muted-foreground">Proxy: {model.proxyMode === "custom" ? model.proxyUrl : model.proxyMode === "direct" ? "Direct connection" : "Deployment default"}</p>
       <p className="mt-1 text-xs">{model.hasApiKey ? `Saved API key: ${model.apiKeyMask}` : "No API key saved — test the connection to check whether your server requires one."}</p>
-      <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => { setEditing(model); setDraft({ provider: model.provider, model: model.model, baseUrl: model.baseUrl ?? "", label: model.label ?? "", credentialStatus: model.credentialStatus, enabled: model.enabled, isDefaultChat: model.isDefaultChat, isDefaultAgent: model.isDefaultAgent }); setApiKey(""); }}>Edit</Button>
+      <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => { setEditing(model); setDraft({ provider: model.provider, model: model.model, baseUrl: model.baseUrl ?? "", label: model.label ?? "", proxyMode: model.proxyMode, proxyUrl: model.proxyUrl ?? "", credentialStatus: model.credentialStatus, enabled: model.enabled, isDefaultChat: model.isDefaultChat, isDefaultAgent: model.isDefaultAgent }); setApiKey(""); }}>Edit</Button>
         <Button size="sm" variant="outline" disabled={test.isPending} onClick={() => test.mutate({ id: model.id })}>Test connection</Button>
         <Button size="sm" variant="outline" disabled={!model.hasApiKey || remove.isPending} onClick={() => remove.mutate({ id: model.id })}>Delete key</Button>
       </div>
@@ -63,6 +64,11 @@ export function ChatModelSettings({ compact = false }: { compact?: boolean }) {
     <form className="space-y-3 border-t pt-4" onSubmit={event => { event.preventDefault(); submitModel(); }}>
       <h3 className="font-medium">{editing ? "Edit saved model" : "Add model"}</h3>
       <div className="grid gap-3 sm:grid-cols-2">{(["provider", "model", "baseUrl", "label"] as const).map(field => <label key={field} className="space-y-1 text-sm">{{ provider: "Provider", model: "Model", baseUrl: "Base URL", label: "Display name" }[field]}<Input required={field !== "label"} disabled={!!editing && (field === "provider" || field === "model")} value={draft[field]} onChange={event => setDraft({ ...draft, [field]: event.target.value })} /></label>)}</div>
+      <label className="block space-y-1 text-sm">Proxy<select className="ml-2 rounded border bg-background p-2" value={draft.proxyMode} onChange={event => setDraft({ ...draft, proxyMode: event.target.value as Model["proxyMode"] })}>
+        <option value="inherit">Use deployment default</option><option value="direct">Direct connection</option><option value="custom">Custom proxy</option>
+      </select></label>
+      {draft.proxyMode === "custom" && <label className="block space-y-1 text-sm">Proxy URL<Input required type="url" placeholder="http://proxy.example.com:7890" value={draft.proxyUrl} onChange={event => setDraft({ ...draft, proxyUrl: event.target.value })} /></label>}
+      <p className="text-xs text-muted-foreground">The server uses this setting for connection tests and all replies. A custom proxy overrides deployment bypass rules. Direct connection bypasses deployment proxies.</p>
       <label className="block space-y-1 text-sm">API key (optional)<Input type="password" autoComplete="new-password" value={apiKey} onChange={event => setApiKey(event.target.value)} placeholder={editing?.hasApiKey ? "Leave blank to preserve the saved key" : "Leave blank if your server does not require a key"} /></label>
       <label className="flex items-center gap-2 text-sm">Credentials<select value={draft.credentialStatus} onChange={event => setDraft({ ...draft, credentialStatus: event.target.value as Model["credentialStatus"] })} className="rounded border bg-background p-2">{["unknown", "valid", "invalid", "missing"].map(status => <option key={status}>{status}</option>)}</select></label>
       <p className="text-xs text-muted-foreground">Credential status is informational. Test the connection to verify whether your server accepts the saved settings.</p>
