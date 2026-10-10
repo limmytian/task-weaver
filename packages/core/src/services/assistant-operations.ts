@@ -41,7 +41,7 @@ export const assistantOperations: Record<string, Operation> = {
       const headerValues = Object.values((server.config as { headers?: Record<string, string> }).headers ?? {});
       const result = await s.mcpRegistryService.callTool(db, p.toolId, p.arguments, a, mcpPool);
       if (result.isError) throw new schemas.ValidationError("External MCP call failed or its outcome is unknown; do not retry automatically");
-      return { id: tool.serverId, toolId: p.toolId, output: cleanAssistantToolData(redactAssistantValues(result, headerValues)) };
+      return { id: tool.serverId, toolId: p.toolId, output: cleanAssistantToolData(redactAssistantValues(result, headerValues), true) };
     }), external: true },
     create_project: operation(schemas.createProjectSchema.strict(), "Create a project.", "project", (db, s, p, a) => s.projectService.createProject(db, p, a)),
     update_project: operation(update("projectId", schemas.updateProjectSchema), "Update project details or archive a project.", "project", (db, s, p, a) => s.projectService.updateProject(db, p.projectId, p.changes, a), "projectId"),
@@ -94,5 +94,5 @@ export async function executeAssistantOperation(db: Database, services: Services
     const parsed = parseAssistantOperation(operationName, input);
     const result = await operation!.run(db, services, parsed, actor);
     const entityId = operation!.target ? parsed[operation!.target] : result?.id;
-    return { entityType: operation!.kind, entityId, result: cleanAssistantToolData(result) };
+    return { entityType: operation!.kind, entityId, result: cleanAssistantToolData(result, operationName === "call_mcp_tool") };
 }

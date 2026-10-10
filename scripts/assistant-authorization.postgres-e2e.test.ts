@@ -406,7 +406,7 @@ test("assistant authorization isolates accounts and resources across REST and tR
       mcpCalls++;
       enteredCall?.();
       if (hold) await new Promise<void>(resolve => { releaseCall = resolve; });
-      result = { isError: body.params.arguments.message === "fail", content: [{ type: "text", text: "Fixture " + body.params.arguments.message + " " + credential }] };
+      result = { isError: body.params.arguments.message === "fail", content: [{ type: "text", text: "Fixture " + body.params.arguments.message + " " + credential }], structuredContent: { data: { message: body.params.arguments.message } } };
     }
     response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result }));
   });
@@ -430,6 +430,7 @@ test("assistant authorization isolates accounts and resources across REST and tR
   const confirmedMcp = await rest(`assistant/actions/${mcpProposal.body.actions[0].id}/execute`, owner.headers, "POST");
   assert.equal(confirmedMcp.status, 200); assert.equal(mcpCalls, 1);
   assert(!JSON.stringify(confirmedMcp.body).includes(credential));
+  assert.equal(confirmedMcp.body.executionResult.result.output.structuredContent.data.message, "confirmed");
   assert.equal((await rest(`assistant/actions/${mcpProposal.body.actions[0].id}/execute`, owner.headers, "POST")).status, 400);
   await ownerChat.updatePolicy(db, { assistantAutoMode: "live" });
   hold = true;

@@ -7,7 +7,7 @@ export function assistantSkillStorage() {
   });
 }
 /** Tool snapshots omit provider credentials, internal connection configuration and large binary data. */
-export function cleanAssistantToolData(value: unknown): any {
+export function cleanAssistantToolData(value: unknown, preserveStructuredData = false): any {
   let remaining = 24_000;
   let nodes = 0;
   const clean = (item: unknown, schema = false): any => {
@@ -16,7 +16,8 @@ export function cleanAssistantToolData(value: unknown): any {
     if (typeof item === "string") { const result = item.slice(0, Math.min(12_000, remaining)); remaining -= result.length; return result; }
     if (Array.isArray(item)) return item.slice(0, 50).map(field => clean(field, schema));
     if (!item || typeof item !== "object") return item;
-    return Object.fromEntries(Object.entries(item).filter(([key]) => schema || !/^(?:config|headers|env|apiKey|apiKeyRef|encryptedApiKey|serviceToken|token|tokenHash|leaseHash|callerContext|storageObject|storageKeyPrefix|objectKey|contentBase64|data|repositories)$/i.test(key))
+    const binary = ["image", "audio"].includes((item as { type?: string }).type ?? "");
+    return Object.fromEntries(Object.entries(item).filter(([key]) => schema || (!/^(?:config|headers|env|apiKey|apiKeyRef|encryptedApiKey|serviceToken|token|tokenHash|leaseHash|callerContext|storageObject|storageKeyPrefix|objectKey|contentBase64|repositories)$/i.test(key) && (key !== "data" || preserveStructuredData && !binary)))
       .map(([key, field]) => [key, clean(field, schema || key === "inputSchema")]));
   };
   return clean(value);
