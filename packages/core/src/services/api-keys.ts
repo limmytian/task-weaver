@@ -229,6 +229,18 @@ export async function getProjectInventoryAuthority(db: AuthDatabase, context: Ve
   })).filter(grant => grant.permissions.length > 0), bounds: null };
 }
 
+/** Archived project browsing adds only read/audit permissions; active entitlements stay unchanged. */
+export async function getArchivedResourceReadAuthority(db: AuthDatabase, context: VerifiedRequestContext) {
+  const live = await getLiveRequestAuthority(db, context);
+  if (live.bounds) throw new AuthorizationError();
+  const historical = await currentAuthority(db, context, new Date(), true);
+  const activeProjects = new Set(live.grants.flatMap(grant => grant.scope === "project" ? [grant.projectId] : []));
+  const archived = historical.grants.filter(grant => grant.scope === "project" && !activeProjects.has(grant.projectId))
+    .map(grant => ({ ...grant, permissions: grant.permissions.filter(permission => ["resource.read", "audit.read"].includes(permission)) }))
+    .filter(grant => grant.permissions.length > 0);
+  return { ...live, grants: [...live.grants, ...archived] };
+}
+
 /** Historical snapshots retain archived membership reads under current credential ceilings. */
 export async function getHistoricalReadAuthority(db: AuthDatabase, context: VerifiedRequestContext) {
   const authority = await getProjectInventoryAuthority(db, context);

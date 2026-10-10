@@ -173,13 +173,13 @@ export function createAssistantService(identity: VerifiedRequestContext) {
       return implementation.deleteConversation(db, id, await scope(db, {}));
     },
     async buildAssistantContext(db: Database, input: BuildAssistantContextInput) {
-      const actor = await scope(db, input);
+      const actor = await scope(db, input, true);
       if (input.conversationId) await matchingConversation(db, input.conversationId, input);
       return implementation.buildAssistantContext(db, input, actor, identity);
     },
     async sendReadOnlyMessage(db: Database, input: Parameters<typeof implementation.sendReadOnlyMessage>[1], observer?: implementation.AssistantStreamObserver) {
       await write(db);
-      const actor = await scope(db, input.context);
+      const actor = await scope(db, input.context, true);
       if (input.conversationId) await matchingConversation(db, input.conversationId, input.context);
       if (input.requestId) {
         const previous = await db.query.assistantMessages.findFirst({ where: and(eq(assistantMessages.role, "user"),

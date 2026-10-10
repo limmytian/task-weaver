@@ -162,6 +162,7 @@ export default function ProjectDetailPage({
               size="sm"
               variant="outline"
               className="flex-1 sm:flex-none"
+              disabled={project.status === "archived"}
               onClick={() => setReqDialogOpen(true)}
             >
               <Plus className="mr-1 h-4 w-4" />
@@ -183,6 +184,7 @@ export default function ProjectDetailPage({
         </div>
       </header>
 
+      {project.status === "archived" && <p role="status" className="border-b bg-muted px-4 py-2 text-sm text-muted-foreground">Archived project: read-only access. Tasks, requirements and documents are retained.</p>}
       <div className="min-w-0 flex-1 overflow-hidden p-3 sm:p-4 md:p-6">
         <Tabs defaultValue="board">
           <TabsList className="scrollbar-none h-10 max-w-full flex-nowrap justify-start overflow-x-auto">
@@ -214,12 +216,14 @@ export default function ProjectDetailPage({
           <TabsContent value="requirements" className="mt-4">
             <RequirementsTab
               projectId={id}
+              readOnly={project.status === "archived"}
               onCreateTask={openCreateTask}
             />
           </TabsContent>
 
           <TabsContent value="board" className="mt-4">
             <KanbanBoard
+              readOnly={project.status === "archived"}
               projectId={id}
               onTaskClick={(taskId) => setSelectedTaskId(taskId)}
             />
@@ -376,7 +380,9 @@ const STATUS_ORDER: Record<string, number> = { in_progress: 0, in_review: 1, rea
 function RequirementsTab({
   projectId,
   onCreateTask,
+  readOnly = false,
 }: {
+  readOnly?: boolean;
   projectId: string;
   onCreateTask: (requirementId: string) => void;
 }) {
@@ -632,6 +638,7 @@ function RequirementsTab({
                 variant="ghost"
                 size="icon"
                 className="size-10 shrink-0 sm:size-7"
+                disabled={readOnly}
                 title="Add task"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -862,6 +869,7 @@ function ProjectSettings({
     });
   };
 
+  if (project.status === "archived") return <p className="text-sm text-muted-foreground">Archived project settings are read-only.</p>;
   if (!canManage) return <ProjectMembers projectId={project.id} />;
 
   return (

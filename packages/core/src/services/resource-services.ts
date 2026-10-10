@@ -1,4 +1,4 @@
-import { getProjectInventoryAuthority } from "./api-keys";
+import { getArchivedResourceReadAuthority } from "./api-keys";
 import { requireDaemonLease } from './daemon-lease-authorization';
 import { createTiExecutionService, isTiExecutionOperation } from './ti-execution';
 import { inArray, and, eq, isNull, sql, desc } from "drizzle-orm";
@@ -65,6 +65,18 @@ const readById: Record<string, ResourceKind> = {
   getRequirementBurndown: "requirement", getRequirementTaskDependencyGraph: "requirement",
   getDocumentRecommendations: "document", getTaskRecommendations: "task",
 };
+// Explicit read allowlist: new operations must opt in before seeing archived resources.
+const archivedReadOperations = new Set([
+  ...Object.keys(readById), "listProjects", "getProjectCounts", "listTasks", "listRequirements", "listDocuments",
+  "listTaskComments", "listTaskNotes", "listDocumentVersions", "compareDocumentVersions",
+  "listActivityLog", "exportActivityLog", "listSchedules", "getSchedule", "listScheduleRuns", "listRuns", "getRun",
+  "getProjectReviewPolicy", "getEffectiveReviewPolicy", "listRequirementReviewRuns",
+  "listUsage", "summarizeUsage", "getUsage", "getRequirementRepositories", "getTaskRepositories",
+  "listRequirementRepositories", "listTaskRepositories", "listActiveClaims", "listActiveRequirementClaims",
+  "searchTasks", "searchRequirements", "searchDocuments", "searchDocumentsWithMetadata", "searchDocumentsFullText",
+  "getDocumentByTitle", "resolveDocumentTitles", "getRequirementRepositoryDelivery", "listCorrelatedHistory",
+  "listRequirementTimeline", "listBoundedLogTail", "getDaemonObservabilityOverview", "getDaemonMetricsReport",
+]);
 const writeById: Record<string, ResourceKind> = {
   updateProject: "project", deleteProject: "project", togglePin: "project",
   updateRequirement: "requirement", deleteRequirement: "requirement", createExecutionSlice: "requirement",
@@ -96,8 +108,8 @@ function bindServices(context?: VerifiedRequestContext) {
           await lockIdentityLifecycle(tx);
           const txDb = tx as unknown as Database;
           const live = await resourceAuthority(tx, context);
-          const authority = group === "project" && ["listProjects", "getProjectCounts"].includes(name) && !live.bounds
-            ? await getProjectInventoryAuthority(tx, context) : live;
+          const authority = !live.bounds && archivedReadOperations.has(name)
+            ? await getArchivedResourceReadAuthority(tx, context) : live;
           const actor: Actor = { id: authority.actor.id, type: authority.actor.type };
           for (const arg of args.slice(1)) {
             if (arg && typeof arg === "object" && "id" in arg && "type" in arg && ["human", "agent"].includes(arg.type)) {

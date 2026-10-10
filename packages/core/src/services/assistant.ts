@@ -8,7 +8,7 @@ import { requestChatTurn } from "./chat-endpoint";
 import { schedulePredicate } from "./metadata-authorization";
 import { mcpServerPredicate } from "./mcp-authorization";
 import { createResourceServices } from './resource-services';
-import { getLiveRequestAuthority, getHistoricalReadAuthority, getProjectInventoryAuthority } from './api-keys';
+import { getLiveRequestAuthority, getHistoricalReadAuthority, getProjectInventoryAuthority, getArchivedResourceReadAuthority } from './api-keys';
 import { lockIdentityLifecycle } from './auth-security';
 import { projectPredicate, resourcePredicate, taskResourcePredicate, memoryResourcePredicate, requireResource, requireScope } from './resource-authorization';
 import { AuthorizationError, type VerifiedRequestContext } from '@task-weaver/contracts';
@@ -332,7 +332,7 @@ export async function buildAssistantContext(
   identity?: VerifiedRequestContext,
 ) {
   if (!identity) throw new AuthorizationError();
-  const authority = await getLiveRequestAuthority(db, identity);
+  const authority = await getArchivedResourceReadAuthority(db, identity);
   const limits = input.limits;
   const scope = await resolveScope(db, input);
   const projectId = scope.project?.id;

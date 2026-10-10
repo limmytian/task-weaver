@@ -349,7 +349,8 @@ test("ordinary resources enforce live authorization consistently across transpor
     await outsider.service.projectService.deleteProject(db, other.id, outsider.actor);
     const [stored] = await db.select().from(documents).where(eq(documents.projectId, other.id));
     assert.equal(stored.projectId, other.id);
-    await assert.rejects(outsider.service.documentService.getDocument(db, stored.id), NotFoundError);
+    assert.equal((await outsider.service.documentService.getDocument(db, stored.id)).id, stored.id);
+    await assert.rejects(owner.service.documentService.getDocument(db, stored.id), NotFoundError);
     const globals = await admin.service.documentService.listDocuments(db, { includeGlobal: true, includePersonal: false });
     assert.ok(!globals.some((row: any) => row.id === stored.id));
   });
@@ -388,7 +389,22 @@ test("ordinary resources enforce live authorization consistently across transpor
     assert.equal(trpcInventory.status, 200);
     assert(trpcInventory.body.result.data.json.some((row: any) => row.id === archived.id));
     await assert.rejects(owner.service.projectService.updateProject(db, archived.id, { name: "Forbidden write" }, owner.actor), NotFoundError);
-    await assert.rejects(owner.service.taskService.getTask(db, (await db.select().from(tasks).where(eq(tasks.projectId, archived.id)))[0].id), NotFoundError);
+    const taskId = (await db.select().from(tasks).where(eq(tasks.projectId, archived.id)))[0].id;
+    assert.equal((await owner.service.taskService.getTask(db, taskId)).id, taskId);
+    assert.equal((await owner.service.requirementService.getRequirement(db, req.id)).id, req.id);
+    assert.equal((await owner.service.projectService.getProject(db, archived.id)).status, "archived");
+    assert.equal((await owner.service.taskService.listTasks(db, { projectId: archived.id })).length, 1);
+    assert.equal((await owner.service.requirementService.listRequirements(db, { projectId: archived.id })).length, 1);
+    assert.equal((await rest(`projects/${archived.id}`, owner.headers)).status, 200);
+    const detail = await trpcRead("project.get", { id: archived.id }, owner.headers);
+    assert.equal(detail.status, 200); assert.equal(detail.body.result.data.json.status, "archived");
+    assert.equal((await owner.service.projectService.getProjectStats(db, archived.id)).totalTasks, 1);
+    await owner.service.taskService.getKanbanBoard(db, archived.id, {});
+    await owner.service.taskService.getGanttChart(db, archived.id);
+    await owner.service.projectService.getKnowledgeGraph(db, archived.id);
+    await assert.rejects(outsider.service.projectService.getProject(db, archived.id), NotFoundError);
+    await assert.rejects(narrowServices.projectService.getProject(db, archived.id), NotFoundError);
+    await assert.rejects(owner.service.taskService.updateTask(db, taskId, { title: "Forbidden archive edit" }, owner.actor), NotFoundError);
     // Remove archived membership directly in this fixture: archived management stays closed.
     await db.update(projectMemberships).set({ removedAt: new Date() }).where(eq(projectMemberships.projectId, archived.id));
     assert(!(await owner.service.projectService.listProjects(db, { status: "archived" })).some((row: any) => row.id === archived.id));

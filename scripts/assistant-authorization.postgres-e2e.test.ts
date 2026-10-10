@@ -688,9 +688,10 @@ test("assistant authorization isolates accounts and resources across REST and tR
     assert((await ownerChat.listConversations(db, { projectId: archived.id })).some((row: any) => row.id === projectHistory.conversation.id));
     await assert.rejects(createAssistantService(restrictedIdentity).getConversation(db, projectHistory.conversation.id), NotFoundError);
     await assert.rejects(outsiderChat.getConversation(db, completed.result.conversation.id), NotFoundError);
-    await assert.rejects(owner.service.requirementService.getRequirement(db, archiveRequirement.id), NotFoundError);
+    assert.equal((await owner.service.requirementService.getRequirement(db, archiveRequirement.id)).id, archiveRequirement.id);
     await assert.rejects(owner.service.projectService.updateProject(db, archived.id, { name: "Forbidden live change" }, owner.actor), NotFoundError);
-    await assert.rejects(ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ conversationId: projectHistory.conversation.id, message: "Continue in archived scope", context: { projectId: archived.id } })), NotFoundError);
+    const archivedReply = await ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ conversationId: projectHistory.conversation.id, message: "Read the archived project", context: { projectId: archived.id } }));
+    assert(archivedReply.assistantMessage.content);
     modelReplies.push({ content: "Global conversation continues after archival" });
     const continued = await ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ conversationId: completed.result.conversation.id, message: "Continue globally", context: {} }));
     assert.equal(continued.assistantMessage.content, "Global conversation continues after archival");

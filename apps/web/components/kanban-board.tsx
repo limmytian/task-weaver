@@ -180,8 +180,10 @@ export function KanbanBoard({
   projectId,
   initialTaskId,
   onTaskClick: externalOnTaskClick,
+  readOnly = false,
 }: {
   projectId: string;
+  readOnly?: boolean;
   initialTaskId?: string;
   onTaskClick?: (taskId: string) => void;
 }) {
@@ -285,6 +287,7 @@ export function KanbanBoard({
   );
 
   const handleDragStart = (event: DragStartEvent) => {
+    if (readOnly) return;
     const task = filteredTasks.find((t) => t.id === event.active.id);
     if (task) setActiveTask(task);
   };
@@ -292,7 +295,7 @@ export function KanbanBoard({
   const handleDragEnd = (event: DragEndEvent) => {
     setActiveTask(null);
     const { active, over } = event;
-    if (!over) return;
+    if (readOnly || !over) return;
 
     const taskId = active.id as string;
     const targetColumn = over.id as string;
