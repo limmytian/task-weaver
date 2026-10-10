@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+import { createAssistantStreamHandler } from "../apps/web/lib/assistant-stream-handler";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -94,15 +96,40 @@ test("assistant authorization isolates accounts and resources across REST and tR
   let expectedKey = "fixture-personal-key";
   let responseStatus = 200;
   let dnsAddress = "8.8.8.8";
+  let pauseStream: (() => Promise<void>) | undefined;
+  let truncateStream = false;
   t.mock.method(dns, "lookup", async () => [{ address: dnsAddress, family: 4 }]);
   t.mock.method(https, "request", (url: URL, options: any, callback: any) => {
     assert.equal(String(url), "https://model.example.test/v1/chat/completions");
     assert.equal(options.headers.authorization, `Bearer ${expectedKey}`);
     calls++;
     const request = new EventEmitter() as any;
+    request.destroy = () => {};
     request.end = (body: string) => {
       lastModelPayload = JSON.parse(body);
       lastModelPrompt = lastModelPayload.messages.map((message: any) => message.content).join("\n");
+      if (lastModelPayload.stream) {
+        const reply = modelReplies.shift() ?? { content: "Fixture streamed reply" };
+        const encode = (value: any) => Buffer.from(`data: ${JSON.stringify(value)}\n\n`);
+        const wait = pauseStream; pauseStream = undefined;
+        const truncated = truncateStream; truncateStream = false;
+        const response = Readable.from((async function* () {
+          if (reply.content) {
+            yield encode({ choices: [{ delta: { content: reply.content.slice(0, 64) } }] });
+            if (wait) await wait();
+            yield encode({ choices: [{ delta: { content: reply.content.slice(64) } }] });
+          }
+          for (const [index, call] of (reply.tool_calls ?? []).entries()) {
+            yield encode({ choices: [{ delta: { tool_calls: [{ index, id: call.id, type: call.type, function: { name: call.function.name, arguments: call.function.arguments.slice(0, 4) } }] } }] });
+            yield encode({ choices: [{ delta: { tool_calls: [{ index, function: { arguments: call.function.arguments.slice(4) } }] } }] });
+          }
+          if (!truncated) {
+            yield encode({ choices: [{ delta: {}, finish_reason: reply.tool_calls?.length ? "tool_calls" : "stop" }] });
+            yield Buffer.from("data: [DONE]\n\n");
+          }
+        })()) as any;
+        response.statusCode = responseStatus; response.headers = { "content-type": "text/event-stream" }; callback(response); return;
+      }
       const response = new EventEmitter() as any;
       response.statusCode = responseStatus;
       response.resume = () => {};
@@ -123,6 +150,73 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.equal(repeated.assistantMessage.id, sent.assistantMessage.id);
   assert.equal(calls, 1);
   await assert.rejects(ownerChat.sendReadOnlyMessage(db, { ...input, requestId: messageRequestId, message: "Different request" }), /different input/);
+  const streamHandler = createAssistantStreamHandler(() => ({ db, auth: runtime }));
+  const { SseDecoder } = apiRequire("@task-weaver/contracts");
+  const streamRequest = (headers: Headers, value: any) => streamHandler(new Request(`${config.trustedOrigins[0]}/api/assistant/stream`, { method: "POST", headers, body: JSON.stringify(value) }));
+  const streamInput = { ...input, requestId: randomUUID(), message: "Stream a verified fixture reply" };
+  let releaseStream!: () => void;
+  pauseStream = () => new Promise<void>(resolve => { releaseStream = resolve; });
+  modelReplies.push({ content: "Visible first fragment " + "x".repeat(100) });
+  const streaming = await streamRequest(owner.headers, streamInput);
+  assert.equal(streaming.status, 200); assert.match(streaming.headers.get("content-type")!, /text\/event-stream/);
+  assert.equal(streaming.headers.get("x-accel-buffering"), "no");
+  const streamReader = streaming.body!.getReader(); const framing = new SseDecoder(); const decoded = new TextDecoder();
+  const events: any[] = [];
+  while (!events.some(event => event.type === "text")) {
+    const chunk = await streamReader.read(); assert.equal(chunk.done, false);
+    events.push(...framing.push(decoded.decode(chunk.value, { stream: true })).map((frame: string) => JSON.parse(frame)));
+  }
+  assert.equal((await ownerChat.getMessageResult(db, { requestId: streamInput.requestId })).status, "running");
+  releaseStream();
+  while (true) { const chunk = await streamReader.read(); if (chunk.done) break; events.push(...framing.push(decoded.decode(chunk.value, { stream: true })).map((frame: string) => JSON.parse(frame))); }
+  const streamComplete = events.find(event => event.type === "completed"); assert(streamComplete);
+  assert.equal(events.filter(event => event.type === "text").map(event => event.delta).join(""), streamComplete.result.assistantMessage.content);
+  assert.equal((await outsiderChat.getMessageResult(db, { requestId: streamInput.requestId })).status, "not_found");
+  const streamCalls = calls;
+  const duplicateStream = await streamRequest(owner.headers, streamInput);
+  assert.equal(duplicateStream.status, 200); assert.match(await duplicateStream.text(), /"type":"completed"/);
+  assert.equal(calls, streamCalls);
+  assert.equal((await streamRequest(outsider.headers, { ...streamInput, requestId: randomUUID() })).status, 404);
+  const noCsrf = new Headers(owner.headers); noCsrf.delete("x-csrf-token");
+  assert.equal((await streamRequest(noCsrf, { ...streamInput, requestId: randomUUID() })).status, 403);
+  const beforeStreamPolicy = await ownerChat.getPolicy(db);
+  await ownerChat.updatePolicy(db, { assistantAutoEnabled: true, assistantAutoMode: "live" });
+  const truncatedInput = { ...input, requestId: randomUUID(), message: "Never execute incomplete tool arguments" };
+  truncateStream = true; modelReplies.push({ content: null, tool_calls: [{ id: "unfinished", type: "function", function: { name: "create_requirement", arguments: JSON.stringify({ projectId: project.id, title: "Never created" }) } }] });
+  const truncatedResponse = await streamRequest(owner.headers, truncatedInput);
+  assert.match(await truncatedResponse.text(), /"type":"failed"/);
+  assert.equal((await ownerChat.getMessageResult(db, { requestId: truncatedInput.requestId })).status, "failed");
+  assert((await owner.service.requirementService.listRequirements(db, { projectId: project.id })).every((row: any) => row.title !== "Never created"));
+  await ownerChat.updatePolicy(db, { assistantAutoEnabled: beforeStreamPolicy.assistantAutoEnabled, assistantAutoMode: beforeStreamPolicy.assistantAutoMode });
+  const revokedStreamInput = { ...input, requestId: randomUUID(), message: "Revalidate access before each text batch" };
+  pauseStream = () => new Promise<void>(resolve => { releaseStream = resolve; });
+  modelReplies.push({ content: "Authorized preview ".padEnd(64, ".") + "Hidden after revocation" });
+  const revokedStream = await streamRequest(viewer.headers, revokedStreamInput);
+  const revokedReader = revokedStream.body!.getReader(); const revokedFrames = new SseDecoder(); const revokedEvents: any[] = [];
+  while (!revokedEvents.some(event => event.type === "text")) {
+    const chunk = await revokedReader.read(); assert.equal(chunk.done, false);
+    revokedEvents.push(...revokedFrames.push(decoded.decode(chunk.value, { stream: true })).map((frame: string) => JSON.parse(frame)));
+  }
+  await runtime.identity.removeMembership(owner.headers, project.id, viewer.actor.id);
+  releaseStream();
+  while (true) { const chunk = await revokedReader.read(); if (chunk.done) break; revokedEvents.push(...revokedFrames.push(decoded.decode(chunk.value, { stream: true })).map((frame: string) => JSON.parse(frame))); }
+  assert(revokedEvents.some(event => event.type === "failed"));
+  assert(!JSON.stringify(revokedEvents).includes("Hidden after revocation"));
+  assert(!revokedEvents.some(event => event.type === "completed"));
+  await runtime.identity.setMembership(owner.headers, project.id, viewer.actor.id, { role: "viewer" });
+  assert.equal((await createAssistantService(viewer.context).getMessageResult(db, { requestId: revokedStreamInput.requestId })).status, "failed");
+  const detachedInput = { ...input, requestId: randomUUID(), message: "Recover after the display disconnects" };
+  pauseStream = () => new Promise<void>(resolve => { releaseStream = resolve; });
+  modelReplies.push({ content: "Detached preview ".padEnd(64, ".") + "Completed original request" });
+  const detached = await streamRequest(owner.headers, detachedInput); const detachedReader = detached.body!.getReader();
+  const detachedFrames = new SseDecoder(); let sawText = false;
+  while (!sawText) { const chunk = await detachedReader.read(); assert.equal(chunk.done, false); sawText = detachedFrames.push(decoded.decode(chunk.value, { stream: true })).some((frame: string) => JSON.parse(frame).type === "text"); }
+  await detachedReader.cancel(); releaseStream();
+  let detachedResult: any;
+  for (let attempt = 0; attempt < 30; attempt++) { detachedResult = await ownerChat.getMessageResult(db, { requestId: detachedInput.requestId }); if (detachedResult.status === "completed") break; await new Promise(resolve => setTimeout(resolve, 25)); }
+  assert.equal(detachedResult.status, "completed"); assert(detachedResult.result.assistantMessage.content.includes("Completed original request"));
+
+
   await assert.rejects(db.insert(assistantMessages).values({ ...sent.userMessage, id: randomUUID() }),
     (error: any) => (error.cause?.code ?? error.code) === "23505");
   const recovered = await rest(`assistant/messages/${messageRequestId}/result`, owner.headers);

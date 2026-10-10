@@ -10,6 +10,7 @@ import {
 } from "../apps/web/trpc/init";
 import { appRouter } from "../apps/web/trpc/routers/_app";
 import { resolveWebSession } from "../apps/web/lib/authenticated-session";
+import { POST as nextAssistantStream } from "../apps/web/app/api/assistant/stream/route";
 import { GET as nextCsrf } from "../apps/web/app/api/auth/csrf/route";
 import { GET as nextEvents } from "../apps/web/app/api/events/route";
 import { GET as nextTRPC } from "../apps/web/app/api/trpc/[trpc]/route";
@@ -139,7 +140,7 @@ test(
         readdirSync(new URL("../apps/web/app/api/", import.meta.url), { recursive: true })
           .filter(path => typeof path === "string" && path.endsWith("route.ts"))
           .sort(),
-        ["auth/csrf/route.ts", "events/route.ts", "trpc/[trpc]/route.ts"],
+        ["assistant/stream/route.ts", "auth/csrf/route.ts", "events/route.ts", "trpc/[trpc]/route.ts"],
         "Classify and exercise any new Next API entry point in the authorization inventory",
       );
       const publicRoutes = new Set([
@@ -182,6 +183,8 @@ test(
         if (authorization) headers.set("authorization", authorization);
         const response = await nextEvents(new Request(`${origin}/api/events`, { headers }));
         assert.equal(response.status, 401);
+        const stream = await nextAssistantStream(new Request(`${origin}/api/assistant/stream`, { method: "POST", headers, body: "{" }));
+        assert.equal(stream.status, 401, "Chat stream authenticates before parsing resource input");
       }
     });
     const email = `${randomUUID()}@example.test`;

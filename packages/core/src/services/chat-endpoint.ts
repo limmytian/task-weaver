@@ -1,4 +1,5 @@
 import https from "node:https";
+import { readChatStream } from "./chat-stream";
 import dns from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
 import { ChatConfigurationError } from "@task-weaver/contracts";
@@ -25,7 +26,7 @@ export function chatEndpoint(baseUrl: string) {
 /** Pin the validated DNS address to the TLS request; never follow redirects with credentials. */
 export type ChatTurn = { content: string | null; toolCalls: { id: string; name: string; arguments: string }[] };
 
-export async function requestChatTurn(baseUrl: string, apiKey: string, payload: unknown, deadline = performance.now() + 45_000) {
+export async function requestChatTurn(baseUrl: string, apiKey: string, payload: unknown, deadline = performance.now() + 45_000, onText?: (text: string) => Promise<void>) {
   const endpoint = chatEndpoint(baseUrl);
   if (performance.now() >= deadline) throw new ChatConfigurationError("chat_connection_failed");
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -35,7 +36,7 @@ export async function requestChatTurn(baseUrl: string, apiKey: string, payload: 
   ]).catch(() => { throw new ChatConfigurationError("chat_endpoint_unresolved"); }).finally(() => { if (timer) clearTimeout(timer); });
   if (!addresses.length || addresses.some(row => !isPublicChatAddress(row.address))) throw new ChatConfigurationError("chat_endpoint_private");
   const address = addresses[0]!;
-  const body = JSON.stringify(payload);
+  const body = JSON.stringify(onText ? { ...(payload as Record<string, unknown>), stream: true } : payload);
   return new Promise<ChatTurn>((resolve, reject) => {
     const failure = (code: ConstructorParameters<typeof ChatConfigurationError>[0]) => reject(new ChatConfigurationError(code));
     const request = https.request(endpoint, {
@@ -45,6 +46,11 @@ export async function requestChatTurn(baseUrl: string, apiKey: string, payload: 
     }, response => {
       const status = response.statusCode ?? 500;
       if (status !== 200) { response.resume(); failure(status === 401 || status === 403 ? "chat_key_rejected" : "chat_request_failed"); return; }
+      if (onText) {
+        if (!response.headers["content-type"]?.includes("text/event-stream")) { response.resume(); failure("chat_response_invalid"); return; }
+        void readChatStream(response, apiKey, onText).then(resolve, error => { request.destroy(); reject(error); });
+        return;
+      }
       const chunks: Buffer[] = [];
       let size = 0;
       response.on("data", (chunk: Buffer) => {

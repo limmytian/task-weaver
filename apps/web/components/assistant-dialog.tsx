@@ -1,5 +1,9 @@
 "use client";
 
+import { useMutation } from "@tanstack/react-query";
+import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
+import type { AppRouter } from "@/trpc/routers/_app";
+import { sendAssistantStream } from "@/lib/assistant-stream";
 import { canRecoverAssistantRequest, recoverAssistantRequest } from "@/lib/assistant-request";
 import { shouldSendChatMessage } from "@/lib/chat-input";
 import { ChatModelSettings } from "./chat-model-settings";
@@ -90,6 +94,8 @@ export function AssistantDialog({
   const nearBottom = useRef(true);
   const [showJump, setShowJump] = useState(false);
   const [activeRequestId, setActiveRequestId] = useState<string>();
+  const [streamingText, setStreamingText] = useState("");
+  const [streamingStatus, setStreamingStatus] = useState("Working on your request...");
   const utils = trpc.useUtils();
   const operationPolicy = trpc.assistant.getPolicy.useQuery(undefined, { enabled: open });
   const operationsAllowed = !!operationPolicy.data?.assistantAutoEnabled && ["live", "confirm"].includes(operationPolicy.data.assistantAutoMode);
@@ -128,8 +134,16 @@ export function AssistantDialog({
     { enabled: open && showHistory },
   );
 
-  const sendMessage = trpc.assistant.sendMessage.useMutation({
+  const sendMessage = useMutation({
+    mutationFn: (variables: inferRouterInputs<AppRouter>["assistant"]["sendMessage"]) =>
+      sendAssistantStream<inferRouterOutputs<AppRouter>["assistant"]["sendMessage"]>(variables, event => {
+        if (event.type === "turn") { setStreamingText(""); setStreamingStatus("Composing a reply..."); }
+        if (event.type === "text") setStreamingText(current => current + event.delta);
+        if (event.type === "tool") setStreamingStatus(`${event.name.replaceAll("_", " ")} · ${event.status}`);
+      }),
+    retry: false,
     onSuccess: (result) => {
+      setStreamingText("");
       pendingRequest.current = null;
       setActiveRequestId(undefined);
       setConversationId(result.conversation.id);
@@ -152,7 +166,7 @@ export function AssistantDialog({
       if (result.actions.some(action => action.status === "succeeded")) void utils.invalidate();
     },
     onError: async (err, variables) => {
-      if (err.data?.httpStatus === 400) pendingRequest.current = null;
+      if (!canRecoverAssistantRequest(err)) pendingRequest.current = null;
       if (variables.requestId && canRecoverAssistantRequest(err)) {
         toast.info("Still checking the original request", { description: "The connection ended. The assistant may still be working; your request will not be sent again." });
         const result = await recoverAssistantRequest(
@@ -164,6 +178,7 @@ export function AssistantDialog({
           () => new Promise(resolve => setTimeout(resolve, 1500)),
         );
         if (result) {
+          setStreamingText("");
           pendingRequest.current = null;
           setActiveRequestId(undefined);
           setConversationId(result.conversation.id);
@@ -174,6 +189,7 @@ export function AssistantDialog({
           return;
         }
       }
+      setStreamingText("");
       setActiveRequestId(undefined);
       setInput(current => current || variables.message);
       setMessages(current => current.map(message => message.id === "pending:" + variables.requestId ? { ...message, localStatus: "failed" } : message));
@@ -282,6 +298,8 @@ export function AssistantDialog({
     nearBottom.current = true;
     setMessages(current => [...current.filter(item => item.id !== "pending:" + requestId && item.localStatus !== "failed"), { id: "pending:" + requestId, role: "user", content: message, localStatus: "sending" }]);
     setInput("");
+    setStreamingText("");
+    setStreamingStatus("Working on your request...");
     sendMessage.mutate({ requestId, conversationId, context, message, proposedActions: [] });
   };
   const copyMessage = async (content: string) => {
@@ -506,10 +524,17 @@ export function AssistantDialog({
                   {requestProgress.data?.status === "running" && requestProgress.data.progress?.actions.map(action => (
                     <AssistantActionCard key={action.id} action={action} allowed={false} busy={true} onApprove={() => {}} onReject={() => {}}/>
                   ))}
+                  {sendMessage.isPending && streamingText && <div className="flex gap-3" aria-live="off">
+                    <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background"><Sparkles aria-hidden="true" className="h-4 w-4"/></div>
+                    <div className="min-w-0 max-w-[85%]">
+                      <div className="mb-1 text-xs font-medium text-muted-foreground">Assistant · replying</div>
+                      <div className="break-words rounded-xl bg-muted px-3 py-2.5 text-sm leading-relaxed"><AssistantMessageContent content={streamingText}/></div>
+                    </div>
+                  </div>}
                   {sendMessage.isPending && (
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Working on your request...
+                      {streamingStatus}
                     </div>
                   )}
                 </div>

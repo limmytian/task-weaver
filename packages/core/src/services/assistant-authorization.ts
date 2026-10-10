@@ -35,38 +35,42 @@ export function createAssistantService(identity: VerifiedRequestContext) {
       taskId: row.taskId ?? undefined, scheduleId: row.scheduleId ?? undefined });
     return row;
   }
+  async function authorizeSnapshot(db: Database, value: unknown, actions: Parameters<typeof assistantDeletedReference>[1]) {
+    const live = await authority(db);
+    const services = createResourceServices(identity);
+    const record = (value: unknown): Record<string, any> => value && typeof value === "object" ? value as Record<string, any> : {};
+    const snapshot = record(value);
+    for (const reference of Array.isArray(snapshot.toolReads) ? snapshot.toolReads : []) {
+      if (!await assistantDeletedReference(db, actions, reference.kind, reference.id))
+        await authorizeAssistantReadReference(db, identity, reference as AssistantReadReference);
+    }
+    const current = record(snapshot.current);
+    const workspace = record(snapshot.workspace);
+    for (const row of Array.isArray(workspace.projects) ? workspace.projects : []) {
+      if (row.id) await requireResource(db, live, "project", row.id);
+    }
+    const state = record(snapshot.projectState);
+    const retrieval = record(snapshot.retrieval);
+    for (const kind of ["project", "requirement", "task"] as const) {
+      if (current[kind]?.id) await requireResource(db, live, kind, current[kind].id);
+    }
+    for (const [kind, rows] of [["requirement", state.requirements], ["task", state.tasks], ["document", retrieval.documents], ["memory", retrieval.memories]] as const) {
+      for (const row of Array.isArray(rows) ? rows : []) if (row.id && !await assistantDeletedReference(db, actions, kind, row.id)) await requireResource(db, live, kind, row.id);
+    }
+    for (const row of Array.isArray(state.schedules) ? state.schedules : []) await services.scheduleService.getSchedule(db, row.id);
+    if (current.schedule?.id) await services.scheduleService.getSchedule(db, current.schedule.id);
+    for (const row of Array.isArray(retrieval.mcpTools) ? retrieval.mcpTools : []) {
+      if (!await assistantDeletedReference(db, actions, "mcp", row.serverId)) await requireResource(db, live, "mcp", row.serverId);
+    }
+
+  }
   async function history(db: Database, id: string) {
     await conversation(db, id);
     const actor = await scope(db, {});
     const result = await implementation.getConversation(db, id, actor);
-    const live = await authority(db);
     const services = createResourceServices(identity);
     const record = (value: unknown): Record<string, any> => value && typeof value === "object" ? value as Record<string, any> : {};
-    for (const message of result.messages) {
-      const snapshot = record(message.contextSnapshot);
-      for (const reference of Array.isArray(snapshot.toolReads) ? snapshot.toolReads : []) {
-        if (!await assistantDeletedReference(db, result.actions, reference.kind, reference.id))
-          await authorizeAssistantReadReference(db, identity, reference as AssistantReadReference);
-      }
-      const current = record(snapshot.current);
-      const workspace = record(snapshot.workspace);
-      for (const row of Array.isArray(workspace.projects) ? workspace.projects : []) {
-        if (row.id) await requireResource(db, live, "project", row.id);
-      }
-      const state = record(snapshot.projectState);
-      const retrieval = record(snapshot.retrieval);
-      for (const kind of ["project", "requirement", "task"] as const) {
-        if (current[kind]?.id) await requireResource(db, live, kind, current[kind].id);
-      }
-      for (const [kind, rows] of [["requirement", state.requirements], ["task", state.tasks], ["document", retrieval.documents], ["memory", retrieval.memories]] as const) {
-        for (const row of Array.isArray(rows) ? rows : []) if (row.id && !await assistantDeletedReference(db, result.actions, kind, row.id)) await requireResource(db, live, kind, row.id);
-      }
-      for (const row of Array.isArray(state.schedules) ? state.schedules : []) await services.scheduleService.getSchedule(db, row.id);
-      if (current.schedule?.id) await services.scheduleService.getSchedule(db, current.schedule.id);
-      for (const row of Array.isArray(retrieval.mcpTools) ? retrieval.mcpTools : []) {
-        if (!await assistantDeletedReference(db, result.actions, "mcp", row.serverId)) await requireResource(db, live, "mcp", row.serverId);
-      }
-    }
+    for (const message of result.messages) await authorizeSnapshot(db, message.contextSnapshot, result.actions);
     for (const action of result.actions) {
       const execution = record(action.executionResult);
       if (["project", "requirement", "task", "document", "memory", "package", "mcp"].includes(execution.entityType) && execution.entityId
@@ -170,7 +174,7 @@ export function createAssistantService(identity: VerifiedRequestContext) {
       if (input.conversationId) await matchingConversation(db, input.conversationId, input);
       return implementation.buildAssistantContext(db, input, actor, identity);
     },
-    async sendReadOnlyMessage(db: Database, input: Parameters<typeof implementation.sendReadOnlyMessage>[1]) {
+    async sendReadOnlyMessage(db: Database, input: Parameters<typeof implementation.sendReadOnlyMessage>[1], observer?: implementation.AssistantStreamObserver) {
       await write(db);
       const actor = await scope(db, input.context);
       if (input.conversationId) await matchingConversation(db, input.conversationId, input.context);
@@ -189,7 +193,18 @@ export function createAssistantService(identity: VerifiedRequestContext) {
           throw new ConflictError("The original request already exists; query its result instead of resubmitting", 0);
         }
       }
-      return implementation.sendReadOnlyMessage(db, input, actor, identity);
+      try {
+        return await implementation.sendReadOnlyMessage(db, input, actor, identity, observer ? async (event, state) => {
+          await conversation(db, state.conversationId);
+          await authorizeSnapshot(db, state.snapshot, state.actions);
+          await observer(event, state);
+        } : undefined);
+      } catch (error) {
+        if (input.requestId) await db.update(assistantMessages).set({ metadata: sql`${assistantMessages.metadata} || ${JSON.stringify({ processing: "failed" })}::jsonb` })
+          .where(and(eq(assistantMessages.createdBy, actor.id), eq(assistantMessages.createdByType, actor.type), eq(assistantMessages.role, "user"),
+            sql`${assistantMessages.metadata}->>'requestId' = ${input.requestId}`, sql`${assistantMessages.metadata}->>'processing' = 'running'`));
+        throw error;
+      }
     },
     async executeApprovedAction(db: Database, id: string) {
       await write(db);

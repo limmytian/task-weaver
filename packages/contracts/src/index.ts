@@ -7,3 +7,4 @@ export * from "./release-evidence";
 
 export { resolveActor } from "./actor";
 export * from "./version";
+export * from "./sse";

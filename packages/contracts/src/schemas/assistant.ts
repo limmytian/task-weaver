@@ -350,3 +350,15 @@ export const saveChatModelSchema = z.object({
 export const chatModelIdSchema = z.object({ id: z.string().uuid() }).strict();
 
 export const getAssistantMessageResultSchema = z.object({ requestId: z.string().uuid() }).strict();
+
+/** Wire events contain display text and status, never tool arguments or credentials. */
+export const assistantStreamEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("started"), conversationId: z.string().uuid(), userMessageId: z.string().uuid() }),
+  z.object({ type: z.literal("turn"), turn: z.number().int().min(0) }),
+  z.object({ type: z.literal("text"), delta: z.string().max(32_000) }),
+  z.object({ type: z.literal("tool"), name: z.string().max(100), status: z.enum(["reading", "executing", "proposed", "completed", "failed"]) }),
+  z.object({ type: z.literal("completed"), result: z.unknown() }),
+  z.object({ type: z.literal("failed"), message: z.string(), code: z.string(), httpStatus: z.number().int() }),
+]);
+export type AssistantStreamEvent = z.infer<typeof assistantStreamEventSchema>;
+export const streamAssistantMessageSchema = sendAssistantMessageSchema.extend({ requestId: z.string().uuid() });

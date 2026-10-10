@@ -85,6 +85,10 @@ function buildModelPrompt(contextSnapshot: Record<string, unknown>, message: str
   ].filter(Boolean).join("\n\n").slice(0, 24_000);
 }
 
+export type AssistantStreamObserver = (event: import("@task-weaver/contracts").AssistantStreamEvent, state: {
+  conversationId: string; snapshot: Record<string, unknown>; actions: AssistantActionRow[];
+}) => Promise<void>;
+
 async function generateModelResponse(
   model: Awaited<ReturnType<ReturnType<typeof createChatModelService>["resolve"]>>,
   contextSnapshot: Record<string, unknown>,
@@ -95,6 +99,7 @@ async function generateModelResponse(
   messageId: string,
   actor: Actor,
   performed: AssistantActionRow[],
+  observer?: AssistantStreamObserver,
 ) {
   const policy = await db.query.tiAgentPolicies.findFirst({ where: and(eq(tiAgentPolicies.ownerId, actor.id), eq(tiAgentPolicies.ownerType, actor.type)) });
   const allowed = !!policy?.assistantAutoEnabled && ["live", "confirm"].includes(policy.assistantAutoMode);
@@ -107,10 +112,21 @@ async function generateModelResponse(
   const deadline = performance.now() + 300_000;
   const references: AssistantReadReference[] = [];
   contextSnapshot.toolReads = references;
+  const emit = (event: import("@task-weaver/contracts").AssistantStreamEvent) => observer?.(event, { conversationId, snapshot: contextSnapshot, actions: performed }) ?? Promise.resolve();
   for (let round = 0; round < 16; round++) {
+    if (observer) await emit({ type: "turn", turn: round });
+    let text = "", lastFlush = performance.now();
+    const flush = async () => {
+      while (text) { const delta = text.slice(0, 16_000); text = text.slice(delta.length); await emit({ type: "text", delta }); }
+      lastFlush = performance.now();
+    };
     const turn = await requestChatTurn(model.config.baseUrl!, model.apiKey, {
       model: model.config.model, messages, tools: allowed ? [...assistantReadTools, ...assistantOperationTools] : assistantReadTools, tool_choice: round === 15 ? "none" : "auto", temperature: 0.2,
-    }, deadline);
+    }, deadline, observer ? async delta => {
+      text += delta;
+      if (text.length >= 64 || performance.now() - lastFlush >= 100) await flush();
+    } : undefined);
+    if (observer) await flush();
     if (!turn.toolCalls.length) {
       if (!turn.content) throw new ValidationError("Assistant returned no answer");
       if (turn.content.includes("<｜DSML｜")) throw new ValidationError("The model returned an invalid tool response");
@@ -131,6 +147,7 @@ async function generateModelResponse(
               && ((action.payload.input as Record<string, unknown>)?.toolId ?? (action.payload.input as Record<string, unknown>)?.serverId) === (parsed.toolId ?? parsed.serverId))));
           const action = duplicate ?? await createProposedAction(db, conversationId, messageId, { actionType: "platform_operation", payload: { operation: operationName, input: parsed } }, actor);
           if (!duplicate && confirmationRequired) performed.push(action);
+          if (observer) await emit({ type: "tool", name: operationName, status: confirmationRequired ? "proposed" : "executing" });
           if (!duplicate && !confirmationRequired) {
             try {
               const executed = await executeApprovedAction(db, action.id, actor, identity, true, false);
@@ -142,12 +159,15 @@ async function generateModelResponse(
             }
           }
           const executed = performed.find(row => row.id === action.id)!;
+          if (observer) await emit({ type: "tool", name: operationName, status: executed.status === "failed" ? "failed" : executed.status === "proposed" ? "proposed" : "completed" });
           result = { status: executed.status, actionId: executed.id, error: executed.errorMessage, ...getContextRecord(executed.executionResult) };
           messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(redactValue(result)).split(model.apiKey).join(REDACTED) });
           continue;
         }
+        if (observer && assistantReadTools.some(tool => tool.function.name === call.name)) await emit({ type: "tool", name: call.name, status: "reading" });
         const read = await runAssistantReadTool(db, identity, call.name, args);
         references.push(...read.references);
+        if (observer) await emit({ type: "tool", name: call.name, status: "completed" });
         const serialized = JSON.stringify(redactValue(read.data));
         result = serialized.length > 16_000 ? { truncated: true, preview: serialized.slice(0, 16_000), guidance: "Narrow the query or request a single resource." } : read.data;
       } catch (error) {
@@ -1290,6 +1310,7 @@ export async function sendReadOnlyMessage(
   input: SendAssistantMessageInput,
   actor: Actor,
   identity?: VerifiedRequestContext,
+  observer?: AssistantStreamObserver,
 ) {
   if (!identity) throw new AuthorizationError();
   const resolved = await createChatModelService(identity).resolve(db, input.requestedProvider, input.requestedModel);
@@ -1331,7 +1352,9 @@ export async function sendReadOnlyMessage(
   const performed: AssistantActionRow[] = [];
   let content: string;
   try {
-    content = await generateModelResponse(resolved, contextSnapshot, input, db, identity, conversation.id, userMessage.id, actor, performed);
+  if (observer) await observer({ type: "started", conversationId: conversation.id, userMessageId: userMessage.id }, { conversationId: conversation.id, snapshot: contextSnapshot, actions: performed });
+
+    content = await generateModelResponse(resolved, contextSnapshot, input, db, identity, conversation.id, userMessage.id, actor, performed, observer);
   } catch (error) {
     if (!performed.some(action => action.status === "succeeded")) {
       await db.update(assistantMessages).set({ metadata: { ...userMessage.metadata, processing: "failed" } }).where(eq(assistantMessages.id, userMessage.id));
