@@ -3,6 +3,9 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import { assistantSkillStorage, cleanAssistantToolData } from "./assistant-assets";
 import { z } from "zod";
 import type { Database } from "@task-weaver/db";
+import { getHistoricalReadAuthority } from "./api-keys";
+import { requireResource } from "./resource-authorization";
+import { authorizeMetadataOperation } from "./metadata-authorization";
 import { listProjectsSchema, listTasksSchema, listRequirementsSchema, listDocumentsSchema, type VerifiedRequestContext } from "@task-weaver/contracts";
 import { createResourceServices } from "./resource-services";
 
@@ -72,20 +75,15 @@ for (const [name, schema] of Object.entries(extraSchemas)) {
   assistantReadTools.push({ type: "function", function: { name, description: descriptions[name as keyof typeof extraSchemas], parameters: parameters as any } });
 }
 
-/** The same reference checks guard completed history and model results after permissions change. */
+/** Revalidate persisted reads, including archived projects, against current membership and credentials. */
 export async function authorizeAssistantReadReference(db: Database, identity: VerifiedRequestContext, reference: AssistantReadReference) {
-  const services = createResourceServices(identity);
-  switch (reference.kind) {
-    case "project": return services.projectService.getProject(db, reference.id);
-    case "requirement": return services.requirementService.getRequirement(db, reference.id);
-    case "task": return services.taskService.getTask(db, reference.id);
-    case "document": return services.documentService.getDocument(db, reference.id);
-    case "memory": return services.memoryService.getMemory(db, reference.id);
-    case "package": return services.skillPackageService.getPackage(db, reference.id);
-    case "mcp": return services.mcpRegistryService.getServer(db, reference.id);
-    case "schedule": return services.scheduleService.getSchedule(db, reference.id);
-    case "ti_agent_run": return services.tiAgentService.getRun(db, reference.id);
+  const authority = await getHistoricalReadAuthority(db, identity);
+  if (reference.kind === "schedule" || reference.kind === "ti_agent_run") {
+    await authorizeMetadataOperation(db, authority, reference.kind === "schedule" ? "schedule" : "ti",
+      reference.kind === "schedule" ? "getSchedule" : "getRun", [db, reference.id]);
+    return;
   }
+  return requireResource(db, authority, reference.kind, reference.id);
 }
 
 export async function runAssistantReadTool(db: Database, identity: VerifiedRequestContext, name: string, raw: unknown) {

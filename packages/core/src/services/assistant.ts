@@ -8,7 +8,7 @@ import { requestChatTurn } from "./chat-endpoint";
 import { schedulePredicate } from "./metadata-authorization";
 import { mcpServerPredicate } from "./mcp-authorization";
 import { createResourceServices } from './resource-services';
-import { getLiveRequestAuthority } from './api-keys';
+import { getLiveRequestAuthority, getHistoricalReadAuthority } from './api-keys';
 import { lockIdentityLifecycle } from './auth-security';
 import { projectPredicate, resourcePredicate, taskResourcePredicate, memoryResourcePredicate, requireResource, requireScope } from './resource-authorization';
 import { AuthorizationError, type VerifiedRequestContext } from '@task-weaver/contracts';
@@ -1370,9 +1370,10 @@ export async function sendReadOnlyMessage(
   const live = await getLiveRequestAuthority(db, identity);
   if (live.actor.id !== actor.id || live.actor.type !== actor.type) throw new AuthorizationError();
   requireScope(live, { personalOwnerId: actor.id, personalOwnerType: "human" }, "resource.write");
+  const historical = await getHistoricalReadAuthority(db, identity);
   const workspace = getContextRecord(contextSnapshot.workspace);
   for (const project of asArray(workspace.projects)) {
-    if (typeof project.id === "string") await requireResource(db, live, "project", project.id);
+    if (typeof project.id === "string") await requireResource(db, historical, "project", project.id);
   }
   for (const reference of contextSnapshot.toolReads as AssistantReadReference[] ?? []) {
     if (!await assistantDeletedReference(db, performed, reference.kind, reference.id))
@@ -1381,9 +1382,9 @@ export async function sendReadOnlyMessage(
   const current = getContextRecord(contextSnapshot.current);
   for (const kind of ["project", "requirement", "task"] as const) {
     const resource = getContextRecord(current[kind]);
-    if (typeof resource.id === "string") await requireResource(db, live, kind, resource.id);
+    if (typeof resource.id === "string") await requireResource(db, historical, kind, resource.id);
   }
-  if (input.context.scheduleId) await createResourceServices(identity).scheduleService.getSchedule(db, input.context.scheduleId);
+  if (input.context.scheduleId) await authorizeAssistantReadReference(db, identity, { kind: "schedule", id: input.context.scheduleId });
 
 
 

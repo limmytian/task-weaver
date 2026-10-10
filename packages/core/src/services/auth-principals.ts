@@ -106,6 +106,7 @@ export async function getPersonalResourceOwner(
 export async function loadPrincipalGrants(
   db: AuthDatabase,
   actorId: string,
+  includeArchived = false,
 ): Promise<AuthorizationGrant[]> {
   const principal = await loadActivePrincipal(db, actorId);
   const grants: AuthorizationGrant[] = [
@@ -143,7 +144,7 @@ export async function loadPrincipalGrants(
       and(
         eq(projectMemberships.actorId, principal.id),
         isNull(projectMemberships.removedAt),
-        eq(projects.status, "active"),
+        includeArchived ? undefined : eq(projects.status, "active"),
       ),
     );
   for (const { membership } of memberships) {

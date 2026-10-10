@@ -76,6 +76,7 @@ async function liveKeyAuthority(
   key: StoredKey,
   now: Date,
   seen = new Set<string>(),
+  includeArchived = false,
 ) {
   if (
     seen.has(key.id) ||
@@ -97,7 +98,7 @@ async function liveKeyAuthority(
     throw new AuthenticationError("invalid_credential");
   let grants = intersectGrants(
     credentialGrantsSchema.parse(key.grants),
-    await loadPrincipalGrants(db, actor.id),
+    await loadPrincipalGrants(db, actor.id, includeArchived),
   );
   if (key.parentKeyId) {
     const [parent] = await db
@@ -111,7 +112,7 @@ async function liveKeyAuthority(
       (parent.expiresAt && (!key.expiresAt || key.expiresAt > parent.expiresAt))
     )
       throw new AuthenticationError("invalid_credential");
-    const authority = await liveKeyAuthority(db, parent, now, seen);
+    const authority = await liveKeyAuthority(db, parent, now, seen, includeArchived);
     grants = intersectGrants(grants, authority.grants);
   }
   if (!grants.length) throw new AuthorizationError();
@@ -155,6 +156,7 @@ async function currentAuthority(
   db: AuthDatabase,
   context: { actor: { id: string }; credential: { kind: string; id: string; actorId: string } },
   now: Date,
+  includeArchived = false,
 ): Promise<{ actor: Principal; grants: AuthorizationGrant[]; key: StoredKey | null; depth: number; bounds?: ExecutionBounds | null }> {
   const actor = await loadActivePrincipal(db, context.actor.id);
   if (context.credential.actorId !== actor.id)
@@ -172,7 +174,7 @@ async function currentAuthority(
       .limit(1);
     if (!key || key.actorId !== actor.id)
       throw new AuthenticationError("invalid_credential");
-    return { ...(await liveKeyAuthority(db, key, now)), key };
+    return { ...(await liveKeyAuthority(db, key, now, new Set(), includeArchived)), key };
   }
   if (context.credential.kind !== "session" || actor.type !== "human")
     throw new AuthorizationError();
@@ -192,7 +194,7 @@ async function currentAuthority(
     throw new AuthenticationError("credential_expired");
   return {
     actor,
-    grants: await loadPrincipalGrants(db, actor.id),
+    grants: await loadPrincipalGrants(db, actor.id, includeArchived),
     key: null,
     depth: 0,
   };
@@ -216,6 +218,15 @@ export async function getLiveRequestAuthority(
   const authority = await currentAuthority(db, context, now);
   const bounds: ExecutionBounds | null = authority.bounds ?? null;
   return { actor: authority.actor, grants: authority.grants, bounds };
+}
+
+/** Historical snapshots retain archived membership reads without granting live operations. */
+export async function getHistoricalReadAuthority(db: AuthDatabase, context: VerifiedRequestContext) {
+  const authority = await currentAuthority(db, context, new Date(), true);
+  if (authority.bounds || authority.actor.type !== "human") throw new AuthorizationError();
+  return { actor: authority.actor, grants: authority.grants.map(grant => ({
+    ...grant, permissions: grant.permissions.filter(permission => permission === "resource.read"),
+  })).filter(grant => grant.permissions.length > 0), bounds: null };
 }
 
 export async function credentialManager(

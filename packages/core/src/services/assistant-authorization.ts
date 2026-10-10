@@ -1,5 +1,6 @@
 import { authorizeAssistantReadReference, type AssistantReadReference } from "./assistant-read-tools";
 import { assistantDeletedReference } from "./assistant-assets";
+import { getHistoricalReadAuthority } from "./api-keys";
 import { lockIdentityLifecycle } from "./auth-security";
 import { and, eq, sql } from "drizzle-orm";
 import { assistantActions, assistantMessages, assistantConversations, tiAgentPolicies, activityLog, type Database } from "@task-weaver/db";
@@ -16,12 +17,16 @@ export function createAssistantService(identity: VerifiedRequestContext) {
     requireScope(live, { personalOwnerId: live.actor.id, personalOwnerType: "human" }, "resource.read");
     return live;
   }
-  async function scope(db: Database, input: Partial<BuildAssistantContextInput>) {
-    const live = await authority(db);
+  async function scope(db: Database, input: Partial<BuildAssistantContextInput>, historical = false) {
+    const live = historical ? await getHistoricalReadAuthority(db, identity) : await authority(db);
+    requireScope(live, { personalOwnerId: live.actor.id, personalOwnerType: "human" }, "resource.read");
     for (const [kind, id] of [["project", input.projectId], ["requirement", input.requirementId], ["task", input.taskId]] as const) {
       if (id) await requireResource(db, live, kind, id);
     }
-    if (input.scheduleId) await createResourceServices(identity).scheduleService.getSchedule(db, input.scheduleId);
+    if (input.scheduleId) {
+      if (historical) await authorizeAssistantReadReference(db, identity, { kind: "schedule", id: input.scheduleId });
+      else await createResourceServices(identity).scheduleService.getSchedule(db, input.scheduleId);
+    }
     return { id: live.actor.id, type: live.actor.type };
   }
   async function conversation(db: Database, id: string) {
@@ -32,12 +37,11 @@ export function createAssistantService(identity: VerifiedRequestContext) {
     ) });
     if (!row) throw new NotFoundError("Assistant conversation not found");
     await scope(db, { projectId: row.projectId ?? undefined, requirementId: row.requirementId ?? undefined,
-      taskId: row.taskId ?? undefined, scheduleId: row.scheduleId ?? undefined });
+      taskId: row.taskId ?? undefined, scheduleId: row.scheduleId ?? undefined }, true);
     return row;
   }
   async function authorizeSnapshot(db: Database, value: unknown, actions: Parameters<typeof assistantDeletedReference>[1]) {
-    const live = await authority(db);
-    const services = createResourceServices(identity);
+    const live = await getHistoricalReadAuthority(db, identity);
     const record = (value: unknown): Record<string, any> => value && typeof value === "object" ? value as Record<string, any> : {};
     const snapshot = record(value);
     for (const reference of Array.isArray(snapshot.toolReads) ? snapshot.toolReads : []) {
@@ -57,8 +61,8 @@ export function createAssistantService(identity: VerifiedRequestContext) {
     for (const [kind, rows] of [["requirement", state.requirements], ["task", state.tasks], ["document", retrieval.documents], ["memory", retrieval.memories]] as const) {
       for (const row of Array.isArray(rows) ? rows : []) if (row.id && !await assistantDeletedReference(db, actions, kind, row.id)) await requireResource(db, live, kind, row.id);
     }
-    for (const row of Array.isArray(state.schedules) ? state.schedules : []) await services.scheduleService.getSchedule(db, row.id);
-    if (current.schedule?.id) await services.scheduleService.getSchedule(db, current.schedule.id);
+    for (const row of Array.isArray(state.schedules) ? state.schedules : []) await authorizeAssistantReadReference(db, identity, { kind: "schedule", id: row.id });
+    if (current.schedule?.id) await authorizeAssistantReadReference(db, identity, { kind: "schedule", id: current.schedule.id });
     for (const row of Array.isArray(retrieval.mcpTools) ? retrieval.mcpTools : []) {
       if (!await assistantDeletedReference(db, actions, "mcp", row.serverId)) await requireResource(db, live, "mcp", row.serverId);
     }
@@ -68,7 +72,6 @@ export function createAssistantService(identity: VerifiedRequestContext) {
     await conversation(db, id);
     const actor = await scope(db, {});
     const result = await implementation.getConversation(db, id, actor);
-    const services = createResourceServices(identity);
     const record = (value: unknown): Record<string, any> => value && typeof value === "object" ? value as Record<string, any> : {};
     for (const message of result.messages) await authorizeSnapshot(db, message.contextSnapshot, result.actions);
     for (const action of result.actions) {
@@ -76,8 +79,8 @@ export function createAssistantService(identity: VerifiedRequestContext) {
       if (["project", "requirement", "task", "document", "memory", "package", "mcp"].includes(execution.entityType) && execution.entityId
         && !await assistantDeletedReference(db, result.actions, execution.entityType, execution.entityId))
         await authorizeAssistantReadReference(db, identity, { kind: execution.entityType, id: execution.entityId });
-      if (execution.entityType === "schedule") await services.scheduleService.getSchedule(db, execution.entityId);
-      if (execution.entityType === "ti_agent_run") await services.tiAgentService.getRun(db, execution.entityId);
+      if (execution.entityType === "schedule") await authorizeAssistantReadReference(db, identity, { kind: "schedule", id: execution.entityId });
+      if (execution.entityType === "ti_agent_run") await authorizeAssistantReadReference(db, identity, { kind: "ti_agent_run", id: execution.entityId });
     }
     return result;
   }
@@ -147,7 +150,7 @@ export function createAssistantService(identity: VerifiedRequestContext) {
     },
     async listConversations(db: Database, input: Parameters<typeof implementation.listConversations>[1]) {
       const actor = await scope(db, { ...input, projectId: input.projectId ?? undefined,
-        requirementId: input.requirementId ?? undefined, taskId: input.taskId ?? undefined, scheduleId: input.scheduleId ?? undefined });
+        requirementId: input.requirementId ?? undefined, taskId: input.taskId ?? undefined, scheduleId: input.scheduleId ?? undefined }, true);
       const rows = await implementation.listConversations(db, input, actor);
       const visible = [];
       for (const row of rows) {

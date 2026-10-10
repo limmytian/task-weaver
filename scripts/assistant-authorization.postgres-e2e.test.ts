@@ -16,8 +16,8 @@ import { createApiApplication } from "../apps/api/src/application";
 import { createTRPCContextFactory } from "../apps/web/trpc/init";
 import { appRouter } from "../apps/web/trpc/routers/_app";
 const apiRequire = createRequire(new URL("../apps/api/package.json", import.meta.url));
-const { createDb, runMigrations, authInstanceState, authRateLimits, repositories, requirementRepositories, taskRepositories, agentUsageRuns, assistantMessages, tiAgentModelConfigs, reviewRuns, activityLog, projectMemberships, requirementClaims, schedules, scheduleRuns, tiAgentRuns, daemons, daemonWorkerProgress, daemonWorkerProgressHistory } = apiRequire("@task-weaver/db");
-const { registerMcpServerSchema, createAuthenticationRuntime, createResourceServices, createAssistantService, createChatModelService, sendAssistantMessageSchema, buildAssistantContextSchema, NotFoundError, AuthorizationError, listRepositoriesSchema, createRepositorySchema, agentUsageQuerySchema, upsertTiModelConfigSchema, createReviewRunSchema, evaluateReviewRunSchema, createScheduleSchema, listSchedulesSchema, daemonHistoryQuerySchema, daemonObservabilityQuerySchema, daemonMetricsQuerySchema } = apiRequire("@task-weaver/core");
+const { createDb, runMigrations, authInstanceState, authRateLimits, repositories, requirementRepositories, taskRepositories, agentUsageRuns, assistantMessages, tiAgentModelConfigs, reviewRuns, activityLog, apiKeys, projectMemberships, requirementClaims, schedules, scheduleRuns, tiAgentRuns, daemons, daemonWorkerProgress, daemonWorkerProgressHistory } = apiRequire("@task-weaver/db");
+const { apiKeyService, registerMcpServerSchema, createAuthenticationRuntime, createResourceServices, createAssistantService, createChatModelService, sendAssistantMessageSchema, buildAssistantContextSchema, NotFoundError, AuthorizationError, listRepositoriesSchema, createRepositorySchema, agentUsageQuerySchema, upsertTiModelConfigSchema, createReviewRunSchema, evaluateReviewRunSchema, createScheduleSchema, listSchedulesSchema, daemonHistoryQuerySchema, daemonObservabilityQuerySchema, daemonMetricsQuerySchema } = apiRequire("@task-weaver/core");
 const { eq, like } = apiRequire("drizzle-orm");
 const databaseUrl = process.env.TW_AUTH_E2E_DATABASE_URL;
 
@@ -657,6 +657,57 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.equal(safeTi.status, 200);
   assert.ok(!JSON.stringify(safeTi.body).includes("encryptedApiKey"));
   assert.ok(!JSON.stringify(safeTi.body).includes(expectedKey));
+  await t.test("archiving a project completes streaming and preserves authorized history", async () => {
+    expectedKey = "fixture-replaced-key";
+    const archived = await owner.service.projectService.createProject(db, { name: "Archive Chat fixture" }, owner.actor);
+    const archiveRequirement = await owner.service.requirementService.createRequirement(db, { projectId: archived.id, title: "History requirement" }, owner.actor);
+    const projectHistory = await ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ message: "Read project before archiving", context: { projectId: archived.id } }));
+    const issued = await apiKeyService.issueScopedApiKey(db, owner.context, owner.actor.id, { name: "History read fixture", grants: [
+      { scope: "personal", actorId: owner.actor.id, permissions: ["resource.read"] },
+      { scope: "project", projectId: archived.id, permissions: ["resource.read"] },
+      { scope: "project", projectId: project.id, permissions: ["resource.read"] },
+    ], expiresAt: null });
+    const keyIdentity = await runtime.verify(new Headers({ authorization: `Bearer ${issued.rawKey}` }));
+    const restricted = await apiKeyService.issueScopedApiKey(db, owner.context, owner.actor.id, { name: "Personal history only", grants: [
+      { scope: "personal", actorId: owner.actor.id, permissions: ["resource.read"] },
+    ], expiresAt: null });
+    const restrictedIdentity = await runtime.verify(new Headers({ authorization: `Bearer ${restricted.rawKey}` }));
+    await ownerChat.updatePolicy(db, { assistantAutoEnabled: true, assistantAutoMode: "live" });
+    const requestId = randomUUID();
+    modelReplies.push({ content: null, tool_calls: [toolCall("archive_project", { projectId: archived.id })] }, { content: "Project archived successfully" });
+    const response = await streamRequest(owner.headers, { requestId, message: "Archive the empty fixture project", context: {} });
+    assert.equal(response.status, 200);
+    const frames = new SseDecoder().push(await response.text()).map((frame: string) => JSON.parse(frame));
+    const completed = frames.find((event: any) => event.type === "completed");
+    assert(completed, JSON.stringify(frames.filter((event: any) => event.type === "error")));
+    assert.equal(completed.result.actions[0].status, "succeeded");
+    assert.equal((await ownerChat.getMessageResult(db, { requestId })).status, "completed");
+    assert.equal((await ownerChat.getConversation(db, completed.result.conversation.id)).messages.at(-1).content, "Project archived successfully");
+    assert.equal((await ownerChat.getConversation(db, projectHistory.conversation.id)).conversation.id, projectHistory.conversation.id);
+    assert.equal((await createAssistantService(keyIdentity).getConversation(db, projectHistory.conversation.id)).conversation.id, projectHistory.conversation.id);
+    assert((await ownerChat.listConversations(db, { projectId: archived.id })).some((row: any) => row.id === projectHistory.conversation.id));
+    await assert.rejects(createAssistantService(restrictedIdentity).getConversation(db, projectHistory.conversation.id), NotFoundError);
+    await assert.rejects(outsiderChat.getConversation(db, completed.result.conversation.id), NotFoundError);
+    await assert.rejects(owner.service.requirementService.getRequirement(db, archiveRequirement.id), NotFoundError);
+    await assert.rejects(owner.service.projectService.updateProject(db, archived.id, { name: "Forbidden live change" }, owner.actor), NotFoundError);
+    await assert.rejects(ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ conversationId: projectHistory.conversation.id, message: "Continue in archived scope", context: { projectId: archived.id } })), NotFoundError);
+    modelReplies.push({ content: "Global conversation continues after archival" });
+    const continued = await ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ conversationId: completed.result.conversation.id, message: "Continue globally", context: {} }));
+    assert.equal(continued.assistantMessage.content, "Global conversation continues after archival");
+    const scopedArchive = await owner.service.projectService.createProject(db, { name: "Scoped archive fixture" }, owner.actor);
+    modelReplies.push({ content: null, tool_calls: [toolCall("archive_project", { projectId: scopedArchive.id })] }, { content: "Current project archived" });
+    const scopedResponse = await streamRequest(owner.headers, { requestId: randomUUID(), message: "Archive this project", context: { projectId: scopedArchive.id } });
+    const scopedCompleted = new SseDecoder().push(await scopedResponse.text()).map((frame: string) => JSON.parse(frame)).find((event: any) => event.type === "completed");
+    assert(scopedCompleted);
+    assert.equal(scopedCompleted.result.actions[0].status, "succeeded");
+    assert.equal((await ownerChat.getConversation(db, scopedCompleted.result.conversation.id)).conversation.projectId, scopedArchive.id);
+    await db.update(apiKeys).set({ revokedAt: new Date() }).where(eq(apiKeys.id, issued.id));
+    await assert.rejects(createAssistantService(keyIdentity).getConversation(db, projectHistory.conversation.id));
+    await db.update(projectMemberships).set({ removedAt: new Date() }).where(eq(projectMemberships.projectId, archived.id));
+    await assert.rejects(ownerChat.getConversation(db, projectHistory.conversation.id), NotFoundError);
+    await assert.rejects(ownerChat.getConversation(db, completed.result.conversation.id), NotFoundError);
+    await ownerChat.updatePolicy(db, { assistantAutoEnabled: false });
+  });
   expectedKey = "fixture-personal-key";
   const viewerRequestId = randomUUID();
   const viewerGlobal = await viewerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ requestId: viewerRequestId, message: "List my projects", context: {} }));
@@ -680,5 +731,7 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.equal(visibleInventory.length, 51);
   assert.equal((boundedWorkspace.workspace as any).projects.length, 50);
   assert.equal((boundedWorkspace.workspace as any).projectsTruncated, true);
+
+
 
 });
