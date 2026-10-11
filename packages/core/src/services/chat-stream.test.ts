@@ -50,3 +50,14 @@ test("compatible gateways can repeat tool metadata without corrupting argument a
   ]) await assert.rejects(readChatStream(bytes(stream(conflicting)), "credential", async () => {}));
   await assert.rejects(readChatStream(bytes(stream(continuation).replace("data: [DONE]\n\n", "")), "credential", async () => {}));
 });
+
+test("usage-only final frames are observed and counters survive incomplete streams", async () => {
+  const observed: unknown[] = [];
+  const usage = { prompt_tokens: 8, completion_tokens: 2 };
+  const stream = delta({ content: "Answer" }, "stop") + frame({ choices: [], model: "actual", usage }) + "data: [DONE]\n\n";
+  await readChatStream(bytes(stream), "", async () => {}, (value, model) => { observed.push({ value, model }); });
+  assert.deepEqual(observed, [{ value: usage, model: "actual" }]);
+  const partial: unknown[] = [];
+  await assert.rejects(readChatStream(bytes(stream.replace("data: [DONE]\n\n", "")), "", async () => {}, value => { partial.push(value); }));
+  assert.deepEqual(partial, [usage]);
+});

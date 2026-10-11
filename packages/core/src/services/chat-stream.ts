@@ -18,7 +18,7 @@ export class SecretTextBuffer {
 }
 
 /** Assemble tool calls before returning a turn; incomplete streams never execute tools. */
-export async function readChatStream(source: AsyncIterable<Uint8Array>, apiKey: string, onText: (text: string) => Promise<void>): Promise<ChatTurn> {
+export async function readChatStream(source: AsyncIterable<Uint8Array>, apiKey: string, onText: (text: string) => Promise<void>, onUsage?: (value: unknown, model?: unknown) => void): Promise<ChatTurn> {
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const frames = new SseDecoder();
   const filter = new SecretTextBuffer(apiKey);
@@ -33,6 +33,7 @@ export async function readChatStream(source: AsyncIterable<Uint8Array>, apiKey: 
       if (frame === "[DONE]") { done = true; continue; }
       let value: any;
       try { value = JSON.parse(frame); } catch { throw new ChatConfigurationError("chat_response_invalid"); }
+      if (value.usage != null || value.model != null) onUsage?.(value.usage, value.model);
       if (value.error) throw new ChatConfigurationError("chat_request_failed");
       const choice = value.choices?.[0];
       if (!choice) continue;

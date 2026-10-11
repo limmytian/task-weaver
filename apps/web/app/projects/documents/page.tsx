@@ -55,14 +55,16 @@ export default function DocumentsPage() {
     refetch,
   } = trpc.document.list.useQuery(
     projectFilter === "__all__"
-      ? {}
+      ? { includePersonal: true }
+      : projectFilter === "__personal__"
+        ? { includeGlobal: false, includePersonal: true }
       : projectFilter === "__global__"
         ? { includeGlobal: true }
         : { projectId: projectFilter, includeGlobal: false },
   );
 
   const selectedProjectId =
-    projectFilter !== "__all__" && projectFilter !== "__global__"
+    projectFilter !== "__all__" && projectFilter !== "__global__" && projectFilter !== "__personal__"
       ? projectFilter
       : undefined;
 
@@ -82,6 +84,7 @@ export default function DocumentsPage() {
         doc.title.toLowerCase().includes(normalizedQuery) ||
         doc.content.toLowerCase().includes(normalizedQuery) ||
         (doc.summary ?? "").toLowerCase().includes(normalizedQuery) ||
+        (doc.tags ?? []).some((tag) => tag.toLowerCase().includes(normalizedQuery)) ||
         (doc.keywords ?? []).some((keyword) => keyword.toLowerCase().includes(normalizedQuery))
       );
     });
@@ -158,7 +161,8 @@ export default function DocumentsPage() {
               <SelectValue placeholder="Global documents" />
             </SelectTrigger>
             <SelectContent style={{ maxWidth: "min(28rem, calc(100vw - 2rem))" }}>
-              <SelectItem value="__all__">Global documents</SelectItem>
+              <SelectItem value="__all__">Global and personal documents</SelectItem>
+              <SelectItem value="__personal__">Personal documents</SelectItem>
               <SelectItem value="__global__">Global only</SelectItem>
               {projects?.map((p) => (
                 <SelectItem key={p.id} value={p.id}>
@@ -254,10 +258,10 @@ export default function DocumentsPage() {
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="font-medium">{doc.title}</p>
                         <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                          {doc.docType}
+                          {doc.form === "attachment" ? "attachment" : doc.docType}
                         </Badge>
                         <Badge variant={doc.projectId ? "outline" : "secondary"} className="text-[10px] px-1.5 py-0">
-                          {doc.projectId ? "project" : "global"}
+                          {doc.projectId ? "project" : doc.personalOwnerId ? "personal" : "global"}
                         </Badge>
                         {doc.needsReview && (
                           <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
@@ -334,6 +338,8 @@ function DocumentPreview({
         summary: string | null;
         keywords: string[] | null;
         docType: string;
+        form: "markdown" | "attachment";
+        personalOwnerId: string | null;
         projectId: string | null;
         tags: string[] | null;
         updatedAt: Date | string;
@@ -360,10 +366,10 @@ function DocumentPreview({
           <p className="line-clamp-2 font-semibold">{doc.title}</p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             <Badge variant="secondary" className="text-[10px]">
-              {doc.docType}
+              {doc.form === "attachment" ? "attachment" : doc.docType}
             </Badge>
             <Badge variant={doc.projectId ? "outline" : "secondary"} className="text-[10px]">
-              {doc.projectId ? "project" : "global"}
+              {doc.projectId ? "project" : doc.personalOwnerId ? "personal" : "global"}
             </Badge>
             {doc.needsReview && (
               <Badge variant="destructive" className="text-[10px]">

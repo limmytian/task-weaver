@@ -1,3 +1,12 @@
+import { createReadStream, createWriteStream } from 'node:fs'
+import { stat, link, unlink } from 'node:fs/promises'
+import { basename, resolve } from 'node:path'
+import { randomUUID, createHash } from 'node:crypto'
+import { Readable, Transform } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import { attachmentMetadataSchema, replaceAttachmentSchema, updateDocumentSchema } from '@task-weaver/contracts'
+import { loadConfig } from '../config.js'
+import { ApiError } from '../client.js'
 import { Command } from 'commander'
 import * as readline from 'readline/promises'
 import { get, post, patch, del } from '../client.js'
@@ -35,6 +44,8 @@ function summarizeDocument(row: Record<string, unknown>): Record<string, unknown
     title: row.title,
     summary: row.summary,
     docType: row.docType,
+    form: row.form ?? "markdown",
+    currentFileVersionId: row.currentFileVersionId,
     tags: row.tags,
     keywords: row.keywords,
     readingTimeMin: row.readingTimeMin,
@@ -46,6 +57,62 @@ function summarizeDocument(row: Record<string, unknown>): Record<string, unknown
 
 export function registerDocuments(program: Command): void {
   const doc = program.command('doc').description('manage knowledge base documents')
+
+  async function transfer(path: string, method: string, metadata?: unknown, filename?: string) {
+    const config = loadConfig();
+    const headers = new Headers(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {});
+    if (metadata) headers.set('x-tw-attachment-metadata', encodeURIComponent(JSON.stringify(metadata)));
+    if (filename) { const info = await stat(filename); if (!info.isFile()) throw new Error('Upload path must be a regular file'); headers.set('content-type', 'application/octet-stream'); headers.set('content-length', String(info.size)); }
+    const response = await fetch(`${config.apiUrl}${path}`, { method, headers, redirect: 'error',
+      ...(filename ? { body: Readable.toWeb(createReadStream(filename)), duplex: 'half' } : {}) } as RequestInit);
+    if (!response.ok) { const body = await response.json().catch(() => ({})) as { error?: string }; throw new ApiError(response.status, body.error ?? `HTTP ${response.status}`); }
+    return response;
+  }
+  doc.command('upload <file>').description('create an attachment document from original file bytes')
+    .option('--project <id>', 'project scope; omit for personal ownership')
+    .option('--title <title>', 'document title; defaults to filename')
+    .option('--description <text>', 'metadata description')
+    .option('--tags <tags>', 'comma-separated metadata tags')
+    .option('--mime-type <mime>', 'file MIME type', 'application/octet-stream')
+    .option('--json', 'output JSON')
+    .action(async (file, opts) => {
+      const input = attachmentMetadataSchema.parse({ projectId: opts.project, title: opts.title ?? basename(file), description: opts.description,
+        tags: opts.tags ? opts.tags.split(',').map((t: string) => t.trim()).filter(Boolean) : undefined, originalFilename: basename(file), mimeType: opts.mimeType });
+      const response = await transfer('/api/v1/documents/attachments', 'POST', input, resolve(file));
+      const data = await response.json(); if (opts.json) printJson(data); else printKv(data as Record<string, unknown>);
+    });
+  doc.command('replace-file <id> <file>').description('replace original bytes and preserve immutable file history')
+    .requiredOption('--expected-version <version>', 'current document metadata version')
+    .option('--mime-type <mime>', 'file MIME type', 'application/octet-stream').option('--json', 'output JSON')
+    .action(async (id, file, opts) => {
+      const input = replaceAttachmentSchema.parse({ expectedVersion: opts.expectedVersion, originalFilename: basename(file), mimeType: opts.mimeType });
+      const response = await transfer(`/api/v1/documents/${encodeURIComponent(id)}/file`, 'PUT', input, resolve(file));
+      const data = await response.json(); if (opts.json) printJson(data); else printKv(data as Record<string, unknown>);
+    });
+  doc.command('files <id>').description('list immutable attachment file versions').option('--json', 'output JSON')
+    .action(async (id, opts) => {
+      const data = await get<unknown[]>(`/api/v1/documents/${encodeURIComponent(id)}/files`);
+      if (opts.json) printJson(data); else printTable(data as Record<string, unknown>[], ['version', 'originalFilename', 'mimeType', 'sizeBytes', 'sha256']);
+    });
+  doc.command('download <id>').description('download authenticated original bytes to a new local destination')
+    .requiredOption('--output <path>', 'destination file; refuses overwriting existing files')
+    .option('--file-version <version>', 'historical immutable file version').option('--json', 'output JSON')
+    .action(async (id, opts) => {
+      const query = new URLSearchParams();
+      if (opts.fileVersion) { const version = Number(opts.fileVersion); if (!Number.isSafeInteger(version) || version < 1) throw new Error('Invalid file version'); query.set('fileVersion', String(version)); }
+      const response = await transfer(`/api/v1/documents/${encodeURIComponent(id)}/file?${query}`, 'GET');
+      if (!response.body) throw new Error('Download response has no body');
+      const output = resolve(opts.output), temporary = `${output}.${randomUUID()}.partial`;
+      const hash = createHash('sha256'); let sizeBytes = 0;
+      try {
+        await pipeline(Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]), new Transform({ transform(chunk, _encoding, callback) { sizeBytes += chunk.length; hash.update(chunk); callback(null, chunk); } }), createWriteStream(temporary, { flags: 'wx', mode: 0o600 }));
+        const sha256 = hash.digest('hex');
+        if (response.headers.get('x-tw-file-sha256') !== sha256) throw new Error('Download checksum mismatch');
+        await link(temporary, output);
+        const result = { path: output, sizeBytes, sha256 }; if (opts.json) printJson(result); else printKv(result);
+      } finally { await unlink(temporary).catch(() => {}); }
+    });
+
 
   doc
     .command('list')
@@ -142,14 +209,18 @@ export function registerDocuments(program: Command): void {
     .description('update a document')
     .option('--title <title>', 'new title')
     .option('--content <content>', 'new content (Markdown)')
-    .option('--summary <summary>', 'new summary')
+    .option('--summary <summary>', 'new summary or attachment description')
+    .option('--tags <tags>', 'comma-separated tags')
+    .option('--expected-version <version>', 'current document version required for attachment metadata')
     .option('--json', 'output raw JSON')
     .action(async (id, opts) => {
       const body: Record<string, unknown> = {}
       if (opts.title) body.title = opts.title
       if (opts.content) body.content = opts.content
-      if (opts.summary) body.summary = opts.summary
-      const data = await patch(`/api/v1/documents/${id}`, body)
+      if (opts.summary !== undefined) body.summary = opts.summary
+      if (opts.tags !== undefined) body.tags = opts.tags.split(',').map((tag: string) => tag.trim()).filter(Boolean)
+      if (opts.expectedVersion !== undefined) body.expectedVersion = Number(opts.expectedVersion)
+      const data = await patch(`/api/v1/documents/${id}`, updateDocumentSchema.parse(body))
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)
     })

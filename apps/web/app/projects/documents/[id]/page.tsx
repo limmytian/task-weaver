@@ -34,6 +34,8 @@ import {
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { AttachmentDocument } from "@/components/attachment-document";
+import { Textarea } from "@/components/ui/textarea";
 import { DocumentVersionHistory } from "@/components/document-version-history";
 
 export default function DocumentDetailPage({
@@ -47,6 +49,8 @@ export default function DocumentDetailPage({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [description, setDescription] = useState("");
+  const [tags, setTags] = useState("");
   const utils = trpc.useUtils();
 
   const { data: doc, isLoading } = trpc.document.get.useQuery({ id });
@@ -56,6 +60,8 @@ export default function DocumentDetailPage({
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setTitle(doc.title);
       setContent(doc.content);
+      setDescription(doc.summary ?? "");
+      setTags((doc.tags ?? []).join(", "));
     }
   }, [doc, editing]);
 
@@ -65,6 +71,7 @@ export default function DocumentDetailPage({
       utils.document.list.invalidate();
       setEditing(false);
     },
+    onError: (error) => toast.error("Failed to save document", { description: error.message }),
   });
 
   const deleteDocument = trpc.document.delete.useMutation({
@@ -91,7 +98,9 @@ export default function DocumentDetailPage({
   const handleSave = () => {
     updateDocument.mutate({
       id,
-      data: { title: title.trim(), content: content.trim() },
+      data: doc?.form === "attachment"
+        ? { title: title.trim(), summary: description, tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean), expectedVersion: doc.version }
+        : { title: title.trim(), content: content.trim() },
     });
   };
 
@@ -99,6 +108,8 @@ export default function DocumentDetailPage({
     if (doc) {
       setTitle(doc.title);
       setContent(doc.content);
+      setDescription(doc.summary ?? "");
+      setTags((doc.tags ?? []).join(", "));
     }
     setEditing(true);
   };
@@ -107,6 +118,8 @@ export default function DocumentDetailPage({
     if (doc) {
       setTitle(doc.title);
       setContent(doc.content);
+      setDescription(doc.summary ?? "");
+      setTags((doc.tags ?? []).join(", "));
     }
     setEditing(false);
   };
@@ -206,12 +219,12 @@ export default function DocumentDetailPage({
                 className="text-lg font-semibold"
                 placeholder="Document title"
               />
-              <MarkdownEditor
+              {doc.form === "attachment" ? <><Textarea aria-label="Description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={1000} /><Input aria-label="Tags" placeholder="Comma-separated tags" value={tags} onChange={(event) => setTags(event.target.value)} /></> : <MarkdownEditor
                 content={content}
                 onChange={setContent}
                 placeholder="Start writing Markdown... (type [[ for wiki-links)"
                 projectId={doc.projectId ?? undefined}
-              />
+              />}
             </div>
           ) : (
             <article className="prose prose-neutral dark:prose-invert max-w-none">
@@ -225,7 +238,7 @@ export default function DocumentDetailPage({
                   Updated {new Date(doc.updatedAt).toLocaleString()}
                 </span>
               </div>
-              <MarkdownRenderer content={doc.content} />
+              {doc.form === "attachment" ? <><p className="whitespace-pre-wrap">{doc.summary}</p><AttachmentDocument id={id} documentVersion={doc.version} /></> : <MarkdownRenderer content={doc.content} />}
             </article>
           )}
         </div>
@@ -236,7 +249,7 @@ export default function DocumentDetailPage({
             unlinkDoc={unlinkDoc}
             unlinkFromTask={unlinkFromTask}
           />
-          <DocumentVersionHistory documentId={id} />
+          {doc.form === "markdown" && <DocumentVersionHistory documentId={id} />}
         </div>
       </div>
 
@@ -265,6 +278,7 @@ function DocumentSidebar({
     incomingLinks?: Array<{ id: string; sourceDoc: { id: string; title: string } }>;
     outgoingLinks?: Array<{ id: string; targetDoc: { id: string; title: string } }>;
     taskLinks?: Array<{ id: string; task: { id: string; title: string; status: string } }>;
+    requirementLinks?: Array<{ id: string; requirement: { id: string; projectId: string; title: string; status: string } }>;
   };
   unlinkDoc: { mutate: (input: { linkId: string }) => void };
   unlinkFromTask: { mutate: (input: { linkId: string }) => void };
@@ -297,6 +311,7 @@ function DocumentSidebar({
   });
 
   const linkToReq = trpc.document.linkToRequirement.useMutation({
+    onError: (error) => toast.error("Failed to link requirement", { description: error.message }),
     onSuccess: () => {
       utils.document.get.invalidate({ id: doc.id });
       setLinkingReq(false);
@@ -306,7 +321,8 @@ function DocumentSidebar({
 
   const existingTaskIds = new Set(doc.taskLinks?.map((l) => l.task.id) ?? []);
   const availableTasks = tasks?.filter((t) => !existingTaskIds.has(t.id) && t.status !== "cancelled");
-  const availableReqs = requirements?.filter((r) => r.status !== "cancelled");
+  const existingReqIds = new Set(doc.requirementLinks?.map((link) => link.requirement.id) ?? []);
+  const availableReqs = requirements?.filter((r) => !existingReqIds.has(r.id) && r.status !== "cancelled");
 
   return (
     <aside className="space-y-4">
@@ -440,7 +456,7 @@ function DocumentSidebar({
           <CardTitle className="flex items-center justify-between text-sm">
             <span className="flex items-center gap-2">
               <ClipboardList className="h-4 w-4" />
-              Requirements
+              Requirements ({doc.requirementLinks?.length ?? 0})
             </span>
             <button
               className="text-muted-foreground hover:text-foreground"
@@ -451,6 +467,12 @@ function DocumentSidebar({
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
+          {doc.requirementLinks?.map((link) => (
+            <Link key={link.id} href={`/projects/${link.requirement.projectId}/requirements/${link.requirement.id}`} className="block rounded-md border p-2 text-sm transition-colors hover:bg-muted">
+              <p className="font-medium">{link.requirement.title}</p>
+              <Badge variant="outline" className="mt-1 text-[10px]">{link.requirement.status}</Badge>
+            </Link>
+          ))}
           {linkingReq && (
             <div className="space-y-2 rounded border p-2">
               <Select value={selectedReqId} onValueChange={setSelectedReqId}>

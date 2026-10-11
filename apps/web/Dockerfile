@@ -35,6 +35,7 @@ COPY --from=installer /app/LICENSE /app/NOTICE /app/THIRD_PARTY_NOTICES.md ./
 COPY --from=installer /app/THIRD_PARTY_LICENSES ./THIRD_PARTY_LICENSES
 COPY --from=installer /app/release-artifacts ./release-artifacts
 COPY --from=installer /app/.release/binary-notice-baseline.json ./release-artifacts/binary-notice-baseline.json
+RUN mkdir -p /app/attachment-data && chown node:node /app/attachment-data
 USER node
 EXPOSE 3000
 ENV PORT=3000 HOSTNAME="0.0.0.0"

@@ -1,4 +1,5 @@
-import { boolean, index, integer, pgTable, real, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { check, bigint, boolean, index, integer, pgTable, real, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 // `version` column enables optimistic concurrency control for multi-agent editing
 import { actorTypeEnum } from "./enums";
 import { projects } from "./projects";
@@ -14,6 +15,8 @@ export const documents = pgTable(
     }),
     personalOwnerId: text("personal_owner_id"),
     personalOwnerType: actorTypeEnum("personal_owner_type"),
+    form: text("form", { enum: ["markdown", "attachment"] }).default("markdown").notNull(),
+    currentFileVersionId: uuid("current_file_version_id"),
     title: text("title").notNull(),
     content: text("content").notNull(),
     tags: text("tags").array(),
@@ -40,6 +43,7 @@ export const documents = pgTable(
     // since tsvector and vector types require extensions
   },
   (table) => [
+    check("attachment_content_check", sql`${table.form} <> 'attachment' OR ${table.content} = ''`),
     index("idx_docs_project").on(table.projectId),
     index("idx_docs_personal_owner").on(table.personalOwnerId, table.personalOwnerType),
     index("idx_docs_doc_type").on(table.docType),
@@ -106,6 +110,7 @@ export const documentVersions = pgTable(
     summary: text("summary"),
     keywords: text("keywords").array(),
     docType: text("doc_type").notNull(),
+    fileVersionId: uuid("file_version_id"),
     changeType: text("change_type", {
       enum: ["created", "updated", "reverted"],
     }).notNull(),
@@ -149,3 +154,21 @@ export const documentRequirementLinks = pgTable(
     index("idx_doc_req_req").on(table.requirementId),
   ],
 );
+
+/** Original bytes and file attribution are immutable; metadata edits share the same file. */
+export const documentFileVersions = pgTable("document_file_versions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  documentId: uuid("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }),
+  version: integer("version").notNull(),
+  originalFilename: text("original_filename").notNull(), mimeType: text("mime_type").notNull(),
+  sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(), sha256: text("sha256").notNull(),
+  storageBackend: text("storage_backend").notNull(), objectKey: text("object_key").notNull(),
+  createdBy: text("created_by").notNull(), createdByType: actorTypeEnum("created_by_type").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, t => [uniqueIndex("idx_document_file_version").on(t.documentId, t.version), uniqueIndex("idx_document_file_object").on(t.objectKey)]);
+
+/** Transactional tombstones allow cleanup after a permanent document deletion commits. */
+export const documentFileGarbage = pgTable("document_file_garbage", {
+  objectKey: text("object_key").primaryKey(), storageBackend: text("storage_backend").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});

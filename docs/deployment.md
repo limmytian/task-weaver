@@ -85,6 +85,11 @@ image pair also needs explicit API/Web environment injection; editing a host
 See [authenticated access](authenticated-access.md) for bootstrap, closed account
 provisioning, scoped CLI login, revocation and the offline upgrade boundary.
 
+The `attachment-data` volume stores attachment originals shared by API and Web.
+See [attachment documents](attachment-documents.md) for limits, persistent
+volume topology and coordinated backup/restore. Preserve both attachment and
+Skill volumes when recreating containers.
+
 The `skill-data` volume stores skill package objects. Preserve it together with
 database backups. The database operator owns database security patches,
 availability, backups, and restoration. Stop application writes before a

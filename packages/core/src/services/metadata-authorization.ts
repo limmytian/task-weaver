@@ -12,9 +12,14 @@ import { loadActivePrincipal } from "./auth-principals";
 
 /** Stored relations must agree before any pagination, totals or usage coverage. */
 export function usageRelationPredicate() {
-  return sql`EXISTS (SELECT 1 FROM requirements r WHERE r.id = ${agentUsageRuns.requirementId} AND r.project_id = ${agentUsageRuns.projectId})
+  const legacy = sql`EXISTS (SELECT 1 FROM requirements r WHERE r.id = ${agentUsageRuns.requirementId} AND r.project_id = ${agentUsageRuns.projectId})
     AND (${agentUsageRuns.taskId} IS NULL OR EXISTS (SELECT 1 FROM tasks t WHERE t.id = ${agentUsageRuns.taskId} AND t.scope = 'project' AND t.project_id = ${agentUsageRuns.projectId} AND t.requirement_id = ${agentUsageRuns.requirementId}))
     AND (${agentUsageRuns.tiRunId} IS NULL OR EXISTS (SELECT 1 FROM ti_agent_runs ti JOIN tasks t ON t.id = ti.task_id WHERE ti.id = ${agentUsageRuns.tiRunId} AND t.project_id = ${agentUsageRuns.projectId} AND t.requirement_id = ${agentUsageRuns.requirementId} AND (${agentUsageRuns.taskId} IS NULL OR ti.task_id = ${agentUsageRuns.taskId})))`;
+  const chat = sql`${agentUsageRuns.source} IN ('ti_chat', 'ti_operation')
+    AND (${agentUsageRuns.requirementId} IS NULL OR EXISTS (SELECT 1 FROM requirements r WHERE r.id = ${agentUsageRuns.requirementId} AND r.project_id = ${agentUsageRuns.projectId}))
+    AND (${agentUsageRuns.taskId} IS NULL OR EXISTS (SELECT 1 FROM tasks t WHERE t.id = ${agentUsageRuns.taskId} AND t.project_id = ${agentUsageRuns.projectId} AND t.requirement_id = ${agentUsageRuns.requirementId}))
+    AND ${agentUsageRuns.tiRunId} IS NULL AND ${agentUsageRuns.daemonId} IS NULL`;
+  return or(legacy, chat)!;
 }
 
 export async function authorizeMetadataOperation(db: Database, authority: ResourceAuthority, group: "usage" | "review" | "ti" | "activity" | "schedule" | "observability" | "metrics" | "progress" | "daemon", name: string, call: any[]) {
@@ -120,6 +125,13 @@ export async function authorizeMetadataOperation(db: Database, authority: Resour
     }
     if (!["listUsage", "summarizeUsage", "getUsage"].includes(name)) throw new AuthorizationError();
     const input = name === "getUsage" ? { projectId: call[1] } : call[1];
+    if (!input.projectId) {
+      requireScope(authority, { personalOwnerId: authority.actor.id, personalOwnerType: authority.actor.type }, "resource.read");
+      call[name === "getUsage" ? 3 : 2] = and(
+        sql`${agentUsageRuns.projectId} IS NULL AND ${agentUsageRuns.requirementId} IS NULL AND ${agentUsageRuns.taskId} IS NULL`,
+        eq(agentUsageRuns.personalOwnerId, authority.actor.id), eq(agentUsageRuns.personalOwnerType, authority.actor.type), usageRelationPredicate());
+      return;
+    }
     await requireResource(db, authority, "project", input.projectId, "audit.read");
     if (input.requirementId) {
       const requirement = await requireResource(db, authority, "requirement", input.requirementId, "audit.read");

@@ -35,7 +35,7 @@ COPY --from=installer /app/THIRD_PARTY_LICENSES ./THIRD_PARTY_LICENSES
 COPY --from=installer /app/release-artifacts ./release-artifacts
 COPY --from=installer /app/.release/binary-notice-baseline.json ./release-artifacts/binary-notice-baseline.json
 ENV TW_PRESET_SKILLS_DIR=/app/skills
-RUN mkdir -p /app/data && chown node:node /app/data
+RUN mkdir -p /app/data /app/attachment-data && chown node:node /app/data /app/attachment-data
 USER node
 EXPOSE 3001
 ENV PORT=3001

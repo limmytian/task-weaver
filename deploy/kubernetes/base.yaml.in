@@ -15,6 +15,17 @@ spec:
       storage: 5Gi
 ---
 apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: task-weaver-attachment-data
+  namespace: ${TW_NAMESPACE}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
 kind: Service
 metadata:
   name: task-weaver-api

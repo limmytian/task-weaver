@@ -15,6 +15,8 @@ spec:
       labels:
         app: task-weaver-api
     spec:
+      securityContext:
+        fsGroup: 1000
       containers:
         - name: api
           image: ${TW_API_IMAGE}
@@ -51,7 +53,13 @@ spec:
               value: polling
             - name: SKILL_PACKAGE_STORAGE_DIR
               value: /app/data/skill-packages
+            - name: TW_ATTACHMENT_STORAGE_DIR
+              value: /app/attachment-data
+            - name: TW_ATTACHMENT_MAX_BYTES
+              value: "52428800"
           volumeMounts:
+            - name: attachment-data
+              mountPath: /app/attachment-data
             - name: skill-data
               mountPath: /app/data
           readinessProbe:
@@ -66,6 +74,9 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 10
       volumes:
+        - name: attachment-data
+          persistentVolumeClaim:
+            claimName: task-weaver-attachment-data
         - name: skill-data
           persistentVolumeClaim:
             claimName: task-weaver-skill-data
@@ -77,6 +88,8 @@ metadata:
   namespace: ${TW_NAMESPACE}
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: task-weaver-web
@@ -85,6 +98,15 @@ spec:
       labels:
         app: task-weaver-web
     spec:
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: task-weaver-api
+              topologyKey: kubernetes.io/hostname
+      securityContext:
+        fsGroup: 1000
       containers:
         - name: web
           image: ${TW_WEB_IMAGE}
@@ -119,6 +141,13 @@ spec:
                   optional: true
             - name: NODE_ENV
               value: production
+            - name: TW_ATTACHMENT_STORAGE_DIR
+              value: /app/attachment-data
+            - name: TW_ATTACHMENT_MAX_BYTES
+              value: "52428800"
+          volumeMounts:
+            - name: attachment-data
+              mountPath: /app/attachment-data
           readinessProbe:
             httpGet:
               path: /
@@ -130,3 +159,8 @@ spec:
               port: 3000
             initialDelaySeconds: 30
             periodSeconds: 10
+
+      volumes:
+        - name: attachment-data
+          persistentVolumeClaim:
+            claimName: task-weaver-attachment-data

@@ -7,6 +7,8 @@ import {
   documentLinks,
   documentTaskLinks,
   documentVersions,
+  documentFileVersions,
+  documentFileGarbage,
   activityLog,
   documentEmbeddings,
   documentEmbeddingStates,
@@ -25,7 +27,7 @@ import type {
   RevertDocumentInput,
 } from "@task-weaver/contracts";
 import { emit } from "@task-weaver/realtime";
-import { NotFoundError } from "@task-weaver/contracts";
+import { NotFoundError, ConflictError, ValidationError } from "@task-weaver/contracts";
 import {
   profileDocumentsCondition,
   reconcileDeletedDocumentEmbedding,
@@ -270,7 +272,8 @@ export async function getDocumentDetail(db: Database, id: string) {
     },
   });
   if (!doc) throw new NotFoundError("Document not found");
-  return doc;
+  const file = doc.currentFileVersionId ? await db.query.documentFileVersions.findFirst({ where: and(eq(documentFileVersions.id, doc.currentFileVersionId), eq(documentFileVersions.documentId, id)) }) : null;
+  return { ...doc, file: file ? { id: file.id, version: file.version, originalFilename: file.originalFilename, mimeType: file.mimeType, sizeBytes: file.sizeBytes, sha256: file.sha256, createdAt: file.createdAt } : null };
 }
 
 type PagedDocumentList = {
@@ -314,6 +317,7 @@ export async function listDocuments(
     conditions.push(sql`(
       ${documents.title} ILIKE ${pattern}
       OR COALESCE(${documents.summary}, '') ILIKE ${pattern}
+      OR array_to_string(${documents.tags}, ' ') ILIKE ${pattern}
     )`);
   }
 
@@ -339,6 +343,8 @@ export async function listDocuments(
         where,
         columns: {
           id: true,
+          form: true,
+          currentFileVersionId: true,
           projectId: true,
           title: true,
           summary: true,
@@ -385,9 +391,15 @@ export async function updateDocument(
   actor: Actor,
   authorizedPredicate?: SQL,
 ) {
-  const current = await getDocument(db, id);
-
-  const updates: Record<string, unknown> = { ...input, updatedAt: new Date() };
+  let current = await getDocument(db, id);
+  if (current.form === "attachment") {
+    const [locked] = await db.select().from(documents).where(eq(documents.id, id)).for("update");
+    current = locked!;
+    if (input.expectedVersion === undefined || input.expectedVersion !== current.version) throw new ConflictError("Document version changed; refresh and supply expectedVersion", current.version);
+    if (input.content !== undefined || input.docType === "skill") throw new ValidationError("Attachment content cannot be edited as Markdown or converted into a Skill");
+  }
+  const { expectedVersion: _version, ...patch } = input;
+  const updates: Record<string, unknown> = { ...patch, updatedAt: new Date(), ...(current.form === "attachment" ? { version: current.version + 1 } : {}) };
 
   // Normalize markdown and recompute reading time if content changed
   if (input.content) {
@@ -397,13 +409,15 @@ export async function updateDocument(
   }
 
   // Snapshot current state as a new version before applying updates
-  await createVersionSnapshot(db, current, "updated", actor);
+  if (current.form === "markdown") await createVersionSnapshot(db, current, "updated", actor);
 
   const [updated] = await db
     .update(documents)
     .set(updates)
     .where(eq(documents.id, id))
     .returning();
+
+  if (current.form === "attachment") await createVersionSnapshot(db, updated!, "updated", actor);
 
   await db.insert(activityLog).values({
     entityType: "document",
@@ -443,6 +457,8 @@ export async function deleteDocument(db: Database, id: string, actor: Actor) {
     reconcileDeletedDocumentEmbedding(db, current, actor)
   ));
 
+  const files = await db.select().from(documentFileVersions).where(eq(documentFileVersions.documentId, id));
+  if (files.length) await db.insert(documentFileGarbage).values(files.map(file => ({ objectKey: file.objectKey, storageBackend: file.storageBackend }))).onConflictDoNothing();
   await db.delete(documents).where(eq(documents.id, id));
 
   await db.insert(activityLog).values({
@@ -646,7 +662,7 @@ async function syncDocumentLinks(
 
 async function createVersionSnapshot(
   db: Database,
-  doc: { id: string; title: string; content: string; summary: string | null; keywords: string[] | null; docType: string },
+  doc: { id: string; title: string; content: string; summary: string | null; keywords: string[] | null; docType: string; currentFileVersionId?: string | null },
   changeType: "created" | "updated" | "reverted",
   actor: Actor,
   changeDescription?: string,
@@ -660,6 +676,7 @@ async function createVersionSnapshot(
   await db.insert(documentVersions).values({
     documentId: doc.id,
     version: nextVersion,
+    fileVersionId: doc.currentFileVersionId,
     title: doc.title,
     content: doc.content,
     summary: doc.summary,
@@ -761,6 +778,7 @@ export async function revertDocument(
   authorizedPredicate?: SQL,
 ) {
   const current = await getDocument(db, documentId);
+  if (current.form === "attachment") throw new ValidationError("Use attachment file replacement to restore a historical file");
   const targetVersion = await getDocumentVersion(db, documentId, input.version);
 
   // Snapshot current state before reverting
@@ -814,6 +832,8 @@ const SEARCH_RESULT_COLUMNS = {
   summary: documents.summary,
   keywords: documents.keywords,
   docType: documents.docType,
+  form: documents.form,
+  currentFileVersionId: documents.currentFileVersionId,
   projectId: documents.projectId,
   personalOwnerId: documents.personalOwnerId,
   personalOwnerType: documents.personalOwnerType,
@@ -868,7 +888,8 @@ function searchDocumentsKeyword(db: Database, input: SearchDocumentsInput, autho
   conditions.push(
     or(
       sql`${documents.title} ILIKE ${likePattern}`,
-      sql`${documents.content} ILIKE ${likePattern}`,
+      and(eq(documents.form, "markdown"), sql`${documents.content} ILIKE ${likePattern}`),
+      and(eq(documents.form, "attachment"), or(sql`${documents.summary} ILIKE ${likePattern}`, sql`array_to_string(${documents.tags}, ' ') ILIKE ${likePattern}`)),
     ),
   );
 
@@ -901,6 +922,8 @@ export interface SearchDocumentItem {
   summary: string | null;
   keywords: string[] | null;
   docType: string | null;
+  form: "markdown" | "attachment";
+  currentFileVersionId: string | null;
   projectId: string | null;
   personalOwnerId: string | null;
   personalOwnerType: "human" | "agent" | null;

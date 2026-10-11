@@ -32,7 +32,8 @@
     "test:gateway-postgres": "node scripts/verify-partners-gateway-postgres.mjs",
     "test:gateway-live": "node scripts/verify-partners-gateway-postgres.mjs --live",
     "test:agent-usage-postgres": "node scripts/verify-agent-usage-postgres.mjs",
-    "test:auth-postgres": "node scripts/verify-auth-postgres.mjs"
+    "test:auth-postgres": "node scripts/verify-auth-postgres.mjs",
+    "test:attachments-postgres": "node scripts/verify-attachments-postgres.mjs"
   },
   "devDependencies": {
     "dotenv-cli": "^11.0.0",
@@ -48,7 +49,8 @@
       "eslint-plugin-react-hooks": "7.0.1",
       "lodash-es": "4.18.0",
       "@graphql-tools/utils": "12.0.1",
-      "source-map-js": "1.2.2"
+      "source-map-js": "1.2.2",
+      "@codemirror/state": "6.7.6"
     }
   },
   "engines": {

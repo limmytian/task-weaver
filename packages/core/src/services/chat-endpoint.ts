@@ -16,7 +16,7 @@ export function chatEndpoint(baseUrl: string) {
 /** Pin the resolved address for each request; never follow redirects with credentials. */
 export type ChatTurn = { content: string | null; toolCalls: { id: string; name: string; arguments: string }[] };
 
-export async function requestChatTurn(baseUrl: string, apiKey: string, payload: unknown, deadline = performance.now() + 45_000, onText?: (text: string) => Promise<void>, connectionTest = false, proxy: ChatProxySettings = {}) {
+export async function requestChatTurn(baseUrl: string, apiKey: string, payload: unknown, deadline = performance.now() + 45_000, onText?: (text: string) => Promise<void>, connectionTest = false, proxy: ChatProxySettings = {}, usage?: { start(): Promise<void>; observe(value: unknown, model?: unknown): void }) {
   const endpoint = chatEndpoint(baseUrl);
   if (performance.now() >= deadline) throw new ChatConfigurationError("chat_connection_failed");
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -26,7 +26,7 @@ export async function requestChatTurn(baseUrl: string, apiKey: string, payload: 
   ]).catch(() => { throw new ChatConfigurationError("chat_endpoint_unresolved"); }).finally(() => { if (timer) clearTimeout(timer); });
   if (!addresses.length) throw new ChatConfigurationError("chat_endpoint_unresolved");
   const address = addresses[0]!;
-  const body = JSON.stringify(onText ? { ...(payload as Record<string, unknown>), stream: true } : payload);
+  const body = JSON.stringify(onText ? { ...(payload as Record<string, unknown>), stream: true, stream_options: { include_usage: true } } : payload);
   const transport = endpoint.protocol === "http:" ? http : https;
   // Explicit agents honor deployment proxies and NO_PROXY without changing global networking.
   const proxyEnv: Record<string, string | undefined> = proxy.proxyMode === "direct" ? {} : proxy.proxyMode === "custom"
@@ -35,6 +35,7 @@ export async function requestChatTurn(baseUrl: string, apiKey: string, payload: 
   const agentOptions = { proxyEnv, keepAlive: false };
   const agent = proxyEnv.HTTPS_PROXY || proxyEnv.https_proxy || proxyEnv.HTTP_PROXY || proxyEnv.http_proxy
     ? new transport.Agent(agentOptions) : undefined;
+  await usage?.start();
   return new Promise<ChatTurn>((resolve, reject) => {
     const failure = (code: ConstructorParameters<typeof ChatConfigurationError>[0]) => reject(new ChatConfigurationError(code));
     const request = transport.request(endpoint, {
@@ -46,7 +47,7 @@ export async function requestChatTurn(baseUrl: string, apiKey: string, payload: 
       if (status !== 200) { response.resume(); failure(status === 401 || status === 403 ? "chat_key_rejected" : "chat_request_failed"); return; }
       if (onText) {
         if (!response.headers["content-type"]?.includes("text/event-stream")) { response.resume(); failure("chat_response_invalid"); return; }
-        void readChatStream(response, apiKey, onText).then(resolve, error => { request.destroy(); reject(error); });
+        void readChatStream(response, apiKey, onText, usage?.observe).then(resolve, error => { request.destroy(); reject(error); });
         return;
       }
       const chunks: Buffer[] = [];
@@ -60,6 +61,7 @@ export async function requestChatTurn(baseUrl: string, apiKey: string, payload: 
       response.on("end", () => {
         try {
           const result = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          usage?.observe(result.usage, result.model);
           const message = result.choices?.[0]?.message;
           const content = typeof message?.content === "string" ? (apiKey ? message.content.trim().split(apiKey).join("[redacted]") : message.content.trim()) : null;
           const rawCalls = message?.tool_calls ?? [];

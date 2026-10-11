@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { router, ordinaryResourceProcedure as resourceProcedure } from "../init";
 import {
+  cleanupAttachmentGarbage,
+  createAttachmentService,
   createResourceServices,
   createDocumentSchema,
   updateDocumentSchema,
@@ -25,6 +27,10 @@ export const documentRouter = router({
       return createResourceServices(ctx.identity).documentService.getDocumentDetail(ctx.db, input.id);
     }),
 
+  fileVersions: resourceProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .query(({ ctx, input }) => createAttachmentService(ctx.identity).versions(ctx.db, input.id)),
+
   create: resourceProcedure
     .input(createDocumentSchema)
     .mutation(async ({ ctx, input }) => {
@@ -40,7 +46,8 @@ export const documentRouter = router({
   delete: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      return createResourceServices(ctx.identity).documentService.deleteDocument(ctx.db, input.id, ctx.actor);
+      await createResourceServices(ctx.identity).documentService.deleteDocument(ctx.db, input.id, ctx.actor);
+      await cleanupAttachmentGarbage(ctx.db).catch(() => {});
     }),
 
   unlinkDocuments: resourceProcedure

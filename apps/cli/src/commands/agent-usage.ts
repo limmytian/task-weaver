@@ -14,7 +14,8 @@ export function registerAgentUsage(program: Command) {
   for (const command of ['runs', 'summary']) {
     usage
       .command(command)
-      .requiredOption('--project <id>', 'project scope')
+      .option('--project <id>', 'project scope')
+      .option('--personal', 'own personal Chat usage')
       .option('--req <id>', 'requirement scope')
       .option(
         '--task <id>',
@@ -23,13 +24,19 @@ export function registerAgentUsage(program: Command) {
       .option('--since <date>', 'inclusive process start timestamp (ISO 8601)')
       .option('--until <date>', 'exclusive process start timestamp (ISO 8601)')
       .option('--phase <phase>', 'execution|review|rework')
+      .option('--source <source>', 'codex_jsonl|daemon_unknown|ti_runtime|ti_chat|ti_operation')
+      .option('--model <model>', 'configured or actual model')
+      .option('--group-by <field>', 'source|model')
+      .option('--conversation <id>', 'conversation ID')
       .option('--coverage <coverage>', 'complete|partial|unknown')
       .option('--limit <number>', 'page size', '25')
       .option('--offset <number>', 'page offset', '0')
       .option('--json', 'output JSON')
       .action(async (opts) => {
         const query = agentUsageQuerySchema.parse({
+          scope: opts.personal ? "personal" : "project",
           projectId: opts.project,
+          source: opts.source, model: opts.model, groupBy: opts.groupBy, conversationId: opts.conversation,
           requirementId: opts.req,
           taskId: opts.task,
           since: opts.since,
@@ -67,11 +74,12 @@ export function registerAgentUsage(program: Command) {
   }
   usage
     .command('run <id>')
-    .requiredOption('--project <id>', 'project scope')
+    .option('--project <id>', 'project scope')
+      .option('--personal', 'own personal Chat usage')
     .option('--json', 'output JSON')
     .action(async (id, opts) => {
       const data: any = await get(
-        `/api/v1/agent-usage/runs/${encodeURIComponent(id)}?projectId=${encodeURIComponent(opts.project)}`,
+        `/api/v1/agent-usage/runs/${encodeURIComponent(id)}?${opts.personal ? "scope=personal" : `projectId=${encodeURIComponent(opts.project)}`}`,
       )
       if (opts.json) return printJson(data)
       printKv({ ...data, ...data.summary })

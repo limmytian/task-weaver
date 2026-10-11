@@ -115,7 +115,12 @@ function validateTimes(
 }
 export const agentUsageQuerySchema = z
   .object({
-    projectId: z.string().uuid(),
+    scope: z.enum(["project", "personal"]).default("project"),
+    projectId: z.string().uuid().optional(),
+    source: z.enum(["codex_jsonl", "daemon_unknown", "ti_runtime", "ti_chat", "ti_operation"]).optional(),
+    model: z.string().max(160).optional(),
+    conversationId: z.string().uuid().optional(),
+    groupBy: z.enum(["source", "model"]).optional(),
     requirementId: z.string().uuid().optional(),
     taskId: z.string().uuid().optional(),
     since: z.string().datetime().optional(),
@@ -126,6 +131,8 @@ export const agentUsageQuerySchema = z
     offset: z.coerce.number().int().nonnegative().default(0),
   })
   .strict()
+  .refine(v => v.scope === "project" ? !!v.projectId : !v.projectId && !v.requirementId && !v.taskId,
+    "Choose a project or an unassociated personal scope")
   .refine(
     (v) => !v.since || !v.until || Date.parse(v.since) <= Date.parse(v.until),
     "Invalid time range",
@@ -135,3 +142,16 @@ export type ReportAgentUsageInput = z.infer<typeof reportAgentUsageSchema>;
 export type ReportTiAgentUsageInput = z.infer<typeof reportTiAgentUsageSchema>;
 export type ReportPiAgentUsageInput = ReportTiAgentUsageInput;
 export type AgentUsageQuery = z.infer<typeof agentUsageQuerySchema>;
+
+/** Deliberately excludes endpoints, proxy settings, credentials and arbitrary metadata. */
+export const usageModelSnapshotSchema = z.object({
+  version: z.literal(1),
+  capturedAt: z.string().datetime(),
+  configurationId: z.string().uuid(),
+  configurationUpdatedAt: z.string().datetime(),
+  displayName: z.string().max(500).nullable(),
+  provider: z.string().max(160),
+  configuredModel: z.string().max(160),
+  generation: z.object({ temperature: z.number().finite().optional(), maxTokens: z.number().int().positive().optional() }).strict(),
+}).strict();
+export type UsageModelSnapshot = z.infer<typeof usageModelSnapshotSchema>;

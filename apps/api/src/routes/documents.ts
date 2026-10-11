@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import {
+  handleAttachmentRequest,
+  cleanupAttachmentGarbage,
   createResourceServices,
   personalResourceOwnerId,
   createDocumentSchema,
@@ -16,6 +18,10 @@ import {
 import type { Env } from "../middleware/actor.js";
 
 const documents = new Hono<Env>();
+documents.post("/attachments", c => handleAttachmentRequest(c.get("db"), c.get("identity"), c.req.raw));
+documents.put("/:id/file", c => handleAttachmentRequest(c.get("db"), c.get("identity"), c.req.raw, c.req.param("id")));
+documents.get("/:id/file", c => handleAttachmentRequest(c.get("db"), c.get("identity"), c.req.raw, c.req.param("id")));
+documents.get("/:id/files", c => handleAttachmentRequest(c.get("db"), c.get("identity"), c.req.raw, c.req.param("id"), true));
 
 // GET / - List documents with optional filters
 documents.get("/", async (c) => {
@@ -110,6 +116,7 @@ documents.delete("/:id", async (c) => {
 
   try {
     await createResourceServices(c.get("identity")).documentService.deleteDocument(db, id, actor);
+    await cleanupAttachmentGarbage(db).catch(() => {});
     return c.json({ success: true });
   } catch (err) {
     if (err instanceof NotFoundError) {

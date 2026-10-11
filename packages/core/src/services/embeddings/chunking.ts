@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 export interface EmbeddingDocumentSource {
   id: string;
+  form?: "markdown" | "attachment";
   title: string;
   content: string;
   projectId?: string | null;
