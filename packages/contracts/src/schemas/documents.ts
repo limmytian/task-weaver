@@ -34,6 +34,7 @@ export const createDocumentSchema = z.object({
 });
 
 export const updateDocumentSchema = z.object({
+  expectedVersion: z.number().int().positive().optional(),
   title: z.string().min(1).max(500).optional(),
   content: z.string().optional(),
   projectId: z.string().uuid().nullable().optional(),
@@ -138,3 +139,24 @@ export type ImportSkillInput = z.infer<typeof importSkillSchema>;
 export type ListDocumentVersionsInput = z.infer<typeof listDocumentVersionsSchema>;
 export type CompareDocumentVersionsInput = z.infer<typeof compareDocumentVersionsSchema>;
 export type RevertDocumentInput = z.infer<typeof revertDocumentSchema>;
+
+export const documentFormSchema = z.enum(["markdown", "attachment"]);
+export const attachmentMetadataSchema = z.object({
+  projectId: z.string().uuid().optional(), personalOwnerId: z.string().optional(), personalOwnerType: z.enum(["human", "agent"]).optional(),
+  title: z.string().min(1).max(500), description: z.string().max(1000).default(""), tags: z.array(z.string().max(200)).max(50).default([]),
+  originalFilename: z.string().min(1).max(500).refine(v => !/[\x00-\x1f\x7f]/.test(v), "Invalid filename"),
+  mimeType: z.string().max(200).regex(/^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/).default("application/octet-stream"),
+}).strict();
+export const replaceAttachmentSchema = attachmentMetadataSchema.pick({ originalFilename: true, mimeType: true }).extend({ expectedVersion: z.coerce.number().int().positive() }).strict();
+export const attachmentFileQuerySchema = z.object({ fileVersion: z.coerce.number().int().positive().optional(), preview: queryBooleanSchema.default(false) }).strict();
+export type AttachmentMetadata = z.infer<typeof attachmentMetadataSchema>;
+
+/** Public file metadata excludes backend identifiers and storage paths. */
+export const attachmentFileMetadataSchema = z.object({
+  id: z.string().uuid(), documentId: z.string().uuid(), version: z.number().int().positive(),
+  originalFilename: z.string(), mimeType: z.string(), sizeBytes: z.number().int().nonnegative(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/), createdAt: z.coerce.date(),
+  createdBy: z.string(), createdByType: z.enum(["human", "agent"]),
+});
+export type AttachmentFileMetadata = z.infer<typeof attachmentFileMetadataSchema>;
+export type DocumentForm = z.infer<typeof documentFormSchema>;

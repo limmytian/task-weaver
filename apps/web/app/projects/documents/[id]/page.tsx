@@ -34,6 +34,8 @@ import {
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { AttachmentDocument } from "@/components/attachment-document";
+import { Textarea } from "@/components/ui/textarea";
 import { DocumentVersionHistory } from "@/components/document-version-history";
 
 export default function DocumentDetailPage({
@@ -47,6 +49,8 @@ export default function DocumentDetailPage({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [description, setDescription] = useState("");
+  const [tags, setTags] = useState("");
   const utils = trpc.useUtils();
 
   const { data: doc, isLoading } = trpc.document.get.useQuery({ id });
@@ -56,6 +60,8 @@ export default function DocumentDetailPage({
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setTitle(doc.title);
       setContent(doc.content);
+      setDescription(doc.summary ?? "");
+      setTags((doc.tags ?? []).join(", "));
     }
   }, [doc, editing]);
 
@@ -65,6 +71,7 @@ export default function DocumentDetailPage({
       utils.document.list.invalidate();
       setEditing(false);
     },
+    onError: (error) => toast.error("Failed to save document", { description: error.message }),
   });
 
   const deleteDocument = trpc.document.delete.useMutation({
@@ -91,7 +98,9 @@ export default function DocumentDetailPage({
   const handleSave = () => {
     updateDocument.mutate({
       id,
-      data: { title: title.trim(), content: content.trim() },
+      data: doc?.form === "attachment"
+        ? { title: title.trim(), summary: description, tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean), expectedVersion: doc.version }
+        : { title: title.trim(), content: content.trim() },
     });
   };
 
@@ -99,6 +108,8 @@ export default function DocumentDetailPage({
     if (doc) {
       setTitle(doc.title);
       setContent(doc.content);
+      setDescription(doc.summary ?? "");
+      setTags((doc.tags ?? []).join(", "));
     }
     setEditing(true);
   };
@@ -107,6 +118,8 @@ export default function DocumentDetailPage({
     if (doc) {
       setTitle(doc.title);
       setContent(doc.content);
+      setDescription(doc.summary ?? "");
+      setTags((doc.tags ?? []).join(", "));
     }
     setEditing(false);
   };
@@ -206,12 +219,12 @@ export default function DocumentDetailPage({
                 className="text-lg font-semibold"
                 placeholder="Document title"
               />
-              <MarkdownEditor
+              {doc.form === "attachment" ? <><Textarea aria-label="Description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={1000} /><Input aria-label="Tags" placeholder="Comma-separated tags" value={tags} onChange={(event) => setTags(event.target.value)} /></> : <MarkdownEditor
                 content={content}
                 onChange={setContent}
                 placeholder="Start writing Markdown... (type [[ for wiki-links)"
                 projectId={doc.projectId ?? undefined}
-              />
+              />}
             </div>
           ) : (
             <article className="prose prose-neutral dark:prose-invert max-w-none">
@@ -225,7 +238,7 @@ export default function DocumentDetailPage({
                   Updated {new Date(doc.updatedAt).toLocaleString()}
                 </span>
               </div>
-              <MarkdownRenderer content={doc.content} />
+              {doc.form === "attachment" ? <><p className="whitespace-pre-wrap">{doc.summary}</p><AttachmentDocument id={id} documentVersion={doc.version} /></> : <MarkdownRenderer content={doc.content} />}
             </article>
           )}
         </div>
@@ -236,7 +249,7 @@ export default function DocumentDetailPage({
             unlinkDoc={unlinkDoc}
             unlinkFromTask={unlinkFromTask}
           />
-          <DocumentVersionHistory documentId={id} />
+          {doc.form === "markdown" && <DocumentVersionHistory documentId={id} />}
         </div>
       </div>
 

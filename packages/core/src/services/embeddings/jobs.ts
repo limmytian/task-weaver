@@ -41,22 +41,24 @@ export class EmbeddingJobError extends Error {
 
 export function profileDocumentsCondition(profile: typeof embeddingProfiles.$inferSelect) {
   if (profile.scope === "project" && profile.projectId) {
-    return eq(documents.projectId, profile.projectId);
+    return and(eq(documents.form, "markdown"), eq(documents.projectId, profile.projectId));
   }
   if (profile.scope === "personal" && profile.personalOwnerId && profile.personalOwnerType) {
     return and(
+      eq(documents.form, "markdown"),
       isNull(documents.projectId),
       eq(documents.personalOwnerId, profile.personalOwnerId),
       eq(documents.personalOwnerType, profile.personalOwnerType),
     );
   }
-  return and(isNull(documents.projectId), isNull(documents.personalOwnerId));
+  return and(eq(documents.form, "markdown"), isNull(documents.projectId), isNull(documents.personalOwnerId));
 }
 
 export function embeddingProfileMatchesDocument(
   profile: typeof embeddingProfiles.$inferSelect,
-  document: Pick<EmbeddingDocumentSource, "projectId" | "personalOwnerId" | "personalOwnerType">,
+  document: Pick<EmbeddingDocumentSource, "projectId" | "personalOwnerId" | "personalOwnerType" | "form">,
 ) {
+  if (document.form === "attachment") return false;
   if (profile.scope === "global") {
     return !document.projectId && !document.personalOwnerId;
   }
@@ -224,6 +226,7 @@ export async function enqueueIncrementalDocument(
   document: EmbeddingDocumentSource,
   actor: Actor,
 ) {
+  if (document.form === "attachment") return null;
   const profile = await getProfile(db, profileId);
   const generationId = profile.activeGenerationId;
   let job = await findActiveIncrementalJob(db, profile.id, generationId);
@@ -309,6 +312,7 @@ export async function reconcileDocumentEmbeddingCoverage(
   document: EmbeddingDocumentSource,
   actor: Actor,
 ) {
+  if (document.form === "attachment") return [];
   const profiles = await matchingProfilesForDocument(db, document);
   const documentHash = hashDocumentEmbeddingContent(document);
   const reconciled: Array<{ profileId: string; state: string; queued: boolean }> = [];
@@ -647,6 +651,7 @@ export async function recoverExpiredEmbeddingJobs(db: Database, now = new Date()
 function toEmbeddingDocumentSource(document: typeof documents.$inferSelect): EmbeddingDocumentSource {
   return {
     id: document.id,
+    form: document.form,
     title: document.title,
     content: document.content,
     projectId: document.projectId,
@@ -701,7 +706,7 @@ async function processEmbeddingItem(
     return;
   }
   const document = await db.query.documents.findFirst({ where: eq(documents.id, item.documentId) });
-  if (!document) {
+  if (!document || document.form === "attachment") {
     await completeEmbeddingJobItem(db, { itemId: item.id, workerId, success: true });
     return;
   }

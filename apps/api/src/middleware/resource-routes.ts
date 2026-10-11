@@ -1,5 +1,8 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
+  ["POST", new RegExp("^/api/v1/documents/attachments/?$")],
+  ["PUT", new RegExp("^/api/v1/documents/[0-9a-fA-F-]{36}/file/?$")],
+  ["GET", new RegExp("^/api/v1/documents/[0-9a-fA-F-]{36}/files?/?$")],
   ["GET", new RegExp("^/api/v1/daemons/[0-9a-fA-F-]{36}/executors(?:/history)?/?$")],
   ["POST", new RegExp("^/api/v1/daemons/[0-9a-fA-F-]{36}/executors/(?:observations|(?:codex|claude|agy|aider|cursor)/(?:refresh|resume))/?$")],
   ["PATCH", new RegExp("^/api/v1/requirement-repositories/[0-9a-fA-F-]{36}/delivery/?$")],

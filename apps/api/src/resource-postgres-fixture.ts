@@ -9,6 +9,7 @@ type UserFixture = { headers: Headers; account: Awaited<ReturnType<Authenticatio
 type ResourceFixture = { auth: Authentication; identity: ReturnType<typeof createIdentityManagementService>;
   admin: UserFixture; owner: UserFixture; outsider: UserFixture;
   project: Awaited<ReturnType<ReturnType<typeof createIdentityManagementService>["createProject"]>>;
+  configuration: Parameters<typeof createAuthenticationService>[1];
   app: ReturnType<typeof createApiApplication>["app"] };
 
 /** Fixture credentials and state exist only in the caller's disposable test database. */
@@ -43,5 +44,5 @@ export async function resourcePostgresFixture(db: Database, databaseUrl: string)
   const project = await identity.createProject(owner.headers, { name: "Private test project" });
   const app = createApiApplication({ db, databaseUrl, env: { TW_AUTH_SECRET: config.secret, TW_AUTH_BASE_URL: config.baseURL,
     TW_AUTH_TRUSTED_ORIGINS: config.trustedOrigins[0], TW_PRESET_SKILLS_SYNC: "disabled" } }).app;
-  return { auth, identity, admin, owner, outsider, project, app };
+  return { auth, identity, admin, owner, outsider, project, app, configuration: config };
 }

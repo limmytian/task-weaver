@@ -19,8 +19,11 @@ services:
       TW_VERSION_CHECK_ENABLED: ${TW_VERSION_CHECK_ENABLED:-true}
       TW_DAEMON_MODE: polling
       SKILL_PACKAGE_STORAGE_DIR: /app/data/skill-packages
+      TW_ATTACHMENT_STORAGE_DIR: /app/attachment-data
+      TW_ATTACHMENT_MAX_BYTES: ${TW_ATTACHMENT_MAX_BYTES:-52428800}
     volumes:
       - skill-data:/app/data
+      - attachment-data:/app/attachment-data
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -40,7 +43,11 @@ services:
       DATABASE_URL: ${DATABASE_URL:?Configure an external PostgreSQL connection}
       TW_VERSION_CHECK_ENABLED: ${TW_VERSION_CHECK_ENABLED:-true}
       TW_API_URL: http://api:3001
+      TW_ATTACHMENT_STORAGE_DIR: /app/attachment-data
+      TW_ATTACHMENT_MAX_BYTES: ${TW_ATTACHMENT_MAX_BYTES:-52428800}
       NODE_ENV: production
+    volumes:
+      - attachment-data:/app/attachment-data
     depends_on:
       api:
         condition: service_healthy
@@ -51,4 +58,5 @@ services:
       retries: 30
 
 volumes:
+  attachment-data:
   skill-data:

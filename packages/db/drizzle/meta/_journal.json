@@ -484,6 +484,13 @@
       "when": 1791694800000,
       "tag": "0068_chat_usage_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1791696000000,
+      "tag": "0069_attachment_documents",
+      "breakpoints": true
     }
   ]
 }

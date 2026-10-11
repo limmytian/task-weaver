@@ -62,7 +62,7 @@ export async function authenticationMiddleware(c: Context<Env>, next: Next) {
     c.header("access-control-allow-methods", "GET, POST, PATCH, PUT, DELETE");
     c.header(
       "access-control-allow-headers",
-      "Authorization, Content-Type, X-CSRF-Token",
+      "Authorization, Content-Type, X-CSRF-Token, X-TW-Attachment-Metadata",
     );
     return c.body(null, 204);
   }

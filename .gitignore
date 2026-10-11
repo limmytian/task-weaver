@@ -14,3 +14,5 @@ data/
 .DS_Store
 .vscode/
 .idea/
+
+.task-weaver/

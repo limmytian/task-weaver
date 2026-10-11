@@ -46,7 +46,7 @@ test('local skill package storage rejects traversal keys', async () => {
     const storage = new LocalSkillPackageStorageAdapter(dir)
     await assert.rejects(
       () => storage.putObject({ key: '../escape', body: 'nope' }),
-      /Invalid skill package storage key/,
+      /Invalid storage key/,
     )
   } finally {
     await rm(dir, { recursive: true, force: true })
