@@ -45,7 +45,8 @@ The Web document creation dialog selects Markdown or attachment. Attachment
 details expose metadata editing, original download, replacement and file history.
 PDF previews render pages to a canvas with locally bundled PDF.js assets and
 page navigation; PDF scripting and interactive actions are not executed. Safe
-raster images and plain text have protected previews; every preview
+raster images have protected previews; plain text renders as escaped text with a
+1 MiB preview limit. Every preview
 retains a download fallback. HTML, SVG, Office and other unsupported formats are
 download-only. Preview responses use sandboxing, no sniffing and no caching.
 

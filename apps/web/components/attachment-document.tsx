@@ -1,5 +1,6 @@
 "use client";
 
+import { TextAttachmentPreview } from "@/components/text-attachment-preview";
 import { PdfAttachmentPreview } from "@/components/pdf-attachment-preview";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -21,7 +22,7 @@ export function AttachmentDocument({ id, documentVersion }: { id: string; docume
   const preview = `${download}${download.includes("?") ? "&" : "?"}preview=true`;
   const image = file && ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"].includes(file.mimeType);
   const pdf = file?.mimeType === "application/pdf";
-  const frame = file?.mimeType === "text/plain";
+  const text = file?.mimeType === "text/plain";
 
   async function replace() {
     if (!replacement) return;
@@ -57,9 +58,8 @@ export function AttachmentDocument({ id, documentVersion }: { id: string; docume
         <img key={preview} src={preview} alt={file.originalFilename} className="max-h-[36rem] max-w-full object-contain" onError={() => setPreviewFailed(true)} />
       )}
       {pdf && <PdfAttachmentPreview key={preview} src={preview} filename={file.originalFilename} />}
-      {!previewFailed && frame && <iframe key={preview} src={preview} title={`Preview: ${file.originalFilename}`} sandbox="allow-same-origin" className="h-[36rem] w-full rounded border" onError={() => setPreviewFailed(true)} />}
-      {(!image && !frame && !pdf || previewFailed) && <p className="text-sm text-muted-foreground">Preview unavailable for this file. Download the original to open it locally.</p>}
-      {frame && <p className="text-xs text-muted-foreground">If your browser cannot display the preview, use Download original file.</p>}
+      {text && <TextAttachmentPreview key={preview} src={preview} filename={file.originalFilename} />}
+      {(!image && !text && !pdf || previewFailed) && <p className="text-sm text-muted-foreground">Preview unavailable for this file. Download the original to open it locally.</p>}
     </>}
     <div className="space-y-2 border-t pt-4">
       <label className="text-sm font-medium" htmlFor="replacement-file">Replace file</label>
