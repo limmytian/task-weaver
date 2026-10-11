@@ -48,8 +48,8 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
   const [other] = await db.execute<{ id: string }>(sql`INSERT INTO task_weaver.projects (name, created_by) VALUES ('Sanitized legacy B', 'anonymous') RETURNING id`);
   const [requirement] = await db.insert(requirements).values({ projectId: project.id, title: "Recover lane", status: "approved", leaseGeneration: 5, createdBy: "tw-cli" }).returning();
   const [task] = await db.insert(tasks).values({ projectId: project.id, requirementId: requirement.id, title: "Recover task", tags: ["capability:tw-v0.3.3-development"], createdBy: "apikey:synthetic" }).returning();
-  const [privateDoc] = await db.insert(documents).values({ title: "Sanitized private note", content: "Synthetic fixture only", personalOwnerId: "apikey:synthetic", personalOwnerType: "agent", createdBy: "apikey:synthetic" }).returning();
-  const [unknownDoc] = await db.insert(documents).values({ title: "Unmapped note", content: "Synthetic fixture only", createdBy: "anonymous" }).returning();
+  const [privateDoc] = await db.execute<{ id: string }>(sql`INSERT INTO task_weaver.documents (title, content, personal_owner_id, personal_owner_type, created_by) VALUES ('Sanitized private note', 'Synthetic fixture only', 'apikey:synthetic', 'agent', 'apikey:synthetic') RETURNING id`);
+  const [unknownDoc] = await db.execute<{ id: string }>(sql`INSERT INTO task_weaver.documents (title, content, created_by) VALUES ('Unmapped note', 'Synthetic fixture only', 'anonymous') RETURNING id`);
   const [active] = await db.insert(daemons).values({ name: "Old active fixture", actorId: "tw-cli", actorType: "agent", status: "busy", activeTaskIds: [task.id], capabilities: ["codex"], lastHeartbeatAt: new Date() }).returning();
   const [inactive] = await db.insert(daemons).values({ name: "Old inactive fixture", actorId: "tw-cli", actorType: "agent", status: "offline", lastHeartbeatAt: new Date(0) }).returning();
   await db.insert(requirementClaims).values({ requirementId: requirement.id, claimedBy: "tw-cli", claimedByType: "agent", daemonId: active.id, workerIndex: "0", generation: 5, expiresAt: new Date(Date.now() + 600000) });
@@ -241,7 +241,7 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
     assert.equal(state[0].actors, null);
     assert.equal((await db.select({ id: projects.id }).from(projects)).length, 2);
     assert.equal((await db.select().from(requirements)).length, 1);
-    assert.equal((await db.select().from(documents)).length, 2);
+    assert.equal((await db.select({ id: documents.id }).from(documents)).length, 2);
     assert.equal((await db.select().from(daemons).where(eq(daemons.id, active.id)))[0].actorId, "tw-cli");
     await runMigrations(databaseUrl!);
     assert.equal((await db.select().from(authActors)).length, 0);

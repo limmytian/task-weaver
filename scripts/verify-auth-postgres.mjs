@@ -100,6 +100,8 @@ try {
         ...(packageName ? ["--filter", packageName] : []),
         "exec",
         "tsx",
+        ...(testFile === "scripts/auth-transports.postgres-e2e.test.ts"
+          ? ["--tsconfig", "apps/web/tsconfig.json"] : []),
         "--test",
         testFile,
       ],

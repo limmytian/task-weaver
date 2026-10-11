@@ -14,6 +14,9 @@ import { POST as nextAssistantStream } from "../apps/web/app/api/assistant/strea
 import { GET as nextCsrf } from "../apps/web/app/api/auth/csrf/route";
 import { GET as nextEvents } from "../apps/web/app/api/events/route";
 import { GET as nextTRPC } from "../apps/web/app/api/trpc/[trpc]/route";
+import { POST as nextAttachmentUpload } from "../apps/web/app/api/attachments/route";
+import { GET as nextAttachmentDownload, PUT as nextAttachmentReplace } from "../apps/web/app/api/attachments/[id]/route";
+import { GET as nextAttachmentHistory } from "../apps/web/app/api/attachments/[id]/files/route";
 
 const apiRequire = createRequire(
   new URL("../apps/api/package.json", import.meta.url),
@@ -140,7 +143,7 @@ test(
         readdirSync(new URL("../apps/web/app/api/", import.meta.url), { recursive: true })
           .filter(path => typeof path === "string" && path.endsWith("route.ts"))
           .sort(),
-        ["assistant/stream/route.ts", "auth/csrf/route.ts", "events/route.ts", "trpc/[trpc]/route.ts"],
+        ["assistant/stream/route.ts", "attachments/[id]/files/route.ts", "attachments/[id]/route.ts", "attachments/route.ts", "auth/csrf/route.ts", "events/route.ts", "trpc/[trpc]/route.ts"],
         "Classify and exercise any new Next API entry point in the authorization inventory",
       );
       const publicRoutes = new Set([
@@ -185,6 +188,16 @@ test(
         assert.equal(response.status, 401);
         const stream = await nextAssistantStream(new Request(`${origin}/api/assistant/stream`, { method: "POST", headers, body: "{" }));
         assert.equal(stream.status, 401, "Chat stream authenticates before parsing resource input");
+        const context = { params: Promise.resolve({ id: "invalid-resource-id" }) };
+        for (const [method, path, handler] of [
+          ["POST", "attachments", nextAttachmentUpload],
+          ["GET", "attachments/invalid-resource-id", nextAttachmentDownload],
+          ["PUT", "attachments/invalid-resource-id", nextAttachmentReplace],
+          ["GET", "attachments/invalid-resource-id/files", nextAttachmentHistory],
+        ] as const) {
+          const response = await handler(new Request(`${origin}/api/${path}`, { method, headers }), context);
+          assert.equal(response.status, 401, `Attachment ${method} ${path} authenticates before resource validation`);
+        }
       }
     });
     const email = `${randomUUID()}@example.test`;
