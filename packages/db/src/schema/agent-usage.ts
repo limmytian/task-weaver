@@ -8,22 +8,25 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+type UsageModelSnapshot = {
+  version: 1; capturedAt: string; configurationId: string; configurationUpdatedAt: string;
+  displayName: string | null; provider: string; configuredModel: string;
+  generation: { temperature?: number; maxTokens?: number };
+};
 import { projects } from "./projects";
 import { requirements } from "./requirements";
 import { tasks } from "./tasks";
 import { daemons } from "./daemons";
 import { tiAgentRuns } from "./ti-agent";
 
-/** One row per process, never one row per model call or usage event. */
+/** Legacy rows represent processes; Chat rows represent individual real invocations. */
 export const agentUsageRuns = pgTable(
   "agent_usage_runs",
   {
     processId: uuid("process_id").primaryKey(),
     projectId: uuid("project_id")
-      .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
     requirementId: uuid("requirement_id")
-      .notNull()
       .references(() => requirements.id, { onDelete: "cascade" }),
     taskId: uuid("task_id").references(() => tasks.id, {
       onDelete: "set null",
@@ -34,12 +37,18 @@ export const agentUsageRuns = pgTable(
     tiRunId: uuid("ti_run_id").references(() => tiAgentRuns.id, {
       onDelete: "set null",
     }),
+    personalOwnerId: text("personal_owner_id"),
+    personalOwnerType: text("personal_owner_type", { enum: ["human", "agent"] }),
+    conversationId: uuid("conversation_id"),
+    messageId: uuid("message_id"),
+    operationIds: jsonb("operation_ids").$type<string[]>(),
+    modelSnapshot: jsonb("model_snapshot").$type<UsageModelSnapshot>(),
     attempt: integer("attempt"),
     leaseRunId: uuid("lease_run_id"),
     leaseGeneration: integer("lease_generation"),
     workerIndex: text("worker_index"),
     source: text("source", {
-      enum: ["codex_jsonl", "daemon_unknown", "ti_runtime"],
+      enum: ["codex_jsonl", "daemon_unknown", "ti_runtime", "ti_chat", "ti_operation"],
     }).notNull(),
     agent: text("agent").notNull(),
     phase: text("phase", { enum: ["execution", "review", "rework"] }).notNull(),

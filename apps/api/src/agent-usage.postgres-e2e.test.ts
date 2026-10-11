@@ -1,412 +1,112 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
+import { createServer } from "node:http";
 import { eq } from "drizzle-orm";
-import {
-  createDb,
-  runMigrations,
-  projects,
-  requirements,
-  tasks,
-  daemons,
-  requirementClaims,
-  tiAgentRuns,
-  agentUsageRuns,
-} from "@task-weaver/db";
-import { apiKeyService } from "@task-weaver/core";
-import { createApiApplication } from "./application.js";
+import { createDb, runMigrations, agentUsageRuns, tiAgentModelConfigs, requirements, tasks, daemons, requirementClaims, tiAgentRuns } from "@task-weaver/db";
+import { createAssistantService, createChatModelService, createResourceServices, sendAssistantMessageSchema } from "@task-weaver/core";
+import { resourcePostgresFixture } from "./resource-postgres-fixture";
 const databaseUrl = process.env.TW_USAGE_E2E_DATABASE_URL;
-test(
-  "whole-process usage persists with authenticated, scoped and idempotent reporting",
-  { skip: !databaseUrl, timeout: 60_000 },
-  async (t) => {
-    const url = new URL(databaseUrl!);
-    assert.equal(url.hostname, "127.0.0.1");
-    assert.equal(
-      url.pathname,
-      "/tw_usage_e2e",
-      "Use only the disposable usage database",
-    );
-    await runMigrations(databaseUrl!);
-    // Applying migrations again must preserve the table and its data contract.
-    await runMigrations(databaseUrl!);
-    const db = createDb(databaseUrl!);
-    t.after(() => db.$client.end());
-    const key = await apiKeyService.createApiKey(db, { name: "usage-fixture" });
-    const otherKey = await apiKeyService.createApiKey(db, {
-      name: "other-reporter",
-    });
-    const actorId = `apikey:${key.id}`;
-    const [project] = await db
-      .insert(projects)
-      .values({ name: "Usage fixture", createdBy: actorId })
-      .returning();
-    const [otherProject] = await db
-      .insert(projects)
-      .values({ name: "Other project", createdBy: actorId })
-      .returning();
-    const [requirement] = await db
-      .insert(requirements)
-      .values({ projectId: project!.id, title: "Usage", createdBy: actorId })
-      .returning();
-    const [task] = await db
-      .insert(tasks)
-      .values({
-        projectId: project!.id,
-        requirementId: requirement!.id,
-        title: "Usage task",
-        createdBy: actorId,
-      })
-      .returning();
-    const [daemon] = await db
-      .insert(daemons)
-      .values({ name: "Usage daemon", actorId, actorType: "agent" })
-      .returning();
-    await db
-      .insert(requirementClaims)
-      .values({
-        requirementId: requirement!.id,
-        daemonId: daemon!.id,
-        claimedBy: actorId,
-        claimedByType: "agent",
-        expiresAt: new Date(Date.now() + 60_000),
-      });
-    const app = createApiApplication({
-      db,
-      databaseUrl: databaseUrl!,
-      env: { TW_PRESET_SKILLS_SYNC: "disabled" },
-    }).app;
-    const headers = {
-      authorization: `Bearer ${key.rawKey}`,
-      "content-type": "application/json",
-    };
-    const request = (
-      path: string,
-      body?: unknown,
-      customHeaders: Record<string, string> = headers,
-    ) =>
-      app.request(`/api/v1/${path}`, {
-        method: body === undefined ? "GET" : "POST",
-        headers: customHeaders,
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-    const startedAt = "2026-10-02T01:00:00.000Z";
-    const endedAt = "2026-10-02T01:00:01.000Z";
-    const unknown = {
-      inputTokens: null,
-      outputTokens: null,
-      cacheReadTokens: null,
-      cacheWriteTokens: null,
-      cacheSemantics: "unknown",
-      provider: "unknown",
-      model: "unknown",
-      completeness: "unknown",
-    };
-    const partial = {
-      ...unknown,
-      inputTokens: 100,
-      outputTokens: 10,
-      cacheReadTokens: 80,
-      cacheSemantics: "included",
-      completeness: "partial",
-    };
-    const body = {
-      processId: randomUUID(),
-      projectId: project!.id,
-      requirementId: requirement!.id,
-      daemonId: daemon!.id,
-      agent: "codex",
-      phase: "execution",
-      startedAt,
-      endedAt: null,
-      outcome: "running",
-      revision: 0,
-      summary: unknown,
-    };
-    assert.equal(
-      (
-        await request("agent-usage/runs", body, {
-          "x-actor-id": actorId,
-          "content-type": "application/json",
-        })
-      ).status,
-      401,
-    );
-    assert.equal(
-      (await request("agent-usage/runs", { ...body, prompt: "Do not store" }))
-        .status,
-      400,
-    );
-    assert.equal(
-      (
-        await request("agent-usage/runs", {
-          ...body,
-          projectId: otherProject!.id,
-        })
-      ).status,
-      400,
-    );
-    assert.equal((await request("agent-usage/runs", body)).status, 200);
-    const snapshot = { ...body, revision: 1, summary: partial };
-    const concurrent = await Promise.all([
-      request("agent-usage/runs", snapshot),
-      request("agent-usage/runs", snapshot),
-    ]);
-    assert.deepEqual(
-      concurrent.map((r) => r.status),
-      [200, 200],
-    );
-    assert.equal(
-      (
-        await request("agent-usage/runs", {
-          ...snapshot,
-          summary: { ...partial, inputTokens: 200 },
-        })
-      ).status,
-      400,
-    );
-    assert.equal((await request("agent-usage/runs", body)).status, 200);
-    const complete = {
-      ...snapshot,
-      revision: 2,
-      outcome: "succeeded",
-      endedAt,
-      summary: {
-        ...partial,
-        inputTokens: 200,
-        outputTokens: 20,
-        completeness: "complete",
-      },
-    };
-    assert.equal((await request("agent-usage/runs", complete)).status, 200);
-    assert.equal((await request("agent-usage/runs", complete)).status, 200);
-    assert.equal(
-      (
-        await request("agent-usage/runs", complete, {
-          ...headers,
-          authorization: `Bearer ${otherKey.rawKey}`,
-        })
-      ).status,
-      400,
-    );
-    assert.equal(
-      (
-        await request("agent-usage/runs", {
-          ...complete,
-          revision: 3,
-          outcome: "running",
-          endedAt: null,
-        })
-      ).status,
-      400,
-    );
-    const cancelled = {
-      ...body,
-      processId: randomUUID(),
-      phase: "review",
-      revision: 1,
-      outcome: "cancelled",
-      endedAt,
-      summary: { ...partial, completeness: "complete" },
-    };
-    assert.equal((await request("agent-usage/runs", cancelled)).status, 200);
-    const noUsage = {
-      ...body,
-      processId: randomUUID(),
-      agent: "claude",
-      outcome: "failed",
-      endedAt,
-    };
-    assert.equal((await request("agent-usage/runs", noUsage)).status, 200);
-    const query = `projectId=${project!.id}`;
-    const total: any = await (
-      await request(`agent-usage/summary?${query}`)
-    ).json();
-    assert.deepEqual(
-      [total.runs, total.complete, total.partial, total.unknown],
-      [3, 1, 1, 1],
-    );
-    assert.deepEqual(
-      [total.inputTokens, total.outputTokens, total.cacheReadTokens],
-      ["300", "30", "160"],
-    );
-    assert.equal(total.cacheWriteTokens, null);
-    assert.equal(total.inputReportedRuns, 2);
-    assert.equal(total.coverage, 1 / 3);
-    const taskTotal: any = await (
-      await request(`agent-usage/summary?${query}&taskId=${task!.id}`)
-    ).json();
-    assert.equal(
-      taskTotal.runs,
-      0,
-      "Shared requirement usage must not be repeated for each task",
-    );
-    const outside: any = await (
-      await request(`agent-usage/runs?projectId=${otherProject!.id}`)
-    ).json();
-    assert.equal(outside.total, 0);
-    assert.equal(
-      (
-        await request(
-          `agent-usage/runs/${body.processId}?projectId=${otherProject!.id}`,
-        )
-      ).status,
-      404,
-    );
-    assert.equal(
-      (
-        await request(
-          `agent-usage/summary?projectId=${otherProject!.id}&taskId=${task!.id}`,
-        )
-      ).status,
-      400,
-    );
-    const filtered: any = await (
-      await request(
-        `agent-usage/runs?${query}&since=${startedAt}&until=2026-10-02T01:00:00.001Z&limit=1&offset=1`,
-      )
-    ).json();
-    assert.equal(filtered.total, 3);
-    assert.equal(filtered.items.length, 1);
-    const excluded: any = await (
-      await request(`agent-usage/summary?${query}&until=${startedAt}`)
-    ).json();
-    assert.equal(excluded.runs, 0);
 
-    const [piRun] = await db
-      .insert(tiAgentRuns)
-      .values({
-        taskId: task!.id,
-        assignedAgentId: actorId,
-        status: "running",
-        leaseOwnerId: "fixture-worker",
-        leaseOwnerType: "agent",
-        leaseExpiresAt: new Date(Date.now() + 60_000),
-        startedAt: new Date(startedAt),
-        createdBy: actorId,
-      })
-      .returning();
-    const pi = {
-      processId: randomUUID(),
-      workerId: "fixture-worker",
-      attempt: 0,
-      startedAt,
-      endedAt: null,
-      outcome: "running",
-      revision: 0,
-      summary: unknown,
-    };
-    const beforePiReport: any = await (
-      await request(`agent-usage/summary?${query}`)
-    ).json();
-    assert.equal(beforePiReport.knownUnregisteredTiAttempts, 1);
-    assert.equal(
-      beforePiReport.coverage,
-      1 / 4,
-      "Unreported Ti work cannot imply complete coverage",
-    );
-    const path = `ti/runs/${piRun!.id}/usage`;
-    assert.equal(
-      (
-        await request(path, pi, {
-          "x-actor-id": actorId,
-          "content-type": "application/json",
-        })
-      ).status,
-      401,
-    );
-    assert.equal(
-      (await request(path, { ...pi, workerId: "wrong-worker" })).status,
-      400,
-    );
-    assert.equal(
-      (
-        await request(path, pi, {
-          ...headers,
-          authorization: `Bearer ${otherKey.rawKey}`,
-        })
-      ).status,
-      400,
-    );
-    assert.equal((await request(path, pi)).status, 200);
-    const piPartial = {
-      ...pi,
-      revision: 1,
-      summary: { ...partial, model: "multiple" },
-    };
-    assert.equal((await request(path, piPartial)).status, 200);
-    assert.equal(
-      (
-        await request(`${path}/${pi.processId}/finish`, {
-          outcome: "failed",
-          endedAt,
-        })
-      ).status,
-      200,
-    );
-    const [saved] = await db
-      .select()
-      .from(agentUsageRuns)
-      .where(eq(agentUsageRuns.processId, pi.processId));
-    assert.equal(saved?.summary.inputTokens, 100);
-    assert.equal(saved?.summary.model, "multiple");
-    assert.equal(saved?.summary.completeness, "partial");
-    await db
-      .update(tiAgentRuns)
-      .set({ retryCount: 1 })
-      .where(eq(tiAgentRuns.id, piRun!.id));
-    const retry = { ...pi, processId: randomUUID(), attempt: 1 };
-    assert.equal((await request(path, retry)).status, 200);
-    const registeredPi: any = await (
-      await request(`agent-usage/summary?${query}`)
-    ).json();
-    assert.equal(registeredPi.knownUnregisteredTiAttempts, 0);
-    assert.equal(
-      (await request(path, { ...pi, processId: randomUUID() })).status,
-      400,
-      "Old attempts cannot register new processes",
-    );
-    assert.equal(
-      (
-        await request(path, {
-          ...retry,
-          revision: 1,
-          outcome: "cancelled",
-          endedAt,
-        })
-      ).status,
-      200,
-    );
-    const piTotals: any = await (
-      await request(`agent-usage/summary?${query}&taskId=${task!.id}`)
-    ).json();
-    assert.deepEqual(
-      [piTotals.runs, piTotals.partial, piTotals.unknown, piTotals.inputTokens],
-      [2, 1, 1, "100"],
-    );
-    assert.equal(
-      (
-        await request(path, {
-          ...retry,
-          revision: 2,
-          summary: { ...partial, inputTokens: 200 },
-          outcome: "cancelled",
-          endedAt,
-        })
-      ).status,
-      200,
-      "Late reported usage can enrich a registered terminal attempt",
-    );
-    assert.equal(
-      (
-        await request("agent-usage/runs", {
-          ...body,
-          processId: randomUUID(),
-          agent: "claude",
-          summary: partial,
-        })
-      ).status,
-      400,
-    );
-  },
-);
+test("Chat invocations and legacy processes retain usage, snapshots and authenticated isolation", { skip: !databaseUrl, timeout: 90_000 }, async t => {
+  const url = new URL(databaseUrl!); assert.equal(url.hostname, "127.0.0.1"); assert.equal(url.pathname, "/tw_usage_e2e");
+  await runMigrations(databaseUrl!); await runMigrations(databaseUrl!);
+  const db = createDb(databaseUrl!); t.after(() => db.$client.end());
+  const f = await resourcePostgresFixture(db, databaseUrl!);
+  let calls = 0, mode = "normal";
+  const server = createServer(async (request, response) => {
+    let data = ""; for await (const chunk of request) data += chunk;
+    const payload = JSON.parse(data); calls++;
+    if (mode === "failure") { response.writeHead(503); response.end(); return; }
+    const firstTool = ["tool", "operation"].includes(mode) && !payload.messages.some((m: any) => m.role === "tool");
+    const message = firstTool ? { content: null, tool_calls: [{ id: "call", type: "function", function: { name: mode === "operation" ? "create_document" : "list_projects", arguments: mode === "operation" ? JSON.stringify({ projectId: f.project.id, title: "Operation fixture", content: "Fixture document" }) : "{}" } }] } : { content: "Fixture answer" };
+    const usage = { prompt_tokens: 100, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 80 } };
+    if (payload.stream) {
+      response.setHeader("content-type", "text/event-stream");
+      response.write(`data: ${JSON.stringify({ model: "actual-fixture", choices: [{ delta: { content: mode === "cancel" ? "Fixture answer".repeat(10) : "Fixture answer" }, finish_reason: "stop" }] })}\n\n`);
+      response.write(`data: ${JSON.stringify({ choices: [], usage })}\n\n`);
+      response.end(mode === "partial" ? "" : "data: [DONE]\n\n");
+    } else { response.setHeader("content-type", "application/json"); response.end(JSON.stringify({ model: "actual-fixture", usage, choices: [{ message }] })); }
+  });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  t.after(async () => { server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); });
+  const models = createChatModelService(f.owner.context);
+  const config = await models.save(db, { provider: "openai", model: "configured-fixture", label: "Original label", baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`, isDefaultChat: true });
+  const assistant = createAssistantService(f.owner.context);
+  const send = (project = false, streaming = false, requestId = randomUUID()) => assistant.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({
+    message: "Fixture question", requestId, context: project ? { contextKind: "project", projectId: f.project.id } : { contextKind: "global" },
+  }), streaming ? async () => {} : undefined);
+  const ownerUsage = createResourceServices(f.owner.context).agentUsageService;
+  const personalQuery = { scope: "personal" as const, limit: 100, offset: 0 };
+  const firstRequest = randomUUID(); await send(false, false, firstRequest); await send(false, false, firstRequest);
+  assert.equal(calls, 1, "Request recovery must not repeat model calls");
+  mode = "tool"; await send(); assert.equal(calls, 3, "Each tool-loop call has its own record");
+  mode = "normal"; await send(true); await send(false, true);
+  mode = "partial"; await assert.rejects(send(false, true));
+  mode = "failure"; await assert.rejects(send()); await assert.rejects(send());
+  const personal = await ownerUsage.listUsage(db, personalQuery);
+  assert.equal(personal.total, 7); assert.equal(new Set(personal.items.map(r => r.processId)).size, 7);
+  assert.equal(personal.items.filter(r => r.summary.completeness === "partial").length, 1);
+  assert.equal(personal.items.filter(r => r.summary.completeness === "unknown").length, 2);
+  const original = personal.items.find(r => r.summary.completeness === "complete")!;
+  assert.equal(original.modelSnapshot?.configuredModel, "configured-fixture"); assert.equal(original.summary.model, "actual-fixture");
+  assert.equal(original.summary.cacheWriteTokens, null);
+  await db.update(tiAgentModelConfigs).set({ label: "Edited", model: "edited-model" }).where(eq(tiAgentModelConfigs.id, config.id));
+  await db.delete(tiAgentModelConfigs).where(eq(tiAgentModelConfigs.id, config.id));
+  const retained = await ownerUsage.getUsage(db, undefined, original.processId);
+  assert.equal(retained.modelSnapshot?.displayName, "Original label");
+  assert.equal((await createResourceServices(f.outsider.context).agentUsageService.listUsage(db, personalQuery)).total, 0);
+  await assert.rejects(createResourceServices(f.outsider.context).agentUsageService.getUsage(db, undefined, original.processId));
+  await assert.rejects(createResourceServices(f.outsider.context).agentUsageService.listUsage(db, { scope: "project", projectId: f.project.id, limit: 25, offset: 0 }));
+  const response = await f.app.request("/api/v1/agent-usage/runs?scope=personal", { headers: f.owner.headers });
+  assert.equal(response.status, 200); assert.equal((await response.json() as any).total, 7);
+  assert.equal((await f.app.request("/api/v1/agent-usage/runs?scope=personal")).status, 401);
+  const grouped = await ownerUsage.summarizeUsage(db, { ...personalQuery, groupBy: "model", model: "configured-fixture" });
+  assert.equal(grouped.runs, 7); assert.equal(grouped.complete, 4); assert.equal(grouped.partial, 1); assert.equal(grouped.unknown, 2);
+  assert.equal(grouped.inputTokens, "500"); assert.equal(grouped.groups.reduce((n, g) => n + g.runs, 0), 7);
+
+  await models.save(db, { provider: "openai", model: "second-fixture", label: "Second model", baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`, isDefaultChat: true });
+  await assistant.updatePolicy(db, { assistantAutoEnabled: true, assistantAutoMode: "live" });
+  mode = "operation";
+  const operation = await send();
+  assert.equal(operation.actions.length, 1); assert.equal(operation.actions[0]?.status, "succeeded");
+  const operationRows = await ownerUsage.listUsage(db, { ...personalQuery, source: "ti_operation" });
+  assert.equal(operationRows.total, 1); assert.deepEqual(operationRows.items[0]?.operationIds, [operation.actions[0]!.id]);
+  assert.equal(operationRows.items[0]?.modelSnapshot?.configuredModel, "second-fixture");
+  assert.equal(operationRows.items[0]?.summary.inputTokens, 100, "CRUD adds no fabricated tokens");
+  mode = "normal"; await send();
+  assert.equal((await ownerUsage.listUsage(db, personalQuery)).total, 10);
+  mode = "cancel";
+  await assert.rejects(assistant.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ message: "Cancel fixture", requestId: randomUUID(), context: { contextKind: "global" } }), async event => {
+    if (event.type === "text") throw new DOMException("Fixture cancellation", "AbortError");
+  }));
+  const cancelled = (await ownerUsage.listUsage(db, personalQuery)).items.find(r => r.outcome === "cancelled");
+  assert.ok(cancelled); assert.equal(cancelled.summary.completeness, "unknown"); assert.equal(cancelled.summary.inputTokens, null);
+
+  const actor = { id: f.owner.account.actorId, type: "human" as const };
+  const [req] = await db.insert(requirements).values({ projectId: f.project.id, title: "Legacy usage", createdBy: actor.id }).returning();
+  const [task] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: "Legacy task", createdBy: actor.id }).returning();
+  const agent = await f.identity.createAgent(f.owner.headers, { displayName: "Legacy usage agent" });
+  await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: "maintainer", explicitPermissions: [] });
+  const key = await f.identity.issueKey(f.owner.headers, agent.id, { name: "Usage fixture", expiresAt: null, grants: [{ scope: "project", projectId: f.project.id, permissions: ["resource.read", "resource.write", "execution.run", "audit.read"] }] });
+  const agentIdentity = await f.auth.resolve(new Headers({ authorization: `Bearer ${key.rawKey}` }));
+  const agentUsage = createResourceServices(agentIdentity).agentUsageService;
+  const [daemon] = await db.insert(daemons).values({ name: "Legacy fixture", actorId: agent.id, actorType: "agent", role: "executor" }).returning();
+  await db.update(requirements).set({ leaseGeneration: 1 }).where(eq(requirements.id, req!.id));
+  const [claim] = await db.insert(requirementClaims).values({ requirementId: req!.id, daemonId: daemon!.id, claimedBy: agent.id, claimedByType: "agent", generation: 1, workerIndex: "0", expiresAt: new Date(Date.now() + 60_000) }).returning();
+  const summary = { inputTokens: 20, outputTokens: 5, cacheReadTokens: null, cacheWriteTokens: null, cacheSemantics: "unknown" as const, provider: "unknown", model: "legacy", completeness: "complete" as const };
+  const report = { processId: randomUUID(), projectId: f.project.id, requirementId: req!.id, daemonId: daemon!.id, runId: claim!.id, leaseGeneration: 1, workerIndex: "0", agent: "codex", phase: "execution" as const, startedAt: new Date().toISOString(), endedAt: null, outcome: "running" as const, revision: 1, summary };
+  await Promise.all([agentUsage.reportDaemonUsage(db, report, { id: agent.id, type: "agent" }), agentUsage.reportDaemonUsage(db, report, { id: agent.id, type: "agent" })]);
+  await assert.rejects(agentUsage.reportDaemonUsage(db, { ...report, summary: { ...summary, inputTokens: 21 } }, { id: agent.id, type: "agent" }));
+  const [run] = await db.insert(tiAgentRuns).values({ taskId: task!.id, assignedAgentId: actor.id, createdBy: actor.id, status: "running", leaseOwnerId: "worker", leaseOwnerType: "agent", leaseExpiresAt: new Date(Date.now() + 60_000), startedAt: new Date() }).returning();
+  const ti = { processId: randomUUID(), workerId: "worker", attempt: 0, startedAt: new Date().toISOString(), endedAt: null, outcome: "running" as const, revision: 1, summary };
+  const legacyTi = { processId: ti.processId, projectId: f.project.id, requirementId: req!.id, taskId: task!.id, tiRunId: run!.id,
+    attempt: 0, source: "ti_runtime" as const, agent: "ti", phase: "execution" as const, outcome: "cancelled" as const,
+    startedAt: new Date(ti.startedAt), endedAt: new Date(), revision: 1, summary: { ...summary, completeness: "partial" as const }, reportedBy: actor.id };
+  await db.insert(agentUsageRuns).values(legacyTi).onConflictDoNothing();
+  await db.insert(agentUsageRuns).values(legacyTi).onConflictDoNothing();
+  const total = await ownerUsage.summarizeUsage(db, { scope: "project", projectId: f.project.id, limit: 25, offset: 0 });
+  assert.equal(total.runs, 3); assert.equal(total.inputTokens, "140"); assert.equal(total.knownUnregisteredTiAttempts, 0);
+  assert.equal((await db.select().from(agentUsageRuns)).length, calls + 2, "Delegated/process reporting never duplicates Chat records");
+});

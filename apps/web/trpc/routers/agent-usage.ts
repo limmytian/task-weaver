@@ -62,7 +62,7 @@ export const agentUsageRouter = router({
     .query(({ ctx, input }) => createResourceServices(ctx.identity).agentUsageService.summarizeUsage(ctx.db, input)),
   run: ordinaryResourceProcedure
     .input(
-      z.object({ projectId: z.string().uuid(), processId: z.string().uuid() }),
+      z.object({ projectId: z.string().uuid().optional(), processId: z.string().uuid() }),
     )
     .query(({ ctx, input }) =>
       createResourceServices(ctx.identity).agentUsageService.getUsage(ctx.db, input.projectId, input.processId),

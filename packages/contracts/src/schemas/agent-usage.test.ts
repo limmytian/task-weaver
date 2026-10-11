@@ -55,3 +55,11 @@ test("cache overlap is explicit and payloads are rejected", () => {
     false,
   );
 });
+
+test("usage query requires an explicit project or isolated personal scope", async () => {
+  const { agentUsageQuerySchema } = await import("./agent-usage");
+  assert.equal(agentUsageQuerySchema.safeParse({}).success, false);
+  assert.equal(agentUsageQuerySchema.safeParse({ scope: "personal", projectId: "11111111-1111-4111-8111-111111111111" }).success, false);
+  assert.equal(agentUsageQuerySchema.safeParse({ scope: "personal", personalOwnerId: "other" }).success, false);
+  assert.equal(agentUsageQuerySchema.parse({ scope: "personal", source: "ti_chat", model: "actual", groupBy: "model" }).scope, "personal");
+});

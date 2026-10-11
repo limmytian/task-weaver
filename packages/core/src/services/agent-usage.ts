@@ -1,4 +1,5 @@
-import { and, desc, eq, gte, isNotNull, lt, sql, type SQL } from "drizzle-orm";
+import { isDeepStrictEqual } from "node:util";
+import { and, desc, eq, gte, isNull, isNotNull, lt, sql, type SQL } from "drizzle-orm";
 import {
   agentUsageRuns,
   projects,
@@ -33,6 +34,10 @@ export function reconcileUsage(
   incoming: UsageWrite,
 ): UsageWrite | null {
   const immutable = [
+    "personalOwnerId",
+    "personalOwnerType",
+    "conversationId",
+    "messageId",
     "projectId",
     "requirementId",
     "taskId",
@@ -51,6 +56,8 @@ export function reconcileUsage(
     immutable.some(
       (key) => (existing[key] ?? null) !== (incoming[key] ?? null),
     ) ||
+    !isDeepStrictEqual(existing.modelSnapshot ?? null, incoming.modelSnapshot ?? null) ||
+    !isDeepStrictEqual(existing.operationIds ?? null, incoming.operationIds ?? null) ||
     existing.startedAt.getTime() !== incoming.startedAt.getTime()
   ) {
     throw new ValidationError("Process identity and attribution cannot change");
@@ -299,7 +306,10 @@ export const reportPiUsage = reportTiUsage;
 function filters(input: AgentUsageQuery, visibility?: SQL) {
   return and(
     visibility,
-    eq(agentUsageRuns.projectId, input.projectId),
+    input.projectId ? eq(agentUsageRuns.projectId, input.projectId) : isNull(agentUsageRuns.projectId),
+    input.source ? eq(agentUsageRuns.source, input.source) : undefined,
+    input.model ? sql`(${agentUsageRuns.summary}->>'model' = ${input.model} OR ${agentUsageRuns.modelSnapshot}->>'configuredModel' = ${input.model})` : undefined,
+    input.conversationId ? eq(agentUsageRuns.conversationId, input.conversationId) : undefined,
     input.requirementId
       ? eq(agentUsageRuns.requirementId, input.requirementId)
       : undefined,
@@ -317,7 +327,7 @@ function filters(input: AgentUsageQuery, visibility?: SQL) {
   );
 }
 export async function listUsage(db: Database, input: AgentUsageQuery, visibility?: SQL) {
-  await validateScope(db, input);
+  if (input.projectId) await validateScope(db, { ...input, projectId: input.projectId });
   const [items, total] = await Promise.all([
     db
       .select()
@@ -340,7 +350,7 @@ export async function listUsage(db: Database, input: AgentUsageQuery, visibility
 }
 export async function getUsage(
   db: Database,
-  projectId: string,
+  projectId: string | undefined,
   processId: string,
   visibility?: SQL,
 ) {
@@ -351,14 +361,14 @@ export async function getUsage(
       and(
         visibility,
         eq(agentUsageRuns.processId, processId),
-        eq(agentUsageRuns.projectId, projectId),
+        projectId ? eq(agentUsageRuns.projectId, projectId) : isNull(agentUsageRuns.projectId),
       ),
     );
   if (!row) throw new NotFoundError("Usage process not found in this project");
   return row;
 }
 export async function summarizeUsage(db: Database, input: AgentUsageQuery, visibility?: SQL) {
-  await validateScope(db, input);
+  if (input.projectId) await validateScope(db, { ...input, projectId: input.projectId });
   // Aggregate in PostgreSQL without loading all process rows or losing integer precision.
   const [row] = await db
     .select({
@@ -397,7 +407,7 @@ export async function summarizeUsage(db: Database, input: AgentUsageQuery, visib
     .where(and(eq(agentUsageRuns.source, "ti_runtime"), visibility))
     .groupBy(agentUsageRuns.tiRunId)
     .as("reported_attempts");
-  const [missing] = await db
+  const [missing] = input.projectId && (!input.source || input.source === "ti_runtime") ? await db
     .select({
       count: sql<number>`coalesce(sum(greatest(${tiAgentRuns.retryCount} + case when ${tiAgentRuns.status} = 'queued' then 0 else 1 end - coalesce(${reportedAttempts.count}, 0), 0)), 0)::int`,
     })
@@ -414,11 +424,17 @@ export async function summarizeUsage(db: Database, input: AgentUsageQuery, visib
           : undefined,
         input.taskId ? eq(tasks.id, input.taskId) : undefined,
       ),
-    );
+    ) : [];
   const knownUnregisteredTiAttempts = missing?.count ?? 0;
   const denominator = (row?.runs ?? 0) + knownUnregisteredTiAttempts;
+  const groupExpression = input.groupBy === "source" ? sql`${agentUsageRuns.source}`
+    : sql`coalesce(nullif(${agentUsageRuns.summary}->>'model', 'unknown'), ${agentUsageRuns.modelSnapshot}->>'configuredModel', 'unknown')`;
+  const groups = input.groupBy ? await db.select({ key: sql<string>`${groupExpression}`, runs: sql<number>`count(*)::int`,
+    inputTokens: sql<string | null>`sum((${agentUsageRuns.summary}->>'inputTokens')::numeric)::text`,
+    outputTokens: sql<string | null>`sum((${agentUsageRuns.summary}->>'outputTokens')::numeric)::text` })
+    .from(agentUsageRuns).where(filters(input, visibility)).groupBy(groupExpression) : [];
   return {
-    ...row!,
+    ...row!, groups,
     knownUnregisteredTiAttempts,
     coverage: denominator ? row!.complete / denominator : null,
     accountingSince:

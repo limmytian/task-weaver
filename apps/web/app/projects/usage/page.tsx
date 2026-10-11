@@ -14,6 +14,10 @@ const selectClass = "h-9 w-full rounded-md border bg-background px-3 text-sm";
 const tokens = (value: string | number | null | undefined) =>
   value == null ? "Unknown" : String(value);
 export default function UsagePage() {
+  const [personal, setPersonal] = useState(false);
+  const [source, setSource] = useState("");
+  const [model, setModel] = useState("");
+  const [groupBy, setGroupBy] = useState<"source" | "model">("source");
   const [projectId, setProjectId] = useState("");
   const [projectSearch, setProjectSearch] = useState("");
   const [requirementId, setRequirementId] = useState("");
@@ -45,16 +49,18 @@ export default function UsagePage() {
     { enabled: !!projectId },
   );
   const parsed = agentUsageQuerySchema.safeParse({
-    projectId: projectId || emptyId,
-    requirementId: requirementId || undefined,
-    taskId: taskId || undefined,
+    scope: personal ? "personal" : "project",
+    projectId: personal ? undefined : projectId || emptyId,
+    source: source || undefined, model: model || undefined, groupBy,
+    requirementId: personal ? undefined : requirementId || undefined,
+    taskId: personal ? undefined : taskId || undefined,
     since: since ? new Date(since).toISOString() : undefined,
     until: until ? new Date(until).toISOString() : undefined,
     limit: 25,
     offset,
   });
   const query = parsed.success ? parsed.data : { projectId: emptyId };
-  const enabled = !!projectId && parsed.success;
+  const enabled = (personal || !!projectId) && parsed.success;
   const runs = trpc.agentUsage.runs.useQuery(query, { enabled });
   const summary = trpc.agentUsage.summary.useQuery(query, { enabled });
   const projectItems = projects.data ?? [];
@@ -69,7 +75,7 @@ export default function UsagePage() {
       </header>
       <main className="mx-auto w-full max-w-6xl space-y-5 p-6">
         <p className="text-sm text-muted-foreground">
-          Reported tokens for each agent process from launch to exit. Totals
+          Reported tokens for agent processes and individual Chat invocations. Totals
           include execution, review, rework and restarted attempts. Missing
           counters remain unknown.
         </p>
@@ -78,6 +84,22 @@ export default function UsagePage() {
             <CardTitle>Scope and time range</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-3">
+            <label className="space-y-2 text-sm">Scope
+              <select className={selectClass} value={personal ? "personal" : "project"} onChange={e => { setPersonal(e.target.value === "personal"); setProjectId(""); setRequirementId(""); setTaskId(""); resetPage(); }}>
+                <option value="project">Project</option><option value="personal">Personal Chat</option>
+              </select>
+            </label>
+            <label className="space-y-2 text-sm">Source
+              <select className={selectClass} value={source} onChange={e => { setSource(e.target.value); resetPage(); }}>
+                <option value="">All sources</option>{["ti_chat", "ti_operation", "ti_runtime", "codex_jsonl", "daemon_unknown"].map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+            <label className="space-y-2 text-sm">Configured or actual model
+              <Input value={model} onChange={e => { setModel(e.target.value); resetPage(); }} placeholder="Model name" />
+            </label>
+            <label className="space-y-2 text-sm">Group totals by
+              <select className={selectClass} value={groupBy} onChange={e => setGroupBy(e.target.value as "source" | "model")}><option value="source">Source</option><option value="model">Model</option></select>
+            </label>
             <div className="space-y-2">
               <label htmlFor="usage-project" className="text-sm">
                 Project
@@ -89,6 +111,7 @@ export default function UsagePage() {
                 placeholder="Search projects"
               />
               <select
+                disabled={personal}
                 id="usage-project"
                 className={selectClass}
                 value={projectId}
@@ -340,7 +363,7 @@ export default function UsagePage() {
                                 Task
                               </Link>
                             ) : (
-                              "Shared requirement"
+                              run.conversationId ? "Chat invocation" : "Shared requirement"
                             )}
                             <br />
                             <span className="text-xs">{run.requirementId}</span>
@@ -380,6 +403,10 @@ export default function UsagePage() {
                                   {tokens(run.summary.cacheWriteTokens)} (
                                   {run.summary.cacheSemantics})
                                 </dd>
+                                <dt>Configured model snapshot</dt>
+                                <dd>{run.modelSnapshot ? `${run.modelSnapshot.displayName ?? run.modelSnapshot.configuredModel} / ${run.modelSnapshot.provider} / ${run.modelSnapshot.configuredModel} (${run.modelSnapshot.configurationId}, ${run.modelSnapshot.capturedAt})` : "Not recorded"}</dd>
+                                <dt>Conversation / message</dt><dd>{run.conversationId ?? "—"} / {run.messageId ?? "—"}</dd>
+                                <dt>Operations</dt><dd>{run.operationIds?.join(", ") || "—"}</dd>
                                 <dt>Ti run / attempt</dt>
                                 <dd>
                                   {run.tiRunId ?? "—"} / {run.attempt ?? "—"}
@@ -413,6 +440,9 @@ export default function UsagePage() {
             </CardContent>
           </Card>
         )}
+        {enabled && summary.data && summary.data.groups.length > 0 && <Card><CardHeader><CardTitle>Totals by {groupBy}</CardTitle></CardHeader><CardContent>
+          <table className="w-full text-sm"><thead><tr><th className="text-left">Group</th><th>Records</th><th>Reported input</th><th>Reported output</th></tr></thead><tbody>{summary.data.groups.map(g => <tr key={g.key}><td>{g.key}</td><td className="text-center">{g.runs}</td><td className="text-center">{tokens(g.inputTokens)}</td><td className="text-center">{tokens(g.outputTokens)}</td></tr>)}</tbody></table>
+        </CardContent></Card>}
       </main>
     </>
   );

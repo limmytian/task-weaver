@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { assistantOperationTools, assistantOperations, parseAssistantOperation, executeAssistantOperation } from "./assistant-operations";
 import { createChatModelService } from "./chat-models";
 import { assistantReadTools, runAssistantReadTool, authorizeAssistantReadReference, type AssistantReadReference } from "./assistant-read-tools";
+import { beginChatUsage, snapshotChatModel } from "./chat-usage";
 import { requestChatTurn } from "./chat-endpoint";
 import { schedulePredicate } from "./metadata-authorization";
 import { mcpServerPredicate } from "./mcp-authorization";
@@ -120,12 +121,31 @@ async function generateModelResponse(
       while (text) { const delta = text.slice(0, 16_000); text = text.slice(delta.length); await emit({ type: "text", delta }); }
       lastFlush = performance.now();
     };
-    const turn = await requestChatTurn(model.config.baseUrl!, model.apiKey, {
+    const currentScope = contextSnapshot.current as { project: { id: string } | null; requirement: { id: string } | null; task: { id: string; scope?: string } | null };
+    let collector: Awaited<ReturnType<typeof beginChatUsage>> | undefined;
+    let turn: Awaited<ReturnType<typeof requestChatTurn>>;
+    try {
+    turn = await requestChatTurn(model.config.baseUrl!, model.apiKey, {
       model: model.config.model, messages, tools: allowed ? [...assistantReadTools, ...assistantOperationTools] : assistantReadTools, tool_choice: round === 15 ? "none" : "auto", temperature: 0.2,
     }, deadline, observer ? async delta => {
       text += delta;
       if (text.length >= 64 || performance.now() - lastFlush >= 100) await flush();
-    } : undefined, false, model.config);
+    } : undefined, false, model.config, {
+      async start() {
+        collector = await beginChatUsage(db, {
+          projectId: currentScope.project?.id ?? null, requirementId: currentScope.requirement?.id ?? null,
+          taskId: currentScope.project ? currentScope.task?.id ?? null : null, conversationId, messageId, actor,
+          operationIds: performed.map(action => action.id),
+          snapshot: snapshotChatModel(model.config, { temperature: 0.2 }, model.apiKey),
+        });
+      },
+      observe(value, actualModel) { collector?.observe(value, actualModel, model.apiKey); },
+    });
+    await collector?.finish("succeeded");
+    } catch (error) {
+      await collector?.finish(error instanceof Error && error.name === "AbortError" ? "cancelled" : "failed");
+      throw error;
+    }
     if (observer) await flush();
     if (!turn.toolCalls.length) {
       if (!turn.content) throw new ValidationError("Assistant returned no answer");

@@ -55,8 +55,9 @@ routes.get("/summary", async (c) => {
 });
 routes.get("/runs/:id", async (c) => {
   const parsed = z
-    .object({ projectId: z.string().uuid() })
+    .object({ projectId: z.string().uuid().optional(), scope: z.enum(["project", "personal"]).default("project") })
     .strict()
+    .refine(v => v.scope === "project" ? !!v.projectId : !v.projectId)
     .safeParse(c.req.query());
   if (!parsed.success)
     return c.json(
