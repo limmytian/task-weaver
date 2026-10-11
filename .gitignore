@@ -16,3 +16,6 @@ data/
 .idea/
 
 .task-weaver/
+
+# PDF preview assets are generated from the pinned dependency.
+apps/web/public/pdfjs/

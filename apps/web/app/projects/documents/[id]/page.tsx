@@ -278,6 +278,7 @@ function DocumentSidebar({
     incomingLinks?: Array<{ id: string; sourceDoc: { id: string; title: string } }>;
     outgoingLinks?: Array<{ id: string; targetDoc: { id: string; title: string } }>;
     taskLinks?: Array<{ id: string; task: { id: string; title: string; status: string } }>;
+    requirementLinks?: Array<{ id: string; requirement: { id: string; projectId: string; title: string; status: string } }>;
   };
   unlinkDoc: { mutate: (input: { linkId: string }) => void };
   unlinkFromTask: { mutate: (input: { linkId: string }) => void };
@@ -310,6 +311,7 @@ function DocumentSidebar({
   });
 
   const linkToReq = trpc.document.linkToRequirement.useMutation({
+    onError: (error) => toast.error("Failed to link requirement", { description: error.message }),
     onSuccess: () => {
       utils.document.get.invalidate({ id: doc.id });
       setLinkingReq(false);
@@ -319,7 +321,8 @@ function DocumentSidebar({
 
   const existingTaskIds = new Set(doc.taskLinks?.map((l) => l.task.id) ?? []);
   const availableTasks = tasks?.filter((t) => !existingTaskIds.has(t.id) && t.status !== "cancelled");
-  const availableReqs = requirements?.filter((r) => r.status !== "cancelled");
+  const existingReqIds = new Set(doc.requirementLinks?.map((link) => link.requirement.id) ?? []);
+  const availableReqs = requirements?.filter((r) => !existingReqIds.has(r.id) && r.status !== "cancelled");
 
   return (
     <aside className="space-y-4">
@@ -453,7 +456,7 @@ function DocumentSidebar({
           <CardTitle className="flex items-center justify-between text-sm">
             <span className="flex items-center gap-2">
               <ClipboardList className="h-4 w-4" />
-              Requirements
+              Requirements ({doc.requirementLinks?.length ?? 0})
             </span>
             <button
               className="text-muted-foreground hover:text-foreground"
@@ -464,6 +467,12 @@ function DocumentSidebar({
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
+          {doc.requirementLinks?.map((link) => (
+            <Link key={link.id} href={`/projects/${link.requirement.projectId}/requirements/${link.requirement.id}`} className="block rounded-md border p-2 text-sm transition-colors hover:bg-muted">
+              <p className="font-medium">{link.requirement.title}</p>
+              <Badge variant="outline" className="mt-1 text-[10px]">{link.requirement.status}</Badge>
+            </Link>
+          ))}
           {linkingReq && (
             <div className="space-y-2 rounded border p-2">
               <Select value={selectedReqId} onValueChange={setSelectedReqId}>
