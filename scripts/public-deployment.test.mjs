@@ -11,7 +11,7 @@ const source = (() => {
   catch { return ""; }
 })();
 
-test("public deployment uses only the published digest-pinned ARM64 application images", () => {
+test("public deployment uses only the published digest-pinned multi-platform application images", () => {
   const compose = read(`${source}docker-compose.yml`);
   assert.doesNotMatch(compose, /^  db:/m);
   assert.doesNotMatch(compose, /pgvector\/|POSTGRES_PASSWORD/);
@@ -20,12 +20,12 @@ test("public deployment uses only the published digest-pinned ARM64 application 
   assert.equal((compose.match(/DATABASE_URL:\s*\$\{/g) ?? []).length, 3);
   assert.match(compose, /Configure an external PostgreSQL connection/);
   const expectedImages = [
-    "ghcr.io/limmytian/task-weaver-api@sha256:7d89b0bfe4adf251d7831fbed0b473fae631aca0befc862d06e07ebf58442359",
-    "ghcr.io/limmytian/task-weaver-web@sha256:3d9dbbf08c73c888fd9d9f18b66ed7520113a2f698deab84bc5f4a34455d5e35",
+    "ghcr.io/limmytian/task-weaver-api@sha256:beb2ee810fdc0880d955c7dfdd245a0bfb838e3bbbad1ae457ddf46656ba00a4",
+    "ghcr.io/limmytian/task-weaver-web@sha256:a5f7b11ceacdd5098fab7388b95c6509036d27a20c049bd01fe00fb3bfee562b",
   ];
   assert.equal(compose.split(expectedImages[0]).length - 1, 2);
   assert.equal(compose.split(expectedImages[1]).length - 1, 1);
-  assert.equal((compose.match(/platform: \$\{TW_IMAGE_PLATFORM:-linux\/arm64\}/g) ?? []).length, 3);
+  assert.doesNotMatch(compose, /^\s+platform:/m);
   const configuredImages = [...compose.matchAll(/^\s+image:\s+\$\{TW_(API|WEB)_IMAGE:-([^}]+)\}/gm)];
   assert.equal(configuredImages.length, 3);
   for (const match of configuredImages) {
@@ -36,7 +36,7 @@ test("public deployment uses only the published digest-pinned ARM64 application 
   assert.equal(policy.sourceOnly, false);
   assert.equal(policy.containersPublished, true);
   assert.equal(policy.composeProvided, true);
-  assert.equal(policy.containerPlatform, "linux/arm64");
+  assert.equal(policy.containerPlatform, "linux/amd64,linux/arm64");
   assert.equal(policy.databaseDelivery, "operator-provisioned");
   assert.equal(policy.npmPublished, false);
 });

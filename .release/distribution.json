@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "channel": "v0.1.0",
+  "channel": "v0.3.7",
   "sourceOnly": false,
   "containersPublished": true,
   "composeProvided": true,
-  "containerPlatform": "linux/arm64",
+  "containerPlatform": "linux/amd64,linux/arm64",
   "databaseDelivery": "operator-provisioned",
   "npmPublished": false
 }
