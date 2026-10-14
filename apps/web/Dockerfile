@@ -3,10 +3,10 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
 ENV npm_config_store_dir=/pnpm/store
 COPY . .
-RUN --mount=type=cache,id=tw-public-web-pnpm,target=/pnpm/store \
+RUN --mount=type=cache,id=tw-public-web-pnpm,target=/pnpm/store,sharing=locked \
     pnpm install --store-dir=/pnpm/store --frozen-lockfile
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN --mount=type=cache,id=tw-public-web-pnpm,target=/pnpm/store \
+RUN --mount=type=cache,id=tw-public-web-pnpm,target=/pnpm/store,sharing=locked \
     mkdir -p apps/web/public && pnpm release:licenses && pnpm --filter @task-weaver/web build
 
 # Production runner

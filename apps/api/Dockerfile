@@ -3,10 +3,10 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
 ENV npm_config_store_dir=/pnpm/store
 COPY . .
-RUN --mount=type=cache,id=tw-public-pnpm,target=/pnpm/store \
+RUN --mount=type=cache,id=tw-public-pnpm,target=/pnpm/store,sharing=locked \
     pnpm install --store-dir=/pnpm/store --frozen-lockfile
-RUN --mount=type=cache,id=tw-public-pnpm,target=/pnpm/store pnpm release:licenses
-RUN --mount=type=cache,id=tw-public-pnpm,target=/pnpm/store pnpm --filter @task-weaver/api deploy --prod /runtime \
+RUN --mount=type=cache,id=tw-public-pnpm,target=/pnpm/store,sharing=locked pnpm release:licenses
+RUN --mount=type=cache,id=tw-public-pnpm,target=/pnpm/store,sharing=locked pnpm --filter @task-weaver/api deploy --prod /runtime \
     && node scripts/verify-api-runtime-dependencies.mjs /runtime
 
 # Production runner
