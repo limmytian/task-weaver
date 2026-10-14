@@ -124,12 +124,11 @@ the [daemon pipeline guide](docs/daemon-pipeline-runbook.md).
 
 ### Container installation and upgrades
 
-For containers, follow [installation and deployment](docs/deployment.md) and
-select a matching, verified API/Web image pair from
-[GitHub Releases](https://github.com/limmytian/task-weaver/releases).
-The checked-in Compose defaults use older published images; follow the deployment
-guide for their supported configuration. Source and published images may differ.
-Back up data and read the [upgrade guide](docs/ce-upgrades.md) before upgrading.
+For a disposable local trial, use the [local Compose guide](docs/local-quickstart.md).
+It starts an isolated PostgreSQL/pgvector database and the released 0.3.7 API/Web
+images on loopback-only ports. For a persistent deployment, follow
+[installation and deployment](docs/deployment.md) and read the
+[upgrade guide](docs/ce-upgrades.md) before upgrading.
 
 ## Development
 
@@ -176,6 +175,7 @@ checkout instructions above.
 - [Architecture](docs/design.md) ([简体中文](docs/design.zh-CN.md))
 - [Authenticated accounts, CLI access and offline upgrade](docs/authenticated-access.md)
 - [Deployment and rollback](docs/deployment.md)
+- [Local Compose trial](docs/local-quickstart.md)
 - [Release history](docs/releases/README.md) and [release gates](docs/release-gates.md)
 - [CE packages](docs/ce-packages.md) and [release operations](docs/release-operations.md)
 - [Install, upgrade, and recovery](docs/ce-upgrades.md)

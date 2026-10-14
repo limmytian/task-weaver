@@ -1,11 +1,12 @@
 # Docker Compose Deployment
 
-The default Compose file runs the v0.1.0 API and Web images published at GHCR.
-Every image reference is pinned to an immutable OCI digest and declares
-`linux/arm64`. PostgreSQL is always provided by the operator through
-`DATABASE_URL`; the Compose file contains no database service or first-party
-database image. Workspace package names and versions do not imply npm
-publication.
+The default Compose file runs the released 0.3.7 API and Web images published
+at GHCR. Both references are pinned to the immutable multi-platform OCI index
+digests from the release. PostgreSQL is provided by the operator through
+`DATABASE_URL`; the production Compose file contains no database service.
+For a disposable local trial that includes PostgreSQL/pgvector, see the
+[local trial guide](local-quickstart.md). Workspace package names and versions do
+not imply npm publication.
 
 For a verified newer release, set `TW_API_IMAGE` and `TW_WEB_IMAGE` together to
 its OCI digest references. See [CE Install, Upgrade, and Recovery](ce-upgrades.md)
@@ -26,13 +27,18 @@ commit credentials; percent encode reserved URL characters in passwords.
 
 ## Start
 
-Copy the example without putting real credentials in a tracked file. Replace the
-placeholder URL with an endpoint that containers can resolve and reach. A
-container's `localhost` refers to that container, not the Docker host.
+Copy the example without putting real credentials in a tracked file. Set the
+database URL and uncomment/replace the authentication placeholders in `.env`.
+Use different random values for `TW_AUTH_SECRET` and
+`TW_AUTH_BOOTSTRAP_SECRET`; generate each with `openssl rand -hex 32`. API and
+Web must use the same authentication values. Replace the placeholder database
+URL with an endpoint that containers can resolve and reach. A container's
+`localhost` refers to that container, not the Docker host.
 
 ```sh
 cp .env.example .env
-# Edit .env locally and set DATABASE_URL.
+# Edit .env locally: set DATABASE_URL, TW_AUTH_SECRET,
+# TW_AUTH_BASE_URL, TW_AUTH_TRUSTED_ORIGINS, and TW_AUTH_BOOTSTRAP_SECRET.
 docker compose config
 docker compose up -d --wait
 docker compose ps
@@ -46,9 +52,12 @@ UI is at `http://localhost:3000`; API health is at
 `http://localhost:3001/health`. `API_PORT` and `WEB_PORT` may change these
 loopback host ports.
 
-`MIGRATION_DATABASE_URL` may select a separate initialization account. API
-startup still runs migrations, so a strictly DML-only runtime account is not a
-supported deployment mode.
+On a fresh instance, open `/login`, choose first-administrator setup, enter the
+bootstrap secret, and create the first account. Remove
+`TW_AUTH_BOOTSTRAP_SECRET` from the API and Web service environment after setup
+and recreate those services. There is no public signup. `MIGRATION_DATABASE_URL`
+may select a separate initialization account. API startup still runs migrations,
+so a strictly DML-only runtime account is not a supported deployment mode.
 
 ## Source development
 
@@ -56,7 +65,7 @@ Use Node.js from `.node-version` and pnpm 9.15.0:
 
 ```sh
 cp .env.example .env
-# Configure DATABASE_URL and the 0.3.3 authentication settings before initialization.
+# Configure DATABASE_URL and the authentication settings before initialization.
 pnpm install --frozen-lockfile
 pnpm exec dotenv -- pnpm --filter @task-weaver/db db:migrate
 pnpm exec dotenv -- pnpm --filter @task-weaver/db db:setup-search
@@ -69,19 +78,16 @@ Compose example deliberately uses the published digest-pinned images.
 
 ## Security and persistence
 
-Keep the default loopback bindings and use TLS outside loopback. The default
-published digest-pinned images predate the 0.3.3 authentication implementation;
-they must not be described as an authenticated multi-user release. The 0.3.3 source
-requires verified sessions/scoped Keys and live resource authorization. Missing
-`TW_AUTH_SECRET` or `TW_AUTH_BASE_URL` fails closed; there is no anonymous fallback.
+Keep the default loopback bindings and use TLS outside loopback. The 0.3.7 images
+include authenticated accounts, sessions, scoped Keys, and live resource
+authorization. Missing `TW_AUTH_SECRET` or `TW_AUTH_BASE_URL` fails closed; there
+is no anonymous fallback.
 
 API and Web need the same database, authentication Secret/base URL and exact
 trusted origins. Browser calls use one origin and signed CSRF cookies/tokens.
-Set these through the service's Secret/environment facility; `.env.example`
-contains source-development placeholders, not credentials. The default Compose
-images/environment are retained for the published release. A future authenticated
-image pair also needs explicit API/Web environment injection; editing a host
-`.env` alone does not inject arbitrary variables into Compose containers.
+Set these through the service's Secret/environment facility. The Compose file
+passes these values explicitly to both API and Web; editing a host `.env` only
+has an effect for values the Compose file references.
 See [authenticated access](authenticated-access.md) for bootstrap, closed account
 provisioning, scoped CLI login, revocation and the offline upgrade boundary.
 
@@ -111,7 +117,7 @@ migrations. Preserve the failed environment until the incident is understood.
 
 ## Release scope
 
-The published v0.1.0 images and this example support Linux ARM64 only. AMD64,
-image signing, floating or platform-neutral tags, npm packages, a first-party
-PostgreSQL image, internet-facing authorization hardening, and complete upgrade
-or downgrade certification are outside this release.
+The 0.3.7 release publishes signed, multi-platform API and Web image indexes.
+This deployment example continues to require an operator-provided PostgreSQL
+database. For a local trial, the separate Compose file supplies a
+PostgreSQL/pgvector container and binds application ports to loopback only.
