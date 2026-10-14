@@ -120,7 +120,7 @@ function parseCommandJson(result, label, acceptedStatuses = [0]) {
   if (!acceptedStatuses.includes(result.status)) {
     const code = typeof parsed?.error?.code === "string" && /^[A-Z0-9_]+$/.test(parsed.error.code)
       ? ` (${parsed.error.code})` : "";
-    const details = result.stderr.trim();
+    const details = result.stderr.trim() || (typeof parsed?.error?.message === "string" ? parsed.error.message : "");
     throw new Error(`${label} failed with exit ${result.status ?? "unknown"}${code}.${details ? ` ${details}` : ""}`);
   }
   return parsed;
