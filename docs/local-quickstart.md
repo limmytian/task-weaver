@@ -2,7 +2,8 @@
 
 This disposable Compose setup lets each visitor run an isolated Task Weaver
 instance on their own computer. It includes PostgreSQL with pgvector, the
-released 0.3.7 API and Web images, migrations, and persistent local volumes.
+latest API and Web images published after successful main-branch CI builds,
+migrations, and persistent local volumes.
 It does not create a shared account or send data to a Task Weaver-hosted service.
 
 ## Requirements
@@ -16,6 +17,14 @@ It does not create a shared account or send data to a Task Weaver-hosted service
 From the repository root, run:
 
 ```sh
+docker compose -f docker-compose.local.yml up -d --wait
+```
+
+Compose pulls the current `latest` images when they are not already available
+locally. To refresh an existing installation to the newest CI build, pull first:
+
+```sh
+docker compose -f docker-compose.local.yml pull
 docker compose -f docker-compose.local.yml up -d --wait
 ```
 

@@ -125,8 +125,8 @@ the [daemon pipeline guide](docs/daemon-pipeline-runbook.md).
 ### Container installation and upgrades
 
 For a disposable local trial, use the [local Compose guide](docs/local-quickstart.md).
-It starts an isolated PostgreSQL/pgvector database and the released 0.3.7 API/Web
-images on loopback-only ports. For a persistent deployment, follow
+It starts an isolated PostgreSQL/pgvector database and the latest API/Web images
+from successful main-branch CI builds on loopback-only ports. For a persistent deployment, follow
 [installation and deployment](docs/deployment.md) and read the
 [upgrade guide](docs/ce-upgrades.md) before upgrading.
 

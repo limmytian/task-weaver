@@ -17,7 +17,7 @@ services:
       retries: 30
 
   migrate:
-    image: ghcr.io/limmytian/task-weaver-api@sha256:beb2ee810fdc0880d955c7dfdd245a0bfb838e3bbbad1ae457ddf46656ba00a4
+    image: ghcr.io/limmytian/task-weaver-api:latest
     working_dir: /app
     command: ["sh", "-c", "./node_modules/.bin/tsx node_modules/@task-weaver/db/src/migrate.ts && ./node_modules/.bin/tsx node_modules/@task-weaver/db/src/setup-search.ts"]
     environment:
@@ -27,7 +27,7 @@ services:
         condition: service_healthy
 
   api:
-    image: ghcr.io/limmytian/task-weaver-api@sha256:beb2ee810fdc0880d955c7dfdd245a0bfb838e3bbbad1ae457ddf46656ba00a4
+    image: ghcr.io/limmytian/task-weaver-api:latest
     restart: unless-stopped
     ports:
       - "127.0.0.1:3001:3001"
@@ -55,7 +55,7 @@ services:
       retries: 30
 
   web:
-    image: ghcr.io/limmytian/task-weaver-web@sha256:a5f7b11ceacdd5098fab7388b95c6509036d27a20c049bd01fe00fb3bfee562b
+    image: ghcr.io/limmytian/task-weaver-web:latest
     restart: unless-stopped
     ports:
       - "127.0.0.1:3000:3000"
