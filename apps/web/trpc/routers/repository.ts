@@ -7,6 +7,7 @@ import {
   listRepositoriesSchema,
   repositoryReadinessInputSchema,
   createResourceServices,
+  reconcileHumanRepositoryDeliverySchema,
   updateRepositorySchema,
 } from "@task-weaver/core";
 
@@ -60,6 +61,9 @@ export const repositoryRouter = router({
     input.reason,
     ctx.actor,
   )),
+  reconcileHumanDelivery: ordinaryResourceProcedure
+    .input(z.object({ linkId: z.string().uuid(), data: reconcileHumanRepositoryDeliverySchema }))
+    .mutation(({ ctx, input }) => createResourceServices(ctx.identity).repositoryService.reconcileHumanRepositoryDelivery(ctx.db, input.linkId, input.data, ctx.actor)),
   listForTask: ordinaryResourceProcedure.input(z.object({ taskId: z.string().uuid() }))
     .query(({ ctx, input }) => createResourceServices(ctx.identity).repositoryService.listTaskRepositories(ctx.db, input.taskId, ctx.actor)),
   addToTask: ordinaryResourceProcedure.input(z.object({ taskId: z.string().uuid() }).merge(addTaskRepositorySchema))

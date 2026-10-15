@@ -207,7 +207,7 @@ requirements.patch("/requirements/:id", async (c) => {
       return c.json({ error: "Resource not found" }, 404);
     }
     if (err instanceof ValidationError) {
-      return c.json({ error: "Invalid request" }, 400);
+      return c.json({ error: err.message, code: "requirement_validation_failed" }, 400);
     }
     throw err;
   }

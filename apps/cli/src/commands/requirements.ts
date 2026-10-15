@@ -1,7 +1,7 @@
 import { Command } from 'commander'
 import * as readline from 'readline/promises'
 import { readFileSync, unlinkSync } from 'node:fs'
-import { requirementWorkflowSchema } from '@task-weaver/contracts'
+import { requirementWorkflowSchema, reconcileHumanRepositoryDeliverySchema } from '@task-weaver/contracts'
 import { loadConfig } from '../config.js'
 import { localWorkflowOutputPath, probeWorkflowArtifact, storeWorkflowArtifact, type LocalWorkflowOutput } from '../workflow-artifacts.js'
 import { cleanupRequirementWorktrees, normalizeRequirementRepositoryEntries } from '../repository-workspace.js'
@@ -538,6 +538,22 @@ export function registerRequirements(program: Command): void {
     .option('--json', 'output raw JSON')
     .action(async (id, repositoryId, opts) => {
       const data = await del(`/api/v1/requirements/${id}/repositories/${repositoryId}`)
+      if (opts.json) return printJson(data)
+      printKv(data as Record<string, unknown>)
+    })
+
+  repo.command('sync-pr <linkId>').description('register or synchronize a pull request using trusted server verification (human only)')
+    .requiredOption('--url <url>', 'pull request URL for the linked repository')
+    .requiredOption('--reason <text>', 'audited reason for reconciliation')
+    .requiredOption('--revision <number>', 'current externalSyncRevision')
+    .requiredOption('--updated-at <timestamp>', 'current delivery updatedAt')
+    .requiredOption('--request-id <uuid>', 'stable idempotency key; reuse for an exact retry')
+    .option('--json', 'output raw JSON')
+    .action(async (linkId, opts) => {
+      const data = await post(`/api/v1/requirement-repositories/${linkId}/human-sync`, reconcileHumanRepositoryDeliverySchema.parse({
+        pullRequestUrl: opts.url, reason: opts.reason, expectedRevision: Number(opts.revision),
+        expectedUpdatedAt: opts.updatedAt, idempotencyKey: opts.requestId,
+      }))
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)
     })

@@ -349,6 +349,15 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
       if (name.startsWith("add")) call[4] = visibility;
       return;
     }
+    if (name === "reconcileHumanRepositoryDelivery") {
+      if (authority.actor.type !== "human" || authority.bounds) throw new AuthorizationError();
+      const link = await db.query.requirementRepositories.findFirst({ where: eq(requirementRepositories.id, id) });
+      if (!link) throw new NotFoundError("Resource not found");
+      await requireRepository(db, authority, link.repositoryId);
+      const scope = await requireResource(db, authority, "requirement", link.requirementId, "repository.manage");
+      requireScope(authority, scope, "project.manage");
+      return;
+    }
     if (["updateRequirementRepositoryDelivery", "syncRequirementRepositoryForgeState", "reopenRequirementRepositoryDelivery"].includes(name)) {
       const link = await db.query.requirementRepositories.findFirst({ where: eq(requirementRepositories.id, id) });
       if (!link) throw new NotFoundError("Resource not found");

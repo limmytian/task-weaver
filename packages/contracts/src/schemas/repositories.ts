@@ -287,3 +287,12 @@ export type ForgePullRequestSnapshot = z.infer<typeof forgePullRequestSnapshotSc
 export type SyncRequirementRepositoryForgeStateInput = z.infer<typeof syncRequirementRepositoryForgeStateSchema>;
 export type ReopenRequirementRepositoryDeliveryInput = z.infer<typeof reopenRequirementRepositoryDeliverySchema>;
 export type RepositoryReadinessInput = z.infer<typeof repositoryReadinessInputSchema>;
+
+export const reconcileHumanRepositoryDeliverySchema = z.object({
+  pullRequestUrl: z.string().url().max(2048),
+  reason: z.string().trim().min(3).max(2000),
+  expectedRevision: z.number().int().min(0),
+  expectedUpdatedAt: z.coerce.date(),
+  idempotencyKey: z.string().uuid(),
+}).strict();
+export type ReconcileHumanRepositoryDeliveryInput = z.infer<typeof reconcileHumanRepositoryDeliverySchema>;

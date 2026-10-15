@@ -32,6 +32,11 @@ export interface RepositoryOperationCheckpoint {
 }
 
 export interface RepositoryExternalState {
+  mergeCommit?: string | null;
+  baseBranch?: string;
+  mergedAt?: string | null;
+  verifiedSource?: string;
+  manualRequestHash?: string;
   provider?: string;
   externalId?: string;
   url?: string;

@@ -7,7 +7,7 @@ const ordinaryRoutes: Array<[string, RegExp]> = [
   ["GET", new RegExp("^/api/v1/daemons/[0-9a-fA-F-]{36}/executors(?:/history)?/?$")],
   ["POST", new RegExp("^/api/v1/daemons/[0-9a-fA-F-]{36}/executors/(?:observations|(?:codex|claude|agy|aider|cursor)/(?:refresh|resume))/?$")],
   ["PATCH", new RegExp("^/api/v1/requirement-repositories/[0-9a-fA-F-]{36}/delivery/?$")],
-  ["POST", new RegExp("^/api/v1/requirement-repositories/[0-9a-fA-F-]{36}/(?:forge-sync|reopen)/?$")],
+  ["POST", new RegExp("^/api/v1/requirement-repositories/[0-9a-fA-F-]{36}/(?:forge-sync|reopen|human-sync)/?$")],
   ["POST", new RegExp("^/api/v1/agent-usage/runs/?$")],
   ["POST", new RegExp("^/api/v1/ti/runs/[0-9a-fA-F-]{36}/usage/?$")],
   ["POST", new RegExp("^/api/v1/daemons/[0-9a-fA-F-]{36}/delegations(?:/[0-9a-fA-F-]{36}/renew)?/?$")],

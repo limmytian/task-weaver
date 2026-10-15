@@ -11,6 +11,7 @@ import {
   reopenRequirementRepositoryDeliverySchema,
   createResourceServices,
   syncRequirementRepositoryForgeStateSchema,
+  reconcileHumanRepositoryDeliverySchema,
   updateRepositorySchema,
   updateRequirementRepositoryDeliverySchema,
   ValidationError,
@@ -234,6 +235,15 @@ repositoryRoutes.delete("/tasks/:id/repositories/:repositoryId", async (c) => {
   } catch (error) {
     return serviceError(c, error);
   }
+});
+
+
+repositoryRoutes.post("/requirement-repositories/:id/human-sync", async (c) => {
+  const parsed = reconcileHumanRepositoryDeliverySchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
+  try {
+    return c.json(await createResourceServices(c.get("identity")).repositoryService.reconcileHumanRepositoryDelivery(c.get("db"), c.req.param("id"), parsed.data, c.get("actor")));
+  } catch (error) { return serviceError(c, error); }
 });
 
 export default repositoryRoutes;

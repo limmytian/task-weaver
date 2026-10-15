@@ -1048,7 +1048,10 @@ Delivery control endpoints:
 POST  /api/v1/requirement-repositories/:linkId/retry
 PATCH /api/v1/requirement-repositories/:linkId/delivery
 POST  /api/v1/requirement-repositories/:linkId/forge-sync
+POST  /api/v1/requirement-repositories/:linkId/human-sync
 ```
+
+`human-sync` is a separate human-only operation requiring project management, repository management, and catalog visibility. Send `pullRequestUrl`, `reason`, `expectedRevision`, `expectedUpdatedAt`, and a UUID `idempotencyKey`. The server reads a trusted forge connection and verifies repository/base/head/merge evidence; it rejects client snapshots, active daemon leases, stale requests, and terminal mutations. Exact retries of the latest successful request are idempotent. It records external facts without fabricating review approvals or advancing configured workflow stages. See `docs/manual-pr-reconciliation.md` for trusted connection configuration and recovery.
 
 The PATCH endpoint is for trusted daemon delivery state. It accepts per-repository workspace, commit, push, pull-request, review, merge, failure, and attempt fields. Retrying resets only the failed link; successful sibling repositories remain intact. `forge-sync` accepts a normalized pull-request snapshot plus `idempotencyKey`, optional `expectedRevision`, `observedAt`, and daemon lease fences. It rejects stale writers, supersedes approvals after a changed head, and maps merged, closed, and reopened provider state to the local delivery lane.
 

@@ -18,6 +18,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { HumanDeliverySync } from "@/components/human-delivery-sync";
+import { useWebIdentity } from "@/components/web-identity-provider";
 import { RepositoryFormDialog } from "@/components/repository-form-dialog";
 
 type RepositoryLink = {
@@ -81,6 +83,12 @@ export function RequirementRepositories({
   const [linkFeedback, setLinkFeedback] = useState<{ tone: "status" | "error"; message: string } | null>(null);
   const utils = trpc.useUtils();
   const links = trpc.repository.listForRequirement.useQuery({ requirementId });
+  const requirement = trpc.requirement.get.useQuery({ id: requirementId });
+  const actor = useWebIdentity();
+  const permissions = trpc.auth.permissions.useQuery();
+  const canSync = actor.type === "human" && !disabled && requirement.data && !["done", "cancelled", "archived"].includes(requirement.data.status)
+    && permissions.data?.grants.some(grant => grant.scope === "project" && grant.projectId === requirement.data?.projectId
+      && grant.permissions.includes("project.manage") && grant.permissions.includes("repository.manage"));
   const catalog = trpc.repository.list.useQuery(
     { query: search || undefined, status: "active", sort: search ? "relevance" : "recently_used", page: 1, pageSize: 50 },
     { enabled: selectorOpen },
@@ -185,6 +193,8 @@ export function RequirementRepositories({
               {link.headCommit && <span>Commit: {link.headCommit.slice(0, 8)}</span>}
               {link.pullRequestUrl && <a href={link.pullRequestUrl} target="_blank" rel="noreferrer" className="underline">Pull request</a>}
             </div>
+            {canSync && ["github", "gitea"].includes(repository.provider) && <HumanDeliverySync link={link} refresh={refresh} />}
+            {link.externalState?.mergeCommit && <p className="mt-1 text-muted-foreground">Merge commit: {link.externalState.mergeCommit.slice(0, 12)}</p>}
             {link.failureSummary && (
               <div className="mt-2 flex items-center justify-between gap-2 rounded bg-destructive/10 px-2 py-1.5 text-destructive">
                 <span>{link.failureSummary}</span>
