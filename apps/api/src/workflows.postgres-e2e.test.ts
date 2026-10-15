@@ -65,7 +65,9 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   assert.equal(failedResubmission.workflowState.delivery, "failed");
   assert.equal(failedResubmission.workflowState.acceptance, "failed");
   await json(await advance(manual.id, { stage: "delivery", decision: "retry", expectedRevision: 4 }));
-  assert.equal((await json(await advance(manual.id, { stage: "delivery", expectedRevision: 5 }))).status, "in_review");
+  const resubmitted = await json(await advance(manual.id, { stage: "delivery", expectedRevision: 5 }));
+  assert.equal(resubmitted.status, "in_review");
+  assert.equal(resubmitted.workflowState.acceptance, "pending");
   assert.equal((await json(await advance(manual.id, { stage: "acceptance", expectedRevision: 6, checks: [{ name: "Complete report", status: "passed" }] }))).status, "done");
 
   const agent = await fixture.identity.createAgent(fixture.owner.headers, { displayName: "Workflow executor" });
