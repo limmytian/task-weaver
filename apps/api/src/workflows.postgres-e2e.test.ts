@@ -61,8 +61,12 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   const followups = await db.query.tasks.findMany({ where: eq(tasks.requirementId, manual.id) });
   assert.equal(followups.length, 1);
   await db.update(tasks).set({ status: "done" }).where(eq(tasks.id, followups[0]!.id));
-  assert.equal((await json(await advance(manual.id, { stage: "delivery", expectedRevision: 3 }))).status, "in_review");
-  assert.equal((await json(await advance(manual.id, { stage: "acceptance", expectedRevision: 4, checks: [{ name: "Complete report", status: "passed" }] }))).status, "done");
+  const failedResubmission = await json(await advance(manual.id, { stage: "delivery", decision: "failed", expectedRevision: 3 }));
+  assert.equal(failedResubmission.workflowState.delivery, "failed");
+  assert.equal(failedResubmission.workflowState.acceptance, "failed");
+  await json(await advance(manual.id, { stage: "delivery", decision: "retry", expectedRevision: 4 }));
+  assert.equal((await json(await advance(manual.id, { stage: "delivery", expectedRevision: 5 }))).status, "in_review");
+  assert.equal((await json(await advance(manual.id, { stage: "acceptance", expectedRevision: 6, checks: [{ name: "Complete report", status: "passed" }] }))).status, "done");
 
   const agent = await fixture.identity.createAgent(fixture.owner.headers, { displayName: "Workflow executor" });
   await fixture.identity.setMembership(fixture.owner.headers, fixture.project.id, agent.id, { role: "maintainer", explicitPermissions: [] });

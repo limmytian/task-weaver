@@ -6,7 +6,7 @@ import type { Config } from './config.js'
 
 export const WORKFLOW_RESULT_PROTOCOL = `Return exactly one final result line with valid JSON:
 WORKFLOW_RESULT: {"decision":"complete","reason":"What was verified or performed","checks":[{"name":"configured check","status":"passed","summary":"Observed evidence"}]}
-Use changes_requested for output findings that need executor rework, or failed when the action cannot be completed. Report each required check explicitly. Never claim a check passed without inspecting evidence. Do not change the requirement status or advance its workflow yourself.`
+Use changes_requested for output findings that need executor rework, or failed when the action cannot be completed. Only include checks for the current stage, each with status passed or failed. Omit pending or future-stage checks. Report each required check explicitly. Never claim a check passed without inspecting evidence. Do not change the requirement status or advance its workflow yourself.`
 
 export function parseWorkflowAgentResult(output: string): WorkflowAgentResult {
   const texts: string[] = []

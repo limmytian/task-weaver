@@ -273,7 +273,7 @@ export async function advanceWorkflowStage(
   if (order.slice(0, stageIndex).some((stage) => state[stage] !== "complete" && state[stage] !== "skipped")) {
     throw new ValidationError("Previous workflow stages are incomplete");
   }
-  const resubmittingAfterFeedback = input.stage === "delivery" && input.decision === "complete"
+  const resubmittingAfterFeedback = input.stage === "delivery"
     && (state.delivery === "complete" || state.delivery === "skipped") && state.acceptance === "failed";
   if ((state[input.stage] === "complete" || state[input.stage] === "skipped") && !resubmittingAfterFeedback) throw new ValidationError("Workflow stage is already terminal");
   if (workflow[input.stage].mode === "skip" && input.stage !== "delivery") throw new ValidationError("Skipped stages advance automatically");
@@ -314,7 +314,7 @@ export async function advanceWorkflowStage(
     state.acceptance = "pending";
     state.integration = "pending";
   }
-  if (resubmittingAfterFeedback) {
+  if (resubmittingAfterFeedback && input.decision === "complete") {
     state.acceptance = "pending";
     state.integration = "pending";
   }
