@@ -6,7 +6,7 @@ COPY . .
 RUN --mount=type=cache,id=tw-public-pnpm,target=/pnpm/store,sharing=locked \
     pnpm install --store-dir=/pnpm/store --frozen-lockfile
 RUN --mount=type=cache,id=tw-public-pnpm,target=/pnpm/store,sharing=locked pnpm release:licenses
-RUN --mount=type=cache,id=tw-public-pnpm,target=/pnpm/store,sharing=locked pnpm --filter @task-weaver/api deploy --prod /runtime \
+RUN --mount=type=cache,id=tw-public-pnpm,target=/pnpm/store,sharing=locked pnpm --filter @task-weaver/api deploy --prod --network-concurrency=4 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=10000 /runtime \
     && node scripts/verify-api-runtime-dependencies.mjs /runtime
 
 # Production runner
