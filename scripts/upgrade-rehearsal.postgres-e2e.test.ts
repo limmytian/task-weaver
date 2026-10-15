@@ -46,12 +46,12 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
   // Seed the pinned legacy schema without referencing columns introduced by later migrations.
   const [project] = await db.execute<{ id: string }>(sql`INSERT INTO task_weaver.projects (name, created_by) VALUES ('Sanitized legacy A', 'tw-cli') RETURNING id`);
   const [other] = await db.execute<{ id: string }>(sql`INSERT INTO task_weaver.projects (name, created_by) VALUES ('Sanitized legacy B', 'anonymous') RETURNING id`);
-  const [requirement] = await db.insert(requirements).values({ projectId: project.id, title: "Recover lane", status: "approved", leaseGeneration: 5, createdBy: "tw-cli" }).returning();
+  const [requirement] = await db.execute<{ id: string }>(sql`INSERT INTO task_weaver.requirements (project_id, title, status, lease_generation, created_by) VALUES (${project.id}, 'Recover lane', 'approved', 5, 'tw-cli') RETURNING id`);
   const [task] = await db.insert(tasks).values({ projectId: project.id, requirementId: requirement.id, title: "Recover task", tags: ["capability:tw-v0.3.3-development"], createdBy: "apikey:synthetic" }).returning();
   const [privateDoc] = await db.execute<{ id: string }>(sql`INSERT INTO task_weaver.documents (title, content, personal_owner_id, personal_owner_type, created_by) VALUES ('Sanitized private note', 'Synthetic fixture only', 'apikey:synthetic', 'agent', 'apikey:synthetic') RETURNING id`);
   const [unknownDoc] = await db.execute<{ id: string }>(sql`INSERT INTO task_weaver.documents (title, content, created_by) VALUES ('Unmapped note', 'Synthetic fixture only', 'anonymous') RETURNING id`);
-  const [active] = await db.insert(daemons).values({ name: "Old active fixture", actorId: "tw-cli", actorType: "agent", status: "busy", activeTaskIds: [task.id], capabilities: ["codex"], lastHeartbeatAt: new Date() }).returning();
-  const [inactive] = await db.insert(daemons).values({ name: "Old inactive fixture", actorId: "tw-cli", actorType: "agent", status: "offline", lastHeartbeatAt: new Date(0) }).returning();
+  const [active] = await db.execute<{ id: string }>(sql`INSERT INTO task_weaver.daemons (name, actor_id, actor_type, status, active_task_ids, capabilities, last_heartbeat_at) VALUES ('Old active fixture', 'tw-cli', 'agent', 'busy', ARRAY[${task.id}]::uuid[], ARRAY['codex'], now()) RETURNING id`);
+  const [inactive] = await db.execute<{ id: string }>(sql`INSERT INTO task_weaver.daemons (name, actor_id, actor_type, status, last_heartbeat_at) VALUES ('Old inactive fixture', 'tw-cli', 'agent', 'offline', to_timestamp(0)) RETURNING id`);
   await db.insert(requirementClaims).values({ requirementId: requirement.id, claimedBy: "tw-cli", claimedByType: "agent", daemonId: active.id, workerIndex: "0", generation: 5, expiresAt: new Date(Date.now() + 600000) });
   // Pre-upgrade columns are explicit because current Drizzle metadata includes later auth fields.
   const legacyToken = `tw_${randomBytes(32).toString("hex")}`;
@@ -240,9 +240,9 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
     const state = await db.execute(sql`SELECT to_regclass('task_weaver.auth_actors') AS actors`);
     assert.equal(state[0].actors, null);
     assert.equal((await db.select({ id: projects.id }).from(projects)).length, 2);
-    assert.equal((await db.select().from(requirements)).length, 1);
+    assert.equal((await db.select({ id: requirements.id }).from(requirements)).length, 1);
     assert.equal((await db.select({ id: documents.id }).from(documents)).length, 2);
-    assert.equal((await db.select().from(daemons).where(eq(daemons.id, active.id)))[0].actorId, "tw-cli");
+    assert.equal((await db.select({ actorId: daemons.actorId }).from(daemons).where(eq(daemons.id, active.id)))[0].actorId, "tw-cli");
     await runMigrations(databaseUrl!);
     assert.equal((await db.select().from(authActors)).length, 0);
     assert.equal((await db.select().from(projectMemberships)).length, 0);
