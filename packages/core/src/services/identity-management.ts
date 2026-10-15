@@ -673,8 +673,7 @@ export function createIdentityManagementService(
       return db.transaction(async tx => {
         await lockIdentityLifecycle(tx);
         // The same credential-manager check used for listing protects subject metadata.
-        await credentialManager(tx, context, actorId, new Date(), true);
-        const authority = await getLiveRequestAuthority(tx, context);
+        const authority = await credentialManager(tx, context, actorId, new Date(), true);
         return intersectGrants(authority.grants, await loadPrincipalGrants(tx, actorId));
       });
     },
@@ -684,8 +683,7 @@ export function createIdentityManagementService(
       const actorId = parsed.actorId ?? context.actor.id;
       return db.transaction(async tx => {
         await lockIdentityLifecycle(tx);
-        await credentialManager(tx, context, actorId, new Date(), true);
-        const authority = await getLiveRequestAuthority(tx, context);
+        const authority = await credentialManager(tx, context, actorId, new Date(), true);
         const eligible = intersectGrants(authority.grants, await loadPrincipalGrants(tx, actorId));
         const projectIds = eligible.flatMap(grant => grant.scope === "project" ? [grant.projectId] : []);
         const pattern = `%${parsed.query.replace(/[\\%_]/g, "\\$&")}%`;

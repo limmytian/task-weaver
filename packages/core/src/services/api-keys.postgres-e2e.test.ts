@@ -684,6 +684,25 @@ test(
           }),
           AuthorizationError,
         );
+        await db.update(projectMemberships).set({ explicitPermissions: ["execution.run", "execution.review", "execution.merge"] })
+          .where(eq(projectMemberships.actorId, agent!.id));
+        const approvedAgentGrants: AuthorizationGrant[] = [{ ...read, permissions: ["resource.read", "resource.write", "execution.review", "execution.merge"] }];
+        await assert.rejects(service.issueScopedApiKey(db, owner.context, owner.actor.id, { name: "Human cannot acquire Agent execution rights", grants: approvedAgentGrants, expiresAt: null }), AuthorizationError);
+        const delegatedKey = await service.issueScopedApiKey(db, owner.context, agent!.id, { name: "Approved reviewer and integrator", grants: approvedAgentGrants, expiresAt: null });
+        const delegated = await service.authenticateScopedApiKey(db, delegatedKey.rawKey);
+        assert.equal(delegated.actor.id, agent!.id);
+        assert.ok((await service.getLiveRequestAuthority(db, owner.context)).grants.every(grant => !grant.permissions.includes("execution.review")), "Issuing Agent keys does not grant execution rights to the human");
+        const rotatedDelegate = await service.rotateScopedApiKey(db, owner.context, delegatedKey.id);
+        assert.deepEqual(rotatedDelegate.grants, approvedAgentGrants);
+        const boundedManager = await issue([personal, { ...read, permissions: ["resource.read", "resource.write", "execution.run"] }]);
+        const boundedContext = await service.authenticateScopedApiKey(db, boundedManager.rawKey);
+        await assert.rejects(service.issueScopedApiKey(db, boundedContext, agent!.id, { name: "Cannot exceed parent", grants: approvedAgentGrants, expiresAt: null }), AuthorizationError);
+        await db.update(projectMemberships).set({ role: "member" }).where(eq(projectMemberships.id, membership!.id));
+        await assert.rejects(service.issueScopedApiKey(db, owner.context, agent!.id, { name: "Manager without project administration", grants: approvedAgentGrants, expiresAt: null }), AuthorizationError);
+        await db.update(projectMemberships).set({ role: "owner" }).where(eq(projectMemberships.id, membership!.id));
+        await db.update(projectMemberships).set({ explicitPermissions: ["execution.run"] }).where(eq(projectMemberships.actorId, agent!.id));
+        const reducedDelegate = await service.authenticateScopedApiKey(db, rotatedDelegate.rawKey);
+        assert.ok(reducedDelegate.credential.kind === "api_key" && reducedDelegate.credential.grants.every(grant => !grant.permissions.includes("execution.review") && !grant.permissions.includes("execution.merge")));
         await db
           .update(authUsers)
           .set({ status: "disabled" })

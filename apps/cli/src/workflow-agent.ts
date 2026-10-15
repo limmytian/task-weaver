@@ -51,7 +51,9 @@ export async function runWorkflowAgent(options: {
       phase: options.stage === 'acceptance' ? 'review' : options.stage === 'delivery' ? 'execution' : 'integration',
     })
     if (child.resourceInterruption) throw new ExecutorResourceBlocked(child.resourceInterruption)
-    if (!child.ok) throw new Error(`Workflow agent exited with status ${child.status ?? 'unknown'}`)
-    return parseWorkflowAgentResult(child.stdout)
+    if (!child.ok) return { decision: 'failed', reason: `Workflow agent exited with status ${child.status ?? 'unknown'}`, checks: [] }
+    try { return parseWorkflowAgentResult(child.stdout) } catch {
+      return { decision: 'failed', reason: 'Agent response did not contain exactly one valid workflow result.', checks: [] }
+    }
   } finally { await access.close() }
 }

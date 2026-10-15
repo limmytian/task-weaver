@@ -858,7 +858,7 @@ export function registerDaemon(program: Command): void {
           if (workflow.delivery.mode !== 'skip' && (workflow.delivery.instructions.trim() || missingOutput)) {
             const tool = selectExecutorTool(tools, requirement.tags ?? [], lane.executorTool)
             if (!tool || !lane.runId) throw new Error('Configured delivery requires an available agent and worker run')
-            const prompt = `Complete Task Weaver delivery for requirement ${requirement.id}: ${requirement.title}.\nDescription: ${requirement.description ?? ''}\nDelivery method: ${workflow.delivery.method}\nInstructions: ${workflow.delivery.instructions || 'Register the required delivery evidence.'}\nExisting outputs: ${JSON.stringify(outputs)}\nUse tw req output register ${requirement.id} to register outputs. For comments, use a completed task as the comment target. Local files must be registered with --type local --file. The daemon owns Git commit, push and optional PR creation. Do not claim or release the requirement.\n${extraWorkerPrompt ?? ''}\n${WORKFLOW_RESULT_PROTOCOL}`
+            const prompt = `Complete Task Weaver delivery for requirement ${requirement.id}: ${requirement.title}.\nDescription: ${requirement.description ?? ''}\nDelivery method: ${workflow.delivery.method}\nInstructions: ${workflow.delivery.instructions || 'Register the required delivery evidence.'}\nExisting outputs: ${JSON.stringify(outputs)}\nReuse valid existing evidence instead of registering duplicate output records. Multiple records referencing the same valid output do not by themselves require rework. Use tw req output register ${requirement.id} to register missing outputs. For comments, use a completed task as the comment target. Local files must be registered with --type local --file. The daemon owns Git commit, push and optional PR creation. Do not claim or release the requirement.\n${extraWorkerPrompt ?? ''}\n${WORKFLOW_RESULT_PROTOCOL}`
             result = await runWorkflowAgent({ config: cliConfig, daemonId, requirement, runId: lane.runId, leaseGeneration: lane.leaseGeneration,
               workerIndex: w.index, stage: 'delivery', tool, argv: buildArgv(tool, prompt, workspace.rootPath, modelMappings.strong, thinkMappings.strong), cwd: workspace.rootPath, signal })
           }
@@ -929,7 +929,7 @@ export function registerDaemon(program: Command): void {
         console.log(`[Daemon] Worker ${w.index} resolving requirement "${requirement.title}"${executionSlice ? ` slice "${executionSlice.title}"` : ''} using tool: '${toolCmd}'${selectedModel ? ` model: '${selectedModel}'` : ''}${selectedReasoningEffort && toolCmd === 'codex' ? ` think: '${selectedReasoningEffort}'` : ''}`)
 
         let branchName: string = requirement?.branchName || task.branchName || ''
-        if (!branchName && requirement) {
+        if (!branchName && requirement && (!requirement.workflow || workflowNeedsWorktree(requirementWorkflowSchema.parse(requirement.workflow)))) {
           const slug = (requirement.title as string)
             .toLowerCase()
             .replace(/[^a-z0-9]+/g, '-')
@@ -1178,6 +1178,18 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           childResult = { ok: false, status: null, stdout: '', stderr: '', command: 'executor-preflight', signal: null,
             timedOut: false, cancelled: false, outputTruncated: false, durationMs: 0, resourceInterruption: error.observation }
         } finally { await access.close() }
+        if (childResult.cancelled && !signal.aborted && !childResult.timedOut && !childResult.resourceInterruption) {
+          try {
+            assertActive()
+            const completedTask = await daemonGet<any>(`/api/v1/tasks/${task.id}`)
+            if (completedTask.status === 'done' || completedTask.status === 'cancelled') {
+              childResult = { ...childResult, ok: true }
+              console.log(`[Daemon] Worker ${w.index} task completed before its delegated access closed.`)
+            }
+          } catch {
+            // Revoked authority or incomplete work must retain the original cancellation outcome.
+          }
+        }
         if (childResult.ok && !signal.aborted) {
           try {
             const current = await daemonGet<any>(`/api/v1/requirements/${requirement.id}`)

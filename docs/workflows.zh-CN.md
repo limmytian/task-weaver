@@ -43,3 +43,5 @@ worktreeMode 为 auto 时，仅 Git 交付或整合创建 worktree；none 使用
 ## AI 工具登录
 
 子进程的任务 HOME 和 Task Weaver 访问配置独立隔离；Codex / Claude 使用操作者已登录的原生 CLI 配置目录。可通过 TW_CODEX_HOME / TW_CLAUDE_CONFIG_DIR 显式选择，未设置时使用对应原生环境变量或用户默认目录。Task Weaver supervisor Key 和 Git/provider 密钥环境变量仍不会传给子进程。启动 daemon 前应先登录所选 AI CLI。
+
+项目 Owner / Maintainer 在近期确认身份的浏览器会话中，可以为自己管理的 Agent 签发包含该项目已批准执行权限的 Key；这不会赋予人类本人这些执行权限。通过 API Key 派生的凭据仍受父 Key 权限范围约束；修改 Agent 成员权限不会自动扩展已有 Key。

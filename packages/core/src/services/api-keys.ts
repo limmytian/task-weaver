@@ -7,10 +7,12 @@ import {
   apiKeyEvents,
   authSessions,
   executionDelegations,
+  projectMemberships,
 } from "@task-weaver/db";
 import { createHash, randomBytes } from "node:crypto";
 import {
   AuthenticationError,
+  PROJECT_ROLE_GRANTABLE_PERMISSIONS,
   AuthorizationError,
   NotFoundError,
   ValidationError,
@@ -279,7 +281,21 @@ export async function credentialManager(
       subject.managedByActorId !== authority.actor.id)
   )
     throw new AuthorizationError();
-  return { ...authority, subject };
+  let grants = authority.grants;
+  if (context.credential.kind === "session" && subject.type === "agent" && subject.managedByActorId === authority.actor.id) {
+    // Project administrators may issue approved Agent entitlements without exercising them as humans.
+    // API-key callers never receive this administrative delegation authority.
+    const memberships = await db.select({ projectId: projectMemberships.projectId, role: projectMemberships.role })
+      .from(projectMemberships).where(and(eq(projectMemberships.actorId, authority.actor.id), isNull(projectMemberships.removedAt)));
+    const roles = new Map(memberships.map((membership) => [membership.projectId, membership.role]));
+    grants = grants.map((grant) => {
+      if (grant.scope !== "project" || !grant.permissions.includes("project.members.manage") || !grant.permissions.includes("agent.manage")) return grant;
+      const role = roles.get(grant.projectId);
+      if (role !== "owner" && role !== "maintainer") return grant;
+      return { ...grant, permissions: [...new Set([...grant.permissions, ...PROJECT_ROLE_GRANTABLE_PERMISSIONS[role]])] };
+    });
+  }
+  return { ...authority, grants, subject };
 }
 export async function keyManager(
   db: AuthDatabase,

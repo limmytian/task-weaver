@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { request } from './client.js'
 import type { Config } from './config.js'
-import { buildAiEnvironment, redactTrustedOutput } from './repository-credentials.js'
+import { buildAiEnvironment, redactSensitiveOutput } from './repository-credentials.js'
 import { createTaskAccessBroker, type TaskCapability } from './task-access-broker.js'
 
 /** Task access is isolated; AI CLIs retain their operator-selected authenticated configuration. */
@@ -59,7 +59,7 @@ export async function createTaskWorkerAccess(options: {
     return { environment, signal: controller.signal,
       redact: (value: string) => {
         for (const secret of secrets) value = value.split(secret).join('[redacted]')
-        return redactTrustedOutput(value)
+        return redactSensitiveOutput(value)
       },
       async close() {
         options.signal?.removeEventListener('abort', abort)

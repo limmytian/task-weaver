@@ -43,3 +43,5 @@ Retirement requires completed producers/consumers and elapsed local retention (d
 ## Authenticated AI tools
 
 Workers keep a separate task HOME and task API configuration, while Codex and Claude use the operator's authenticated CLI configuration directory. Override it with `TW_CODEX_HOME` or `TW_CLAUDE_CONFIG_DIR`; otherwise the corresponding native configuration environment variable or normal user configuration directory applies. Supervisor Task Weaver keys and Git/provider secret environment variables remain outside the child environment. Authenticate the selected AI CLI before starting a daemon.
+
+A project owner or maintainer using a recently confirmed browser session can issue a managed Agent Key containing execution entitlements already approved for that Agent in that project. This does not give the human those execution rights. An API-key caller can only issue within its own parent credential ceiling; changing Agent membership never expands an existing Key.

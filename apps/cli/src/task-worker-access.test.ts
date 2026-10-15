@@ -55,6 +55,10 @@ test('worker TW commands use a broker while supervisor, provider and Git secrets
     assert.equal(child.status, 0)
     assert.equal(child.stdout.trim(), actorId)
     assert.equal(access.redact(`${supervisorKey} ${token} ${access.environment.TW_API_KEY}`), '[redacted] [redacted] [redacted]')
+    const longOutput = `${'x'.repeat(5000)} ${supervisorKey} WORKFLOW_RESULT: complete`
+    const redactedOutput = access.redact(longOutput)
+    assert.ok(redactedOutput.endsWith('[redacted] WORKFLOW_RESULT: complete'))
+    assert.ok(redactedOutput.length > 5000)
     authorized = false
     await new Promise<void>(resolve => access!.signal.addEventListener('abort', () => resolve(), { once: true }))
     assert.equal(access.signal.aborted, true)
