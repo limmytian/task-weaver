@@ -76,3 +76,15 @@ export class ChatConfigurationError extends Error {
     this.name = "ChatConfigurationError";
   }
 }
+
+const requirementCompletionMessages = {
+  requirement_repository_delivery_incomplete: "Requirement cannot be completed until every repository delivery is merged or unchanged",
+  requirement_workflow_incomplete: "Requirement workflow stages are not complete",
+} as const;
+/** Completion reasons are fixed public messages, separate from credential validation failures. */
+export class RequirementCompletionError extends ValidationError {
+  constructor(readonly code: keyof typeof requirementCompletionMessages) {
+    super(requirementCompletionMessages[code]);
+    this.name = "RequirementCompletionError";
+  }
+}

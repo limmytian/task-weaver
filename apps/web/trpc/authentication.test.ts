@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { randomBytes } from "node:crypto";
 import type { Database } from "@task-weaver/db";
-import { createAuthenticationRuntime } from "@task-weaver/core";
+import { createAuthenticationRuntime, RequirementCompletionError, ValidationError } from "@task-weaver/core";
+import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "./routers/_app";
 import { createTRPCContextFactory, publicProcedure, router } from "./init";
 
@@ -76,4 +77,17 @@ test("setup readiness is an explicit anonymous, uncached and origin-guarded quer
     await assert.rejects(() => fixture(headers, db).then(ctx => appRouter.createCaller(ctx).auth.setupStatus()));
   }
   assert.equal(reads, 1);
+});
+
+test("fixed completion reasons cross tRPC while arbitrary validation details stay private", async () => {
+  for (const failure of [new RequirementCompletionError("requirement_repository_delivery_incomplete"), new ValidationError("private-provider-secret")]) {
+    const endpoint = router({ version: router({ info: publicProcedure.query(() => { throw failure; }) }) });
+    const context = await fixture();
+    await assert.rejects(() => endpoint.createCaller(context).version.info(), (error: unknown) => { assert.equal((error as Error).message, failure instanceof RequirementCompletionError ? failure.message : "Invalid request"); return true; });
+    const response = await fetchRequestHandler({ endpoint: "/api/trpc", req: new Request("http://localhost:3000/api/trpc/version.info"), router: endpoint, createContext: () => context });
+    const body = JSON.stringify(await response.json());
+    assert.equal(response.status, 400, body);
+    assert.equal(body.includes("private-provider-secret"), false);
+    assert.equal(body.includes("every repository delivery is merged or unchanged"), failure instanceof RequirementCompletionError);
+  }
 });

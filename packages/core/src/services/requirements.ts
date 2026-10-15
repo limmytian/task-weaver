@@ -1,3 +1,4 @@
+import { RequirementCompletionError } from "@task-weaver/contracts";
 import type { RetrievalPredicates } from "./retrieval-predicates";
 import type { SQL } from "drizzle-orm";
 import { eq, and, sql, inArray } from "drizzle-orm";
@@ -558,7 +559,7 @@ export async function updateRequirement(
       if (state.delivery !== "complete" && state.delivery !== "skipped"
         || state.acceptance !== "complete" && state.acceptance !== "skipped"
         || state.integration !== "complete" && state.integration !== "skipped") {
-        throw new ValidationError("Requirement workflow stages are not complete");
+        throw new RequirementCompletionError("requirement_workflow_incomplete");
       }
     } else {
       const repositoryLinks = await db
@@ -569,9 +570,7 @@ export async function updateRequirement(
         (link) => link.deliveryStatus !== "merged" && link.deliveryStatus !== "unchanged",
       );
       if (incomplete.length > 0) {
-        throw new ValidationError(
-          "Requirement cannot be completed until every repository delivery is merged or unchanged",
-        );
+        throw new RequirementCompletionError("requirement_repository_delivery_incomplete");
       }
     }
   }

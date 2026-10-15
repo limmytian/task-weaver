@@ -43,6 +43,7 @@ export function HumanDeliverySync({ link, refresh }: {
             if (!attempt) return;
             try {
               const result = await sync.mutateAsync({ linkId: link.id, data: { pullRequestUrl: url.trim(), reason: reason.trim(), expectedRevision: attempt.revision, expectedUpdatedAt: new Date(attempt.updatedAt), idempotencyKey: attempt.requestId } });
+              if (!result.ok) throw new Error(result.error);
               await refresh(); setOpen(false);
               toast.success(result.link.deliveryStatus === "merged" ? "Verified merge recorded. The requirement can complete once its tasks and configured stages are satisfied." : "PR state synchronized. The provider has not merged it.");
             } catch (failure) {

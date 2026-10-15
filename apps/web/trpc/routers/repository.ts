@@ -7,6 +7,8 @@ import {
   listRepositoriesSchema,
   repositoryReadinessInputSchema,
   createResourceServices,
+  ValidationError,
+  ConflictError,
   reconcileHumanRepositoryDeliverySchema,
   updateRepositorySchema,
 } from "@task-weaver/core";
@@ -63,7 +65,15 @@ export const repositoryRouter = router({
   )),
   reconcileHumanDelivery: ordinaryResourceProcedure
     .input(z.object({ linkId: z.string().uuid(), data: reconcileHumanRepositoryDeliverySchema }))
-    .mutation(({ ctx, input }) => createResourceServices(ctx.identity).repositoryService.reconcileHumanRepositoryDelivery(ctx.db, input.linkId, input.data, ctx.actor)),
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const result = await createResourceServices(ctx.identity).repositoryService.reconcileHumanRepositoryDelivery(ctx.db, input.linkId, input.data, ctx.actor);
+        return { ok: true as const, ...result };
+      } catch (error) {
+        if (error instanceof ValidationError || error instanceof ConflictError) return { ok: false as const, error: error.message };
+        throw error;
+      }
+    }),
   listForTask: ordinaryResourceProcedure.input(z.object({ taskId: z.string().uuid() }))
     .query(({ ctx, input }) => createResourceServices(ctx.identity).repositoryService.listTaskRepositories(ctx.db, input.taskId, ctx.actor)),
   addToTask: ordinaryResourceProcedure.input(z.object({ taskId: z.string().uuid() }).merge(addTaskRepositorySchema))
