@@ -127,8 +127,8 @@ test("daemon authority scopes registration, queues and fenced operations", { ski
       assert.equal((await call("register", executor.headers, { ...registration, id, role, capabilities: [role === "reviewer" ? "review" : "merge"] })).response.status, 201);
       const candidate = await owner.service.requirementService.createRequirement(db, { projectId: project.id, title: `${role} work`, status: "approved" }, owner.actor);
       await owner.service.taskService.createTask(db, { projectId: project.id, requirementId: candidate.id, title: `${role} task` }, owner.actor);
-      await db.update(requirements).set({ status: role === "reviewer" ? "in_review" : "ready_to_merge" }).where(eq(requirements.id, candidate.id));
-      await db.update(requirements).set({ status: role === "reviewer" ? "in_review" : "ready_to_merge" }).where(eq(requirements.id, privateReq.id));
+      await db.update(requirements).set({ workflow: null, status: role === "reviewer" ? "in_review" : "ready_to_merge" }).where(eq(requirements.id, candidate.id));
+      await db.update(requirements).set({ workflow: null, status: role === "reviewer" ? "in_review" : "ready_to_merge" }).where(eq(requirements.id, privateReq.id));
       const acquired = await call(`${id}/${role === "reviewer" ? "apply-review" : "apply-merge"}`, executor.headers, {});
       assert.equal(acquired.response.status, 200, JSON.stringify(acquired.body));
       assert.equal(acquired.body.requirement.id, candidate.id);
