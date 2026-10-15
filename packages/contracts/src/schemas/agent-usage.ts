@@ -61,7 +61,7 @@ export const agentUsageSummarySchema = z
     }
   });
 export type AgentUsageSummary = z.infer<typeof agentUsageSummarySchema>;
-export const usagePhaseSchema = z.enum(["execution", "review", "rework"]);
+export const usagePhaseSchema = z.enum(["execution", "review", "rework", "integration"]);
 export const usageOutcomeSchema = z.enum([
   "running",
   "succeeded",

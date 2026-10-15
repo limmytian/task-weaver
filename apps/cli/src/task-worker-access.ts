@@ -1,5 +1,5 @@
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { request } from './client.js'
 import type { Config } from './config.js'
@@ -49,6 +49,8 @@ export async function createTaskWorkerAccess(options: {
       HOME: home, XDG_CONFIG_HOME: join(root, 'config'), XDG_DATA_HOME: join(root, 'data'),
       CODEX_HOME: join(root, 'codex'), CLAUDE_CONFIG_DIR: join(root, 'claude'),
       TW_CONFIG_DIR: join(root, 'tw'), TW_API_URL: broker.apiUrl, TW_API_KEY: broker.apiKey,
+      TW_NODE_ID: options.config.nodeId,
+      TW_ARTIFACT_ROOT: process.env.TW_ARTIFACT_ROOT ?? join(homedir(), '.task-weaver', 'artifacts'),
       TW_TASK_ID: options.taskId, TW_DAEMON_ID: options.daemonId, TW_DAEMON_RUN_ID: options.runId,
       TW_REQUIREMENT_LEASE_GENERATION: String(options.leaseGeneration),
       CI: process.env.CI ?? '1', NO_COLOR: '1', TERM: 'xterm-256color',

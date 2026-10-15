@@ -1,10 +1,12 @@
 import { matchDaemonTaskCapabilities } from "./daemon-capabilities";
 import { MAX_REPOSITORY_AUTO_RETRY_ATTEMPTS } from "./daemon-state-machine";
+import { requirementWorkflowSchema } from "@task-weaver/contracts";
 
 export type DaemonControlPlaneRole = "executor" | "reviewer" | "merger";
 export type DaemonQueueState = "runnable" | "blocked" | "retrying" | "manual";
 
 export interface DaemonQueueDaemonInput {
+  nodeId?: string | null;
   role: DaemonControlPlaneRole;
   capabilities: string[];
   configuredCapabilities?: string[];
@@ -53,6 +55,10 @@ export interface DaemonQueueRepositoryInput {
 }
 
 export interface DaemonQueueRequirementInput {
+  workflow?: unknown;
+  workflowState?: Record<string, string> | null;
+  workflowOutputs?: Array<{ id: string; type: string; nodeId: string | null; availability: string }>;
+  workflowInputs?: Array<{ taskId: string | null; executionSliceId: string | null; output: { id: string; type: string; nodeId: string | null; availability: string } }>;
   id: string;
   projectId: string;
   projectName: string;
@@ -211,10 +217,27 @@ export function classifyDaemonQueueRequirement(
   if (!unfinished(requirement.status)) return null;
 
   const role = roleForStatus(requirement.status);
+  const parsedWorkflow = requirementWorkflowSchema.safeParse(requirement.workflow);
+  const workflow = parsedWorkflow.success ? parsedWorkflow.data : null;
+  const executionComplete = (requirement.tasks ?? []).every((task) => ["done", "cancelled"].includes(task.status));
+  const stage = requirement.status === "in_review" ? "acceptance" : requirement.status === "ready_to_merge" ? "integration" : executionComplete ? "delivery" : null;
+  if (workflow && stage && (workflow[stage].mode === "manual" || requirement.workflowState?.[stage] === "failed")) {
+    return queueItem(requirement, "operator", "manual", ["workflow_stage"], [`${stage} ${requirement.workflowState?.[stage] === "failed" ? "failed and requires a decision or retry" : "requires a human decision"}`]);
+  }
+  const localInputs = (task?: DaemonQueueTaskInput) => (requirement.workflowInputs ?? [])
+    .filter((input) => !task || ((!input.taskId || input.taskId === task.id) && (!input.executionSliceId || input.executionSliceId === task.executionSliceId)))
+    .map((input) => input.output).filter((output) => output.type === "local");
+  const requiredLocalOutputs = [...(role === "executor" && !executionComplete ? [] : (requirement.workflowOutputs ?? []).filter((output) => output.type === "local")), ...localInputs()];
+  if (workflow && role !== "executor" && requiredLocalOutputs.some((output) => output.availability !== "available")) {
+    return queueItem(requirement, role ?? "operator", "blocked", ["artifact_unavailable"], ["A required local artifact is missing, changed, or retired; verify it on the producing node"]);
+  }
+  if (workflow && role !== "executor" && requiredLocalOutputs.length && !daemons.some((daemon) => daemon.role === role && requiredLocalOutputs.every((output) => output.nodeId === daemon.nodeId))) {
+    return queueItem(requirement, role ?? "operator", "blocked", ["artifact_locality"], [`No healthy ${role} daemon is available on all required artifact nodes`]);
+  }
   const manualMerge = (requirement.repositories ?? []).find(
     (repository) => repository.deliveryStatus === "ready_to_merge" && repository.mergeMode === "manual",
   );
-  if (manualMerge) {
+  if (!workflow && manualMerge) {
     return queueItem(
       requirement,
       "operator",
@@ -320,6 +343,9 @@ export function classifyDaemonQueueRequirement(
   }
 
   if (role !== "executor") {
+    if (workflow && stage && (workflow[stage].instructions.trim() || (stage === "acceptance" && workflow.acceptance.requiredChecks.length)) && !roleDaemons.some((daemon) => daemon.capabilities.includes("workflow-agent"))) {
+      return queueItem(requirement, role, "blocked", ["capability"], [`Configured ${stage} instructions require an available agent`]);
+    }
     if (role === "reviewer" && roleDaemons.every(daemon => {
       const configured = daemon.configuredCapabilities ?? daemon.capabilities;
       const tools = configured.filter(tool => ["codex", "claude", "agy", "aider", "cursor"].includes(tool));
@@ -341,6 +367,11 @@ export function classifyDaemonQueueRequirement(
   const activeSlices = slices.filter((slice) => unfinished(slice.status));
   const pendingTasks = (requirement.tasks ?? []).filter((task) => task.status === "todo");
   if (pendingTasks.length === 0) {
+    if (workflow && executionComplete && workflow.delivery.mode !== "manual") {
+      if (requiredLocalOutputs.some((output) => output.availability !== "available")) return queueItem(requirement, role, "blocked", ["artifact_unavailable"], ["A local delivery artifact is unavailable"]);
+      if (requiredLocalOutputs.length && !roleDaemons.some((daemon) => requiredLocalOutputs.every((output) => output.nodeId === daemon.nodeId))) return queueItem(requirement, role, "blocked", ["artifact_locality"], ["No executor is available on the producing node"]);
+      return queueItem(requirement, role, "runnable", [], ["Execution is complete; configured delivery is ready"]);
+    }
     return queueItem(
       requirement,
       role,
@@ -354,6 +385,13 @@ export function classifyDaemonQueueRequirement(
   const blockedReasonCodes = new Set<string>();
   const blockedReasons = new Set<string>();
   for (const task of pendingTasks) {
+    const inputs = localInputs(task);
+    if (inputs.some((output) => output.availability !== "available")) {
+      blockedReasonCodes.add("artifact_unavailable"); blockedReasons.add("A required task artifact is unavailable"); continue;
+    }
+    if (inputs.length && !roleDaemons.some((daemon) => inputs.every((output) => output.nodeId === daemon.nodeId))) {
+      blockedReasonCodes.add("artifact_locality"); blockedReasons.add("No executor is available on the task artifact node"); continue;
+    }
     const taskBlockers = (task.dependencies ?? []).filter((dependency) =>
       dependency.type === "blocks" && dependency.dependsOn?.status !== "done",
     );
@@ -394,7 +432,7 @@ export function classifyDaemonQueueRequirement(
   }
 
   const runnableTask = structurallyRunnable.find((task) =>
-    roleHasCapability(role, task.tags ?? [], daemons),
+    roleHasCapability(role, task.tags ?? [], daemons.filter((daemon) => localInputs(task).every((output) => output.nodeId === daemon.nodeId))),
   );
   if (!runnableTask) {
     const task = structurallyRunnable[0];

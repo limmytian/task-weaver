@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import {
   applyPlanSchema,
-  planService,
+  createResourceServices,
   NotFoundError,
   ValidationError,
 } from "@task-weaver/core";
@@ -21,7 +21,7 @@ plans.post("/apply", async (c) => {
   }
 
   try {
-    const result = await planService.applyPlan(db, parsed.data, actor);
+    const result = await createResourceServices(c.get("identity")).planService.applyPlan(db, parsed.data, actor);
     return c.json(result, parsed.data.dryRun ? 200 : 201);
   } catch (err) {
     if (err instanceof NotFoundError) {

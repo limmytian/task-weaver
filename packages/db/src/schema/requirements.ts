@@ -1,4 +1,4 @@
-import { boolean, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import {
   actorTypeEnum,
   executionSliceStatusEnum,
@@ -22,6 +22,11 @@ export const requirements = pgTable(
     modelTier: modelTierEnum("model_tier").default("standard").notNull(),
     tags: text("tags").array(),
     branchName: text("branch_name"),
+    workflow: jsonb("workflow").$type<Record<string, unknown>>(),
+    workflowSource: text("workflow_source", { enum: ["basic", "project", "explicit", "legacy"] }),
+    workflowRevision: integer("workflow_revision").default(0).notNull(),
+    workflowState: jsonb("workflow_state").$type<Record<string, string>>(),
+    workflowStateRevision: integer("workflow_state_revision").default(0).notNull(),
     leaseGeneration: integer("lease_generation").default(0).notNull(),
     expectedAt: timestamp("expected_at", { withTimezone: true }),
     createdBy: text("created_by").notNull(),

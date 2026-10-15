@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { requirementWorkflowSchema } from "./workflows";
 
 export const projectStatusSchema = z.enum(["active", "archived"]);
 
@@ -18,6 +19,7 @@ export const updateProjectSchema = z.object({
   description: z.string().optional(),
   status: projectStatusSchema.optional(),
   executorFallbackPolicy: executorFallbackPolicySchema.nullable().optional(),
+  defaultWorkflow: requirementWorkflowSchema.nullable().optional(),
 });
 
 export const listProjectsSchema = z.object({

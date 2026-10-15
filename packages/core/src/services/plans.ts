@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { type Database, projects } from "@task-weaver/db";
+import { type Database, projects, requirements } from "@task-weaver/db";
 import type { Actor } from "@task-weaver/contracts";
 import type {
   ApplyPlanInput,
@@ -10,10 +10,13 @@ import type {
   PlanRequirementDependencyInput,
   PlanTaskDependencyInput,
 } from "@task-weaver/contracts";
-import { NotFoundError, ValidationError } from "@task-weaver/contracts";
-import * as documentService from "./documents";
-import * as requirementService from "./requirements";
-import * as taskService from "./tasks";
+import { NotFoundError, ValidationError, BASIC_WORKFLOW, requirementWorkflowSchema, workflowFromPreset, type RequirementWorkflow } from "@task-weaver/contracts";
+import type * as DocumentService from "./documents";
+import type * as RequirementService from "./requirements";
+import type * as TaskService from "./tasks";
+import { AuthorizationError } from "@task-weaver/contracts";
+
+interface PlanResourceServices { documentService: typeof DocumentService; requirementService: typeof RequirementService; taskService: typeof TaskService }
 
 type RefMap = Map<string, string>;
 
@@ -25,6 +28,7 @@ export interface PlanApplyRef {
 }
 
 export interface PlanApplyResult {
+  workflows?: Array<{ key: string; source: string; workflow: RequirementWorkflow | null }>;
   dryRun: boolean;
   summary: {
     requirements: { create: number; reuse: number };
@@ -87,17 +91,29 @@ export async function applyPlan(
   db: Database,
   input: ApplyPlanInput,
   actor: Actor,
+  services?: PlanResourceServices,
 ): Promise<PlanApplyResult> {
+  if (!services) throw new AuthorizationError();
+  const { documentService, requirementService, taskService } = services;
   await validateProject(db, input.plan.projectId);
   const normalized = normalizePlan(input.plan);
-  await validateExistingEntities(db, input.plan, normalized);
+  await validateExistingEntities(db, input.plan, normalized, services);
   validateReferences(input.plan, normalized);
-  await validateSliceAssignments(db, input.plan, normalized);
+  await validateSliceAssignments(db, input.plan, normalized, services);
   validateDependencyCycles(normalized.requirementDependencies, "requirement");
   validateDependencyCycles(normalized.taskDependencies, "task");
 
   const initialRefs = buildInitialRefs(input.plan);
   const dryRunResult = buildResult(input.plan, normalized, initialRefs, input.dryRun);
+  const project = await db.query.projects.findFirst({ where: eq(projects.id, input.plan.projectId) });
+  const workflows = await Promise.all(input.plan.requirements.map(async (requirement) => {
+    if (requirement.existingId) {
+      const existing = await db.query.requirements.findFirst({ where: eq(requirements.id, requirement.existingId) });
+      return { key: requirement.key, source: existing?.workflowSource ?? "legacy", workflow: existing?.workflow ? requirementWorkflowSchema.parse(existing.workflow) : null };
+    }
+    return { key: requirement.key, source: requirement.workflow || requirement.workflowPreset ? "explicit" : project?.defaultWorkflow ? "project" : "basic", workflow: requirement.workflow ?? (requirement.workflowPreset ? workflowFromPreset(requirement.workflowPreset) : project?.defaultWorkflow ? requirementWorkflowSchema.parse(project.defaultWorkflow) : BASIC_WORKFLOW) };
+  }));
+  dryRunResult.workflows = workflows;
   if (input.dryRun) return dryRunResult;
 
   const appliedRefs = await db.transaction(async (tx) => {
@@ -135,6 +151,8 @@ export async function applyPlan(
         tags: requirement.tags,
         branchName: requirement.branchName,
         expectedAt: requirement.expectedAt,
+        workflow: requirement.workflow,
+        workflowPreset: requirement.workflowPreset,
       }, actor);
       refs.requirements.set(requirement.key, created.id);
     }
@@ -245,7 +263,7 @@ export async function applyPlan(
     return refs;
   });
 
-  return buildResult(input.plan, normalized, appliedRefs, false);
+  return { ...buildResult(input.plan, normalized, appliedRefs, false), workflows };
 }
 
 async function validateProject(db: Database, projectId: string) {
@@ -262,7 +280,9 @@ async function validateExistingEntities(
   db: Database,
   plan: PlanInput,
   normalized: ReturnType<typeof normalizePlan>,
+  services: PlanResourceServices,
 ) {
+  const { documentService, requirementService, taskService } = services;
   const requirementKeys = new Set<string>();
   const taskKeys = new Set<string>();
   const documentKeys = new Set<string>();
@@ -307,16 +327,18 @@ async function validateExistingEntities(
     }
   }
 
-  await validateDirectRequirementRefs(db, plan, normalized);
-  await validateDirectTaskRefs(db, plan, normalized);
-  await validateDirectDocumentRefs(db, plan, normalized);
+  await validateDirectRequirementRefs(db, plan, normalized, services);
+  await validateDirectTaskRefs(db, plan, normalized, services);
+  await validateDirectDocumentRefs(db, plan, normalized, services);
 }
 
 async function validateDirectRequirementRefs(
   db: Database,
   plan: PlanInput,
   normalized: ReturnType<typeof normalizePlan>,
+  services: PlanResourceServices,
 ) {
+  const { requirementService } = services;
   const known = new Set(plan.requirements.map((req) => req.key));
   const refs = collectDirectRefs([
     ...normalized.requirementDependencies.flatMap((dep) => [dep.requirement, dep.dependsOn]),
@@ -335,7 +357,9 @@ async function validateDirectTaskRefs(
   db: Database,
   plan: PlanInput,
   normalized: ReturnType<typeof normalizePlan>,
+  services: PlanResourceServices,
 ) {
+  const { taskService } = services;
   const known = new Set(listPlanTasks(plan).map(({ task }) => task.key));
   const refs = collectDirectRefs([
     ...normalized.taskDependencies.flatMap((dep) => [dep.task, dep.dependsOn]),
@@ -355,7 +379,9 @@ async function validateDirectDocumentRefs(
   db: Database,
   plan: PlanInput,
   normalized: ReturnType<typeof normalizePlan>,
+  services: PlanResourceServices,
 ) {
+  const { documentService } = services;
   const known = new Set(plan.documents.map((doc) => doc.key));
   const refs = collectDirectRefs([
     ...normalized.documentLinks.flatMap((link) => [link.source, link.target]),
@@ -536,7 +562,9 @@ async function validateSliceAssignments(
   db: Database,
   plan: PlanInput,
   normalized: ReturnType<typeof normalizePlan>,
+  services: PlanResourceServices,
 ) {
+  const { taskService } = services;
   const taskRequirement = new Map<string, string>();
   const sliceRequirement = new Map<string, PlanRequirementInputLike>();
 

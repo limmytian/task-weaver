@@ -33,7 +33,8 @@
     "test:gateway-live": "node scripts/verify-partners-gateway-postgres.mjs --live",
     "test:agent-usage-postgres": "node scripts/verify-agent-usage-postgres.mjs",
     "test:auth-postgres": "node scripts/verify-auth-postgres.mjs",
-    "test:attachments-postgres": "node scripts/verify-attachments-postgres.mjs"
+    "test:attachments-postgres": "node scripts/verify-attachments-postgres.mjs",
+    "test:workflow-postgres": "node scripts/verify-workflow-postgres.mjs"
   },
   "devDependencies": {
     "dotenv-cli": "^11.0.0",

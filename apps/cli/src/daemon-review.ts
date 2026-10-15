@@ -63,6 +63,7 @@ export interface MergeRequirementBranchOptions extends ReviewCallbacks {
   baseBranch?: string
   run?: CommandRunner
   baseUpdateRetries?: number
+  expectedHeadCommit?: string
 }
 
 export interface ReviewAndMergeOptions extends ReviewRequirementBranchOptions {
@@ -367,6 +368,13 @@ export async function mergeRequirementBranch(options: MergeRequirementBranchOpti
     if (!mergeFetch.ok) {
       summaryLines.push(gitFailureLine('Merge worktree fetch', mergeFetch))
       return finish('failed', 'git_fetch_failed')
+    }
+    if (options.expectedHeadCommit) {
+      const head = await run('git', ['rev-parse', `origin/${branchName}`], mergeWorktreePath)
+      if (!head.ok || head.stdout.trim() !== options.expectedHeadCommit) {
+        summaryLines.push('- Merge stopped: remote branch differs from the accepted delivery commit.')
+        return finish('failed', 'merge_head_changed')
+      }
     }
     const reset = await run('git', ['reset', '--hard', `origin/${baseBranch}`], mergeWorktreePath)
     if (!reset.ok) {

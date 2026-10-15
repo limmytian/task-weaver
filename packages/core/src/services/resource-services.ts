@@ -5,7 +5,7 @@ import { inArray, and, eq, isNull, sql, desc } from "drizzle-orm";
 import {
   projectPreferences, type Database, daemons, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
   mcpTools, mcpLocalRequests, requirementRepositories, skillPackages, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
-  documentRequirementLinks, projectMemberships, activityLog, executionDelegations,
+  documentRequirementLinks, projectMemberships, activityLog, executionDelegations, taskComments, workflowOutputs,
 } from "@task-weaver/db";
 import {
   AuthenticationError, AuthorizationError, NotFoundError, ValidationError, type Actor,
@@ -44,11 +44,13 @@ import * as tiImplementation from "./ti-agent";
 import * as activityImplementation from "./activity-log";
 import * as usageImplementation from "./agent-usage";
 import * as reviewImplementation from "./reviews";
+import * as planImplementation from "./plans";
 import { authorizeMetadataOperation } from "./metadata-authorization";
 
-type Group = "project" | "requirement" | "task" | "claim" | "document" | "memory" | "recommendation" | "context" | "package" | "embedding" | "mcp" | "repository" | "usage" | "review" | "ti" | "activity" | "schedule" | "observability" | "metrics" | "progress" | "daemon" | "slo";
+type Group = "plan" | "project" | "requirement" | "task" | "claim" | "document" | "memory" | "recommendation" | "context" | "package" | "embedding" | "mcp" | "repository" | "usage" | "review" | "ti" | "activity" | "schedule" | "observability" | "metrics" | "progress" | "daemon" | "slo";
 type Input = Record<string, any>;
 const sources = {
+  plan: planImplementation,
   slo: sloImplementation, observability: observabilityImplementation, metrics: metricsImplementation, progress: progressImplementation, daemon: daemonImplementation, schedule: scheduleImplementation, ti: tiImplementation, activity: activityImplementation, usage: usageImplementation, review: reviewImplementation,
   repository: repositoryImplementation, project: projectImplementation, requirement: requirementImplementation, task: taskImplementation,
   claim: claimImplementation, document: documentImplementation, memory: memoryImplementation,
@@ -61,6 +63,9 @@ const readById: Record<string, ResourceKind> = {
   listRequirementDependencies: "requirement", checkBlockingDependencies: "task", checkBlockingRequirementDependencies: "requirement",
   getBacklinks: "document", getDocumentVersion: "document",
   getProjectStats: "project", getProjectHealthDashboard: "project", getKnowledgeGraph: "project",
+  listWorkflowOutputs: "requirement",
+  listWorkflowInputs: "requirement",
+  getWorkflowCleanupEligibility: "requirement",
   getKanbanBoard: "project", getGanttChart: "project", getRequirementHeatmap: "project",
   getRequirementBurndown: "requirement", getRequirementTaskDependencyGraph: "requirement",
   getDocumentRecommendations: "document", getTaskRecommendations: "task",
@@ -80,6 +85,8 @@ const archivedReadOperations = new Set([
 const writeById: Record<string, ResourceKind> = {
   updateProject: "project", deleteProject: "project", togglePin: "project",
   updateRequirement: "requirement", deleteRequirement: "requirement", createExecutionSlice: "requirement",
+  registerWorkflowOutput: "requirement", advanceWorkflowStage: "requirement",
+  retireWorkflowOutput: "requirement",
   updateExecutionSlice: "slice", deleteExecutionSlice: "slice", updateTask: "task", updateTaskStatus: "task",
   deleteTask: "task", addTaskComment: "task", addTaskNote: "task", updateDocument: "document",
   deleteDocument: "document", revertDocument: "document", updateMemory: "memory", forgetMemory: "memory",
@@ -119,6 +126,7 @@ function bindServices(context?: VerifiedRequestContext) {
           const call = [...args];
           call[0] = txDb;
           await authorizeOperation(txDb, authority, group, name, call, context);
+          if (group === "plan" && name === "applyPlan") call[3] = createResourceServices(context);
           const removedDocumentLink = name === "unlinkDocumentFromTask"
             ? await tx.query.documentTaskLinks.findFirst({ where: eq(documentTaskLinks.id, call[1]) })
             : name === "unlinkDocumentFromRequirement"
@@ -168,7 +176,7 @@ function bindServices(context?: VerifiedRequestContext) {
           if (group === "task" && ["updateTask", "updateTaskStatus"].includes(name) && ["done", "cancelled"].includes(result?.status)) {
             await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(isNull(executionDelegations.revokedAt), sql`${call[1]}::uuid = ANY(${executionDelegations.taskIds})`, result.status === "done" ? inArray(executionDelegations.purpose, ["execute", "automation"]) : undefined));
           }
-          if (group === "requirement" && ["updateRequirement", "updateRequirementStatus"].includes(name) && ["done", "cancelled", "archived"].includes(result?.status)) {
+          if (group === "requirement" && ["updateRequirement", "updateRequirementStatus", "advanceWorkflowStage"].includes(name) && ["done", "cancelled", "archived"].includes(result?.status)) {
             await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(isNull(executionDelegations.revokedAt), eq(executionDelegations.requirementId, call[1])));
           }
           if (group === "task" && name === "updateTask" && ["requirementId", "executionSliceId", "assignee", "assigneeType"].some(key => key in (call[2] ?? {}))) {
@@ -215,6 +223,7 @@ function bindServices(context?: VerifiedRequestContext) {
     })) as T;
   }
   return {
+    planService: bind("plan", sources.plan),
     daemonSloService: bind("slo", sources.slo), daemonObservabilityService: bind("observability", sources.observability), daemonMetricsService: bind("metrics", sources.metrics), daemonProgressService: bind("progress", sources.progress), daemonService: bind("daemon", sources.daemon), scheduleService: bind("schedule", sources.schedule), tiAgentService: bind("ti", sources.ti), activityLogService: bind("activity", sources.activity), agentUsageService: bind("usage", sources.usage), reviewService: bind("review", sources.review), repositoryService: bind("repository", sources.repository), projectService: bind("project", sources.project), requirementService: bind("requirement", sources.requirement),
     taskService: bind("task", sources.task), claimService: bind("claim", sources.claim),
     documentService: bind("document", sources.document), memoryService: bind("memory", sources.memory),
@@ -223,7 +232,7 @@ function bindServices(context?: VerifiedRequestContext) {
 }
 
 /** Compatibility names compile for staged adapters but cannot authorize a caller. */
-export const { projectService, requirementService, taskService, claimService, documentService, memoryService, recommendationService, contextService, skillPackageService, embeddingService, mcpRegistryService, repositoryService, agentUsageService, reviewService, tiAgentService, activityLogService, scheduleService, daemonObservabilityService, daemonMetricsService, daemonProgressService, daemonService, daemonSloService } = bindServices();
+export const { planService, projectService, requirementService, taskService, claimService, documentService, memoryService, recommendationService, contextService, skillPackageService, embeddingService, mcpRegistryService, repositoryService, agentUsageService, reviewService, tiAgentService, activityLogService, scheduleService, daemonObservabilityService, daemonMetricsService, daemonProgressService, daemonService, daemonSloService } = bindServices();
 
 async function checkTaskInput(db: Database, authority: ResourceAuthority, input: Input, current?: ResourceScope) {
   const scope: ResourceScope = current ?? (input.scope === "personal" ? {
@@ -267,7 +276,11 @@ function redactDelegatedInput(value: any): any {
 function authorizeDelegatedOperation(authority: ResourceAuthority, group: Group, name: string, call: any[]) {
   const reads = new Set(["getProject", "getRequirement", "getTask", "getTaskDetail", "listTasks", "listRequirements", "listProjects", "getDocument", "getDocumentDetail", "listDocuments", "getTaskClaim", "getRequirementClaim", "listExecutionSlices", "listTaskComments", "listTaskNotes", "listDocumentVersions", "getDocumentVersion", "getRequirementRepositories", "getTaskRepositories", "listRequirementRepositories", "listTaskRepositories", "getRepository", "listRepositories", "bootstrapContext", "getBootstrapContext", "searchTasks", "searchRequirements", "searchDocuments", "searchDocumentsFulltext", "searchAll", "resolveTitles", "listContextEntries", "searchContext", "getContextEntry"]);
   const writes = new Set(["updateTask", "updateTaskStatus", "addTaskComment", "addTaskNote", "claimTask", "releaseTask", "heartbeatClaim", "updateDocument"]);
-  if (!reads.has(name) && !(["execute", "automation"].includes(authority.bounds?.purpose ?? "") && writes.has(name))) throw new AuthorizationError();
+  reads.add("listWorkflowOutputs");
+  reads.add("listWorkflowInputs");
+  writes.add("registerWorkflowOutput");
+  const deliveryWrites = new Set(["registerWorkflowOutput", "addTaskComment", "addTaskNote", "updateDocument"]);
+  if (!reads.has(name) && !(["execute", "automation"].includes(authority.bounds?.purpose ?? "") && writes.has(name)) && !(authority.bounds?.purpose === "delivery" && deliveryWrites.has(name))) throw new AuthorizationError();
   if (["usage", "review", "ti", "activity", "schedule", "observability", "metrics", "progress", "daemon", "mcp", "embedding", "memory", "package", "slo"].includes(group)) throw new AuthorizationError();
   if (name === "updateTask" && Object.keys(call[2] ?? {}).some(key => !["title", "description", "priority", "expectedAt", "expectedVersion", "version", "status", "reason", "daemonId", "leaseGeneration"].includes(key))) throw new AuthorizationError();
   if (name === "updateTaskStatus") {
@@ -277,6 +290,9 @@ function authorizeDelegatedOperation(authority: ResourceAuthority, group: Group,
     call[6] = fence;
   }
   if (name === "updateDocument" && Object.keys(call[2] ?? {}).some(key => !["title", "content", "version"].includes(key))) throw new AuthorizationError();
+  if (name === "registerWorkflowOutput") {
+    call[2] = { ...call[2], daemonId: authority.bounds!.daemonId ?? undefined, leaseGeneration: Number(authority.bounds!.leaseGeneration) };
+  }
 }
 
 async function authorizeOperation(db: Database, authority: ResourceAuthority, group: Group, name: string, call: any[], context: VerifiedRequestContext) {
@@ -286,6 +302,11 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
   }
   if (group === "usage" || group === "review" || group === "ti" || group === "activity" || group === "schedule" || group === "observability" || group === "metrics" || group === "progress" || group === "daemon") return authorizeMetadataOperation(db, authority, group, name, call);
   const id = call[1];
+  if (group === "plan") {
+    if (name !== "applyPlan" || authority.bounds) throw new AuthorizationError();
+    await requireResource(db, authority, "project", call[1].plan.projectId, "resource.write");
+    return;
+  }
   if (group === "repository") {
     const visibility = repositoryPredicate(authority);
     const predicates = { requirements: resourcePredicate(authority, requirements), tasks: taskResourcePredicate(authority) };
@@ -394,6 +415,19 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     }
     return;
   }
+  if (name === "addWorkflowInput") {
+    await requireResource(db, authority, "requirement", id, authority.actor.type === "human" ? "resource.write" : "execution.run");
+    const output = await db.query.workflowOutputs.findFirst({ where: eq(workflowOutputs.id, call[2]?.outputId) });
+    if (!output) throw new NotFoundError("Resource not found");
+    await requireResource(db, authority, "requirement", output.requirementId);
+    if (call[2]?.taskId) await requireResource(db, authority, "task", call[2].taskId, "resource.write");
+    if (call[2]?.executionSliceId) await requireResource(db, authority, "slice", call[2].executionSliceId, "resource.write");
+    return;
+  }
+  if (name === "reportWorkflowOutputAvailability") {
+    await requireResource(db, authority, "requirement", id, authority.actor.type === "human" ? "resource.write" : "resource.read");
+    return;
+  }
   if (group === "embedding") {
     if (name === "listEmbeddingProfiles") { call[1] = profileResourcePredicate(authority); return; }
     if (name === "createEmbeddingProfile") {
@@ -489,6 +523,26 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
   if (name === "togglePin") {
     await requireResource(db, authority, "project", id);
     requireScope(authority, { personalOwnerId: authority.actor.id, personalOwnerType: authority.actor.type }, "resource.write");
+    return;
+  }
+  if (name === "advanceWorkflowStage") {
+    const stage = call[2]?.stage;
+    const permission = authority.actor.type === "human" ? "resource.write"
+      : stage === "acceptance" ? "execution.review"
+      : stage === "integration" ? "execution.merge" : "execution.run";
+    await requireResource(db, authority, "requirement", id, permission);
+    return;
+  }
+  if (name === "registerWorkflowOutput") {
+    await requireResource(db, authority, "requirement", id, authority.actor.type === "human" ? "resource.write" : "execution.run");
+    if (call[2]?.taskId) await requireResource(db, authority, "task", call[2].taskId);
+    if (call[2]?.executionSliceId) await requireResource(db, authority, "slice", call[2].executionSliceId);
+    if (call[2]?.type === "attachment" && call[2]?.referenceId) await requireResource(db, authority, "document", call[2].referenceId);
+    if (call[2]?.type === "comment" && call[2]?.referenceId) {
+      const comment = await db.query.taskComments.findFirst({ where: eq(taskComments.id, call[2].referenceId) });
+      if (!comment) throw new NotFoundError("Resource not found");
+      await requireResource(db, authority, "task", comment.taskId);
+    }
     return;
   }
   if (writeById[name]) {

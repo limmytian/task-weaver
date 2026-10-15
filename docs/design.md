@@ -498,7 +498,8 @@ The CLI daemon is the runtime carrier for autonomous AI agents. It registers wit
 - **Model controls**: workers can map model tiers to concrete Codex models and Codex `model_reasoning_effort`; unsupported tools ignore the think mapping.
 - **Local prompt controls**: daemon workers can receive local-only prompt fragments from `--prompt` and `--prompt-file` without storing machine-specific guidance in the API.
 - **Composite workspace isolation**: each slice receives a frozen, secret-free manifest and one isolated branch worktree per Requirement repository. Node-local base checkouts are shared, while concurrent Requirement branches remain separate.
-- **Independent finalization**: spawned agents leave file changes in repository worktrees; the daemon owns commit, push, provider-specific PR detection/creation, per-link delivery state, partial retry, review comments, and final Requirement routing.
+- **Configurable delivery**: each newly created Requirement resolves a versioned delivery, acceptance, and integration workflow. Delivery can require no output, a platform comment or attachment, a URL, a node-local file, a Git branch, or a PR. Project defaults and Requirement overrides use the same schema across Web, REST, and CLI. Existing Requirements with no workflow keep their prior Git finalization behavior.
+- **Independent finalization**: for Git delivery, spawned agents leave file changes in repository worktrees; the daemon owns commit, push, optional provider-specific PR creation, per-link delivery state, partial retry, review comments, and final Requirement routing.
 - **Review and merge**: `tw daemon review` combines local checks with normalized GitHub/Gitea checks and approvals, then commit-fences the structured decision. `tw daemon merge` resolves the effective provider/direct/manual policy and marks a Requirement `done` only after every repository is terminal.
 - **Worker visibility**: daemon status includes `activeWorkerStates`, which powers the Web Daemons page worker cards and task roadmap.
 - **State**: daemon rows use `idle` / `busy` / `offline`; requirement and task status remain the durable project state.
@@ -514,7 +515,7 @@ Daemon scheduling uses the requirement as the unit of ownership:
 5. The daemon freezes the Requirement repository set, provisions one isolated worktree per repository, writes the composite manifest, and spawns the AI CLI at the workspace root for that slice.
 6. The spawned agent processes the slice task roadmap sequentially and leaves a handoff summary.
 7. On exit, the daemon marks the slice `done` or `in_review`, releases the requirement claim, and performs fallback status routing if needed.
-8. When every task under the Requirement is `done` or `cancelled`, the daemon independently finalizes each repository: it commits changes when present, pushes the repository branch, invokes provider-supported PR behavior, records each outcome, preserves successful siblings when one fails, writes an aggregate comment, and moves the Requirement to `in_review`.
+8. When every task under a legacy Requirement is `done` or `cancelled`, the daemon independently finalizes each repository. For a configurable Requirement, it advances delivery only after the configured output evidence exists; Git finalization runs only for the selected Git delivery method, and PR creation runs only for `git_pr`.
 
 This keeps branch granularity at the requirement level while bounding each AI session to a planned slice. Different requirements in the same project can still run concurrently across daemon workers.
 
@@ -722,3 +723,5 @@ ownership and database-derived Ti attribution prevent row/project reassignment.
 The feature excludes money, per-call records, raw usage events, prompts, responses,
 credentials and text-based estimates. Embedding usage is separate. See
 [Agent token usage](agent-token-usage.md) for contracts, limits and validation.
+
+[Requirement workflows](workflows.md)

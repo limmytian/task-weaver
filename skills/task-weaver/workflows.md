@@ -78,6 +78,29 @@ Bootstrap a new project from scratch.
 
 ---
 
+## Configurable Requirement Delivery (0.3.8)
+
+New requirements resolve a versioned workflow at creation. The project default applies when no requirement override is provided; without a project default the `basic` workflow requires no output and skips acceptance and integration. Existing requirements with a null workflow retain the legacy Git behavior until explicitly updated while draft or approved.
+
+The workflow has three stages: delivery (executor), acceptance (reviewer), and integration (merger). Each stage has an `automatic`, `manual`, or `skip` mode, instructions, and a method or checks. A skipped stage performs no extra work. A manual stage waits for a human to advance it. Git PR creation is available through the `git_pr` preset; it is not the default for new requirements.
+
+```bash
+tw project update "$PROJECT_ID" --default-workflow comment
+tw req create --project "$PROJECT_ID" --title "Report" --workflow url
+tw req create --project "$PROJECT_ID" --title "Custom delivery" --workflow-file workflow.json
+tw req output register "$REQ_ID" --type url --url https://example.com/report --summary "Final report"
+tw req output register "$REQ_ID" --type local --file /path/to/large-output.bin --summary "Large output"
+tw req get "$REQ_ID" --json
+tw req advance "$REQ_ID" --stage delivery --reason "Output reviewed" --revision 0
+```
+
+Local files are copied into `TW_ARTIFACT_ROOT` or `~/.task-weaver/artifacts` on the CLI node, hashed, and represented in Task Weaver by a relative path, node ID, size, and checksum. The bytes are not uploaded. Daemons that take subsequent work must advertise the same stable node ID. Declare downstream artifact dependencies with `tw req input add <consumer-requirement> <output-id>` and optionally `--task` or `--slice`. Scheduling enforces the producing node and verifies availability. Retire outputs explicitly with `tw req output retire`; retirement requires elapsed retention and completed consumers. Local deletion additionally requires `--delete-local`.
+
+`tw req advance` requires the current `workflowStateRevision` from `tw req get --json`; it also uses the active claim lease when a daemon owns the lane. Check results can be supplied with `--checks-file` as a JSON array of `{ "name": "...", "status": "passed" }` entries. Acceptance required checks and human approval rules are enforced by the server.
+
+For custom stage behavior, use a JSON definition with `delivery`, `acceptance`, and `integration` objects. See `requirementWorkflowSchema` in `packages/contracts/src/schemas/workflows.ts` for the complete validated shape. Automatic integration supports built-in Git methods and agent instructions for `custom`, `publish`, `attach`, or `archive`. These methods require nonempty instructions. Empty instructions with `none` perform no extra agent action.
+Set `worktreeMode` to `none` in a custom workflow when linked repositories are only context and no checkout is needed. `auto` creates a worktree only for Git delivery or integration; `isolated` explicitly requests one. Git actions require `auto` or `isolated`. Use `tw req workspace cleanup` after retention and dependent work complete; dirty worktrees are preserved.
+
 ## Multi-Repository Requirement Workspace
 
 Define a reusable catalog and attach the exact repository set before a Requirement slice starts.
@@ -558,7 +581,7 @@ Daemon workers use a different coordination unit from interactive agents:
 3. Server selects the first executable task and marks it in_progress
 4. Daemon prepares the requirement branch worktree
 5. Spawned agent processes the requirement task roadmap sequentially
-6. When all requirement tasks are terminal, daemon commits/pushes the requirement branch, discovers or creates a PR when possible, records the result in Task Weaver comments, and moves the requirement to `in_review`
+6. When all requirement tasks are terminal, daemon follows the resolved delivery stage. Git branch/PR actions run only when configured. Legacy requirements with a null workflow keep the earlier Git finalization path.
 7. A review daemon can move approved branches to `ready_to_merge`; a merge daemon then consumes `ready_to_merge` and marks successful merges `done`
 8. Daemon heartbeats and releases the requirement claim
 ```

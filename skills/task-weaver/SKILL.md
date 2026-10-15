@@ -56,8 +56,9 @@ You may be running in one of two modes. **Identify which one you are in before t
 - Do **not** claim or release the requirement lane; the daemon owns `requirement_claims` heartbeat/release.
 - Start with the initial task, then continue through remaining unblocked tasks under the same requirement.
 - Set each completed task to `done`; use `in_review` for tasks that need human judgment.
-- Do **not** commit, push, create a PR, or set the requirement final status. Leave file changes in the daemon-provided worktree.
-- When every task under the requirement is `done` or `cancelled`, the daemon commits/pushes the requirement branch, discovers or creates a PR when possible, records the outcome in Task Weaver comments, and moves the requirement to `in_review`.
+- Follow the Requirement's resolved `workflow`: register the configured output with `tw req output register` before finishing the last task. A Git worktree is relevant only when the work uses linked repositories.
+- Do **not** set the requirement final status. For a legacy Requirement with `workflow: null`, leave file changes in the daemon-provided worktree; the daemon owns commit, push, and provider PR handling.
+- When every task is terminal, the daemon advances automatic delivery from the configured output evidence. Manual stages wait for a human decision. The `basic` workflow requires no output and skips acceptance and integration.
 - The daemon renews the requirement claim while you run and releases it when you exit. If you exit abnormally, the daemon reverts the active task to `todo` for retry; if you exit cleanly without finalizing the active task, it routes that task to `in_review`.
 
 ## Data Model

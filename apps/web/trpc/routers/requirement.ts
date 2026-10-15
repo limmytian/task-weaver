@@ -9,9 +9,14 @@ import {
   createRequirementDependencySchema,
   createExecutionSliceSchema,
   updateExecutionSliceSchema,
+  advanceWorkflowStageSchema,
+  registerWorkflowOutputSchema,
+  addWorkflowInputSchema,
 } from "@task-weaver/core";
 
 export const requirementRouter = router({
+  addWorkflowInput: resourceProcedure.input(z.object({ requirementId: z.string().uuid(), data: addWorkflowInputSchema }))
+    .mutation(async ({ ctx, input }) => createResourceServices(ctx.identity).requirementService.addWorkflowInput(ctx.db, input.requirementId, input.data, ctx.actor)),
   list: resourceProcedure
     .input(listRequirementsSchema)
     .query(async ({ ctx, input }) => {
@@ -23,6 +28,14 @@ export const requirementRouter = router({
     .query(async ({ ctx, input }) => {
       return createResourceServices(ctx.identity).requirementService.getRequirement(ctx.db, input.id);
     }),
+
+  registerWorkflowOutput: resourceProcedure
+    .input(z.object({ requirementId: z.string().uuid(), data: registerWorkflowOutputSchema }))
+    .mutation(async ({ ctx, input }) => createResourceServices(ctx.identity).requirementService.registerWorkflowOutput(ctx.db, input.requirementId, input.data, ctx.actor)),
+
+  advanceWorkflowStage: resourceProcedure
+    .input(z.object({ requirementId: z.string().uuid(), data: advanceWorkflowStageSchema }))
+    .mutation(async ({ ctx, input }) => createResourceServices(ctx.identity).requirementService.advanceWorkflowStage(ctx.db, input.requirementId, input.data, ctx.actor)),
 
   create: resourceProcedure
     .input(createRequirementSchema)

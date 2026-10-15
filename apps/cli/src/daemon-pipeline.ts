@@ -119,7 +119,13 @@ export function buildPipelineRoleArgs(
     if (reviewer.allowUnreviewed) args.push('--allow-unreviewed')
     if (reviewer.postForgeSummary) args.push('--post-forge-summary')
   } else {
+    const merger = config.roles.merger
     args.push('--base', config.baseBranch)
+    if (merger.tools.length) args.push('--tools', merger.tools.join(','))
+    appendModelOptions(args, '--model', merger.models)
+    appendModelOptions(args, '--think', merger.reasoningEffort)
+    appendRepeated(args, '--prompt', merger.prompts)
+    appendRepeated(args, '--prompt-file', merger.promptFiles)
     args.push('--mode', config.mergePolicy.mode)
   }
   return args

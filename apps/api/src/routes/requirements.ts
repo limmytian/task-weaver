@@ -12,12 +12,26 @@ import {
   claimRequirementSchema,
   heartbeatRequirementClaimSchema,
   releaseRequirementSchema,
+  registerWorkflowOutputSchema,
+  advanceWorkflowStageSchema,
+  addWorkflowInputSchema,
+  reportWorkflowOutputAvailabilitySchema,
+  retireWorkflowOutputSchema,
   NotFoundError,
+  ConflictError,
   ValidationError,
 } from "@task-weaver/core";
 import type { Env } from "../middleware/actor.js";
 
 const requirements = new Hono<Env>();
+
+requirements.get("/requirements/:id/workflow-cleanup", async (c) => c.json(await createResourceServices(c.get("identity")).requirementService.getWorkflowCleanupEligibility(c.get("db"), c.req.param("id"))));
+requirements.post("/requirements/:id/workflow-output-retire", async (c) => {
+  const parsed = retireWorkflowOutputSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: "Invalid output ID" }, 400);
+  try { return c.json(await createResourceServices(c.get("identity")).requirementService.retireWorkflowOutput(c.get("db"), c.req.param("id"), parsed.data.outputId, c.get("actor"))); }
+  catch (error) { if (error instanceof ValidationError) return c.json({ error: error.message }, 400); throw error; }
+});
 
 // GET /projects/:projectId/requirements - List requirements for a project
 requirements.get("/projects/:projectId/requirements", async (c) => {
@@ -110,6 +124,66 @@ requirements.get("/requirements/:id", async (c) => {
       return c.json({ error: "Resource not found" }, 404);
     }
     throw err;
+  }
+});
+
+requirements.get("/requirements/:id/workflow-outputs", async (c) => {
+  try {
+    return c.json(await createResourceServices(c.get("identity")).requirementService.listWorkflowOutputs(c.get("db"), c.req.param("id")));
+  } catch (error) {
+    if (error instanceof NotFoundError) return c.json({ error: "Resource not found" }, 404);
+    throw error;
+  }
+});
+
+requirements.post("/requirements/:id/workflow-outputs", async (c) => {
+  const parsed = registerWorkflowOutputSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
+  try {
+    return c.json(await createResourceServices(c.get("identity")).requirementService.registerWorkflowOutput(c.get("db"), c.req.param("id"), parsed.data, c.get("actor")), 201);
+  } catch (error) {
+    if (error instanceof ValidationError) return c.json({ error: error.message }, 400);
+    if (error instanceof NotFoundError) return c.json({ error: "Resource not found" }, 404);
+    throw error;
+  }
+});
+
+requirements.post("/requirements/:id/workflow-advance", async (c) => {
+  const parsed = advanceWorkflowStageSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
+  try {
+    return c.json(await createResourceServices(c.get("identity")).requirementService.advanceWorkflowStage(c.get("db"), c.req.param("id"), parsed.data, c.get("actor")));
+  } catch (error) {
+    if (error instanceof ConflictError) return c.json({ error: error.message }, 409);
+    if (error instanceof ValidationError) return c.json({ error: error.message }, 400);
+    if (error instanceof NotFoundError) return c.json({ error: "Resource not found" }, 404);
+    throw error;
+  }
+});
+
+requirements.get("/requirements/:id/workflow-inputs", async (c) => {
+  return c.json(await createResourceServices(c.get("identity")).requirementService.listWorkflowInputs(c.get("db"), c.req.param("id")));
+});
+
+requirements.post("/requirements/:id/workflow-inputs", async (c) => {
+  const parsed = addWorkflowInputSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
+  try {
+    return c.json(await createResourceServices(c.get("identity")).requirementService.addWorkflowInput(c.get("db"), c.req.param("id"), parsed.data, c.get("actor")), 201);
+  } catch (error) {
+    if (error instanceof ValidationError) return c.json({ error: error.message }, 400);
+    throw error;
+  }
+});
+
+requirements.post("/requirements/:id/workflow-output-availability", async (c) => {
+  const parsed = reportWorkflowOutputAvailabilitySchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
+  try {
+    return c.json(await createResourceServices(c.get("identity")).requirementService.reportWorkflowOutputAvailability(c.get("db"), c.req.param("id"), parsed.data, c.get("actor")));
+  } catch (error) {
+    if (error instanceof ValidationError) return c.json({ error: error.message }, 400);
+    throw error;
   }
 });
 

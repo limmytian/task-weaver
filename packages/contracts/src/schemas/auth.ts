@@ -311,17 +311,18 @@ export const executionDelegationSchema = z
     executorActorId: idSchema,
     projectId: idSchema,
     requirementId: idSchema,
-    taskIds: uniqueIdsSchema.refine(
-      (ids) => ids.length > 0,
-      "Delegation requires tasks",
-    ),
+    taskIds: uniqueIdsSchema,
     repositoryIds: uniqueIdsSchema,
     runId: idSchema,
-    purpose: z.enum(["execute", "review", "merge", "automation"]),
+    purpose: z.enum(["execute", "delivery", "review", "merge", "automation"]),
     leaseGeneration: z.number().int().positive(),
     expiresAt: timestampSchema,
   })
-  .strict();
+  .strict().superRefine((value, ctx) => {
+    if (["execute", "automation"].includes(value.purpose) && value.taskIds.length === 0) {
+      ctx.addIssue({ code: "custom", path: ["taskIds"], message: "Execution delegation requires tasks" });
+    }
+  });
 
 const credentialIdentityFields = {
   id: idSchema,
@@ -400,6 +401,7 @@ export const requestIdentitySnapshotSchema = z
         readonly AuthorizationPermission[]
       > = {
         execute: ["execution.review", "execution.merge"],
+        delivery: ["execution.review", "execution.merge"],
         review: ["execution.run", "execution.merge"],
         merge: ["execution.run", "execution.review"],
         automation: ["execution.review", "execution.merge"],

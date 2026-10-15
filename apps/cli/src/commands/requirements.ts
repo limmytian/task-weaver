@@ -1,5 +1,10 @@
 import { Command } from 'commander'
 import * as readline from 'readline/promises'
+import { readFileSync, unlinkSync } from 'node:fs'
+import { requirementWorkflowSchema } from '@task-weaver/contracts'
+import { loadConfig } from '../config.js'
+import { localWorkflowOutputPath, probeWorkflowArtifact, storeWorkflowArtifact, type LocalWorkflowOutput } from '../workflow-artifacts.js'
+import { cleanupRequirementWorktrees, normalizeRequirementRepositoryEntries } from '../repository-workspace.js'
 import { get, post, patch, del } from '../client.js'
 import { printJson, printTable, printKv } from '../output.js'
 
@@ -113,6 +118,133 @@ export function registerRequirements(program: Command): void {
       printKv(data as Record<string, unknown>)
     })
 
+  const output = req.command('output').description('manage requirement delivery outputs')
+  output.command('list <requirement-id>')
+    .option('--json', 'output raw JSON')
+    .action(async (id, opts) => {
+      const data = await get<unknown[]>(`/api/v1/requirements/${id}/workflow-outputs`)
+      if (opts.json) return printJson(data)
+      printTable(data as Record<string, unknown>[], ['type', 'summary', 'url', 'relativePath', 'id'])
+    })
+  output.command('register <requirement-id>')
+    .requiredOption('--type <type>', 'comment|attachment|url|local|git_branch|git_pr')
+    .option('--reference <id>', 'platform comment or attachment ID')
+    .option('--url <url>', 'URL for a URL or Git PR output')
+    .option('--node <id>', 'stable node ID for a local output')
+    .option('--path <path>', 'path relative to the local artifact root')
+    .option('--file <path>', 'copy a local file to durable node storage and register its checksum')
+    .option('--size <bytes>', 'local output size in bytes')
+    .option('--sha256 <hash>', 'local output SHA-256 checksum')
+    .option('--repository-link <id>', 'requirement repository link ID')
+    .option('--task <id>', 'source task ID')
+    .option('--slice <id>', 'source execution slice ID')
+    .option('--summary <text>', 'output summary')
+    .option('--json', 'output raw JSON')
+    .action(async (id, opts) => {
+      if (opts.file && opts.type !== 'local') throw new Error('--file requires --type local')
+      if (opts.file && (opts.path || opts.node || opts.size || opts.sha256)) throw new Error('--file cannot be combined with manual local metadata')
+      let local: { nodeId: string; relativePath: string; sizeBytes: number; sha256: string } | undefined
+      if (opts.file) {
+        const config = loadConfig()
+        if (!config.nodeId) throw new Error('Node identity is unavailable')
+        local = await storeWorkflowArtifact(id, opts.file, config.nodeId)
+      }
+      const data = await post(`/api/v1/requirements/${id}/workflow-outputs`, {
+        type: opts.type, referenceId: opts.reference, url: opts.url,
+        nodeId: local?.nodeId ?? opts.node, relativePath: local?.relativePath ?? opts.path,
+        sizeBytes: local?.sizeBytes ?? (opts.size === undefined ? undefined : Number(opts.size)),
+        sha256: local?.sha256 ?? opts.sha256, requirementRepositoryId: opts.repositoryLink,
+        taskId: opts.task, executionSliceId: opts.slice, summary: opts.summary,
+      })
+      if (opts.json) return printJson(data)
+      printKv(data as Record<string, unknown>)
+    })
+
+  output.command('verify <requirement-id> <output-id>')
+    .option('--daemon-id <id>', 'registered daemon reporting availability')
+    .option('--json', 'output raw JSON')
+    .action(async (id, outputId, opts) => {
+      const config = loadConfig()
+      const outputs = await get<LocalWorkflowOutput[]>(`/api/v1/requirements/${id}/workflow-outputs`)
+      const target = outputs.find((entry) => entry.id === outputId && entry.type === 'local')
+      if (!target) throw new Error('Local output not found')
+      const probe = await probeWorkflowArtifact(target, config.nodeId)
+      const data = await post(`/api/v1/requirements/${id}/workflow-output-availability`, { outputId, nodeId: config.nodeId, daemonId: opts.daemonId, ...probe })
+      if (opts.json) return printJson(data)
+      printKv(data as Record<string, unknown>)
+    })
+
+  output.command('retire <requirement-id> <output-id>')
+    .description('retire an output after retention and all consumer work have finished')
+    .option('--delete-local', 'delete verified local bytes after retirement is authorized')
+    .option('--json', 'output raw JSON')
+    .action(async (id, outputId, opts) => {
+      let localPath: string | undefined
+      if (opts.deleteLocal) {
+        const outputs = await get<LocalWorkflowOutput[]>(`/api/v1/requirements/${id}/workflow-outputs`)
+        const output = outputs.find((candidate) => candidate.id === outputId && candidate.type === 'local')
+        if (!output) throw new Error('Local output not found')
+        const probe = await probeWorkflowArtifact(output, loadConfig().nodeId)
+        if (probe.availability !== 'available') throw new Error(probe.reason)
+        localPath = localWorkflowOutputPath(output.relativePath!)
+      }
+      const data = await post(`/api/v1/requirements/${id}/workflow-output-retire`, { outputId })
+      if (localPath) unlinkSync(localPath)
+      if (opts.json) return printJson(data)
+      printKv(data as Record<string, unknown>)
+    })
+
+  req.command('workspace').description('manage node-local requirement workspaces')
+    .command('cleanup <id>')
+    .description('remove clean Git worktrees after retention and all consumers have finished')
+    .option('--json', 'output raw JSON')
+    .action(async (id, opts) => {
+      const policy = await get<{ canCleanupWorktrees: boolean; activeConsumers: number; worktreeRetainUntil: string }>(`/api/v1/requirements/${id}/workflow-cleanup`)
+      if (!policy.canCleanupWorktrees) throw new Error(`Workspace must be terminal, have no active consumers, and be retained until ${policy.worktreeRetainUntil}; active consumers: ${policy.activeConsumers}`)
+      const repositories = await get<unknown[]>(`/api/v1/requirements/${id}/repositories`)
+      const result = await cleanupRequirementWorktrees(loadConfig(), id, normalizeRequirementRepositoryEntries(repositories))
+      if (opts.json) return printJson(result)
+      printKv(result)
+    })
+
+  const input = req.command('input').description('declare outputs needed by downstream work')
+  input.command('list <requirement-id>').option('--json', 'output raw JSON')
+    .action(async (id, opts) => {
+      const data = await get<Record<string, unknown>[]>(`/api/v1/requirements/${id}/workflow-inputs`)
+      if (opts.json) return printJson(data)
+      printTable(data, ['id', 'outputId', 'taskId', 'executionSliceId'])
+    })
+  input.command('add <requirement-id> <output-id>')
+    .option('--task <id>', 'limit dependency to one task')
+    .option('--slice <id>', 'limit dependency to one execution slice')
+    .option('--json', 'output raw JSON')
+    .action(async (id, outputId, opts) => {
+      const data = await post(`/api/v1/requirements/${id}/workflow-inputs`, { outputId, taskId: opts.task, executionSliceId: opts.slice })
+      if (opts.json) return printJson(data)
+      printKv(data as Record<string, unknown>)
+    })
+
+  req.command('advance <id>')
+    .requiredOption('--stage <stage>', 'delivery|acceptance|integration')
+    .requiredOption('--reason <text>', 'reason for the decision')
+    .requiredOption('--revision <number>', 'expected workflow state revision')
+    .option('--decision <decision>', 'complete|changes_requested|failed|retry', 'complete')
+    .option('--checks-file <path>', 'JSON array of acceptance checks')
+    .option('--lease-generation <number>', 'requirement lease generation')
+    .option('--daemon-id <id>', 'daemon holding the requirement lease')
+    .option('--json', 'output raw JSON')
+    .action(async (id, opts) => {
+      const data = await post(`/api/v1/requirements/${id}/workflow-advance`, {
+        stage: opts.stage, reason: opts.reason, decision: opts.decision,
+        expectedRevision: Number(opts.revision),
+        checks: opts.checksFile ? JSON.parse(readFileSync(opts.checksFile, 'utf8')) : [],
+        leaseGeneration: opts.leaseGeneration === undefined ? undefined : Number(opts.leaseGeneration),
+        daemonId: opts.daemonId,
+      })
+      if (opts.json) return printJson(data)
+      printKv(data as Record<string, unknown>)
+    })
+
   req
     .command('create')
     .description('create a requirement')
@@ -120,11 +252,14 @@ export function registerRequirements(program: Command): void {
     .requiredOption('--title <title>', 'requirement title')
     .option('--description <desc>', 'requirement description')
     .option('--priority <priority>', 'low|medium|high|critical (default: medium)')
-    .option('--status <status>', 'draft|approved|in_progress|in_review|ready_to_merge|done (default: draft)')
+    .option('--status <status>', 'draft|approved|in_progress (default: draft)')
     .option('--model-tier <tier>', 'fast|standard|strong (default: standard)')
     .option('--branch-name <name>', 'git branch name for this requirement')
+    .option('--workflow <preset>', 'workflow preset: basic|comment|attachment|url|local|git_branch|git_pr')
+    .option('--workflow-file <path>', 'JSON workflow definition; mutually exclusive with --workflow')
     .option('--json', 'output raw JSON')
     .action(async (opts) => {
+      if (opts.workflow && opts.workflowFile) throw new Error('Choose either --workflow or --workflow-file')
       const data = await post(`/api/v1/projects/${opts.project}/requirements`, {
         title: opts.title,
         description: opts.description,
@@ -132,6 +267,8 @@ export function registerRequirements(program: Command): void {
         status: opts.status,
         modelTier: opts.modelTier,
         branchName: opts.branchName,
+        workflowPreset: opts.workflow,
+        workflow: opts.workflowFile ? requirementWorkflowSchema.parse(JSON.parse(readFileSync(opts.workflowFile, 'utf8'))) : undefined,
       })
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)
@@ -146,8 +283,11 @@ export function registerRequirements(program: Command): void {
     .option('--priority <priority>', 'new priority')
     .option('--model-tier <tier>', 'fast|standard|strong')
     .option('--branch-name <name>', 'git branch name for this requirement')
+    .option('--workflow <preset>', 'replace workflow with a preset')
+    .option('--workflow-file <path>', 'replace workflow with a JSON definition')
     .option('--json', 'output raw JSON')
     .action(async (id, opts) => {
+      if (opts.workflow && opts.workflowFile) throw new Error('Choose either --workflow or --workflow-file')
       const body: Record<string, unknown> = {}
       if (opts.title) body.title = opts.title
       if (opts.description) body.description = opts.description
@@ -155,6 +295,8 @@ export function registerRequirements(program: Command): void {
       if (opts.priority) body.priority = opts.priority
       if (opts.modelTier) body.modelTier = opts.modelTier
       if (opts.branchName !== undefined) body.branchName = opts.branchName
+      if (opts.workflow) body.workflowPreset = opts.workflow
+      if (opts.workflowFile) body.workflow = requirementWorkflowSchema.parse(JSON.parse(readFileSync(opts.workflowFile, 'utf8')))
       const data = await patch(`/api/v1/requirements/${id}`, body)
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)

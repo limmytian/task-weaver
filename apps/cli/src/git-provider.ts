@@ -102,6 +102,7 @@ export interface FinalizeRepositoryOptions {
   credential: CredentialResolution
   forgeCredential?: CredentialResolution
   skipPush?: boolean
+  createPullRequest?: boolean
   repository?: { host: string; namespace: string; name: string }
 }
 
@@ -495,6 +496,7 @@ export class GitHubGitAdapter extends GenericGitAdapter {
   override async finalize(options: FinalizeRepositoryOptions): Promise<RepositoryDeliveryResult> {
     const result = await super.finalize(options)
     if (result.deliveryStatus === 'failed' || result.deliveryStatus === 'unchanged') return result
+    if (options.createPullRequest === false) return result
     const pullRequest = await this.ensurePullRequest({
       worktreePath: options.worktreePath,
       branchName: options.branchName,
@@ -679,6 +681,7 @@ export class GiteaGitAdapter extends GenericGitAdapter {
   override async finalize(options: FinalizeRepositoryOptions): Promise<RepositoryDeliveryResult> {
     const result = await super.finalize(options)
     if (result.deliveryStatus === 'failed' || result.deliveryStatus === 'unchanged') return result
+    if (options.createPullRequest === false) return result
     const pullRequest = await this.ensurePullRequest({
       worktreePath: options.worktreePath,
       branchName: options.branchName,

@@ -55,6 +55,18 @@ test('task broker rejects expired and excessive lifetimes before binding', async
   }
 })
 
+test('task broker permits bounded output registration and input discovery while denying stage advancement', async () => {
+  const cap = capability()
+  const broker = await createTaskAccessBroker({ apiUrl: 'https://tw.example', capability: cap, renew: async () => cap, revoke: async () => {}, fetch: async () => Response.json({ ok: true }) })
+  try {
+    const headers = { authorization: `Bearer ${broker.apiKey}`, 'content-type': 'application/json' }
+    const path = `${broker.apiUrl}/api/v1/requirements/${cap.delegation.requirementId}`
+    assert.equal((await fetch(`${path}/workflow-outputs`, { headers, method: 'POST', body: JSON.stringify({ type: 'url', url: 'https://example.com/report' }) })).status, 200)
+    assert.equal((await fetch(`${path}/workflow-inputs`, { headers })).status, 200)
+    assert.equal((await fetch(`${path}/workflow-advance`, { headers, method: 'POST', body: '{}' })).status, 403)
+  } finally { await broker.close() }
+})
+
 test('upstream revocation closes task access and invokes cancellation without retrying broader credentials', async () => {
   const cap = capability()
   let invalidations = 0

@@ -74,6 +74,7 @@ export const registerDaemonSchema = z.object({
   role: daemonRoleSchema.default("executor"),
   capabilities: z.array(z.string()),
   host: z.string().min(1).max(255).optional(),
+  nodeId: z.string().min(1).max(255).optional(),
   processStartedAt: z.string().datetime({ offset: true }).optional(),
   workerCapacity: z.number().int().min(1).max(256).default(1),
 }).superRefine((value, ctx) => {

@@ -9,8 +9,8 @@ export interface TaskAccessBroker {
   close(): Promise<void>
 }
 const identifier = '[0-9a-fA-F-]{36}'
-const readPaths = new RegExp(`^/api/v1/(?:auth/me|projects(?:/${identifier}(?:/(?:requirements|tasks))?)?|tasks(?:/${identifier}(?:/(?:claim|comments|notes|repositories))?)?|requirements/${identifier}(?:/(?:slices|repositories))?|documents(?:/${identifier}(?:/(?:versions(?:/[0-9]+)?|links|backlinks))?)?|repositories(?:/${identifier})?|search/(?:tasks|requirements|documents(?:/fulltext)?|all)|context/(?:search|list|bootstrap|${identifier}))/?$`)
-const writePaths = new RegExp(`^/api/v1/tasks/${identifier}/(?:status|claim|release|heartbeat|comments|notes)/?$`)
+const readPaths = new RegExp(`^/api/v1/(?:auth/me|projects(?:/${identifier}(?:/(?:requirements|tasks))?)?|tasks(?:/${identifier}(?:/(?:claim|comments|notes|repositories))?)?|requirements/${identifier}(?:/(?:slices|repositories|workflow-outputs|workflow-inputs))?|documents(?:/${identifier}(?:/(?:versions(?:/[0-9]+)?|links|backlinks))?)?|repositories(?:/${identifier})?|search/(?:tasks|requirements|documents(?:/fulltext)?|all)|context/(?:search|list|bootstrap|${identifier}))/?$`)
+const writePaths = new RegExp(`^/api/v1/(?:tasks/${identifier}/(?:status|claim|release|heartbeat|comments|notes)|requirements/${identifier}/workflow-outputs)/?$`)
 const patchPaths = new RegExp(`^/api/v1/(?:tasks/${identifier}(?:/status)?|documents/${identifier})/?$`)
 const secretDigest = (value: string) => createHash('sha256').update(value).digest()
 

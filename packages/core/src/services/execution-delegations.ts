@@ -54,13 +54,17 @@ export async function liveExecutionAuthority(db: AuthDatabase, id: string, now =
     || lease.daemonId !== row.daemonId || lease.workerIndex !== row.workerIndex || lease.generation !== Number(row.leaseGeneration)
     || lease.expiresAt <= now || !requirement || requirement.projectId !== row.projectId || requirement.leaseGeneration !== Number(row.leaseGeneration)
     || ['cancelled', 'done', 'archived'].includes(requirement.status)) throw new AuthenticationError('invalid_credential');
+  if (row.purpose === 'delivery') {
+    const currentTasks = await database.select().from(tasks).where(eq(tasks.requirementId, row.requirementId));
+    if (!requirement.workflow || currentTasks.some(task => !['done', 'cancelled'].includes(task.status))) throw new AuthenticationError('invalid_credential');
+  }
   }
   if (!grantsAreCovered(credentialGrantsSchema.parse(row.grants), parent.grants)) throw new AuthorizationError();
   const authority = { ...parent, bounds: null };
   for (const taskId of row.taskIds) {
     const task = await database.query.tasks.findFirst({ where: eq(tasks.id, taskId) });
     if (!task || task.scope !== 'project' || task.requirementId !== row.requirementId || task.projectId !== row.projectId
-      || task.status === 'cancelled' || (['execute', 'automation'].includes(row.purpose) && task.status === 'done')) throw new AuthenticationError('invalid_credential');
+      || (['execute', 'automation'].includes(row.purpose) && ['done', 'cancelled'].includes(task.status))) throw new AuthenticationError('invalid_credential');
     await requireResource(database, authority, 'task', taskId, phasePermission(row.purpose));
   }
   for (const documentId of row.documentIds) {
@@ -116,14 +120,15 @@ export function createExecutionDelegationService(context: VerifiedRequestContext
         if (!daemon || daemon.actorId !== authority.actor.id || daemon.actorType !== 'agent') throw new NotFoundError('Daemon not found');
         if (!claim || claim.id !== input.runId || claim.daemonId !== daemonId || claim.claimedBy !== authority.actor.id || claim.claimedByType !== 'agent'
           || claim.generation !== input.leaseGeneration || claim.workerIndex !== String(input.workerIndex) || claim.expiresAt <= new Date()) throw new ValidationError('Delegation requires the original active worker lease');
-        const purpose = daemon.role === 'reviewer' ? 'review' : daemon.role === 'merger' ? 'merge' : 'execute';
-        if (purpose === 'execute' && !input.taskId) throw new ValidationError('Execution delegation requires the current task');
+        const purpose = daemon.role === 'reviewer' ? 'review' : daemon.role === 'merger' ? 'merge' : input.taskId ? 'execute' : 'delivery';
         const scope = await requireResource(tx, authority, 'requirement', input.requirementId, phasePermission(purpose));
         const requirement = await tx.query.requirements.findFirst({ where: eq(requirements.id, input.requirementId) });
         if (!requirement || requirement.leaseGeneration !== claim.generation || ['cancelled', 'done', 'archived'].includes(requirement.status)) throw new AuthorizationError();
-        const selected = await tx.select().from(tasks).where(and(eq(tasks.requirementId, input.requirementId), purpose === 'execute' ? eq(tasks.id, input.taskId ?? '') : undefined));
-        if (!selected.length || selected.some(task => task.scope !== 'project' || task.projectId !== scope.projectId || task.status === 'cancelled' || (purpose === 'execute' && task.status === 'done'))) throw new AuthorizationError();
-        if (purpose === 'execute') {
+        const deliveryOnly = purpose === 'delivery';
+        const selected = await tx.select().from(tasks).where(and(eq(tasks.requirementId, input.requirementId), purpose === 'execute' && input.taskId ? eq(tasks.id, input.taskId) : undefined));
+        if (deliveryOnly && (!requirement.workflow || selected.some(task => !['done', 'cancelled'].includes(task.status)))) throw new ValidationError('Delivery delegation requires completed execution');
+        if ((purpose === 'execute' && !deliveryOnly && !selected.length) || selected.some(task => task.scope !== 'project' || task.projectId !== scope.projectId || (purpose === 'execute' && !deliveryOnly && ['done', 'cancelled'].includes(task.status)))) throw new AuthorizationError();
+        if (purpose === 'execute' && !deliveryOnly) {
           const blockers = await tx.select({ id: taskDependencies.dependsOnTaskId }).from(taskDependencies).where(and(eq(taskDependencies.taskId, input.taskId!), eq(taskDependencies.type, 'blocks')));
           for (const blocker of blockers) {
             await requireResource(tx, authority, 'task', blocker.id);
@@ -141,7 +146,7 @@ export function createExecutionDelegationService(context: VerifiedRequestContext
         const taskRepos = await tx.select({ id: taskRepositories.repositoryId }).from(taskRepositories).where(inArray(taskRepositories.taskId, taskIds));
         const repositoryIds = [...new Set([...repositories, ...taskRepos].map(link => link.id))];
         for (const id of repositoryIds) await requireRepository(tx, authority, id);
-        const permissions: AuthorizationPermission[] = ['resource.read', phasePermission(purpose), ...(purpose === 'execute' ? ['resource.write' as const] : [])];
+        const permissions: AuthorizationPermission[] = ['resource.read', phasePermission(purpose), ...(['execute', 'delivery'].includes(purpose) ? ['resource.write' as const] : [])];
         const grants: AuthorizationGrant[] = [{ scope: 'project', projectId: scope.projectId!, permissions }];
         if (!grantsAreCovered(grants, authority.grants)) throw new AuthorizationError();
         await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(eq(executionDelegations.runId, claim.id), eq(executionDelegations.purpose, purpose), isNull(executionDelegations.revokedAt)));

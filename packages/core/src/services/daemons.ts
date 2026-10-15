@@ -267,6 +267,7 @@ export async function registerDaemon(
           actorType: existing.actorType ?? actor.type,
           capabilities: input.capabilities,
           host: input.host ?? existing.host,
+          nodeId: input.nodeId ?? existing.nodeId,
           processStartedAt: isLive
             ? existing.processStartedAt
             : processStartedAt,
@@ -306,6 +307,7 @@ export async function registerDaemon(
       actorType: actor.type,
       capabilities: input.capabilities,
       host: input.host,
+      nodeId: input.nodeId,
       processStartedAt,
       workerCapacity: input.workerCapacity,
       status: "idle",
@@ -651,6 +653,8 @@ export async function listDaemonControlPlaneQueues(db: Database, scope?: Metadat
           orderBy: (task, { asc }) => [asc(task.createdAt)],
         },
         repositories: { with: { repository: true } },
+        workflowOutputs: true,
+        workflowInputs: { with: { output: true } },
       },
       orderBy: (requirement, { asc }) => [
         asc(requirement.updatedAt),
@@ -668,6 +672,7 @@ export async function listDaemonControlPlaneQueues(db: Database, scope?: Metadat
   ]);
 
   const queueDaemons: DaemonQueueDaemonInput[] = await Promise.all(daemonRows.map(async (daemon) => ({
+    nodeId: daemon.nodeId,
     role: daemon.role,
     capabilities: await availableDaemonCapabilities(db, daemon.id, daemon.capabilities ?? []),
     configuredCapabilities: daemon.capabilities ?? [],
@@ -682,6 +687,10 @@ export async function listDaemonControlPlaneQueues(db: Database, scope?: Metadat
       priority: requirement.priority,
       tags: requirement.tags,
       updatedAt: requirement.updatedAt,
+      workflow: requirement.workflow,
+      workflowState: requirement.workflowState,
+      workflowOutputs: requirement.workflowOutputs.filter((output) => output.workflowRevision === requirement.workflowRevision),
+      workflowInputs: requirement.workflowInputs,
       claim: requirement.claim
         ? {
             claimedBy: requirement.claim.claimedBy,
@@ -1236,6 +1245,12 @@ export async function applyRequirement(
       ${tierFilter}
       AND r.status IN (${EXECUTOR_REQUIREMENT_STATUSES_SQL})
       AND NOT EXISTS (
+        SELECT 1 FROM workflow_inputs wi JOIN workflow_outputs wo ON wo.id = wi.output_id
+        WHERE wi.requirement_id = r.id AND (wi.task_id IS NULL OR wi.task_id = t.id)
+          AND (wi.execution_slice_id IS NULL OR wi.execution_slice_id = es.id)
+          AND wo.type = 'local' AND (wo.node_id IS DISTINCT FROM ${daemon.nodeId ?? null} OR wo.availability <> 'available')
+      )
+      AND NOT EXISTS (
         SELECT 1 FROM requirement_repositories rr
         WHERE rr.requirement_id = r.id
           AND rr.delivery_status = 'failed'
@@ -1401,6 +1416,7 @@ export async function applyRequirement(
       return {
         requirement,
         task,
+        stage: "execution" as const,
         executionSlice,
         tasks: executionSlice?.tasks ?? requirement?.tasks ?? [],
         repositories: requirement?.repositories ?? [],
@@ -1414,6 +1430,30 @@ export async function applyRequirement(
     }
   }
 
+  const deliveryCandidates = await db.execute(sql`
+    SELECT r.* FROM requirements r
+    CROSS JOIN LATERAL (SELECT r.id AS requirement_id, r.project_id) t
+    WHERE ${authorizationFilter ?? sql`false`} ${projectFilter}
+      AND r.status IN ('approved', 'in_progress') AND r.workflow IS NOT NULL
+      ${modelTiers?.length ? sql`AND r.model_tier::text IN (${sql.join(modelTiers.map((tier) => sql`${tier}`), sql`, `)})` : sql``}
+      AND r.workflow #>> '{delivery,mode}' IN ('automatic', 'skip')
+      AND (r.workflow_state->>'delivery' = 'pending' OR r.workflow_state->>'acceptance' = 'failed')
+      AND NOT EXISTS (SELECT 1 FROM tasks open_task WHERE open_task.requirement_id = r.id AND open_task.status NOT IN ('done', 'cancelled'))
+      AND NOT EXISTS (SELECT 1 FROM requirement_claims rc WHERE rc.requirement_id = r.id AND rc.expires_at > now())
+      AND NOT EXISTS (SELECT 1 FROM requirement_dependencies rd JOIN requirements upstream ON upstream.id = rd.depends_on_requirement_id WHERE rd.requirement_id = r.id AND rd.type = 'blocks' AND upstream.status NOT IN ('done', 'cancelled'))
+      AND NOT EXISTS (SELECT 1 FROM workflow_outputs wo WHERE wo.requirement_id = r.id AND wo.workflow_revision = r.workflow_revision AND wo.type = 'local' AND (wo.node_id IS DISTINCT FROM ${daemon.nodeId ?? null} OR wo.availability <> 'available'))
+      AND NOT EXISTS (SELECT 1 FROM workflow_inputs wi JOIN workflow_outputs wo ON wo.id = wi.output_id WHERE wi.requirement_id = r.id AND wo.type = 'local' AND (wo.node_id IS DISTINCT FROM ${daemon.nodeId ?? null} OR wo.availability <> 'available'))
+    ORDER BY r.updated_at ASC LIMIT 25
+  `);
+  for (const candidate of deliveryCandidates as unknown as Array<{ id: string; project_id: string; tags: string[] | null }>) {
+    const match = await matchAvailableExecutor(db, daemon.id, daemon.capabilities ?? [], candidate.tags ?? [], candidate.project_id);
+    if (!match.eligible) continue;
+    try {
+      const claim = await claimRequirement(db, candidate.id, actor, 5, { daemonId, workerIndex });
+      const requirement = await db.query.requirements.findFirst({ where: eq(requirements.id, candidate.id), with: { tasks: true, repositories: { with: { repository: true } }, executionSlices: { orderBy: (slice, { desc }) => [desc(slice.orderIndex)] } } });
+      return { requirement, task: null, stage: "delivery" as const, executionSlice: requirement?.executionSlices[0] ?? null, tasks: requirement?.tasks ?? [], repositories: requirement?.repositories ?? [], executorTool: match.executorTool, leaseGeneration: claim.generation, runId: claim.id };
+    } catch (error) { if (!(error instanceof ValidationError)) throw error; }
+  }
   return null;
 }
 
@@ -1448,6 +1488,14 @@ export async function applyReview(
     SELECT r.*
     FROM requirements r
     WHERE ${authorizationFilter ?? sql`false`} AND r.status = ${REVIEWER_REQUIREMENT_STATUS_SQL}
+      AND (r.workflow IS NULL OR r.workflow #>> '{acceptance,mode}' = 'automatic')
+      AND (r.workflow IS NULL OR r.workflow_state->>'acceptance' <> 'failed')
+      AND (r.workflow IS NULL OR ${Boolean(daemon.capabilities?.includes("workflow-agent"))} OR (BTRIM(COALESCE(r.workflow #>> '{acceptance,instructions}', '')) = '' AND jsonb_array_length(COALESCE(r.workflow #> '{acceptance,requiredChecks}', '[]'::jsonb)) = 0))
+      AND NOT EXISTS (
+        SELECT 1 FROM workflow_outputs wo WHERE wo.type = 'local'
+          AND (wo.node_id IS DISTINCT FROM ${daemon.nodeId ?? null} OR wo.availability <> 'available')
+          AND ((wo.requirement_id = r.id AND wo.workflow_revision = r.workflow_revision) OR EXISTS (SELECT 1 FROM workflow_inputs wi WHERE wi.requirement_id = r.id AND wi.output_id = wo.id))
+      )
       AND NOT EXISTS (
         SELECT 1 FROM requirement_repositories rr
         WHERE rr.requirement_id = r.id
@@ -1569,6 +1617,14 @@ export async function applyMerge(
     SELECT r.*
     FROM requirements r
     WHERE ${authorizationFilter ?? sql`false`} AND r.status = ${MERGER_REQUIREMENT_STATUS_SQL}
+      AND (r.workflow IS NULL OR r.workflow #>> '{integration,mode}' = 'automatic')
+      AND (r.workflow IS NULL OR r.workflow_state->>'integration' <> 'failed')
+      AND (r.workflow IS NULL OR ${Boolean(daemon.capabilities?.includes("workflow-agent"))} OR BTRIM(COALESCE(r.workflow #>> '{integration,instructions}', '')) = '')
+      AND NOT EXISTS (
+        SELECT 1 FROM workflow_outputs wo WHERE wo.type = 'local'
+          AND (wo.node_id IS DISTINCT FROM ${daemon.nodeId ?? null} OR wo.availability <> 'available')
+          AND ((wo.requirement_id = r.id AND wo.workflow_revision = r.workflow_revision) OR EXISTS (SELECT 1 FROM workflow_inputs wi WHERE wi.requirement_id = r.id AND wi.output_id = wo.id))
+      )
       AND NOT EXISTS (
         SELECT 1 FROM requirement_repositories manual_rr
         WHERE manual_rr.requirement_id = r.id

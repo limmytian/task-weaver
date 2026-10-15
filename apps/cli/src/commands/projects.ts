@@ -1,5 +1,7 @@
 import { Command } from 'commander'
 import * as readline from 'readline/promises'
+import { readFileSync } from 'node:fs'
+import { requirementWorkflowSchema, workflowFromPreset, workflowPresetSchema } from '@task-weaver/contracts'
 import { get, post, patch } from '../client.js'
 import {
   type GraphData,
@@ -179,11 +181,20 @@ export function registerProjects(program: Command): void {
     .description('update a project')
     .option('--name <name>', 'new name')
     .option('--description <desc>', 'new description')
+    .option('--default-workflow <preset>', 'default requirement workflow preset')
+    .option('--default-workflow-file <path>', 'JSON default requirement workflow')
+    .option('--clear-default-workflow', 'use the basic workflow for new requirements')
     .option('--json', 'output raw JSON')
     .action(async (id, opts) => {
       const body: Record<string, unknown> = {}
       if (opts.name) body.name = opts.name
       if (opts.description) body.description = opts.description
+      if ([opts.defaultWorkflow, opts.defaultWorkflowFile, opts.clearDefaultWorkflow].filter(Boolean).length > 1) {
+        throw new Error('Choose one default workflow option')
+      }
+      if (opts.defaultWorkflow) body.defaultWorkflow = workflowFromPreset(workflowPresetSchema.parse(opts.defaultWorkflow))
+      if (opts.defaultWorkflowFile) body.defaultWorkflow = requirementWorkflowSchema.parse(JSON.parse(readFileSync(opts.defaultWorkflowFile, 'utf8')))
+      if (opts.clearDefaultWorkflow) body.defaultWorkflow = null
       const data = await patch(`/api/v1/projects/${id}`, body)
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)

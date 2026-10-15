@@ -6,6 +6,7 @@ import {
   requirementStatusSchema,
 } from "./requirements";
 import { taskPrioritySchema, taskStatusSchema } from "./tasks";
+import { requirementWorkflowSchema, workflowPresetSchema } from "./workflows";
 
 const keySchema = z.string().min(1).max(120);
 const refSchema = z.string().min(1).max(500);
@@ -139,12 +140,16 @@ export const planRequirementSchema = z.object({
   tags: z.array(z.string()).optional(),
   branchName: z.string().optional(),
   expectedAt: z.coerce.date().optional(),
+  workflowPreset: workflowPresetSchema.optional(),
+  workflow: requirementWorkflowSchema.optional(),
   dependsOn: z.array(planRequirementDependencySchema).default([]),
   dependencies: z.array(planRequirementDependencySchema).default([]),
   documents: z.array(planDocumentRefSchema).default([]),
   slices: z.array(planSliceSchema).default([]),
   tasks: z.array(planTaskSchema).default([]),
 }).superRefine((data, ctx) => {
+  if (data.workflow && data.workflowPreset) ctx.addIssue({ code: "custom", path: ["workflow"], message: "Specify either a workflow or a workflow preset" });
+  if (!data.existingId && ["in_review", "ready_to_merge", "done"].includes(data.status)) ctx.addIssue({ code: "custom", path: ["status"], message: "New requirements must start before acceptance" });
   if (!data.existingId && !data.title) {
     ctx.addIssue({ code: "custom", path: ["title"], message: "New requirements require title" });
   }

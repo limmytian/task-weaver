@@ -47,6 +47,12 @@ async function routeRequirementForCreatedTask(
   });
   if (!requirement) throw new NotFoundError("Requirement not found");
   const nextStatus = requirementStatusAfterTaskCreation(requirement.status, taskStatus);
+  if (requirement.workflow && !["done", "cancelled"].includes(taskStatus)) {
+    await assertRequirementLease(db, requirementId, actor, fence);
+    if (Object.values(requirement.workflowState ?? {}).some((state) => state !== "pending")) {
+      await db.update(requirements).set({ workflowState: { delivery: "pending", acceptance: "pending", integration: "pending" }, workflowStateRevision: requirement.workflowStateRevision + 1, updatedAt: new Date() }).where(eq(requirements.id, requirementId));
+    }
+  }
   if (nextStatus === requirement.status) return;
   await updateRequirement(db, requirementId, {
     status: nextStatus,
@@ -512,6 +518,10 @@ export async function updateTaskStatus(
     throw new ValidationError(
       "Cannot change status of a cancelled task. Create a new task instead.",
     );
+  }
+  if (task.requirementId && task.status === "done" && !["done", "cancelled"].includes(newStatus)) {
+    const requirement = await db.query.requirements.findFirst({ where: eq(requirements.id, task.requirementId) });
+    if (requirement?.workflow && !["done", "cancelled", "archived"].includes(requirement.status)) await routeRequirementForCreatedTask(db, task.requirementId, newStatus, actor, leaseFence ?? {});
   }
 
   if (

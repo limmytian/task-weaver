@@ -401,3 +401,18 @@ test('review and merge infrastructure failures expose normalized outcome codes',
   assert.equal(merge.status, 'failed')
   assert.equal(merge.outcomeCode, 'git_reset_failed')
 })
+
+
+test('mergeRequirementBranch rejects a remote head that differs from accepted delivery', async () => {
+  const { run, calls } = createRunner([
+    ['git fetch origin', {}],
+    ['git rev-parse origin/req/review', { stdout: 'changed-head\n' }],
+  ])
+  const result = await mergeRequirementBranch({
+    requirement, branchName: 'req/review', mergeWorktreePath: '/tmp/merge',
+    commentTaskId: null, expectedHeadCommit: 'accepted-head', run, ...callbacks(),
+  })
+  assert.equal(result.status, 'failed')
+  assert.equal(result.outcomeCode, 'merge_head_changed')
+  assert.equal(calls.length, 2)
+})

@@ -378,6 +378,7 @@ daemonsRouter.post("/:id/apply-requirement", async (c) => {
       tasks: result.tasks,
       repositories: result.repositories,
       executorTool: result.executorTool,
+      stage: result.stage,
       eligibility,
       leaseGeneration: result.leaseGeneration,
       runId: result.runId,

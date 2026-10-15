@@ -1,5 +1,6 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
+  ["POST", new RegExp("^/api/v1/plans/apply/?$")],
   ["POST", new RegExp("^/api/v1/documents/attachments/?$")],
   ["PUT", new RegExp("^/api/v1/documents/[0-9a-fA-F-]{36}/file/?$")],
   ["GET", new RegExp("^/api/v1/documents/[0-9a-fA-F-]{36}/files?/?$")],
@@ -66,6 +67,8 @@ const ordinaryRoutes: Array<[string, RegExp]> = [
   ["GET", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/?$")],
   ["PATCH", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/?$")],
   ["DELETE", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/?$")],
+  ["GET", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/(?:workflow-outputs|workflow-inputs|workflow-cleanup)/?$")],
+  ["POST", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/(?:workflow-outputs|workflow-inputs|workflow-advance|workflow-output-availability|workflow-output-retire)/?$")],
   ["POST", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/claim/?$")],
   ["POST", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/release/?$")],
   ["POST", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/heartbeat/?$")],

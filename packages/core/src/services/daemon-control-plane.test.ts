@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { workflowFromPreset, requirementWorkflowSchema } from "@task-weaver/contracts";
 import {
   classifyDaemonQueueRequirement,
   type DaemonQueueRequirementInput,
@@ -11,6 +12,21 @@ const daemons = [
   { role: "reviewer" as const, capabilities: ["review"] },
   { role: "merger" as const, capabilities: ["merge"] },
 ];
+
+test("workflow stages expose human decisions and node-local input blockers", () => {
+  const manual = classifyDaemonQueueRequirement(requirement({ status: "in_review", workflow: requirementWorkflowSchema.parse({ delivery: {}, acceptance: { mode: "manual" }, integration: {} }), workflowState: { delivery: "complete", acceptance: "pending", integration: "pending" } }), daemons, now);
+  assert.equal(manual?.role, "operator");
+  assert.equal(manual?.state, "manual");
+  const output = { id: "output-1", type: "local", nodeId: "node-a", availability: "available" };
+  const taskInput = requirement({ workflow: workflowFromPreset("basic"), workflowInputs: [{ taskId: "task-1", executionSliceId: null, output }] });
+  assert.deepEqual(classifyDaemonQueueRequirement(taskInput, daemons, now)?.reasonCodes, ["artifact_locality"]);
+  assert.equal(classifyDaemonQueueRequirement(taskInput, daemons.map((daemon) => ({ ...daemon, nodeId: "node-a" })), now)?.state, "runnable");
+  taskInput.workflowInputs![0]!.output.availability = "missing";
+  assert.deepEqual(classifyDaemonQueueRequirement(taskInput, daemons, now)?.reasonCodes, ["artifact_unavailable"]);
+  const delivery = classifyDaemonQueueRequirement(requirement({ workflow: workflowFromPreset("basic"), status: "in_progress", tasks: [], executionSlices: [] }), daemons, now);
+  assert.equal(delivery?.state, "runnable");
+  assert.match(delivery?.reasons[0] ?? "", /delivery/);
+});
 
 function requirement(
   overrides: Partial<DaemonQueueRequirementInput> = {},

@@ -1,5 +1,7 @@
 "use client";
 
+import { ProjectWorkflowSettings } from "@/components/project-workflow-settings";
+
 import { use, useMemo, useState } from "react";
 import Link from "next/link";
 import { ProjectMembers } from "@/components/project-members";
@@ -825,6 +827,7 @@ function ProjectSettings({
     name: string;
     description: string | null;
     status: string;
+    defaultWorkflow?: unknown;
   };
 }) {
   const [name, setName] = useState(project.name);
@@ -924,6 +927,8 @@ function ProjectSettings({
           </Button>
         </CardContent>
       </Card>
+
+      <ProjectWorkflowSettings projectId={project.id} defaultWorkflow={project.defaultWorkflow} />
 
       <Card className="border-destructive/30">
         <CardHeader>

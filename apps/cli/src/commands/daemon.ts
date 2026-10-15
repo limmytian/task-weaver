@@ -6,6 +6,7 @@ import { createHash, randomUUID } from 'crypto'
 import { homedir, hostname } from 'os'
 import { join, resolve } from 'path'
 import { Command } from 'commander'
+import { requirementWorkflowSchema, workflowNeedsWorktree } from '@task-weaver/contracts'
 import { runCommand } from '../async-command.js'
 import { runMeteredAgent } from '../agent-usage.js'
 import { commandFailureSummary } from '../daemon-finalization.js'
@@ -40,6 +41,8 @@ import {
   type RequirementRepositoryEntry,
 } from '../repository-workspace.js'
 import { registerDaemonPipeline } from './daemon-pipeline.js'
+import { runWorkflowAgent, WORKFLOW_RESULT_PROTOCOL } from '../workflow-agent.js'
+import { probeWorkflowArtifact, type LocalWorkflowOutput } from '../workflow-artifacts.js'
 import {
   manualMergeActionUrl,
   selectMergeMode,
@@ -64,6 +67,15 @@ interface DaemonProcessIdentity {
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+async function verifyLocalWorkflowOutputs(outputs: LocalWorkflowOutput[], config: Config, report: (output: LocalWorkflowOutput, probe: Awaited<ReturnType<typeof probeWorkflowArtifact>>) => Promise<unknown>, signal?: AbortSignal): Promise<void> {
+  for (const output of outputs) {
+    if (output.type !== 'local') continue
+    const probe = await probeWorkflowArtifact(output, config.nodeId, signal)
+    await report(output, probe)
+    if (probe.availability !== 'available') throw new Error(`Local output ${output.id}: ${probe.reason}`)
+  }
+}
 
 function forgeSyncIdempotencyKey(pullRequest: ForgePullRequest) {
   const digest = createHash('sha256').update(JSON.stringify(pullRequest)).digest('hex')
@@ -136,6 +148,7 @@ interface WorkerState {
 }
 
 interface RequirementLane {
+  stage?: 'execution' | 'delivery'
   requirement: any
   executionSlice?: any | null
   task: any
@@ -682,6 +695,7 @@ export function registerDaemon(program: Command): void {
           ...supportedModelTiers.map((tier) => `model-tier:${tier}`),
         ],
         host,
+        nodeId: cliConfig.nodeId,
         processStartedAt: identity.processStartedAt,
         workerCapacity: numWorkers,
       })
@@ -811,7 +825,73 @@ export function registerDaemon(program: Command): void {
         w.pollTimer = setTimeout(() => poll(w), w.currentInterval)
       }
 
+      const runDelivery = async (w: WorkerState, lane: RequirementLane, signal: AbortSignal): Promise<void> => {
+        const requirement = lane.requirement
+        const workflow = requirementWorkflowSchema.parse(requirement.workflow)
+        if (workflow.integration.target && ['git_provider', 'git_direct'].includes(workflow.integration.method) && lane.repositories.some((entry) => entry.link.baseBranch !== workflow.integration.target)) throw new Error('Git integration target must match every repository base branch')
+        const fence = { daemonId, leaseGeneration: lane.leaseGeneration }
+        const active = () => { throwIfCancelled(signal); leaseSupervisor.assertHealthy(String(w.index)) }
+        const patchDelivery = async (linkId: string, fields: Record<string, unknown>) => {
+          active()
+          return daemonPatch(`/api/v1/requirement-repositories/${linkId}/delivery`, { ...fields, ...fence })
+        }
+        w.currentRequirementId = requirement.id
+        w.activeProcess = true
+        w.currentTaskId = null
+        w.requirementTitle = requirement.title
+        w.startedAt = new Date().toISOString()
+        await reportDaemonStatus('busy')
+        let succeeded = false
+        try {
+          const workspace = await provisionCompositeWorkspace({
+            config: cliConfig, requirement, executionSlice: lane.executionSlice,
+            entries: workflowNeedsWorktree(workflow) ? lane.repositories : [], updateDelivery: patchDelivery, includeDeliveredRepositories: true, signal,
+          })
+          w.worktreePath = workspace.rootPath
+          let outputs = await daemonGet<any[]>(`/api/v1/requirements/${requirement.id}/workflow-outputs`)
+          outputs = outputs.filter((output) => output.workflowRevision === requirement.workflowRevision)
+          await verifyLocalWorkflowOutputs(outputs, cliConfig,
+            (output, probe) => daemonPost(`/api/v1/requirements/${output.requirementId}/workflow-output-availability`, { outputId: output.id, nodeId: cliConfig.nodeId, daemonId, ...probe }), signal)
+          const gitDelivery = ['git_branch', 'git_pr'].includes(workflow.delivery.method)
+          const missingOutput = workflow.delivery.method !== 'none' && !gitDelivery && !outputs.some((output) => output.type === workflow.delivery.method)
+          let result = { decision: 'complete' as 'complete' | 'changes_requested' | 'failed', reason: 'Delivery evidence is ready; no extra instructions are configured.', checks: [] as Array<{ name: string; status: 'passed' | 'failed' }> }
+          if (workflow.delivery.mode !== 'skip' && (workflow.delivery.instructions.trim() || missingOutput)) {
+            const tool = selectExecutorTool(tools, requirement.tags ?? [], lane.executorTool)
+            if (!tool || !lane.runId) throw new Error('Configured delivery requires an available agent and worker run')
+            const prompt = `Complete Task Weaver delivery for requirement ${requirement.id}: ${requirement.title}.\nDescription: ${requirement.description ?? ''}\nDelivery method: ${workflow.delivery.method}\nInstructions: ${workflow.delivery.instructions || 'Register the required delivery evidence.'}\nExisting outputs: ${JSON.stringify(outputs)}\nUse tw req output register ${requirement.id} to register outputs. For comments, use a completed task as the comment target. Local files must be registered with --type local --file. The daemon owns Git commit, push and optional PR creation. Do not claim or release the requirement.\n${extraWorkerPrompt ?? ''}\n${WORKFLOW_RESULT_PROTOCOL}`
+            result = await runWorkflowAgent({ config: cliConfig, daemonId, requirement, runId: lane.runId, leaseGeneration: lane.leaseGeneration,
+              workerIndex: w.index, stage: 'delivery', tool, argv: buildArgv(tool, prompt, workspace.rootPath, modelMappings.strong, thinkMappings.strong), cwd: workspace.rootPath, signal })
+          }
+          if (result.decision === 'complete' && gitDelivery) {
+            const deliveries = await finalizeCompositeWorkspace({ config: cliConfig, workspace, entries: lane.repositories, requirement, updateDelivery: patchDelivery, createPullRequest: workflow.delivery.method === 'git_pr', signal })
+            if (deliveries.some((delivery) => delivery.result.deliveryStatus === 'failed')) throw new Error('Git delivery remains incomplete')
+            for (const delivery of deliveries) await daemonPost(`/api/v1/requirements/${requirement.id}/workflow-outputs`, {
+              type: workflow.delivery.method, requirementRepositoryId: delivery.linkId,
+              url: delivery.result.pullRequestUrl, summary: `${delivery.result.deliveryStatus}: ${delivery.result.headCommit ?? 'no commit'}`, ...fence,
+            })
+          }
+          active()
+          const latest = await daemonGet<any>(`/api/v1/requirements/${requirement.id}`)
+          await daemonPost(`/api/v1/requirements/${requirement.id}/workflow-advance`, { stage: 'delivery', ...result, expectedRevision: latest.workflowStateRevision, ...fence })
+          succeeded = result.decision === 'complete'
+        } finally {
+          await daemonPost(`/api/v1/requirements/${requirement.id}/release`, { reason: 'Delivery worker finished', ...fence }).catch(() => undefined)
+          leaseSupervisor.unregister(String(w.index))
+          w.activeProcess = false
+          w.currentRequirementId = null
+          w.requirementTitle = null
+          w.startedAt = null
+          w.worktreePath = null
+          w.runId = null
+          w.leaseGeneration = null
+          await reportDaemonStatus(workers.some((worker) => worker.activeProcess) ? 'busy' : 'idle')
+        }
+        if (opts.once) await stopDaemon('idle', succeeded ? 0 : 1)
+        else { resetBackoff(w); schedulePoll(w) }
+      }
+
       const runAgent = async (w: WorkerState, lane: RequirementLane, signal: AbortSignal): Promise<void> => {
+        if (lane.stage === 'delivery') return runDelivery(w, lane, signal)
         const { requirement, executionSlice, task } = lane
         const leaseFence = { daemonId, leaseGeneration: lane.leaseGeneration }
         const assertLease = () => leaseSupervisor.assertHealthy(String(w.index))
@@ -865,12 +945,20 @@ export function registerDaemon(program: Command): void {
         }
 
         let workspace: Awaited<ReturnType<typeof provisionCompositeWorkspace>>
+        let workflowInputRows: any[] = []
         try {
+          if (requirement.workflow) {
+            workflowInputRows = (await daemonGet<any[]>(`/api/v1/requirements/${requirement.id}/workflow-inputs`))
+              .filter((input) => (!input.taskId || input.taskId === task.id) && (!input.executionSliceId || input.executionSliceId === executionSlice?.id))
+            await verifyLocalWorkflowOutputs(workflowInputRows.map((input) => input.output), cliConfig,
+              (output, probe) => daemonPost(`/api/v1/requirements/${output.requirementId}/workflow-output-availability`, { outputId: output.id, nodeId: cliConfig.nodeId, daemonId, ...probe }), signal)
+          }
           workspace = await provisionCompositeWorkspace({
             config: cliConfig,
             requirement: { id: requirement.id, title: requirement.title, branchName },
             executionSlice: executionSlice ? { id: executionSlice.id, orderIndex: executionSlice.orderIndex } : null,
-            entries: lane.repositories,
+            entries: requirement.workflow && !workflowNeedsWorktree(requirementWorkflowSchema.parse(requirement.workflow)) ? [] : lane.repositories,
+            includeDeliveredRepositories: Boolean(requirement.workflow),
             updateDelivery: (linkId, fields) => fencedPatch(`/api/v1/requirement-repositories/${linkId}/delivery`, fields),
             signal,
           })
@@ -939,7 +1027,7 @@ ${workspace.repositories.length > 0
   : '  * None. This is a repository-free Requirement slice.'}
 - The 'tw' CLI is available and pre-configured with the correct API URL and key. Use it directly (no setup needed).
 - Run: cd ${workspacePath} before any file edits or shell commands.
-- Work only inside the listed repository directories. Do not add repositories or change branches during this slice.
+- Work inside the listed repository directories when the task changes source code. For non-repository outputs, follow the configured delivery instructions and register the output in Task Weaver.
 - Do not run authenticated Git network operations; the daemon owns fetch, push, and forge delivery.`
 
         const workspaceRecoverySection = `Workspace Recovery State:
@@ -951,7 +1039,17 @@ ${workspace.repositories.length > 0
           `${index + 1}. [${t.status}] ${t.title} (${t.id})${t.description ? `\n   ${t.description}` : ''}`,
         ).join('\n')
 
-        const gitWorkflowSection = `Daemon-Owned Multi-Repository Finalization:
+        const gitWorkflowSection = requirement.workflow
+          ? `Configured Requirement Workflow:
+- Delivery mode: ${requirement.workflow.delivery.mode}; method: ${requirement.workflow.delivery.method}.
+- Delivery instructions: ${requirement.workflow.delivery.instructions || 'No extra instructions.'}
+- These instructions describe the later delivery stage. Complete this task's work and register produced artifacts as appropriate; a delivery worker performs extra automatic delivery actions after all tasks are terminal.
+- Register required evidence with tw req output register ${requirement.id} before finishing the final task.
+- Acceptance instructions: ${requirement.workflow.acceptance.instructions || 'No extra instructions.'}
+- Integration instructions: ${requirement.workflow.integration.instructions || 'No extra instructions.'}
+- Declared inputs: ${JSON.stringify(workflowInputRows)}
+- The daemon advances automatic stages; manual stages wait for a human decision.`
+          : `Daemon-Owned Multi-Repository Finalization:
 - The daemon prepared one isolated worktree per frozen Requirement repository and owns all authenticated Git/forge operations.
 - Do not run git checkout or mutate the repository manifest.
 - Do not commit, push, create a PR, or change the requirement final status yourself.
@@ -1012,9 +1110,9 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
 2. Work only on task ${task.id}. The supervisor will select subsequent tasks in separate executions.
 3. Before working a task, set it to in_progress if needed. When finished, set it to done with a reason. Use in_review when human judgment is needed.
 4. Use the 'tw' CLI commands to fetch context, list requirements, fetch documents, search, and update progress.
-5. Follow the Daemon-Owned Git Finalization section above after completing code changes for the requirement.
+5. Follow the configured delivery instructions above. Git finalization is handled by the daemon only for legacy requirements.
 6. If this slice is complete, leave a concise summary in task comments or requirement notes as useful context for the next slice.
-7. Do not mark requirement ${requirement.id} done. The daemon will move it to in_review after branch publication when all tasks are terminal.
+7. Do not mark requirement ${requirement.id} done. The daemon advances its configured workflow when all tasks are terminal.
 `
 
         w.currentTaskId = task.id
@@ -1219,6 +1317,47 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
 
               const openTasks = reqTasks.filter((candidate: any) => !['done', 'cancelled'].includes(candidate.status))
               if (openTasks.length === 0) {
+                if (req.workflow && req.workflow.delivery.mode !== 'manual') {
+                  if (executionSliceId) await fencedPatch(`/api/v1/execution-slices/${executionSliceId}`, { status: 'done', resultSummary: sliceSummary ?? 'Execution complete; configured delivery is next.' })
+                  await runDelivery(w, { ...lane, requirement: req, repositories: normalizeRequirementRepositoryEntries(req.repositories ?? []), task: null, stage: 'delivery' }, signal)
+                  return
+                }
+                if (req.workflow) {
+                  const method = req.workflow.delivery.method as string
+                  let finalizationSummary = `Delivery stage reached with ${reqTasks.length} terminal tasks. Method: ${method}.`
+                  if (method === 'git_branch' || method === 'git_pr') {
+                    if (lane.repositories.length === 0) throw new Error('Git delivery requires a linked repository')
+                    const delivery = await finalizeCompositeWorkspace({
+                      config: cliConfig, workspace, entries: lane.repositories,
+                      requirement: { title: req.title },
+                      updateDelivery: (linkId, fields) => fencedPatch(`/api/v1/requirement-repositories/${linkId}/delivery`, fields),
+                      createPullRequest: method === 'git_pr', signal,
+                    })
+                    const failed = delivery.filter((item) => item.result.deliveryStatus === 'failed')
+                    if (failed.length > 0) throw new Error(`Git delivery failed for ${failed.length} repositories`)
+                    for (const item of delivery) {
+                      await daemonPost(`/api/v1/requirements/${requirementId}/workflow-outputs`, {
+                        type: method, requirementRepositoryId: item.linkId,
+                        url: item.result.pullRequestUrl, summary: `${item.result.deliveryStatus}: ${item.result.headCommit ?? 'no commit'}`,
+                        ...leaseFence,
+                      })
+                    }
+                    finalizationSummary = `Git delivery completed for ${delivery.length} repositories using ${method}.`
+                  }
+                  if (executionSliceId) {
+                    await fencedPatch(`/api/v1/execution-slices/${executionSliceId}`, {
+                      status: openSliceTasks.length === 0 ? 'done' : 'in_review',
+                      resultSummary: `${sliceSummary ?? 'Daemon requirement agent exited cleanly.'}\n\n${finalizationSummary}`,
+                    })
+                  }
+                  if (req.workflow.delivery.mode !== 'manual') {
+                    await daemonPost(`/api/v1/requirements/${requirementId}/workflow-advance`, {
+                      stage: 'delivery', decision: 'complete', reason: finalizationSummary,
+                      expectedRevision: (await daemonGet<any>(`/api/v1/requirements/${requirementId}`)).workflowStateRevision, ...leaseFence,
+                    })
+                  }
+                  console.log(`[Daemon] Worker ${w.index} completed configured delivery for requirement ${requirementId}.`)
+                } else {
                 const delivery = await finalizeCompositeWorkspace({
                   config: cliConfig,
                   workspace,
@@ -1242,6 +1381,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
                 }
                 await fencedPatch(`/api/v1/requirements/${requirementId}`, { status: 'in_review' })
                 console.log(`[Daemon] Worker ${w.index} requirement ${requirementId} finalized across ${delivery.length} repositories.`)
+                }
               } else {
                 if (executionSliceId) {
                   await fencedPatch(`/api/v1/execution-slices/${executionSliceId}`, {
@@ -1318,13 +1458,13 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           }
 
           await executorStatus.refresh()
-          const res = await daemonPost<{ requirement: any | null; executionSlice?: any | null; task: any | null; tasks: any[]; repositories: RequirementRepositoryEntry[]; executorTool?: string | null; eligibility?: SchedulerEligibilityDiagnostics; leaseGeneration?: number; runId?: string }>(`/api/v1/daemons/${daemonId}/apply-requirement`, {
+          const res = await daemonPost<{ requirement: any | null; stage?: 'execution' | 'delivery'; executionSlice?: any | null; task: any | null; tasks: any[]; repositories: RequirementRepositoryEntry[]; executorTool?: string | null; eligibility?: SchedulerEligibilityDiagnostics; leaseGeneration?: number; runId?: string }>(`/api/v1/daemons/${daemonId}/apply-requirement`, {
             projectId: opts.project,
             workerIndex: w.index,
             modelTiers: supportedModelTiers.length > 0 ? supportedModelTiers : undefined,
             includeDiagnostics: true,
           })
-          if (res && res.requirement && res.task && res.leaseGeneration) {
+          if (res && res.requirement && (res.task || res.stage === 'delivery') && res.leaseGeneration) {
             if (lifecycle.isDraining) {
               await daemonPost(`/api/v1/requirements/${res.requirement.id}/release`, {
                 reason: 'daemon entered drain mode during acquisition',
@@ -1353,6 +1493,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
             })
             try {
               await runAgent(w, {
+                stage: res.stage,
                 requirement: res.requirement,
                 executionSlice: res.executionSlice,
                 task: res.task,
@@ -1565,8 +1706,9 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         id: daemonId,
         name: `review-daemon-${host}`,
         role: 'reviewer',
-        capabilities: ['review', ...tools],
+        capabilities: ['review', ...tools, ...(reviewTool ? ['workflow-agent'] : [])],
         host,
+        nodeId: cliConfig.nodeId,
         processStartedAt: identity.processStartedAt,
         workerCapacity: numWorkers,
       })
@@ -1778,6 +1920,32 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         let activeReviewLinkId: string | null = null
         let reviewWorkspace: Awaited<ReturnType<typeof provisionCompositeWorkspace>> | null = null
         try {
+          if (requirement.workflow) {
+            const workflow = requirement.workflow
+            const outputRows = (await daemonRequest<any[]>('GET', `/api/v1/requirements/${requirementId}/workflow-outputs`)).filter((output) => output.workflowRevision === requirement.workflowRevision)
+            const inputs = await daemonRequest<any[]>('GET', `/api/v1/requirements/${requirementId}/workflow-inputs`)
+            await verifyLocalWorkflowOutputs([...outputRows, ...inputs.map((input) => input.output)], cliConfig,
+              (output, probe) => daemonPost(`/api/v1/requirements/${output.requirementId}/workflow-output-availability`, { outputId: output.id, nodeId: cliConfig.nodeId, daemonId, ...probe }), signal)
+            const reviewPrompt = `Review this Task Weaver requirement delivery.\nRequirement: ${requirement.title}\nDescription: ${requirement.description ?? ''}\nDelivery instructions: ${workflow.delivery.instructions ?? ''}\nAcceptance instructions: ${workflow.acceptance.instructions ?? ''}\nRequired checks: ${(workflow.acceptance.requiredChecks ?? []).join('; ') || 'None'}\nRegistered outputs: ${JSON.stringify(outputRows)}\nLocal artifact root: ${process.env.TW_ARTIFACT_ROOT ?? join(homedir(), '.task-weaver', 'artifacts')}\nInspect the outputs and any available workspace.\n${extraWorkerPrompt ?? ''}\n${WORKFLOW_RESULT_PROTOCOL}`
+            const workspace = await provisionCompositeWorkspace({
+              config: cliConfig, requirement, executionSlice: lane.executionSlice,
+              entries: workflowNeedsWorktree(requirementWorkflowSchema.parse(workflow)) ? lane.repositories ?? [] : [], updateDelivery: () => Promise.resolve(undefined),
+              includeDeliveredRepositories: true,
+              preserveDeliveryStatus: true, deliveryPhase: 'review', signal,
+            })
+            const needsAgent = Boolean(workflow.acceptance.instructions.trim() || workflow.acceptance.requiredChecks.length)
+            if (needsAgent && (!reviewTool || !lane.runId)) throw new Error('Configured acceptance requires an available review agent and worker run')
+            const result = needsAgent ? await runWorkflowAgent({
+              config: cliConfig, daemonId, requirement, runId: lane.runId!, leaseGeneration: lane.leaseGeneration,
+              workerIndex: w.index, stage: 'acceptance', tool: reviewTool!,
+              argv: buildArgv(reviewTool!, reviewPrompt, workspace.rootPath, modelMappings.strong, thinkMappings.strong),
+              cwd: workspace.rootPath, signal,
+            }) : { decision: 'complete' as const, reason: 'No additional acceptance instructions or checks are configured.', checks: [] }
+            await fencedPost(`/api/v1/requirements/${requirementId}/workflow-advance`, {
+              stage: 'acceptance', ...result, expectedRevision: requirement.workflowStateRevision,
+            })
+            return
+          }
           const requirementTasks = Array.isArray(lane.tasks) && lane.tasks.length > 0
             ? lane.tasks
             : Array.isArray(requirement.tasks)
@@ -2256,11 +2424,21 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
     .option('--id <uuid>', 'merger instance ID (defaults to a unique process ID)')
     .option('--workers <n>', 'number of parallel merge workers (default: 1)')
     .option('--mode <mode>', 'merge mode: auto, provider, direct, or manual (default: auto)', 'auto')
+    .option('--tools <list>', 'comma-separated AI tools for configured integration instructions')
+    .option('--model <tier:model>', 'model mapping for integration; repeatable', collectModelMapping, [])
+    .option('--think <tier:effort>', 'Codex reasoning effort mapping for integration; repeatable', collectModelMapping, [])
+    .option('--prompt <text>', 'extra local integration instructions; repeatable', collectRepeatedOption, [])
+    .option('--prompt-file <path>', 'extra local integration instructions from a file; repeatable', collectRepeatedOption, [])
     .option('--once', 'process at most one acquired requirement, then exit')
     .action(async (opts) => {
       const cliConfig = await verifiedDaemonConfig()
       const baseBranch = opts.base as string
       const requestedMergeMode = opts.mode as RequestedMergeMode
+      const integrationTools = opts.tools ? String(opts.tools).split(',').map((tool) => tool.trim()).filter(Boolean) : detectTools()
+      const integrationTool = integrationTools.includes('codex') ? 'codex' : integrationTools[0] ?? null
+      const integrationModels = parseModelMappings(opts.model)
+      const integrationThink = parseThinkMappings(opts.think)
+      const integrationPrompt = loadExtraWorkerPrompt({ prompt: opts.prompt, promptFile: opts.promptFile })
       if (!['auto', 'provider', 'direct', 'manual'].includes(requestedMergeMode)) {
         throw new Error(`Invalid merge mode '${requestedMergeMode}'. Expected auto, provider, direct, or manual.`)
       }
@@ -2282,8 +2460,9 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         id: daemonId,
         name: `merge-daemon-${host}`,
         role: 'merger',
-        capabilities: ['merge'],
+        capabilities: ['merge', ...integrationTools, ...(integrationTool ? ['workflow-agent'] : [])],
         host,
+        nodeId: cliConfig.nodeId,
         processStartedAt: identity.processStartedAt,
         workerCapacity: numWorkers,
       })
@@ -2443,7 +2622,41 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           assertLease()
           return daemonPatch<T>(path, { ...body, ...leaseFence })
         }
+        const runIntegrationInstructions = async (cwd: string) => {
+          const workflow = requirementWorkflowSchema.parse(requirement.workflow)
+          const outputs = (await daemonRequest<any[]>('GET', `/api/v1/requirements/${requirementId}/workflow-outputs`)).filter((output) => output.workflowRevision === requirement.workflowRevision)
+          const inputs = await daemonRequest<any[]>('GET', `/api/v1/requirements/${requirementId}/workflow-inputs`)
+          await verifyLocalWorkflowOutputs([...outputs, ...inputs.map((input) => input.output)], cliConfig,
+            (output, probe) => daemonPost(`/api/v1/requirements/${output.requirementId}/workflow-output-availability`, { outputId: output.id, nodeId: cliConfig.nodeId, daemonId, ...probe }), signal)
+          if (!workflow.integration.instructions.trim()) {
+            return { decision: 'complete' as const, reason: 'Configured integration action completed; no additional instructions.', checks: [] }
+          }
+          if (!integrationTool || !lane.runId) throw new Error('Configured integration requires an available agent and worker run')
+          const prompt = `Perform the configured Task Weaver integration action.\nRequirement: ${requirement.title}\nDescription: ${requirement.description ?? ''}\nMethod: ${workflow.integration.method}\nTarget: ${workflow.integration.target ?? 'As specified in the instructions'}\nInstructions: ${workflow.integration.instructions}\nRegistered outputs: ${JSON.stringify(outputs)}\nLocal artifact root: ${process.env.TW_ARTIFACT_ROOT ?? join(homedir(), '.task-weaver', 'artifacts')}\n${integrationPrompt ?? ''}\n${WORKFLOW_RESULT_PROTOCOL}`
+          return runWorkflowAgent({
+            config: cliConfig, daemonId, requirement, runId: lane.runId,
+            leaseGeneration: lane.leaseGeneration, workerIndex: w.index, stage: 'integration', tool: integrationTool,
+            argv: buildArgv(integrationTool, prompt, cwd, integrationModels.strong, integrationThink.strong), cwd, signal,
+          })
+        }
         try {
+          if (requirement.workflow) {
+            const method = requirement.workflow.integration.method as string
+            if (method !== 'git_provider' && method !== 'git_direct') {
+              const workspace = await provisionCompositeWorkspace({
+                config: cliConfig, requirement, executionSlice: lane.executionSlice,
+                entries: workflowNeedsWorktree(requirementWorkflowSchema.parse(requirement.workflow)) ? lane.repositories : [],
+                includeDeliveredRepositories: true,
+                updateDelivery: () => Promise.resolve(undefined), preserveDeliveryStatus: true, deliveryPhase: 'merge', signal,
+              })
+              const result = await runIntegrationInstructions(workspace.rootPath)
+              await fencedPost(`/api/v1/requirements/${requirementId}/workflow-advance`, {
+                stage: 'integration', ...result,
+                expectedRevision: requirement.workflowStateRevision,
+              })
+              return
+            }
+          }
           const requirementTasks = Array.isArray(lane.tasks) && lane.tasks.length > 0
             ? lane.tasks
             : Array.isArray(requirement.tasks)
@@ -2457,7 +2670,9 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           )
           let mergeMode: 'provider' | 'direct' | 'manual'
           try {
-            mergeMode = selectMergeMode(effectivePolicy, requestedMergeMode)
+            mergeMode = selectMergeMode(effectivePolicy, requirement.workflow
+              ? requirement.workflow.integration.method === 'git_provider' ? 'provider' : 'direct'
+              : requestedMergeMode)
           } catch (error) {
             const summary = error instanceof Error ? error.message : String(error)
             for (const entry of lane.repositories ?? []) {
@@ -2478,8 +2693,6 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
             }
             return
           }
-          const mergeBaseBranch = effectivePolicy.baseBranch || baseBranch
-
           const updateDelivery = (linkId: string, fields: Record<string, unknown>) =>
             fencedPatch(`/api/v1/requirement-repositories/${linkId}/delivery`, fields)
           const workspace = await provisionCompositeWorkspace({
@@ -2490,6 +2703,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
             updateDelivery,
             preserveDeliveryStatus: true,
             deliveryPhase: 'merge',
+            includeDeliveredRepositories: Boolean(requirement.workflow),
             signal,
           })
 
@@ -2509,6 +2723,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           for (const repository of workspace.repositories) {
             const entry = entryByLink.get(repository.linkId)
             if (!entry || ['unchanged', 'merged'].includes(entry.link.deliveryStatus)) continue
+            const mergeBaseBranch = requirement.workflow ? requirement.workflow.integration.target || repository.baseBranch : effectivePolicy.baseBranch || baseBranch
             const adapter = getGitProviderAdapter(
               entry.repository.provider,
               (command, args, cwd, environment) => runTrustedGitCommand(command, args, cwd, environment, signal),
@@ -2697,6 +2912,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
               },
               branchName: repository.workingBranch,
               mergeWorktreePath,
+              expectedHeadCommit: requirement.workflow ? entry.link.pushedCommit ?? entry.link.headCommit ?? undefined : undefined,
               commentTaskId,
               baseBranch: mergeBaseBranch,
               run: trustedRun,
@@ -2752,7 +2968,15 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
             : failures.length > 0 || manualActions.length > 0
               ? 'ready_to_merge'
               : 'done'
-          await fencedPatch(`/api/v1/requirements/${requirement.id}`, { status: nextStatus })
+          if (requirement.workflow && nextStatus === 'done') {
+            const result = await runIntegrationInstructions(workspace.rootPath)
+            await fencedPost(`/api/v1/requirements/${requirement.id}/workflow-advance`, {
+              stage: 'integration', ...result,
+              expectedRevision: requirement.workflowStateRevision,
+            })
+          } else {
+            await fencedPatch(`/api/v1/requirements/${requirement.id}`, { status: nextStatus })
+          }
           const resultSummary = failures.length > 0
             ? failures.join(', ')
             : manualActions.length > 0

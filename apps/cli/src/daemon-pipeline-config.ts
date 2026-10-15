@@ -47,7 +47,13 @@ export interface PipelineReviewerConfig extends PipelineRoleBase {
   postForgeSummary: boolean
 }
 
-export interface PipelineMergerConfig extends PipelineRoleBase {}
+export interface PipelineMergerConfig extends PipelineRoleBase {
+  tools: string[]
+  models: Partial<Record<PipelineModelTier, string>>
+  reasoningEffort: Partial<Record<PipelineModelTier, PipelineReasoningEffort>>
+  prompts: string[]
+  promptFiles: string[]
+}
 
 export interface PipelineEnvironmentReference {
   fromEnv: string
@@ -252,13 +258,18 @@ function parseReviewer(value: unknown, issues: string[], sourceDirectory: string
   }
 }
 
-function parseMerger(value: unknown, issues: string[]): PipelineMergerConfig {
+function parseMerger(value: unknown, sourceDirectory: string, issues: string[]): PipelineMergerConfig {
   const path = 'roles.merger'
   const input = objectAt(value, path, issues)
-  assertKnownKeys(input, ['enabled', 'workers'], path, issues)
+  assertKnownKeys(input, ['enabled', 'workers', 'tools', 'models', 'reasoningEffort', 'prompts', 'promptFiles'], path, issues)
   return {
     enabled: booleanAt(input.enabled, `${path}.enabled`, issues, true),
     workers: integerAt(input.workers, `${path}.workers`, issues, 1, 1, 64),
+    tools: stringArrayAt(input.tools, `${path}.tools`, issues),
+    models: modelMapAt(input.models, `${path}.models`, issues),
+    reasoningEffort: effortMapAt(input.reasoningEffort, `${path}.reasoningEffort`, issues),
+    prompts: stringArrayAt(input.prompts, `${path}.prompts`, issues),
+    promptFiles: stringArrayAt(input.promptFiles, `${path}.promptFiles`, issues).map((file) => resolve(sourceDirectory, file)),
   }
 }
 
@@ -311,7 +322,7 @@ export function parseDaemonPipelineConfig(value: unknown, sourcePath = '<inline>
   const sourceDirectory = sourcePath === '<inline>' ? process.cwd() : resolve(sourcePath, '..')
   const executor = parseExecutor(roles.executor, issues, sourceDirectory)
   const reviewer = parseReviewer(roles.reviewer, issues, sourceDirectory)
-  const merger = parseMerger(roles.merger, issues)
+  const merger = parseMerger(roles.merger, sourceDirectory, issues)
   if (
     reviewer.enabled
     && reviewer.skipAiReview

@@ -8,6 +8,7 @@ export const projects = pgTable("projects", {
     .default("active")
     .notNull(),
   executorFallbackPolicy: jsonb("executor_fallback_policy").$type<{ allowedTools: string[]; authenticationMode: "subscription"; allowPaidApi: false }>(),
+  defaultWorkflow: jsonb("default_workflow").$type<Record<string, unknown>>(),
   pinnedAt: timestamp("pinned_at", { withTimezone: true }),
   createdBy: text("created_by").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })

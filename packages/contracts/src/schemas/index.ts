@@ -22,3 +22,4 @@ export * from "./agent-usage";
 export * from "./activity";
 
 export * from "./executor-availability";
+export * from "./workflows";

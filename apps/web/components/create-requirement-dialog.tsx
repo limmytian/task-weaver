@@ -22,6 +22,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { requirementWorkflowSchema, workflowFromPreset, workflowPresetSchema, BASIC_WORKFLOW, type RequirementWorkflow } from "@task-weaver/contracts";
+import { WorkflowEditor } from "@/components/workflow-editor";
 
 function defaultRequirementDate() {
   return new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
@@ -40,16 +42,22 @@ export function CreateRequirementDialog({
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<string>("medium");
   const [status, setStatus] = useState<string>("draft");
+  const [workflowPreset, setWorkflowPreset] = useState<string>("project");
+  const [customWorkflow, setCustomWorkflow] = useState<RequirementWorkflow>(BASIC_WORKFLOW);
   const [expectedAt, setExpectedAt] = useState(defaultRequirementDate);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const utils = trpc.useUtils();
+  const project = trpc.project.get.useQuery({ id: projectId }, { enabled: open });
+  const inheritedWorkflow = requirementWorkflowSchema.safeParse(project.data?.defaultWorkflow ?? BASIC_WORKFLOW);
 
   const resetForm = () => {
     setTitle("");
     setDescription("");
     setPriority("medium");
     setStatus("draft");
+    setWorkflowPreset("project");
+    setCustomWorkflow(BASIC_WORKFLOW);
     setExpectedAt(defaultRequirementDate());
     setSubmitAttempted(false);
   };
@@ -59,6 +67,7 @@ export function CreateRequirementDialog({
     description.trim().length > 0 ||
     priority !== "medium" ||
     status !== "draft" ||
+    workflowPreset !== "project" ||
     expectedAt !== defaultRequirementDate();
   const titleError = submitAttempted && !title.trim() ? "Requirement title is required." : null;
 
@@ -86,6 +95,15 @@ export function CreateRequirementDialog({
     e.preventDefault();
     setSubmitAttempted(true);
     if (!title.trim()) return;
+    let workflow: ReturnType<typeof requirementWorkflowSchema.parse> | undefined;
+    if (workflowPreset !== "project") {
+      try {
+        workflow = requirementWorkflowSchema.parse(customWorkflow);
+      } catch (error) {
+        toast.error("Invalid workflow", { description: error instanceof Error ? error.message : String(error) });
+        return;
+      }
+    }
     createReq.mutate({
       projectId,
       title: title.trim(),
@@ -93,13 +111,14 @@ export function CreateRequirementDialog({
       priority: priority as "low" | "medium" | "high" | "critical",
       status: status as "draft" | "approved" | "in_progress" | "in_review" | "ready_to_merge" | "done",
       expectedAt: expectedAt ? new Date(expectedAt + "T00:00:00") : undefined,
+      workflow,
     });
   };
 
   return (
     <>
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <form onSubmit={handleSubmit}>
             <DialogHeader>
               <DialogTitle>Create Requirement</DialogTitle>
@@ -129,6 +148,25 @@ export function CreateRequirementDialog({
                 onChange={(e) => setDescription(e.target.value)}
                 rows={4}
               />
+              <div>
+                <label className="mb-1.5 block text-sm font-medium">Delivery workflow</label>
+                <Select value={workflowPreset} onValueChange={(preset) => { setWorkflowPreset(preset); if (preset === "custom") setCustomWorkflow(inheritedWorkflow.success ? inheritedWorkflow.data : BASIC_WORKFLOW); else if (preset !== "project") setCustomWorkflow(workflowFromPreset(workflowPresetSchema.parse(preset))); }}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="project">Project default</SelectItem>
+                    <SelectItem value="basic">No output required</SelectItem>
+                    <SelectItem value="comment">Comment</SelectItem>
+                    <SelectItem value="attachment">Attachment</SelectItem>
+                    <SelectItem value="url">URL</SelectItem>
+                    <SelectItem value="local">Local file</SelectItem>
+                    <SelectItem value="git_branch">Git branch</SelectItem>
+                    <SelectItem value="git_pr">Pull request</SelectItem>
+                    <SelectItem value="custom">Customize project default</SelectItem>
+                  </SelectContent>
+                </Select>
+                {workflowPreset === "project" && inheritedWorkflow.success && <p className="mt-2 text-xs text-muted-foreground">Delivery: {inheritedWorkflow.data.delivery.method} · Acceptance: {inheritedWorkflow.data.acceptance.mode} · Integration: {inheritedWorkflow.data.integration.mode}</p>}
+                {workflowPreset !== "project" && <div className="mt-3"><WorkflowEditor value={customWorkflow} onChange={setCustomWorkflow} /></div>}
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <Select value={status} onValueChange={setStatus}>
                   <SelectTrigger>
@@ -138,9 +176,6 @@ export function CreateRequirementDialog({
                     <SelectItem value="draft">Draft</SelectItem>
                     <SelectItem value="approved">Approved</SelectItem>
                     <SelectItem value="in_progress">In Progress</SelectItem>
-                    <SelectItem value="in_review">In Review</SelectItem>
-                    <SelectItem value="ready_to_merge">Ready to Merge</SelectItem>
-                    <SelectItem value="done">Done</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={priority} onValueChange={setPriority}>

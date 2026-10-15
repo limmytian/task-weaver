@@ -116,6 +116,8 @@ PATCH /api/v1/projects/:id
 { "name": "New Name", "description": "...", "status": "archived" }
 ```
 
+`defaultWorkflow` accepts a validated requirement workflow object or `null` to clear the project default. New requirements without an override inherit this value; when it is null, they use the `basic` workflow.
+
 ### Get Project Statistics
 
 ```
@@ -291,6 +293,8 @@ POST /api/v1/projects/:projectId/tasks
 | `assignee` | string | no | |
 | `assigneeType` | enum | no | `human` \| `agent` |
 | `tags` | string[] | no | |
+| `workflowPreset` | enum | no | `basic`, `comment`, `attachment`, `url`, `local`, `git_branch`, or `git_pr` |
+| `workflow` | object | no | Custom three-stage workflow; mutually exclusive with `workflowPreset` |
 | `expectedAt` | date | no | |
 
 ### List Personal Tasks
@@ -706,7 +710,24 @@ Returns requirement with linked tasks and documents.
 PATCH /api/v1/requirements/:id
 ```
 
-All fields optional. `modelTier` controls daemon scheduling for this requirement lane and accepts `fast`, `standard`, or `strong`.
+All fields optional. `modelTier` controls daemon scheduling for this requirement lane and accepts `fast`, `standard`, or `strong`. `workflowPreset` or `workflow` can replace the resolved workflow only while the requirement is draft or approved and all tasks are unstarted.
+
+### Workflow Outputs and Stage Decisions
+
+```
+GET  /api/v1/requirements/:id/workflow-outputs
+POST /api/v1/requirements/:id/workflow-outputs
+POST /api/v1/requirements/:id/workflow-advance
+GET  /api/v1/requirements/:id/workflow-inputs
+POST /api/v1/requirements/:id/workflow-inputs
+POST /api/v1/requirements/:id/workflow-output-availability
+POST /api/v1/requirements/:id/workflow-output-retire
+GET  /api/v1/requirements/:id/workflow-cleanup
+```
+
+Output registration accepts `type` (`comment`, `attachment`, `url`, `local`, `git_branch`, `git_pr`), optional `taskId`, `executionSliceId`, `requirementRepositoryId`, and `summary`. Comment and attachment outputs require a platform `referenceId`; URL outputs require `url`; local outputs require `nodeId`, normalized `relativePath`, `sizeBytes`, and `sha256`. Git outputs require a requirement repository link. The server validates ownership. Additional output types may coexist; advancing delivery requires evidence for the selected primary method.
+
+Stage advancement requires `stage` (`delivery`, `acceptance`, `integration`), `decision` (`complete`, `changes_requested`, `failed`, `retry`), `reason`, and `expectedRevision` from `workflowStateRevision`. Acceptance may include `checks` as name/status entries. Daemon callers include their `daemonId` and `leaseGeneration`. A conflicting revision returns `409`; manual stages require a human actor. Existing requirements with `workflow: null` retain the legacy Git flow.
 
 ### Execution Slices
 

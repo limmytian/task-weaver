@@ -7,6 +7,7 @@ import {
   requirementRepositories,
   requirements,
   reviewRuns,
+  workflowOutputs,
   taskRepositories,
   tasks,
 } from "@task-weaver/db";
@@ -23,8 +24,23 @@ import type {
   UpdateRepositoryInput,
   UpdateRequirementRepositoryDeliveryInput,
 } from "@task-weaver/contracts";
-import { ConflictError, NotFoundError, ValidationError } from "@task-weaver/contracts";
+import { ConflictError, NotFoundError, ValidationError, requirementWorkflowSchema } from "@task-weaver/contracts";
 import { assertRequirementLease } from "./claims";
+
+async function assertWorkflowIntegration(db: Database, requirement: typeof requirements.$inferSelect, link: typeof requirementRepositories.$inferSelect, actor: Actor) {
+  if (!requirement.workflow) return;
+  const workflow = requirementWorkflowSchema.parse(requirement.workflow);
+  const state = requirement.workflowState ?? {};
+  if (!["complete", "skipped"].includes(state.delivery ?? "") || !["complete", "skipped"].includes(state.acceptance ?? "")) throw new ValidationError("Workflow delivery and acceptance must complete before Git integration");
+  if (!["git_provider", "git_direct"].includes(workflow.integration.method)) throw new ValidationError("Git integration is not configured for this requirement");
+  if (workflow.integration.mode === "manual" && actor.type !== "human") throw new ValidationError("Git integration requires a human decision");
+  if (workflow.integration.target && workflow.integration.target !== link.baseBranch) throw new ValidationError("Git integration target differs from the repository base branch");
+  const output = await db.query.workflowOutputs.findFirst({
+    where: and(eq(workflowOutputs.requirementId, requirement.id), eq(workflowOutputs.requirementRepositoryId, link.id), eq(workflowOutputs.workflowRevision, requirement.workflowRevision), inArray(workflowOutputs.type, ["git_branch", "git_pr"])),
+    orderBy: [desc(workflowOutputs.createdAt), desc(workflowOutputs.id)],
+  });
+  if (!output?.headCommit || output.headCommit !== link.pushedCommit || output.headCommit !== link.headCommit) throw new ValidationError("Git integration must use the accepted delivery commit");
+}
 import { emit } from "@task-weaver/realtime";
 import {
   REPOSITORY_DELIVERY_STATE_POLICY,
@@ -759,6 +775,7 @@ export async function updateRequirementRepositoryDelivery(
   });
   if (!requirement) throw new NotFoundError("Requirement not found");
   const actorPhase = authenticatedPhase ?? deliveryIdentityPhase(fields);
+  if (actorPhase === "merge" && (fields.deliveryStatus === "merged" || fields.mergeStatus === "merging" || fields.mergeStatus === "merged")) await assertWorkflowIntegration(db, requirement, link, actor);
   const policy = actorPhase === "review" || actorPhase === "merge"
     ? await getEffectiveReviewPolicy(db, link.requirementId)
     : null;
@@ -1012,6 +1029,8 @@ export async function syncRequirementRepositoryForgeState(
     throw new ValidationError("Forge snapshot pull request does not match the linked pull request");
   }
 
+  const requirement = await db.query.requirements.findFirst({ where: eq(requirements.id, link.requirementId) });
+  if (!requirement) throw new NotFoundError("Requirement not found");
   const reviewHead = snapshot.headCommit ?? link.headCommit;
   const approvedRun = reviewHead
     ? await db.query.reviewRuns.findFirst({
@@ -1027,7 +1046,7 @@ export async function syncRequirementRepositoryForgeState(
     currentDeliveryStatus: link.deliveryStatus,
     currentHeadCommit: link.pushedCommit ?? link.headCommit,
     snapshot,
-    currentHeadApproved: Boolean(approvedRun),
+    currentHeadApproved: Boolean(approvedRun) || Boolean(requirement.workflow && ["complete", "skipped"].includes(requirement.workflowState?.acceptance ?? "") && snapshot.headCommit === link.pushedCommit),
   });
   if (authenticatedPhase) {
     const policy = await getEffectiveReviewPolicy(db, link.requirementId);
@@ -1037,6 +1056,7 @@ export async function syncRequirementRepositoryForgeState(
       current: { actorId: actor.id, actorType: actor.type, daemonId: input.daemonId ?? null },
     });
     if (transition.deliveryStatus === "merged") {
+      await assertWorkflowIntegration(db, requirement, link, actor);
       if (snapshot.headCommit && snapshot.headCommit !== link.headCommit) throw new ValidationError("Provider merge must use the current delivery head");
       if (!approvedRun && (policy.requiredChecks.length > 0 || policy.requireAiReview || policy.minimumHumanApprovals > 0 || policy.requireIndependentReviewer)) throw new ValidationError("Provider merge requires approved evidence for the current delivery head");
     }
@@ -1104,10 +1124,6 @@ export async function syncRequirementRepositoryForgeState(
     ));
   }
 
-  const requirement = await db.query.requirements.findFirst({
-    where: eq(requirements.id, link.requirementId),
-  });
-  if (!requirement) throw new NotFoundError("Requirement not found");
   const repositoryLinks = await db.query.requirementRepositories.findMany({
     where: eq(requirementRepositories.requirementId, link.requirementId),
   });
@@ -1115,13 +1131,16 @@ export async function syncRequirementRepositoryForgeState(
     repositoryLinks.map((repositoryLink) => repositoryLink.deliveryStatus),
   );
   if (
-    requirement.status !== desiredRequirementStatus
+    !requirement.workflow && requirement.status !== desiredRequirementStatus
     && canTransitionRequirementStatus(requirement.status, desiredRequirementStatus)
   ) {
     await db.update(requirements).set({
       status: desiredRequirementStatus,
       updatedAt: new Date(),
     }).where(eq(requirements.id, requirement.id));
+  }
+  if (requirement.workflow && transition.invalidateReview) {
+    await db.update(requirements).set({ workflowState: { delivery: "pending", acceptance: "pending", integration: "pending" }, workflowStateRevision: requirement.workflowStateRevision + 1, status: "in_progress", updatedAt: new Date() }).where(eq(requirements.id, requirement.id));
   }
 
   await db.insert(activityLog).values({

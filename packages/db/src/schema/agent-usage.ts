@@ -51,7 +51,7 @@ export const agentUsageRuns = pgTable(
       enum: ["codex_jsonl", "daemon_unknown", "ti_runtime", "ti_chat", "ti_operation"],
     }).notNull(),
     agent: text("agent").notNull(),
-    phase: text("phase", { enum: ["execution", "review", "rework"] }).notNull(),
+    phase: text("phase", { enum: ["execution", "review", "rework", "integration"] }).notNull(),
     outcome: text("outcome", {
       enum: ["running", "succeeded", "failed", "cancelled"],
     }).notNull(),

@@ -24,7 +24,7 @@ import type {
   UpsertReviewCheckInput,
   UpsertReviewFindingInput,
 } from "@task-weaver/contracts";
-import { ConflictError, NotFoundError, ValidationError } from "@task-weaver/contracts";
+import { ConflictError, NotFoundError, ValidationError, requirementWorkflowSchema } from "@task-weaver/contracts";
 import { assertRequirementLease } from "./claims";
 
 export const DEFAULT_REVIEW_POLICY: ReviewPolicyInput = {
@@ -48,7 +48,7 @@ export const DEFAULT_REVIEW_POLICY: ReviewPolicyInput = {
 type ReviewPolicyRow = typeof reviewPolicies.$inferSelect;
 
 export interface ResolvedReviewPolicy extends ReviewPolicyInput {
-  source: "built_in" | "project" | "requirement";
+  source: "built_in" | "project" | "requirement" | "workflow";
   id: string | null;
   projectId: string;
   requirementId: string | null;
@@ -246,6 +246,11 @@ export async function getEffectiveReviewPolicy(db: Database, requirementId: stri
     where: eq(requirements.id, requirementId),
   });
   if (!requirement) throw new NotFoundError("Requirement not found");
+  if (requirement.workflow) {
+    const workflow = requirementWorkflowSchema.parse(requirement.workflow);
+    const mode: ReviewMergeMode = workflow.integration.method === "git_provider" ? "provider" : workflow.integration.method === "git_direct" ? "direct" : "manual";
+    return { ...DEFAULT_REVIEW_POLICY, allowedMergeModes: [mode], defaultMergeMode: mode, baseBranch: workflow.integration.target ?? "main", source: "workflow" as const, id: null, projectId: requirement.projectId, requirementId: requirement.id } satisfies ResolvedReviewPolicy;
+  }
   const [projectPolicy, requirementPolicy] = await Promise.all([
     db.query.reviewPolicies.findFirst({
       where: and(eq(reviewPolicies.projectId, requirement.projectId), isNull(reviewPolicies.requirementId)),

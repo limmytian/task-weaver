@@ -21,6 +21,7 @@ export const daemons = pgTable(
     actorId: text("actor_id"),
     actorType: actorTypeEnum("actor_type"),
     host: text("host"),
+    nodeId: text("node_id"),
     processStartedAt: timestamp("process_started_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

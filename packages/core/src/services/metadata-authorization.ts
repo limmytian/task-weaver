@@ -120,7 +120,7 @@ export async function authorizeMetadataOperation(db: Database, authority: Resour
       const input = call[1];
       if (!input.runId || input.workerIndex === undefined) throw new AuthorizationError();
       const { daemon, requirement } = await requireDaemonLease(db, authority, input.requirementId, input);
-      if (requirement.projectId !== input.projectId || daemon.role === "merger" || (daemon.role === "reviewer" ? input.phase !== "review" : !["execution", "rework"].includes(input.phase))) throw new AuthorizationError();
+      if (requirement.projectId !== input.projectId || (daemon.role === "merger" ? input.phase !== "integration" : daemon.role === "reviewer" ? input.phase !== "review" : !["execution", "rework"].includes(input.phase))) throw new AuthorizationError();
       return;
     }
     if (!["listUsage", "summarizeUsage", "getUsage"].includes(name)) throw new AuthorizationError();

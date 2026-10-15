@@ -4,18 +4,22 @@ import { eq, and, sql, inArray } from "drizzle-orm";
 import {
   type Database,
   requirements,
+  projects,
   documents,
   repositories,
   executionSlices,
   requirementClaims,
+  daemons,
   requirementDependencies,
   tasks,
   taskComments,
   activityLog,
   documentRequirementLinks,
   requirementRepositories,
+  workflowOutputs,
+  workflowInputs,
 } from "@task-weaver/db";
-import type { Actor } from "@task-weaver/contracts";
+import type { Actor, AddWorkflowInputInput, AdvanceWorkflowStageInput, RegisterWorkflowOutputInput, ReportWorkflowOutputAvailabilityInput } from "@task-weaver/contracts";
 import type {
   CreateRequirementInput,
   UpdateRequirementInput,
@@ -30,7 +34,16 @@ import {
   assertRequirementStatusTransition,
   requirementStatePolicy,
 } from "./daemon-state-machine";
-import { NotFoundError, ValidationError } from "@task-weaver/contracts";
+import { ConflictError, NotFoundError, ValidationError } from "@task-weaver/contracts";
+import { BASIC_WORKFLOW, requirementWorkflowSchema, workflowFromPreset, type RequirementWorkflow, type WorkflowPreset } from "@task-weaver/contracts";
+
+function selectedWorkflow(input: { workflow?: RequirementWorkflow; workflowPreset?: WorkflowPreset }, projectDefault: Record<string, unknown> | null): { workflow: RequirementWorkflow; source: "basic" | "project" | "explicit" } {
+  if (input.workflow && input.workflowPreset) throw new ValidationError("Specify either a workflow or a workflow preset");
+  if (input.workflow) return { workflow: input.workflow, source: "explicit" };
+  if (input.workflowPreset) return { workflow: workflowFromPreset(input.workflowPreset), source: "explicit" };
+  if (projectDefault) return { workflow: requirementWorkflowSchema.parse(projectDefault), source: "project" };
+  return { workflow: BASIC_WORKFLOW, source: "basic" };
+}
 import { assertExecutionSliceCanAdvance } from "./execution-slice-policy";
 
 export async function createRequirement(
@@ -38,6 +51,10 @@ export async function createRequirement(
   input: CreateRequirementInput,
   actor: Actor,
 ) {
+  const project = await db.query.projects.findFirst({ where: eq(projects.id, input.projectId) });
+  if (!project) throw new NotFoundError("Project not found");
+  if (["in_review", "ready_to_merge", "done"].includes(input.status ?? "draft")) throw new ValidationError("New requirements must start before acceptance");
+  const resolved = selectedWorkflow(input, project.defaultWorkflow);
   const [requirement] = await db
     .insert(requirements)
     .values({
@@ -49,6 +66,10 @@ export async function createRequirement(
       modelTier: input.modelTier,
       tags: input.tags,
       branchName: input.branchName,
+      workflow: resolved.workflow,
+      workflowSource: resolved.source,
+      workflowRevision: 1,
+      workflowState: { delivery: "pending", acceptance: "pending", integration: "pending" },
       expectedAt: input.expectedAt,
       createdBy: actor.id,
     })
@@ -83,10 +104,258 @@ export async function getRequirement(db: Database, id: string) {
         with: { document: true },
       },
       repositories: { with: { repository: true } },
+      workflowOutputs: true,
+      workflowInputs: { with: { output: true } },
     },
   });
   if (!requirement) throw new NotFoundError("Requirement not found");
   return requirement;
+}
+
+export async function listWorkflowOutputs(db: Database, requirementId: string) {
+  await getRequirementOrThrow(db, requirementId);
+  return db.query.workflowOutputs.findMany({
+    where: eq(workflowOutputs.requirementId, requirementId),
+    orderBy: (output, { asc }) => [asc(output.createdAt)],
+  });
+}
+
+export async function listWorkflowInputs(db: Database, requirementId: string) {
+  await getRequirementOrThrow(db, requirementId);
+  return db.query.workflowInputs.findMany({ where: eq(workflowInputs.requirementId, requirementId), with: { output: true } });
+}
+
+export async function getWorkflowCleanupEligibility(db: Database, requirementId: string) {
+  const requirement = await getRequirementOrThrow(db, requirementId);
+  const workflow = requirement.workflow ? requirementWorkflowSchema.parse(requirement.workflow) : null;
+  const outputs = await db.query.workflowOutputs.findMany({ where: eq(workflowOutputs.requirementId, requirementId) });
+  const consumers = outputs.length ? await db.query.workflowInputs.findMany({ where: inArray(workflowInputs.outputId, outputs.map((output) => output.id)), with: { requirement: true, task: true, executionSlice: true } }) : [];
+  const activeConsumers = consumers.filter((consumer) => !["done", "cancelled", "archived"].includes(consumer.task?.status ?? consumer.executionSlice?.status ?? consumer.requirement.status)).length;
+  const terminal = ["done", "cancelled", "archived"].includes(requirement.status);
+  const retainUntil = new Date(requirement.updatedAt.getTime() + (workflow?.worktreeRetentionDays ?? 7) * 86_400_000);
+  return { terminal, activeConsumers, worktreeRetainUntil: retainUntil, canCleanupWorktrees: terminal && activeConsumers === 0 && retainUntil <= new Date() };
+}
+
+export async function retireWorkflowOutput(db: Database, requirementId: string, outputId: string, actor: Actor) {
+  const policy = await getWorkflowCleanupEligibility(db, requirementId);
+  const output = await db.query.workflowOutputs.findFirst({ where: and(eq(workflowOutputs.id, outputId), eq(workflowOutputs.requirementId, requirementId)) });
+  if (!output) throw new NotFoundError("Output not found");
+  if (!policy.terminal || policy.activeConsumers > 0) throw new ValidationError("Output is still required by active work");
+  if (output.retainUntil && output.retainUntil > new Date()) throw new ValidationError("Output retention period has not expired");
+  const [retired] = await db.update(workflowOutputs).set({ availability: "retired" }).where(eq(workflowOutputs.id, output.id)).returning();
+  await db.insert(activityLog).values({ entityType: "requirement", entityId: requirementId, action: "workflow_output_retired", actorId: actor.id, actorType: actor.type, metadata: { outputId } });
+  return retired!;
+}
+
+export async function addWorkflowInput(db: Database, requirementId: string, input: AddWorkflowInputInput, actor: Actor) {
+  const requirement = await getRequirementOrThrow(db, requirementId);
+  if (!requirement.workflow) throw new ValidationError("Workflow inputs require a configured workflow");
+  await assertRequirementLease(db, requirementId, actor, input);
+  if (["done", "cancelled", "archived"].includes(requirement.status)) throw new ValidationError("Requirement is terminal");
+  const output = await db.query.workflowOutputs.findFirst({ where: eq(workflowOutputs.id, input.outputId) });
+  const source = output && await getRequirementOrThrow(db, output.requirementId);
+  if (!source || source.projectId !== requirement.projectId) throw new ValidationError("Workflow input must belong to the same project");
+  if (output?.availability !== "available") throw new ValidationError("Workflow input output is unavailable");
+  if (input.taskId) {
+    const task = await db.query.tasks.findFirst({ where: eq(tasks.id, input.taskId) });
+    if (task?.requirementId !== requirementId || task.status !== "todo") throw new ValidationError("Workflow input task must be unstarted and belong to the requirement");
+  }
+  if (input.executionSliceId) {
+    const slice = await db.query.executionSlices.findFirst({ where: eq(executionSlices.id, input.executionSliceId) });
+    if (slice?.requirementId !== requirementId || slice.status !== "todo") throw new ValidationError("Workflow input slice must be unstarted and belong to the requirement");
+  }
+  const [registered] = await db.insert(workflowInputs).values({ requirementId, outputId: input.outputId, taskId: input.taskId, executionSliceId: input.executionSliceId, createdBy: actor.id }).returning();
+  await db.insert(activityLog).values({ entityType: "requirement", entityId: requirementId, action: "workflow_input_registered", actorId: actor.id, actorType: actor.type, metadata: { outputId: input.outputId, taskId: input.taskId ?? null, executionSliceId: input.executionSliceId ?? null } });
+  emit({ type: "requirement_updated", projectId: requirement.projectId, requirementId });
+  return registered!;
+}
+
+export async function reportWorkflowOutputAvailability(db: Database, requirementId: string, input: ReportWorkflowOutputAvailabilityInput, actor: Actor) {
+  const output = await db.query.workflowOutputs.findFirst({ where: and(eq(workflowOutputs.id, input.outputId), eq(workflowOutputs.requirementId, requirementId)) });
+  if (!output || output.type !== "local" || output.nodeId !== input.nodeId) throw new ValidationError("Local output node does not match");
+  if (output.availability === "retired") throw new ValidationError("Retired outputs cannot be made available again");
+  if (actor.type === "agent") {
+    const daemon = input.daemonId && await db.query.daemons.findFirst({ where: eq(daemons.id, input.daemonId) });
+    if (!daemon || daemon.nodeId !== input.nodeId || daemon.actorId !== actor.id || daemon.actorType !== actor.type) throw new ValidationError("Availability reports require the registered producing node");
+  }
+  const [updated] = await db.update(workflowOutputs).set({ availability: input.availability, verifiedAt: new Date() }).where(eq(workflowOutputs.id, input.outputId)).returning();
+  await db.insert(activityLog).values({ entityType: "requirement", entityId: requirementId, action: "workflow_output_probed", actorId: actor.id, actorType: actor.type, metadata: { outputId: input.outputId, availability: input.availability, reason: input.reason } });
+  return updated!;
+}
+
+export async function registerWorkflowOutput(
+  db: Database,
+  requirementId: string,
+  input: RegisterWorkflowOutputInput,
+  actor: Actor,
+) {
+  const requirement = await getRequirementOrThrow(db, requirementId);
+  if (!requirement.workflow) throw new ValidationError("Legacy requirements do not use workflow outputs");
+  await assertRequirementLease(db, requirementId, actor, input);
+  if (["done", "cancelled", "archived"].includes(requirement.status)) throw new ValidationError("Requirement is terminal");
+  const workflow = requirementWorkflowSchema.parse(requirement.workflow);
+  if (["complete", "skipped"].includes(requirement.workflowState?.acceptance ?? "pending")) throw new ValidationError("Accepted delivery outputs are frozen");
+  if (input.taskId) {
+    const task = await db.query.tasks.findFirst({ where: eq(tasks.id, input.taskId) });
+    if (task?.requirementId !== requirementId) throw new ValidationError("Output task does not belong to the requirement");
+  }
+  if (input.executionSliceId) {
+    const slice = await db.query.executionSlices.findFirst({ where: eq(executionSlices.id, input.executionSliceId) });
+    if (slice?.requirementId !== requirementId) throw new ValidationError("Output slice does not belong to the requirement");
+  }
+  if (input.requirementRepositoryId) {
+    const link = await db.query.requirementRepositories.findFirst({ where: eq(requirementRepositories.id, input.requirementRepositoryId) });
+    if (link?.requirementId !== requirementId) throw new ValidationError("Output repository does not belong to the requirement");
+  }
+  if (input.type === "comment") {
+    const comment = await db.query.taskComments.findFirst({ where: eq(taskComments.id, input.referenceId!) });
+    const task = comment && await db.query.tasks.findFirst({ where: eq(tasks.id, comment.taskId) });
+    if (task?.requirementId !== requirementId) throw new ValidationError("Comment does not belong to the requirement");
+  }
+  if (input.type === "attachment") {
+    const document = await db.query.documents.findFirst({ where: eq(documents.id, input.referenceId!) });
+    if (document?.form !== "attachment" || document.projectId !== requirement.projectId) throw new ValidationError("Attachment does not belong to the project");
+  }
+  if (input.type === "local") {
+    const claim = await db.query.requirementClaims.findFirst({ where: eq(requirementClaims.requirementId, requirementId) });
+    if (claim?.daemonId) {
+      const daemon = await db.query.daemons.findFirst({ where: eq(daemons.id, claim.daemonId) });
+      if (!daemon?.nodeId || daemon.nodeId !== input.nodeId) throw new ValidationError("Local output must be registered from the active daemon node");
+    }
+  }
+  if ((input.type === "git_branch" || input.type === "git_pr") && !input.requirementRepositoryId) {
+    throw new ValidationError("Git output requires a linked repository");
+  }
+  const gitLink = input.requirementRepositoryId && await db.query.requirementRepositories.findFirst({ where: eq(requirementRepositories.id, input.requirementRepositoryId) });
+  if (["git_branch", "git_pr"].includes(input.type) && gitLink && gitLink.deliveryStatus !== "unchanged" && (!gitLink.pushedCommit || (input.type === "git_pr" && !gitLink.pullRequestUrl))) throw new ValidationError("Repository has no verified delivery for this output type");
+  const [revision] = await db.update(requirements).set({ workflowStateRevision: requirement.workflowStateRevision + 1, updatedAt: new Date() })
+    .where(and(eq(requirements.id, requirementId), eq(requirements.workflowStateRevision, requirement.workflowStateRevision))).returning({ id: requirements.id });
+  if (!revision) throw new ConflictError("Workflow state changed", requirement.workflowStateRevision);
+  const [output] = await db.insert(workflowOutputs).values({
+    requirementId, taskId: input.taskId, executionSliceId: input.executionSliceId,
+    workflowRevision: requirement.workflowRevision,
+    requirementRepositoryId: input.requirementRepositoryId, type: input.type,
+    referenceId: input.referenceId, url: input.url, nodeId: input.nodeId,
+    relativePath: input.relativePath, sizeBytes: input.sizeBytes, sha256: input.sha256,
+    headCommit: gitLink ? gitLink.pushedCommit ?? gitLink.headCommit : null,
+    summary: input.summary, createdBy: actor.id, createdByType: actor.type,
+    verifiedAt: input.type === "local" ? new Date() : undefined,
+    retainUntil: input.type === "local" ? new Date(Date.now() + workflow.localArtifactRetentionDays * 86_400_000) : undefined,
+  }).returning();
+  await db.insert(activityLog).values({
+    entityType: "requirement", entityId: requirementId, action: "workflow_output_registered",
+    actorId: actor.id, actorType: actor.type,
+    metadata: { outputId: output!.id, type: input.type, nodeId: input.nodeId ?? null },
+  });
+  emit({ type: "requirement_updated", projectId: requirement.projectId, requirementId });
+  return output!;
+}
+
+export async function advanceWorkflowStage(
+  db: Database,
+  requirementId: string,
+  input: AdvanceWorkflowStageInput,
+  actor: Actor,
+) {
+  const requirement = await getRequirementOrThrow(db, requirementId);
+  if (!requirement.workflow) throw new ValidationError("Legacy requirements do not use workflow stages");
+  if (["done", "cancelled", "archived"].includes(requirement.status)) throw new ValidationError("Requirement is terminal");
+  if (requirement.workflowStateRevision !== input.expectedRevision) throw new ConflictError("Workflow state changed", requirement.workflowStateRevision);
+  await assertRequirementLease(db, requirementId, actor, input);
+  const workflow = requirementWorkflowSchema.parse(requirement.workflow);
+  const state = { delivery: "pending", acceptance: "pending", integration: "pending", ...requirement.workflowState };
+  if (input.decision === "complete") {
+    const dependencies = await db.query.requirementDependencies.findMany({ where: and(eq(requirementDependencies.requirementId, requirementId), eq(requirementDependencies.type, "blocks")), with: { dependsOn: true } });
+    if (dependencies.some((dependency) => !["done", "cancelled"].includes(dependency.dependsOn.status))) throw new ValidationError("Requirement dependencies are incomplete");
+  }
+  const order = ["delivery", "acceptance", "integration"] as const;
+  const stageIndex = order.indexOf(input.stage);
+  if (order.slice(0, stageIndex).some((stage) => state[stage] !== "complete" && state[stage] !== "skipped")) {
+    throw new ValidationError("Previous workflow stages are incomplete");
+  }
+  const resubmittingAfterFeedback = input.stage === "delivery" && input.decision === "complete"
+    && (state.delivery === "complete" || state.delivery === "skipped") && state.acceptance === "failed";
+  if ((state[input.stage] === "complete" || state[input.stage] === "skipped") && !resubmittingAfterFeedback) throw new ValidationError("Workflow stage is already terminal");
+  if (workflow[input.stage].mode === "skip" && input.stage !== "delivery") throw new ValidationError("Skipped stages advance automatically");
+  if (workflow[input.stage].mode === "manual" && actor.type !== "human") throw new ValidationError("This stage requires a human decision");
+  if (input.decision === "complete" && input.stage === "delivery") {
+    const openTasks = await db.query.tasks.findMany({ where: eq(tasks.requirementId, requirementId) });
+    if (openTasks.some((task) => task.status !== "done" && task.status !== "cancelled")) throw new ValidationError("Requirement tasks are incomplete");
+    if (workflow.delivery.method !== "none") {
+      const outputs = await db.query.workflowOutputs.findMany({ where: and(eq(workflowOutputs.requirementId, requirementId), eq(workflowOutputs.workflowRevision, requirement.workflowRevision), eq(workflowOutputs.availability, "available")) });
+      if (!["git_branch", "git_pr"].includes(workflow.delivery.method) && !outputs.some((output) => output.type === workflow.delivery.method)) throw new ValidationError("Required delivery output is missing");
+      if (["git_branch", "git_pr"].includes(workflow.delivery.method)) {
+        const links = await db.query.requirementRepositories.findMany({ where: eq(requirementRepositories.requirementId, requirementId) });
+        if (workflow.integration.target && ["git_provider", "git_direct"].includes(workflow.integration.method) && links.some((link) => link.baseBranch !== workflow.integration.target)) throw new ValidationError("Git integration target must match the repository base branch");
+        if (!links.length || links.some((link) => link.deliveryStatus !== "unchanged" && (!link.pushedCommit || !outputs.some((output) => output.requirementRepositoryId === link.id && output.type === workflow.delivery.method && output.headCommit === link.pushedCommit) || (workflow.delivery.method === "git_pr" && !link.pullRequestUrl)))) throw new ValidationError("Git delivery evidence is incomplete");
+      }
+    }
+  }
+  if (input.decision === "complete" && input.stage === "acceptance") {
+    const checks = new Map(input.checks.map((check) => [check.name, check.status]));
+    if (workflow.acceptance.requiredChecks.some((name) => checks.get(name) !== "passed")) throw new ValidationError("Required acceptance checks have not passed");
+    if (workflow.acceptance.minimumHumanApprovals > 0 && actor.type !== "human") throw new ValidationError("Human acceptance is required");
+  }
+  if (input.decision === "complete" && input.stage === "integration" && ["git_provider", "git_direct"].includes(workflow.integration.method)) {
+    const links = await db.query.requirementRepositories.findMany({ where: eq(requirementRepositories.requirementId, requirementId) });
+    if (links.length === 0 || links.some((link) => link.deliveryStatus !== "merged" && link.deliveryStatus !== "unchanged")) {
+      throw new ValidationError("Repository integration evidence is incomplete");
+    }
+  }
+  state[input.stage] = input.decision === "complete"
+    ? workflow[input.stage].mode === "skip" ? "skipped" : "complete"
+    : "failed";
+  if (input.decision === "retry") {
+    if (actor.type !== "human" || requirement.workflowState?.[input.stage] !== "failed") throw new ValidationError("Only a human can retry a failed stage");
+    state[input.stage] = "pending";
+  }
+  if (input.stage === "integration" && input.decision === "changes_requested") {
+    state.delivery = "pending";
+    state.acceptance = "pending";
+    state.integration = "pending";
+  }
+  if (resubmittingAfterFeedback) {
+    state.acceptance = "pending";
+    state.integration = "pending";
+  }
+  if (input.decision === "complete") {
+    for (const stage of order.slice(stageIndex + 1)) {
+      if (workflow[stage].mode === "skip") state[stage] = "skipped";
+      else break;
+    }
+  }
+  const nextStatus = input.decision !== "complete"
+    ? input.decision === "changes_requested" ? "in_progress" : input.stage === "integration" ? "ready_to_merge" : input.stage === "acceptance" ? "in_review" : "in_progress"
+    : order.every((stage) => state[stage] === "complete" || state[stage] === "skipped")
+      ? "done"
+      : state.acceptance === "complete" || state.acceptance === "skipped"
+        ? "ready_to_merge"
+        : "in_review";
+  const [updated] = await db.update(requirements).set({
+    workflowState: state,
+    workflowStateRevision: requirement.workflowStateRevision + 1,
+    status: nextStatus,
+    updatedAt: new Date(),
+  }).where(and(eq(requirements.id, requirementId), eq(requirements.workflowStateRevision, input.expectedRevision))).returning();
+  if (!updated) throw new ConflictError("Workflow state changed", requirement.workflowStateRevision);
+  if (nextStatus === "done") await db.delete(requirementClaims).where(eq(requirementClaims.requirementId, requirementId));
+  if (input.decision === "changes_requested") {
+    await db.insert(tasks).values({
+      projectId: requirement.projectId,
+      requirementId,
+      title: `Address ${input.stage} feedback`,
+      description: input.reason,
+      status: "todo",
+      createdBy: actor.id,
+    });
+  }
+  await db.insert(activityLog).values({
+    entityType: "requirement", entityId: requirementId, action: "workflow_stage_advanced",
+    actorId: actor.id, actorType: actor.type,
+    metadata: { stage: input.stage, decision: input.decision, reason: input.reason, checks: input.checks, workflowRevision: requirement.workflowRevision, from: requirement.workflowState, to: state, status: nextStatus },
+  });
+  emit({ type: "requirement_updated", projectId: requirement.projectId, requirementId });
+  return updated;
 }
 
 const TERMINAL_REQ_STATUSES = ["done", "cancelled", "archived"] as const;
@@ -251,7 +520,7 @@ export async function updateRequirement(
   actor: Actor,
 ) {
   const existing = await getRequirementOrThrow(db, id);
-  const { leaseGeneration, daemonId, ...fields } = input;
+  const { leaseGeneration, daemonId, workflow, workflowPreset, ...fields } = input;
 
   if (input.status || leaseGeneration !== undefined || daemonId !== undefined) {
     await assertRequirementLease(db, id, actor, { leaseGeneration, daemonId });
@@ -262,25 +531,55 @@ export async function updateRequirement(
   }
   if (input.status) {
     assertRequirementStatusTransition(existing.status, input.status);
+    if (existing.workflow && ["in_review", "ready_to_merge", "done"].includes(input.status)) {
+      const state = existing.workflowState ?? {};
+      if (state.delivery !== "complete" && state.delivery !== "skipped") throw new ValidationError("Delivery stage is incomplete");
+      if (["ready_to_merge", "done"].includes(input.status) && state.acceptance !== "complete" && state.acceptance !== "skipped") throw new ValidationError("Acceptance stage is incomplete");
+      if (input.status === "done" && state.integration !== "complete" && state.integration !== "skipped") throw new ValidationError("Integration stage is incomplete");
+    }
+  }
+  let workflowChanges: Record<string, unknown> = {};
+  if (workflow || workflowPreset) {
+    await assertRequirementLease(db, id, actor, { leaseGeneration, daemonId });
+    if (workflow && workflowPreset) throw new ValidationError("Specify either a workflow or a workflow preset");
+    if (!["draft", "approved"].includes(existing.status)) throw new ValidationError("Workflow changes require a draft or approved requirement");
+    const activeTasks = await db.query.tasks.findMany({ where: eq(tasks.requirementId, id) });
+    if (activeTasks.some((task) => task.status !== "todo")) throw new ValidationError("Workflow changes require all tasks to be unstarted");
+    workflowChanges = {
+      workflow: workflow ?? workflowFromPreset(workflowPreset!),
+      workflowSource: "explicit",
+      workflowRevision: existing.workflowRevision + 1,
+      workflowState: { delivery: "pending", acceptance: "pending", integration: "pending" },
+      workflowStateRevision: existing.workflowStateRevision + 1,
+    };
   }
   if (input.status === "done") {
-    const repositoryLinks = await db
-      .select({ deliveryStatus: requirementRepositories.deliveryStatus })
-      .from(requirementRepositories)
-      .where(eq(requirementRepositories.requirementId, id));
-    const incomplete = repositoryLinks.filter(
-      (link) => link.deliveryStatus !== "merged" && link.deliveryStatus !== "unchanged",
-    );
-    if (incomplete.length > 0) {
-      throw new ValidationError(
-        "Requirement cannot be completed until every repository delivery is merged or unchanged",
+    if (existing.workflow) {
+      const state = existing.workflowState ?? {};
+      if (state.delivery !== "complete" && state.delivery !== "skipped"
+        || state.acceptance !== "complete" && state.acceptance !== "skipped"
+        || state.integration !== "complete" && state.integration !== "skipped") {
+        throw new ValidationError("Requirement workflow stages are not complete");
+      }
+    } else {
+      const repositoryLinks = await db
+        .select({ deliveryStatus: requirementRepositories.deliveryStatus })
+        .from(requirementRepositories)
+        .where(eq(requirementRepositories.requirementId, id));
+      const incomplete = repositoryLinks.filter(
+        (link) => link.deliveryStatus !== "merged" && link.deliveryStatus !== "unchanged",
       );
+      if (incomplete.length > 0) {
+        throw new ValidationError(
+          "Requirement cannot be completed until every repository delivery is merged or unchanged",
+        );
+      }
     }
   }
 
   const [updated] = await db
     .update(requirements)
-    .set({ ...fields, updatedAt: new Date() })
+    .set({ ...fields, ...workflowChanges, updatedAt: new Date() })
     .where(eq(requirements.id, id))
     .returning();
 
@@ -291,7 +590,7 @@ export async function updateRequirement(
     actorId: actor.id,
     actorType: actor.type,
     metadata: {
-      changes: fields,
+      changes: { ...fields, ...workflowChanges },
       previous: {
         title: existing.title,
         status: existing.status,
@@ -350,38 +649,10 @@ export async function batchCreateRequirements(
   const results = await db.transaction(async (tx) => {
     const created = [];
     for (const reqInput of input.requirements) {
-      const [requirement] = await tx
-        .insert(requirements)
-        .values({
-          projectId: reqInput.projectId,
-          title: reqInput.title,
-          description: reqInput.description,
-          status: reqInput.status,
-          priority: reqInput.priority,
-          modelTier: reqInput.modelTier,
-          tags: reqInput.tags,
-          branchName: reqInput.branchName,
-          createdBy: actor.id,
-        })
-        .returning();
-
-      await tx.insert(activityLog).values({
-        entityType: "requirement",
-        entityId: requirement!.id,
-        action: "created",
-        actorId: actor.id,
-        actorType: actor.type,
-        metadata: { batch: true },
-      });
-
-      created.push(requirement!);
+      created.push(await createRequirement(tx as unknown as Database, reqInput, actor));
     }
     return created;
   });
-
-  for (const req of results) {
-    emit({ type: "requirement_created", projectId: req.projectId, requirementId: req.id, title: req.title });
-  }
 
   return results;
 }

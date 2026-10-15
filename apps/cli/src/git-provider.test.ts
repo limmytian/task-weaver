@@ -47,6 +47,18 @@ const finalizeInput = {
   credential,
 }
 
+test('branch-only delivery never invokes a forge command on GitHub or Gitea', async () => {
+  for (const Adapter of [GitHubGitAdapter, GiteaGitAdapter]) {
+    const fake = runner([
+      ['status --porcelain', {}], ['rev-parse HEAD', { stdout: 'new-head' }],
+      ['rev-parse origin/main', { stdout: 'base-head' }], ['push -u origin req/change', {}],
+    ])
+    const result = await new Adapter(fake.run).finalize({ ...finalizeInput, createPullRequest: false })
+    assert.equal(result.deliveryStatus, 'pushed')
+    assert.ok(fake.calls.every((call) => call.startsWith('git ')))
+  }
+})
+
 const githubPullRequest = JSON.stringify({
   number: 7,
   url: 'https://github.example/team/repository/pull/7',

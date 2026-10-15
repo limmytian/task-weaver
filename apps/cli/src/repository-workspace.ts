@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
-import { mkdir, readFile, rm, writeFile } from 'fs/promises'
+import { mkdir, readFile, readdir, realpath, rm, writeFile } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import { homedir } from 'os'
-import { join } from 'path'
+import { join, resolve, sep } from 'path'
+import { workflowArtifactRoot } from './workflow-artifacts.js'
 import type { Config } from './config.js'
 import {
   getGitProviderAdapter,
@@ -395,12 +396,13 @@ export async function provisionCompositeWorkspace(options: {
   updateDelivery: UpdateDelivery
   preserveDeliveryStatus?: boolean
   deliveryPhase?: RepositoryDeliveryPhase
+  includeDeliveredRepositories?: boolean
   signal?: AbortSignal
 }): Promise<CompositeWorkspace> {
   const { config, requirement, executionSlice, updateDelivery } = options
   const deliveryPhase = options.deliveryPhase ?? 'execution'
   const entries = options.entries
-    .filter((entry) => isRepositoryRelevantToPhase(entry, deliveryPhase))
+    .filter((entry) => options.includeDeliveredRepositories ? !isTerminalRepositoryEntry(entry) : isRepositoryRelevantToPhase(entry, deliveryPhase))
     .sort((a, b) => a.repository.canonicalKey.localeCompare(b.repository.canonicalKey))
   const manifestVersion = (executionSlice?.orderIndex ?? 0) + 1
   const rootPath = compositeRoot(requirement.id, executionSlice?.id)
@@ -576,6 +578,7 @@ export async function finalizeCompositeWorkspace(options: {
   requirement: { title: string }
   updateDelivery: UpdateDelivery
   signal?: AbortSignal
+  createPullRequest?: boolean
 }): Promise<Array<{ linkId: string; result: RepositoryDeliveryResult }>> {
   const entryByLink = new Map(options.entries.map((entry) => [entry.link.id, entry]))
   const results: Array<{ linkId: string; result: RepositoryDeliveryResult }> = []
@@ -608,6 +611,7 @@ export async function finalizeCompositeWorkspace(options: {
       credential,
       forgeCredential,
       skipPush: checkpointCompleted('push'),
+      createPullRequest: options.createPullRequest,
       repository: {
         host: entry.repository.host,
         namespace: entry.repository.namespace,
@@ -655,4 +659,40 @@ export async function finalizeCompositeWorkspace(options: {
     results.push({ linkId: provisioned.linkId, result })
   }
   return results
+}
+
+/** Explicit cleanup removes only clean registered worktrees; ordinary files and artifact roots are retained. */
+export async function cleanupRequirementWorktrees(config: Config, requirementId: string, entries: RequirementRepositoryEntry[]) {
+  if (!/^[0-9a-f-]{36}$/i.test(requirementId)) throw new Error('Invalid requirement ID')
+  const root = join(homedir(), '.task-weaver', 'requirement-workspaces', requirementId)
+  if (!existsSync(root)) return { removed: [] as string[], retained: [] as string[] }
+  const canonicalRoot = await realpath(root)
+  const removed: string[] = [], retained: string[] = []
+  for (const directory of await readdir(root, { withFileTypes: true })) {
+    if (!directory.isDirectory() || directory.isSymbolicLink()) continue
+    const manifestPath = join(root, directory.name, 'repository-manifest.json')
+    if (!existsSync(manifestPath)) continue
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+    if (manifest.requirementId !== requirementId || !Array.isArray(manifest.repositories)) throw new Error('Workspace manifest identity mismatch')
+    for (const item of manifest.repositories) {
+      const entry = entries.find((candidate) => candidate.repository.id === item.repositoryId)
+      if (!entry || typeof item.relativePath !== 'string') throw new Error('Workspace repository is no longer registered')
+      const path = resolve(root, directory.name, item.relativePath)
+      if (!path.startsWith(`${canonicalRoot}${sep}`) || !existsSync(path)) continue
+      if (await realpath(path) !== path) throw new Error('Workspace path contains a symbolic link')
+      const artifactRoot = workflowArtifactRoot()
+      if (artifactRoot === path || artifactRoot.startsWith(`${path}${sep}`)) { retained.push(path); continue }
+      await withRepositoryWorkspaceLock({ config, repository: entry.repository, operation: 'cleanup' }, async () => {
+        const adapter = getGitProviderAdapter(entry.repository.provider)
+        const credential = resolveRepositoryCredential(config, entry.repository, 'read')
+        const top = await adapter.git(credential, ['rev-parse', '--show-toplevel'], path)
+        const status = await adapter.git(credential, ['status', '--porcelain', '--ignored'], path)
+        if (!top.ok || top.stdout.trim() !== path || !status.ok || status.stdout.trim()) { retained.push(path); return }
+        const result = await adapter.git(credential, ['worktree', 'remove', path], baseCheckoutPath(config, entry.repository))
+        if (!result.ok) { retained.push(path); return }
+        removed.push(path)
+      })
+    }
+  }
+  return { removed, retained }
 }

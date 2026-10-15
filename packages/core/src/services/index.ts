@@ -34,7 +34,7 @@ export * as assistantService from "./assistant";
 export * as skillPackageStorageService from "./skill-package-storage";
 export { skillPackageService } from "./resource-services";
 export * as skillPresetService from "./skill-presets";
-export * as planService from "./plans";
+export { planService } from "./resource-services";
 export { buildDaemonSloReport } from "./daemon-slo";
 export { getDaemonSloReport } from "./metadata-compatibility";
 export { buildDaemonMetricsReport } from "./daemon-metrics";

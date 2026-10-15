@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { requirementWorkflowSchema, workflowPresetSchema } from "./workflows";
 import { requirementLeaseFenceFields } from "./common";
 
 export const requirementStatusSchema = z.enum([
@@ -39,6 +40,8 @@ export const createRequirementSchema = z.object({
   tags: z.array(z.string()).optional(),
   branchName: z.string().optional(),
   expectedAt: z.coerce.date().optional(),
+  workflowPreset: workflowPresetSchema.optional(),
+  workflow: requirementWorkflowSchema.optional(),
 });
 
 export const updateRequirementSchema = z.object({
@@ -50,6 +53,8 @@ export const updateRequirementSchema = z.object({
   tags: z.array(z.string()).optional(),
   branchName: z.string().nullable().optional(),
   expectedAt: z.coerce.date().nullable().optional(),
+  workflowPreset: workflowPresetSchema.optional(),
+  workflow: requirementWorkflowSchema.optional(),
   ...requirementLeaseFenceFields,
 });
 

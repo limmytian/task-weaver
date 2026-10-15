@@ -55,6 +55,7 @@ import { GanttChart } from "@/components/gantt-chart";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
 import { ProjectWorkspaceLinks, WorkspaceBreadcrumbs } from "@/components/project-navigation";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
+import { RequirementWorkflowPanel } from "@/components/requirement-workflow-panel";
 import { RepositoryChips, RequirementRepositories } from "@/components/repository-links";
 import { cn } from "@/lib/utils";
 
@@ -525,6 +526,7 @@ export default function RequirementDetailPage({
               </div>
 
               {/* Burndown Chart */}
+              <RequirementWorkflowPanel requirement={requirement} />
               <BurndownChart requirementId={reqId} />
 
               <ExecutionSlicesPanel

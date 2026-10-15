@@ -39,6 +39,7 @@ import { scheduleRuns, schedules } from "./schedules";
 import { tiAgentModelConfigs, tiAgentPolicies, tiAgentRuns } from "./ti-agent";
 import { assistantActions, assistantConversations, assistantMessages } from "./assistant";
 import { reviewChecks, reviewDecisions, reviewFindings, reviewPolicies, reviewRuns } from "./reviews";
+import { workflowOutputs, workflowInputs } from "./workflow-outputs";
 import {
   skillPackageFiles,
   skillPackages,
@@ -78,6 +79,8 @@ export const requirementsRelations = relations(
     repositories: many(requirementRepositories),
     reviewPolicies: many(reviewPolicies),
     reviewRuns: many(reviewRuns),
+    workflowOutputs: many(workflowOutputs),
+    workflowInputs: many(workflowInputs),
   }),
 );
 
@@ -91,6 +94,20 @@ export const executionSlicesRelations = relations(
     tasks: many(tasks),
   }),
 );
+
+export const workflowOutputsRelations = relations(workflowOutputs, ({ one }) => ({
+  requirement: one(requirements, { fields: [workflowOutputs.requirementId], references: [requirements.id] }),
+  task: one(tasks, { fields: [workflowOutputs.taskId], references: [tasks.id] }),
+  executionSlice: one(executionSlices, { fields: [workflowOutputs.executionSliceId], references: [executionSlices.id] }),
+  requirementRepository: one(requirementRepositories, { fields: [workflowOutputs.requirementRepositoryId], references: [requirementRepositories.id] }),
+}));
+
+export const workflowInputsRelations = relations(workflowInputs, ({ one }) => ({
+  requirement: one(requirements, { fields: [workflowInputs.requirementId], references: [requirements.id] }),
+  output: one(workflowOutputs, { fields: [workflowInputs.outputId], references: [workflowOutputs.id] }),
+  task: one(tasks, { fields: [workflowInputs.taskId], references: [tasks.id] }),
+  executionSlice: one(executionSlices, { fields: [workflowInputs.executionSliceId], references: [executionSlices.id] }),
+}));
 
 export const requirementClaimsRelations = relations(requirementClaims, ({ one }) => ({
   requirement: one(requirements, {
