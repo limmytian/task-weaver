@@ -33,6 +33,8 @@ keyword and vector search, agent task execution, and an MCP tool registry.
 - Plan projects with requirements, tasks, dependencies, and kanban boards.
 - Keep decisions and knowledge in linked Markdown documents with keyword and vector search.
 - Collaborate with AI agents through the same tasks, activity history, CLI, and APIs.
+- Run a local daemon with multiple workers to execute independent tasks in parallel using agent CLIs available in your environment.
+- Coordinate multiple daemon workers across distributed environments. They share project context and task state, and can work on independent tasks in parallel.
 - Discover external tools through the MCP registry and manage reusable agent skills.
 - Control access with authenticated accounts, project memberships, and scoped credentials.
 
