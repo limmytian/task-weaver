@@ -533,9 +533,9 @@ export async function updateRequirement(
     assertRequirementStatusTransition(existing.status, input.status);
     if (existing.workflow && ["in_review", "ready_to_merge", "done"].includes(input.status)) {
       const state = existing.workflowState ?? {};
-      if (state.delivery !== "complete" && state.delivery !== "skipped") throw new ValidationError("Delivery stage is incomplete");
-      if (["ready_to_merge", "done"].includes(input.status) && state.acceptance !== "complete" && state.acceptance !== "skipped") throw new ValidationError("Acceptance stage is incomplete");
-      if (input.status === "done" && state.integration !== "complete" && state.integration !== "skipped") throw new ValidationError("Integration stage is incomplete");
+      if (state.delivery !== "complete" && state.delivery !== "skipped") throw new RequirementCompletionError("requirement_workflow_incomplete");
+      if (["ready_to_merge", "done"].includes(input.status) && state.acceptance !== "complete" && state.acceptance !== "skipped") throw new RequirementCompletionError("requirement_workflow_incomplete");
+      if (input.status === "done" && state.integration !== "complete" && state.integration !== "skipped") throw new RequirementCompletionError("requirement_workflow_incomplete");
     }
   }
   let workflowChanges: Record<string, unknown> = {};

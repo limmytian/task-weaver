@@ -77,7 +77,8 @@ test("human PR reconciliation verifies server evidence, authority, leases, retri
   current = workflow.link; await json(await sync());
   const unchanged = await json(await api(`/requirements/${workflow.r.id}`)); assert.equal(unchanged.status, "approved"); assert.equal(unchanged.workflowState.acceptance, "pending");
   assert.equal(unchanged.workflowOutputs[0].headCommit, row.head.sha);
-  assert.equal((await api(`/requirements/${workflow.r.id}`, "PATCH", { status: "done" })).status, 400);
+  const workflowIncomplete = await json(await api(`/requirements/${workflow.r.id}`, "PATCH", { status: "done" }), 400);
+  assert.equal(workflowIncomplete.error, "Requirement workflow stages are not complete");
   let stateRevision = unchanged.workflowStateRevision;
   for (const stage of ["delivery", "acceptance", "integration"]) {
     const advanced = await json(await api(`/requirements/${workflow.r.id}/workflow-advance`, "POST", { stage, expectedRevision: stateRevision, reason: "Human verified configured stage" }));
