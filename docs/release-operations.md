@@ -53,6 +53,10 @@ maintenance requirements in the curated notes before approving the candidate.
    workflow aggregates both platform candidates into `ce-binary-candidate` and
    independently loads/verifies each platform in its consumption job. New acquisition hashes
    and the complete evidence require maintainer review before promotion.
+   Candidate preparation restores the exact Cairo 1.18.6 and Pixman 0.46.4 source
+   archives from the immutable v0.3.7 corresponding-source bundle after verifying
+   its Sigstore signature and each source checksum. Application images and all
+   other evidence are rebuilt and verified normally.
 5. Record the approval, create the annotated tag, then manually dispatch the
    `CE release` workflow with that version, the reviewed `candidate_run_id`,
    and the previous tag, if any. Test the candidate-producing Actions run before

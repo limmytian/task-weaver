@@ -74,6 +74,23 @@ jobs:
           pnpm test
           pnpm test:release-gates
           pnpm release:verify
+      - uses: sigstore/cosign-installer@v4.0.0
+      - name: Restore signed upstream source cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/reviewed-sources"
+          gh release download v0.3.7 --repo limmytian/task-weaver \
+            --pattern corresponding-source-amd64.tar.gz \
+            --pattern corresponding-source-amd64.tar.gz.sigstore.json \
+            --dir "$RUNNER_TEMP/reviewed-sources"
+          cosign verify-blob \
+            --bundle "$RUNNER_TEMP/reviewed-sources/corresponding-source-amd64.tar.gz.sigstore.json" \
+            --certificate-identity https://github.com/limmytian/task-weaver/.github/workflows/ce-release.yml@refs/tags/v0.3.7 \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$RUNNER_TEMP/reviewed-sources/corresponding-source-amd64.tar.gz"
+          node scripts/restore-reviewed-source-cache.mjs \
+            "$RUNNER_TEMP/reviewed-sources/corresponding-source-amd64.tar.gz"
       - name: Build and verify the paired binary candidate
         env:
           VERSION: ${{ inputs.version }}
