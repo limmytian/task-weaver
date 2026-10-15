@@ -377,7 +377,7 @@ function startRoleRetryWakeStream(options: {
 
 // argv template per tool: {prompt} is replaced with the actual prompt string
 const TOOL_ARGV_TEMPLATES: Record<string, string[]> = {
-  codex: ['exec', '--dangerously-bypass-approvals-and-sandbox', '--json', '--color', 'never', '-C', '{cwd}', '{prompt}'],
+  codex: ['exec', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check', '--json', '--color', 'never', '-C', '{cwd}', '{prompt}'],
   claude: ['--dangerouslySkipPermissions', '-p', '{prompt}'],
   agy: ['--dangerously-skip-permissions', '-p', '{prompt}'],
   aider: ['--message', '{prompt}'],

@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { test } from 'node:test'
 import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { createTaskWorkerAccess } from './task-worker-access.js'
 import { runCommand } from './async-command.js'
 
@@ -43,6 +45,8 @@ test('worker TW commands use a broker while supervisor, provider and Git secrets
   try {
     access = await createTaskWorkerAccess({ config: { apiUrl: `http://127.0.0.1:${address.port}`, apiKey: supervisorKey }, daemonId, requirementId, taskId, runId, workerIndex: 0, leaseGeneration: 1 })
     assert.notEqual(access.environment.HOME, process.env.HOME)
+    assert.equal(access.environment.CODEX_HOME, process.env.TW_CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), '.codex'))
+    assert.equal(access.environment.CLAUDE_CONFIG_DIR, process.env.TW_CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'))
     assert.match(access.environment.TW_API_KEY!, /^twb_[0-9a-f]{64}$/)
     assert.ok(!JSON.stringify(access.environment).includes(supervisorKey))
     assert.equal(access.environment.OPENAI_API_KEY, undefined)

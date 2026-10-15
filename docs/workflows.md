@@ -39,3 +39,7 @@ Retirement requires completed producers/consumers and elapsed local retention (d
 `worktreeMode: auto` provisions Git worktrees only when Git delivery or integration needs them. `none` uses an ordinary runtime workspace and rejects Git actions. `isolated` explicitly requests worktrees for linked repositories. Artifacts belong in the durable artifact root, outside worktrees.
 
 `tw req workspace cleanup` checks terminal requirement state, completed consumers, and retention (default 7 days). It removes only registered clean worktrees under the managed root; dirty worktrees are preserved. Base checkouts and branches are retained. Cleanup is explicit.
+
+## Authenticated AI tools
+
+Workers keep a separate task HOME and task API configuration, while Codex and Claude use the operator's authenticated CLI configuration directory. Override it with `TW_CODEX_HOME` or `TW_CLAUDE_CONFIG_DIR`; otherwise the corresponding native configuration environment variable or normal user configuration directory applies. Supervisor Task Weaver keys and Git/provider secret environment variables remain outside the child environment. Authenticate the selected AI CLI before starting a daemon.

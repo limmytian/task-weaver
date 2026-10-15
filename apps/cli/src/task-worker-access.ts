@@ -6,7 +6,7 @@ import type { Config } from './config.js'
 import { buildAiEnvironment, redactTrustedOutput } from './repository-credentials.js'
 import { createTaskAccessBroker, type TaskCapability } from './task-access-broker.js'
 
-/** Each child has independent local access and configuration; parent credentials stay in this closure. */
+/** Task access is isolated; AI CLIs retain their operator-selected authenticated configuration. */
 export async function createTaskWorkerAccess(options: {
   config: Config
   daemonId: string
@@ -47,7 +47,8 @@ export async function createTaskWorkerAccess(options: {
     await mkdir(home, { mode: 0o700 })
     const environment = buildAiEnvironment(process.env, {
       HOME: home, XDG_CONFIG_HOME: join(root, 'config'), XDG_DATA_HOME: join(root, 'data'),
-      CODEX_HOME: join(root, 'codex'), CLAUDE_CONFIG_DIR: join(root, 'claude'),
+      CODEX_HOME: process.env.TW_CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), '.codex'),
+      CLAUDE_CONFIG_DIR: process.env.TW_CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'),
       TW_CONFIG_DIR: join(root, 'tw'), TW_API_URL: broker.apiUrl, TW_API_KEY: broker.apiKey,
       TW_NODE_ID: options.config.nodeId,
       TW_ARTIFACT_ROOT: process.env.TW_ARTIFACT_ROOT ?? join(homedir(), '.task-weaver', 'artifacts'),

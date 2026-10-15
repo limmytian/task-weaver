@@ -39,3 +39,7 @@ Web 提供结构化配置；CLI 创建使用 `--workflow` 或 `--workflow-file`�
 worktreeMode 为 auto 时，仅 Git 交付或整合创建 worktree；none 使用普通运行目录并拒绝 Git 动作；isolated 显式为关联仓库创建隔离 worktree。产物应放在独立持久目录。
 
 `tw req workspace cleanup` 检查需求终态、消费者完成和保留期（默认 7 天），仅清理托管根目录中已登记的干净 worktree，保留脏目录、基础 checkout 和分支。清理需要显式调用。
+
+## AI 工具登录
+
+子进程的任务 HOME 和 Task Weaver 访问配置独立隔离；Codex / Claude 使用操作者已登录的原生 CLI 配置目录。可通过 TW_CODEX_HOME / TW_CLAUDE_CONFIG_DIR 显式选择，未设置时使用对应原生环境变量或用户默认目录。Task Weaver supervisor Key 和 Git/provider 密钥环境变量仍不会传给子进程。启动 daemon 前应先登录所选 AI CLI。

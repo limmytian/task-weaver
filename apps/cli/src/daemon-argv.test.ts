@@ -136,6 +136,7 @@ test('codex argv includes model and reasoning effort before the prompt', () => {
   const argv = buildArgv('codex', prompt, '/tmp/worktree', 'gpt-5.5', 'high')
 
   assert.deepEqual(argv.slice(0, 2), ['exec', '--dangerously-bypass-approvals-and-sandbox'])
+  assert.ok(argv.includes('--skip-git-repo-check'))
   assert.equal(argv.at(-1), prompt)
   assert.ok(argv.includes('--model'))
   assert.ok(argv.includes('gpt-5.5'))
