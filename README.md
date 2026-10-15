@@ -137,8 +137,9 @@ tw project list --json
 ```
 
 Share the [Task Weaver skill](skills/task-weaver/SKILL.md) with your agent for the
-data model, task claiming, and common workflows. For autonomous execution, follow
-the [daemon pipeline guide](docs/daemon-pipeline-runbook.md).
+data model, task claiming, and common workflows. It follows the Agent Skills
+format and can be copied into a local agent's skills directory. For autonomous
+execution, follow the [daemon pipeline guide](docs/daemon-pipeline-runbook.md).
 
 ### Container installation and upgrades
 
