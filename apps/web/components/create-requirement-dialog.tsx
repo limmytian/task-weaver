@@ -165,7 +165,7 @@ export function CreateRequirementDialog({
                   </SelectContent>
                 </Select>
                 {workflowPreset === "project" && inheritedWorkflow.success && <p className="mt-2 text-xs text-muted-foreground">Delivery: {inheritedWorkflow.data.delivery.method} · Acceptance: {inheritedWorkflow.data.acceptance.mode} · Integration: {inheritedWorkflow.data.integration.mode}</p>}
-                {workflowPreset !== "project" && <div className="mt-3"><WorkflowEditor value={customWorkflow} onChange={setCustomWorkflow} /></div>}
+                {workflowPreset !== "project" && <div className="mt-3"><WorkflowEditor key={workflowPreset} value={customWorkflow} onChange={setCustomWorkflow} /></div>}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <Select value={status} onValueChange={setStatus}>
