@@ -95,6 +95,7 @@ test("authenticated disposable CLI pipeline preserves real roles, delivery and u
   git(["remote", "add", "origin", remote], seed); git(["push", "origin", "0.3.3"], seed);
   const [repository] = await db.insert(repositories).values({ displayName: "Disposable auth fixture", host: "fixture.test", namespace: "fixture", name: randomUUID(), canonicalKey: `fixture.test/fixture/${randomUUID()}`, visibility: "instance", createdBy: admin.actor.id, httpsCloneUrl: pathToFileURL(remote).href, authPolicy: { allowedTransports: ["https"], preferredTransport: "https", allowedOperations: ["read", "push"], allowNativeDefault: true, revision: 1 } }).returning();
   const requirement = await owner.service.requirementService.createRequirement(db, { projectId: project.id, title: "Authenticated pipeline", branchName: "req/auth-fixture", status: "approved" }, owner.actor);
+  await db.update(requirements).set({ workflow: null }).where(eq(requirements.id, requirement.id));
   const task = await owner.service.taskService.createTask(db, { projectId: project.id, requirementId: requirement.id, title: "Disposable task", tags: ["executor:fake-agent"] }, owner.actor);
   const [link] = await db.insert(requirementRepositories).values({ requirementId: requirement.id, repositoryId: repository.id, baseBranch: "0.3.3", workingBranch: "req/auth-fixture" }).returning();
   const app = createApiApplication({ db, databaseUrl: databaseUrl!, env: { TW_AUTH_SECRET: config.secret, TW_AUTH_BOOTSTRAP_SECRET: config.bootstrapSecret, TW_AUTH_BASE_URL: config.baseURL, TW_AUTH_TRUSTED_ORIGINS: config.trustedOrigins[0], TW_PRESET_SKILLS_SYNC: "disabled" } }).app;
@@ -116,6 +117,9 @@ const fs = require('node:fs'), path = require('node:path');
  if (process.argv.includes('--version')) { console.log('fake-agent 1.0'); return; }
  if (!/^twb_[0-9a-f]{64}$/.test(process.env.TW_API_KEY || '')) throw new Error('Expected broker capability');
  if (Object.values(process.env).some(v => v.includes('supervisor-canary-'))) throw new Error('Inherited supervisor canary');
+ if (process.argv.join(' ').includes('WORKFLOW_RESULT')) {
+   console.log('WORKFLOW_RESULT: ' + JSON.stringify({ decision: 'complete', reason: 'Disposable workflow stage completed', checks: [{name: 'fixture-check', status: 'passed'}] })); return;
+ }
  if (!process.env.TW_TASK_ID) {
    const base = process.env.TW_API_URL, headers = { authorization: 'Bearer ' + process.env.TW_API_KEY, 'Content-Type': 'application/json' };
    const response = await fetch(base + '/api/v1/requirements/' + ${JSON.stringify(requirement.id)}, { headers });
@@ -124,7 +128,7 @@ const fs = require('node:fs'), path = require('node:path');
    if (blocked.status !== 403) throw new Error('Review child acquired write authority');
    console.log('REVIEW_DECISION: approve'); return;
  }
- const manifest = JSON.parse(fs.readFileSync('repository-manifest.json', 'utf8'));
+ const manifest = fs.existsSync('repository-manifest.json') ? JSON.parse(fs.readFileSync('repository-manifest.json', 'utf8')) : {repositories: []};
  fs.writeFileSync('child-environment.json', JSON.stringify({ ...process.env, TW_API_KEY: '[REDACTED]' }));
  for (const repository of manifest.repositories) fs.writeFileSync(path.join(repository.relativePath, 'result.txt'), 'Authenticated fixture\\n');
  const response = await fetch(process.env.TW_API_URL + '/api/v1/tasks/' + process.env.TW_TASK_ID + '/status', { method: 'PATCH', headers: { 'Content-Type': 'application/json', authorization: 'Bearer ' + process.env.TW_API_KEY }, body: JSON.stringify({status:'done',reason:'Disposable authenticated child'}) });
@@ -226,8 +230,24 @@ const fs = require('node:fs'), path = require('node:path');
     try { executed = await cli("start", ["--tools", "fake-agent", "--mode", "sse"]); }
     finally { if (previousMode === undefined) delete process.env.TW_DAEMON_MODE; else process.env.TW_DAEMON_MODE = previousMode; }
     assert.equal((await db.query.tasks.findFirst({ where: eq(tasks.id, selected.id) })).status, "done", executed.output);
-    assert.equal((await db.query.requirements.findFirst({ where: eq(requirements.id, candidate.id) })).status, "in_review");
+    assert.equal((await db.query.requirements.findFirst({ where: eq(requirements.id, candidate.id) })).status, "done");
     assert.ok(sseConnections > 0, executed.output);
+  });
+  await t.test("taskless non-Git stages run delegated executor, reviewer and integrator agents", async () => {
+    const candidate = await owner.service.requirementService.createRequirement(db, {
+      projectId: project.id, title: "Taskless workflow", status: "approved",
+      workflow: { version: 1, worktreeMode: "none", localArtifactRetentionDays: 30, worktreeRetentionDays: 7,
+        delivery: { mode: "automatic", method: "none", instructions: "Confirm execution needs no output." },
+        acceptance: { mode: "automatic", instructions: "Check the completed work.", requiredChecks: ["fixture-check"], minimumHumanApprovals: 0 },
+        integration: { mode: "automatic", method: "custom", instructions: "Confirm the custom integration result." } },
+    }, owner.actor);
+    for (const role of ["start", "review", "merge"]) {
+      const result = await cli(role, ["--tools", "fake-agent", ...(role === "start" ? ["--mode", "polling"] : [])]);
+      const stored = await db.query.requirements.findFirst({ where: eq(requirements.id, candidate.id) });
+      assert.equal(stored.status, role === "start" ? "in_review" : role === "review" ? "ready_to_merge" : "done", result.output);
+    }
+    const usage = await db.select().from(agentUsageRuns).where(eq(agentUsageRuns.requirementId, candidate.id));
+    assert.deepEqual(usage.map((run: any) => run.phase).sort(), ["execution", "integration", "review"]);
   });
   await t.test("persisted execution artifacts contain no supervisor or provider credentials", async () => {
     async function inspect(path: string) {
