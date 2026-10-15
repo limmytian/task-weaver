@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { type RequirementWorkflow, deliveryMethodSchema, integrationMethodSchema } from "@task-weaver/contracts";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,12 +13,16 @@ const labels: Record<string, string> = {
 };
 
 export function WorkflowEditor({ value, onChange }: { value: RequirementWorkflow; onChange: (value: RequirementWorkflow) => void }) {
+  const [criteriaText, setCriteriaText] = useState(value.acceptance.requiredChecks.join("\n"));
   const mode = (stage: "delivery" | "acceptance" | "integration", next: "automatic" | "manual" | "skip") => {
     const updated = { ...value, [stage]: { ...value[stage], mode: next } };
     if (next === "skip") {
       if (stage === "delivery") updated.delivery = { ...updated.delivery, method: "none" };
       if (stage === "integration") updated.integration = { ...updated.integration, method: "none" };
-      if (stage === "acceptance") updated.acceptance = { ...updated.acceptance, requiredChecks: [], minimumHumanApprovals: 0 };
+      if (stage === "acceptance") {
+        updated.acceptance = { ...updated.acceptance, requiredChecks: [], minimumHumanApprovals: 0 };
+        setCriteriaText("");
+      }
     }
     onChange(updated);
   };
@@ -34,7 +39,7 @@ export function WorkflowEditor({ value, onChange }: { value: RequirementWorkflow
       </Select>}
       {value[stage].mode !== "skip" && <Textarea aria-label={`${stage} instructions`} placeholder="Extra instructions (optional)" rows={3} value={value[stage].instructions} onChange={(event) => onChange({ ...value, [stage]: { ...value[stage], instructions: event.target.value } })} />}
       {stage === "acceptance" && value.acceptance.mode !== "skip" && <>
-        <Textarea aria-label="Required acceptance criteria" placeholder="Required acceptance criteria, one per line" rows={3} value={value.acceptance.requiredChecks.join("\n")} onChange={(event) => onChange({ ...value, acceptance: { ...value.acceptance, requiredChecks: event.target.value.split("\n").filter((line) => line.trim()) } })} />
+        <Textarea aria-label="Required acceptance criteria" placeholder="Required acceptance criteria, one per line" rows={3} value={criteriaText} onChange={(event) => { setCriteriaText(event.target.value); onChange({ ...value, acceptance: { ...value.acceptance, requiredChecks: event.target.value.split("\n").map((line) => line.trim()).filter(Boolean) } }); }} />
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={value.acceptance.minimumHumanApprovals > 0} onChange={(event) => onChange({ ...value, acceptance: { ...value.acceptance, mode: event.target.checked ? "manual" : value.acceptance.mode, minimumHumanApprovals: event.target.checked ? 1 : 0 } })} />Require human approval</label>
       </>}
       {stage === "integration" && value.integration.mode !== "skip" && <Input aria-label="Integration target" placeholder="Target branch, location, or destination (optional)" value={value.integration.target ?? ""} onChange={(event) => onChange({ ...value, integration: { ...value.integration, target: event.target.value || undefined } })} />}
