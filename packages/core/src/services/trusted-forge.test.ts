@@ -33,3 +33,41 @@ test("server credentials are scoped to both catalog ID and canonical repository 
     await assert.rejects(readTrustedPullRequest(repository, payload.html_url, { connection: { host: "github.com", provider: "github", apiBaseUrl: "https://api.github.com", ...scope }, fetch: async () => { throw new Error("Must not fetch an unauthorized repository"); } }), /outside.*scope/);
   }
 });
+
+test("direct integration verifies the configured branch tip without requiring a pull request", async () => {
+  const { readTrustedDirectMerge } = await import("./trusted-forge");
+  const commit = "a".repeat(40);
+  const result = await readTrustedDirectMerge(repository, "release/0.3.9", commit, { fetch: async (url, init) => {
+    assert.equal(String(url), "https://api.github.com/repos/acme/app/branches/release%2F0.3.9");
+    assert.equal(init?.redirect, "error");
+    return Response.json({ name: "release/0.3.9", commit: { sha: commit } });
+  } });
+  assert.equal(result.headCommit, commit); assert.equal(result.targetCommit, commit);
+});
+test("direct integration accepts an ancestor and rejects unrelated or behind target branches", async () => {
+  const { readTrustedDirectMerge } = await import("./trusted-forge");
+  for (const status of ["ahead", "behind", "diverged"]) {
+    const action = () => readTrustedDirectMerge(repository, "main", "a".repeat(40), { fetch: async url => {
+      if (String(url).endsWith("/branches/main")) return Response.json({ name: "main", commit: { sha: "b".repeat(40) } });
+      assert.ok(String(url).endsWith(`/compare/${"a".repeat(40)}...${"b".repeat(40)}`));
+      return Response.json({ status, base_commit: { sha: "a".repeat(40) }, merge_base_commit: { sha: "a".repeat(40) } });
+    } });
+    if (status === "ahead") assert.equal((await action()).targetCommit, "b".repeat(40));
+    else await assert.rejects(action(), /not contained/);
+  }
+  await assert.rejects(readTrustedDirectMerge(repository, "main", "a".repeat(40), { fetch: async () => Response.json({ name: "other", commit: { sha: "a".repeat(40) } }) }), /incomplete target branch/);
+});
+test("Gitea direct integration verifies parent objects and refuses unverifiable ancestry", async () => {
+  const { readTrustedDirectMerge } = await import("./trusted-forge");
+  const repo = { ...repository, host: "forge.example", provider: "gitea" };
+  const connection = { host: repo.host, provider: "gitea" as const, apiBaseUrl: "https://api.forge.example/api/v1", repositoryIds: [repo.id], repositories: ["acme/app"] };
+  for (const contained of [true, false]) {
+    const action = () => readTrustedDirectMerge(repo, "main", "a".repeat(40), { connection, fetch: async url => {
+      if (String(url).endsWith("/branches/main")) return Response.json({ name: "main", commit: { sha: "b".repeat(40) } });
+      assert.ok(String(url).endsWith(`/git/commits/${"b".repeat(40)}`));
+      return Response.json({ sha: "b".repeat(40), parents: contained ? [{ sha: "a".repeat(40) }] : [] });
+    } });
+    if (contained) assert.equal((await action()).headCommit, "a".repeat(40));
+    else await assert.rejects(action(), /ancestry limit/);
+  }
+});

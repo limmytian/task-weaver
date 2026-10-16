@@ -288,11 +288,19 @@ export type SyncRequirementRepositoryForgeStateInput = z.infer<typeof syncRequir
 export type ReopenRequirementRepositoryDeliveryInput = z.infer<typeof reopenRequirementRepositoryDeliverySchema>;
 export type RepositoryReadinessInput = z.infer<typeof repositoryReadinessInputSchema>;
 
-export const reconcileHumanRepositoryDeliverySchema = z.object({
-  pullRequestUrl: z.string().url().max(2048),
+const humanReconciliationFields = {
   reason: z.string().trim().min(3).max(2000),
   expectedRevision: z.number().int().min(0),
   expectedUpdatedAt: z.coerce.date(),
   idempotencyKey: z.string().uuid(),
+};
+export const reconcileHumanDirectRepositoryDeliverySchema = z.object({
+  ...humanReconciliationFields,
+  commit: z.string().regex(/^[a-f0-9]{40,64}$/).transform(value => value.toLowerCase()),
 }).strict();
+export const reconcileHumanRepositoryDeliverySchema = z.union([
+  z.object({ ...humanReconciliationFields, pullRequestUrl: z.string().url().max(2048) }).strict(),
+  reconcileHumanDirectRepositoryDeliverySchema,
+]);
+export type ReconcileHumanDirectRepositoryDeliveryInput = z.infer<typeof reconcileHumanDirectRepositoryDeliverySchema>;
 export type ReconcileHumanRepositoryDeliveryInput = z.infer<typeof reconcileHumanRepositoryDeliverySchema>;

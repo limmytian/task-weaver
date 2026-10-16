@@ -15,6 +15,7 @@ import {
 import type { Actor } from "@task-weaver/contracts";
 import type {
   ReconcileHumanRepositoryDeliveryInput,
+  ReconcileHumanDirectRepositoryDeliveryInput,
   AddRequirementRepositoryInput,
   AddTaskRepositoryInput,
   CreateRepositoryInput,
@@ -29,7 +30,7 @@ import type {
 import { ConflictError, NotFoundError, ValidationError, requirementWorkflowSchema } from "@task-weaver/contracts";
 import { assertRequirementLease } from "./claims";
 import { createHash } from "node:crypto";
-import { parseTrustedPullRequestUrl, readTrustedPullRequest } from "./trusted-forge";
+import { parseTrustedPullRequestUrl, readTrustedPullRequest, readTrustedDirectMerge } from "./trusted-forge";
 
 async function assertWorkflowIntegration(db: Database, requirement: typeof requirements.$inferSelect, link: typeof requirementRepositories.$inferSelect, actor: Actor) {
   if (!requirement.workflow) return;
@@ -1301,6 +1302,7 @@ export async function reconcileHumanRepositoryDelivery(
   db: Database, linkId: string, input: ReconcileHumanRepositoryDeliveryInput, actor: Actor,
 ) {
   if (actor.type !== "human") throw new ValidationError("Human delivery reconciliation requires a human credential");
+  if ("commit" in input) return reconcileHumanDirectRepositoryDelivery(db, linkId, input, actor);
   const initial = await db.query.requirementRepositories.findFirst({ where: eq(requirementRepositories.id, linkId) });
   if (!initial) throw new NotFoundError("Requirement repository link not found");
   const [requirement] = await db.select().from(requirements).where(eq(requirements.id, initial.requirementId)).for("update");
@@ -1358,6 +1360,61 @@ export async function reconcileHumanRepositoryDelivery(
     metadata: { repositoryId: repository.id, linkId: link.id, reason: redactDeliverySummary(input.reason), source: snapshot.source, observedAt: snapshot.observedAt.toISOString(), idempotencyKey: key,
       before, after: { deliveryStatus: updated.deliveryStatus, headCommit: updated.headCommit, pushedCommit: updated.pushedCommit, pullRequestUrl: updated.pullRequestUrl, reviewStatus: updated.reviewStatus, mergeStatus: updated.mergeStatus, externalSyncRevision: updated.externalSyncRevision },
       mergeCommit: snapshot.mergeCommit, baseBranch: snapshot.baseBranch, mergedAt: snapshot.mergedAt } });
+  emit({ type: "requirement_updated", projectId: requirement.projectId, requirementId: requirement.id });
+  return { link: updated, idempotent: false, revision: updated.externalSyncRevision };
+}
+
+async function reconcileHumanDirectRepositoryDelivery(
+  db: Database, linkId: string, input: ReconcileHumanDirectRepositoryDeliveryInput, actor: Actor,
+) {
+  const initial = await db.query.requirementRepositories.findFirst({ where: eq(requirementRepositories.id, linkId) });
+  if (!initial) throw new NotFoundError("Requirement repository link not found");
+  const [requirement] = await db.select().from(requirements).where(eq(requirements.id, initial.requirementId)).for("update");
+  const [link] = await db.select().from(requirementRepositories).where(eq(requirementRepositories.id, linkId)).for("update");
+  if (!requirement || !link) throw new NotFoundError("Requirement repository link not found");
+  const repository = await db.query.repositories.findFirst({ where: eq(repositories.id, link.repositoryId) });
+  if (!repository || repository.status !== "active") throw new ValidationError("Repository must be active");
+  const requestHash = createHash("sha256").update(JSON.stringify({ actorId: actor.id, kind: "direct", commit: input.commit, reason: input.reason })).digest("hex");
+  const key = `human:${input.idempotencyKey}`;
+  if (link.externalState.idempotencyKey === key) {
+    if (link.externalState.manualRequestHash !== requestHash) throw new ConflictError("Idempotency key was used for a different reconciliation request", link.externalSyncRevision);
+    return { link, idempotent: true, revision: link.externalSyncRevision };
+  }
+  if (["done", "cancelled", "archived"].includes(requirement.status)) throw new ValidationError("Terminal requirements cannot change delivery evidence");
+  const claim = await db.query.requirementClaims.findFirst({ where: eq(requirementClaims.requirementId, requirement.id) });
+  if (claim && claim.expiresAt.getTime() > Date.now() && (claim.claimedBy !== actor.id || claim.claimedByType !== "human" || claim.daemonId)) throw new ConflictError("An active execution lease owns this requirement; wait for its release", link.externalSyncRevision);
+  if (input.expectedRevision !== link.externalSyncRevision || input.expectedUpdatedAt.getTime() !== link.updatedAt.getTime()) throw new ConflictError("Repository delivery changed; reload it before synchronizing", link.externalSyncRevision);
+  if (!link.baseBranch) throw new ValidationError("A target branch is required to verify direct integration");
+  if (link.deliveryStatus === "unchanged") throw new ValidationError("Reopen unchanged delivery before registering direct integration");
+  if (link.pullRequestUrl || link.pullRequestExternalId) throw new ValidationError("This delivery has a pull request; synchronize its PR evidence instead");
+  if ((link.pushedCommit || link.headCommit) && input.commit !== (link.pushedCommit || link.headCommit)?.toLowerCase()) throw new ConflictError("Delivered commit differs from the recorded delivery", link.externalSyncRevision);
+  const workflow = requirement.workflow ? requirementWorkflowSchema.parse(requirement.workflow) : null;
+  if (workflow?.delivery.method === "git_pr") throw new ValidationError("This workflow requires a pull request delivery; direct integration cannot replace it");
+  if (workflow?.integration.target && workflow.integration.target !== link.baseBranch) throw new ValidationError("Configured integration target differs from the repository base branch");
+  const snapshot = await readTrustedDirectMerge(repository, link.baseBranch, input.commit);
+  const before = { deliveryStatus: link.deliveryStatus, headCommit: link.headCommit, reviewStatus: link.reviewStatus, externalSyncRevision: link.externalSyncRevision };
+  const [updated] = await db.update(requirementRepositories).set({
+    headCommit: snapshot.headCommit, pushedCommit: snapshot.headCommit, pushStatus: "pushed", pushedAt: link.pushedAt ?? snapshot.observedAt,
+    deliveryStatus: "merged", mergeStatus: "merged", mergedAt: link.mergedAt ?? snapshot.observedAt,
+    mergerActorId: actor.id, mergerActorType: actor.type, mergerDaemonId: null, mergeMode: "direct",
+    externalState: { provider: snapshot.provider, evidenceType: "direct", headCommit: snapshot.headCommit, baseBranch: snapshot.baseBranch,
+      targetCommit: snapshot.targetCommit, verifiedSource: snapshot.source, observedAt: snapshot.observedAt.toISOString(), idempotencyKey: key, manualRequestHash: requestHash },
+    externalStateUpdatedAt: snapshot.observedAt, externalSyncRevision: link.externalSyncRevision + 1,
+    failureCode: null, failureSummary: null, retryPhase: null, retryRole: null, retryPolicy: null, resumeOperation: null, nextAttemptAt: null, updatedAt: new Date(),
+  }).where(and(eq(requirementRepositories.id, link.id), eq(requirementRepositories.externalSyncRevision, input.expectedRevision))).returning();
+  if (!updated) throw new ConflictError("Repository delivery changed during reconciliation", link.externalSyncRevision);
+  if (workflow?.delivery.method === "git_branch" && !["complete", "skipped"].includes(requirement.workflowState?.delivery ?? "")) {
+    const existing = await db.query.workflowOutputs.findFirst({ where: and(eq(workflowOutputs.requirementId, requirement.id), eq(workflowOutputs.requirementRepositoryId, link.id), eq(workflowOutputs.workflowRevision, requirement.workflowRevision), eq(workflowOutputs.type, "git_branch"), eq(workflowOutputs.headCommit, snapshot.headCommit)) });
+    if (!existing) {
+      await db.insert(workflowOutputs).values({ requirementId: requirement.id, requirementRepositoryId: link.id, workflowRevision: requirement.workflowRevision,
+        type: "git_branch", url: `https://${repository.host}/${repository.namespace}/${repository.name}/commit/${snapshot.headCommit}`, headCommit: snapshot.headCommit,
+        summary: "Direct integration into the target branch verified by the server forge connection", createdBy: actor.id, createdByType: actor.type });
+      await db.update(requirements).set({ workflowStateRevision: requirement.workflowStateRevision + 1, updatedAt: new Date() }).where(eq(requirements.id, requirement.id));
+    }
+  }
+  await db.insert(activityLog).values({ entityType: "requirement", entityId: requirement.id, action: "repository_delivery_human_reconciled", actorId: actor.id, actorType: actor.type,
+    metadata: { repositoryId: repository.id, linkId: link.id, kind: "direct", reason: redactDeliverySummary(input.reason), source: snapshot.source, observedAt: snapshot.observedAt.toISOString(), idempotencyKey: key,
+      before, after: { deliveryStatus: updated.deliveryStatus, headCommit: updated.headCommit, reviewStatus: updated.reviewStatus, externalSyncRevision: updated.externalSyncRevision }, targetCommit: snapshot.targetCommit, baseBranch: snapshot.baseBranch } });
   emit({ type: "requirement_updated", projectId: requirement.projectId, requirementId: requirement.id });
   return { link: updated, idempotent: false, revision: updated.externalSyncRevision };
 }

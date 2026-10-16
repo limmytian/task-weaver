@@ -558,6 +558,22 @@ export function registerRequirements(program: Command): void {
       printKv(data as Record<string, unknown>)
     })
 
+  repo.command('sync-direct <linkId>').description('verify a delivered commit is contained in the target branch without a PR (human only)')
+    .requiredOption('--commit <sha>', 'full delivered commit SHA to verify against the configured target branch')
+    .requiredOption('--reason <text>', 'audited reason for reconciliation')
+    .requiredOption('--revision <number>', 'current externalSyncRevision')
+    .requiredOption('--updated-at <timestamp>', 'current delivery updatedAt')
+    .requiredOption('--request-id <uuid>', 'stable idempotency key; reuse for an exact retry')
+    .option('--json', 'output raw JSON')
+    .action(async (linkId, opts) => {
+      const data = await post(`/api/v1/requirement-repositories/${linkId}/human-sync`, reconcileHumanRepositoryDeliverySchema.parse({
+        commit: opts.commit, reason: opts.reason, expectedRevision: Number(opts.revision),
+        expectedUpdatedAt: opts.updatedAt, idempotencyKey: opts.requestId,
+      }))
+      if (opts.json) return printJson(data)
+      printKv(data as Record<string, unknown>)
+    })
+
   repo.command('reopen <linkId>').description('explicitly reopen a terminal Requirement repository delivery')
     .requiredOption('--reason <reason>', 'audited reason for reopening the terminal delivery')
     .option('--json', 'output raw JSON')

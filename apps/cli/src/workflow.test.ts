@@ -4,7 +4,7 @@ import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { requirementWorkflowSchema, workflowFromPreset, workflowNeedsWorktree } from '@task-weaver/contracts'
+import { reconcileHumanRepositoryDeliverySchema, requirementWorkflowSchema, workflowFromPreset, workflowNeedsWorktree } from '@task-weaver/contracts'
 import { parseWorkflowAgentResult } from './workflow-agent.js'
 import { localWorkflowOutputPath, probeWorkflowArtifact, storeWorkflowArtifact } from './workflow-artifacts.js'
 
@@ -52,5 +52,15 @@ test('durable local outputs detect modification, missing bytes, wrong nodes and 
   } finally {
     if (previous === undefined) delete process.env.TW_ARTIFACT_ROOT; else process.env.TW_ARTIFACT_ROOT = previous
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+
+test('human reconciliation accepts exactly one evidence type and rejects client status overrides', () => {
+  const common = { reason: 'Verify direct integration', expectedRevision: 0, expectedUpdatedAt: new Date(), idempotencyKey: randomUUID() }
+  assert.equal(reconcileHumanRepositoryDeliverySchema.parse({ ...common, commit: 'a'.repeat(40) }).reason, common.reason)
+  assert.equal(reconcileHumanRepositoryDeliverySchema.parse({ ...common, pullRequestUrl: 'https://github.com/acme/app/pull/1' }).reason, common.reason)
+  for (const extra of [{}, { commit: 'short' }, { commit: 'a'.repeat(40), pullRequestUrl: 'https://github.com/acme/app/pull/1' }, { commit: 'a'.repeat(40), deliveryStatus: 'merged' }, { commit: 'a'.repeat(40), snapshot: { merged: true } }]) {
+    assert.throws(() => reconcileHumanRepositoryDeliverySchema.parse({ ...common, ...extra }))
   }
 })

@@ -623,3 +623,5 @@ For larger teams, partition work at the requirement level:
 - Cross-requirement work requires coordination via comments
 
 This reduces contention and makes parallel work natural.
+
+For human integration without a PR, use `tw req repo sync-direct` (0.3.9) to verify the delivered commit against the configured target branch, then complete the normal requirement/workflow controls. See [human delivery reconciliation](../../docs/manual-pr-reconciliation.md).

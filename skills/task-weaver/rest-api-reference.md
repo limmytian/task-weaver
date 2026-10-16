@@ -2455,3 +2455,12 @@ Finite stored grants remain limited to 100 scopes. The REST body limit is 32 KiB
 returns `{ items, hasNext }`. Summary metadata excludes grants and verifier
 material. The Web Key list uses this endpoint contract and fetches grants only
 when opening detail; the original full metadata listing remains compatible.
+
+### Human direct integration reconciliation (0.3.9)
+
+`POST /api/v1/requirement-repositories/:id/human-sync` also accepts `commit` (full SHA)
+instead of `pullRequestUrl`, with the same reason, revision, timestamp and request UUID.
+The server verifies that the configured target branch contains the delivered commit.
+Only authorized human management credentials may call it. Existing PR deliveries and
+explicit `git_pr` workflows must use PR synchronization. No configured acceptance or
+integration stage is automatically advanced. Use `tw req repo sync-direct --help`.

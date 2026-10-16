@@ -50,3 +50,5 @@ A project owner or maintainer using a recently confirmed browser session can iss
 ## Human PR reconciliation
 
 For externally delivered pull requests, use the human-only trusted synchronization flow described in [Human PR reconciliation](manual-pr-reconciliation.md). Verified merge facts and configured workflow decisions remain separate.
+
+For human integration without a PR, use `tw req repo sync-direct` (0.3.9) to verify the delivered commit against the configured target branch, then complete the normal requirement/workflow controls. See [human delivery reconciliation](manual-pr-reconciliation.md).

@@ -50,3 +50,5 @@ worktreeMode 为 auto 时，仅 Git 交付或整合创建 worktree；none 使用
 ## 人工 PR 同步
 
 外部交付的 PR 可通过[人工 PR 交付登记与同步](manual-pr-reconciliation.zh-CN.md)中的人类入口核验。外部合并事实与配置的工作流阶段分别推进。
+
+0.3.9 支持通过 `tw req repo sync-direct` 核验无 PR 的人工直接整合，再按正常工作流收尾。详见[人工交付同步](manual-pr-reconciliation.zh-CN.md)。

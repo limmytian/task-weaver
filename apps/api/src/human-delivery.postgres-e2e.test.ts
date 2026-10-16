@@ -86,4 +86,57 @@ test("human PR reconciliation verifies server evidence, authority, leases, retri
     if (stage === "integration") assert.equal(advanced.status, "done");
   }
   assert.equal((await api(`/requirement-repositories/${current.id}/forge-sync`, "POST", { snapshot: row })).status, 400);
+  // Reproduce the released defect: a legacy requirement directly integrated without a PR.
+  const direct = await create();
+  await db.update(requirements).set({ workflow: null, workflowSource: null }).where(eq(requirements.id, direct.r.id));
+  const task = await json(await api(`/projects/${f.project.id}/tasks`, "POST", { requirementId: direct.r.id, title: "Delivered task" }), 201);
+  let directLink = direct.link;
+  let targetName = "main";
+  const deliveredCommit = "e".repeat(40);
+  globalThis.fetch = async path => {
+    if (String(path).endsWith("/branches/main")) return Response.json({ name: targetName, commit: { sha: deliveredCommit } });
+    assert.ok(String(path).includes("/compare/"));
+    return Response.json({ status: "behind", base_commit: { sha: "f".repeat(40) }, merge_base_commit: { sha: "f".repeat(40) } });
+  };
+  const directInput = () => ({ commit: deliveredCommit, reason: "Owner authorized direct integration into main", expectedRevision: directLink.externalSyncRevision, expectedUpdatedAt: directLink.updatedAt, idempotencyKey: randomUUID() });
+  const syncDirect = (body = directInput(), headers = f.owner.headers) => api(`/requirement-repositories/${directLink.id}/human-sync`, "POST", body, headers);
+  assert.equal((await syncDirect(directInput(), agentHeaders)).status, 403);
+  assert.equal((await syncDirect(directInput(), new Headers({ authorization: `Bearer ${limitedKey.rawKey}`, "content-type": "application/json" }))).status, 403);
+  assert.equal((await syncDirect({ ...directInput(), pullRequestUrl: row.html_url } as any)).status, 400);
+  assert.equal((await syncDirect({ ...directInput(), snapshot: { merged: true } } as any)).status, 400);
+  assert.equal((await syncDirect({ ...directInput(), commit: "f".repeat(40) })).status, 400);
+  targetName = "other"; assert.equal((await syncDirect()).status, 400); targetName = "main";
+  await json(await api(`/requirements/${direct.r.id}/claim`, "POST", { daemonId, workerIndex: 0, durationMinutes: 5 }, agentHeaders), 201);
+  assert.equal((await syncDirect()).status, 409);
+  const directClaim = await json(await api(`/requirements/${direct.r.id}/claim`));
+  await json(await api(`/requirements/${direct.r.id}/release`, "POST", { daemonId, leaseGeneration: directClaim.generation }, agentHeaders));
+  const directRequests = [directInput(), directInput()];
+  const directResponses = await Promise.all(directRequests.map(body => syncDirect(body)));
+  assert.deepEqual(directResponses.map(response => response.status).sort(), [200, 409]);
+  const directSuccess = directResponses.findIndex(response => response.status === 200);
+  const directRequest = directRequests[directSuccess]!;
+  directLink = (await json(directResponses[directSuccess]!)).link;
+  assert.equal(directLink.deliveryStatus, "merged"); assert.equal(directLink.mergeMode, "direct");
+  assert.equal(directLink.reviewStatus, "pending"); assert.equal(directLink.pullRequestUrl, null);
+  assert.equal(directLink.externalState.evidenceType, "direct"); assert.equal(directLink.externalState.targetCommit, deliveredCommit);
+  assert.equal((await syncDirect({ ...directInput(), expectedUpdatedAt: direct.link.updatedAt })).status, 409);
+  await json(await api(`/tasks/${task.id}/status`, "PATCH", { status: "done", reason: "Implementation verified" }));
+  assert.equal((await json(await api(`/requirements/${direct.r.id}`, "PATCH", { status: "done" }))).status, "done");
+  assert.equal((await json(await syncDirect(directRequest))).idempotent, true);
+  assert.equal((await syncDirect({ ...directRequest, reason: "Different request" })).status, 409);
+  assert.equal((await syncDirect()).status, 400);
+  const directAudit = await db.query.activityLog.findMany({ where: eq(activityLog.entityId, direct.r.id) });
+  assert.equal(directAudit.filter(entry => entry.action === "repository_delivery_human_reconciled" && (entry.metadata as Record<string, unknown> | null)?.kind === "direct").length, 1);
+  const explicitPr = await create({ delivery: { method: "git_pr" }, acceptance: {}, integration: {} });
+  directLink = explicitPr.link; assert.equal((await syncDirect()).status, 400);
+  const branchWorkflow = await create({ delivery: { method: "git_branch" }, acceptance: { mode: "manual", minimumHumanApprovals: 1 }, integration: { mode: "manual", method: "git_direct" } });
+  directLink = branchWorkflow.link; await json(await syncDirect());
+  let branchState = await json(await api(`/requirements/${branchWorkflow.r.id}`));
+  assert.equal(branchState.workflowState.acceptance, "pending"); assert.equal(branchState.workflowOutputs[0].type, "git_branch");
+  assert.equal((await api(`/requirements/${branchWorkflow.r.id}`, "PATCH", { status: "done" })).status, 400);
+  for (const stage of ["delivery", "acceptance", "integration"]) {
+    branchState = await json(await api(`/requirements/${branchWorkflow.r.id}/workflow-advance`, "POST", { stage, expectedRevision: branchState.workflowStateRevision, reason: "Owner verified configured direct integration stage" }));
+  }
+  assert.equal(branchState.status, "done");
+
 });

@@ -32,6 +32,8 @@ export interface RepositoryOperationCheckpoint {
 }
 
 export interface RepositoryExternalState {
+  evidenceType?: "direct";
+  targetCommit?: string;
   mergeCommit?: string | null;
   baseBranch?: string;
   mergedAt?: string | null;

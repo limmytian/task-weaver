@@ -194,6 +194,7 @@ export function RequirementRepositories({
               {link.pullRequestUrl && <a href={link.pullRequestUrl} target="_blank" rel="noreferrer" className="underline">Pull request</a>}
             </div>
             {canSync && ["github", "gitea"].includes(repository.provider) && <HumanDeliverySync link={link} refresh={refresh} />}
+            {link.externalState?.evidenceType === "direct" && <p className="mt-1 text-muted-foreground">Direct integration verified in {link.baseBranch}; target commit: {link.externalState.targetCommit?.slice(0, 12)}</p>}
             {link.externalState?.mergeCommit && <p className="mt-1 text-muted-foreground">Merge commit: {link.externalState.mergeCommit.slice(0, 12)}</p>}
             {link.failureSummary && (
               <div className="mt-2 flex items-center justify-between gap-2 rounded bg-destructive/10 px-2 py-1.5 text-destructive">
