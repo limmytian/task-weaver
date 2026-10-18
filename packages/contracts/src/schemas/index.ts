@@ -9,6 +9,7 @@ export * from "./documents";
 export * from "./embeddings";
 export * from "./webhooks";
 export * from "./mcp";
+export * from "./mcp-server";
 export * from "./memory";
 export * from "./daemons";
 export * from "./observability";
