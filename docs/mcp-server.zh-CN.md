@@ -33,7 +33,7 @@ tw mcp serve --read-only
       "command": "tw",
       "args": ["mcp", "serve", "--read-only"],
       "env": {
-        "TW_API_URL": "https://task-weaver.example.com"
+        "TW_API_URL": "https://api.task-weaver.example.com"
       }
     }
   }
@@ -46,7 +46,7 @@ stdout 仅包含 MCP 协议，日志写入 stderr；EOF、SIGINT、SIGTERM 会�
 
 ### 远程 Streamable HTTP
 
-客户端地址为 `https://task-weaver.example.com/api/v1/mcp-server`，每次请求都必须
+客户端地址为 `https://api.task-weaver.example.com/api/v1/mcp-server`，每次请求都必须
 携带 `Authorization: Bearer <API_KEY>`。在客户端秘密设置中配置此请求头。
 客户端应按官方协议设置 Accept 和协商后的 MCP-Protocol-Version。
 
@@ -56,6 +56,28 @@ stdout 仅包含 MCP 协议，日志写入 stderr；EOF、SIGINT、SIGTERM 会�
 如果请求包含 Origin，必须通过现有 `TW_AUTH_TRUSTED_ORIGINS` 校验。
 设置 `TW_MCP_READ_ONLY=true` 可让远程入口和本地调用所用的 REST 入口一起拒绝写入。
 代理超时应大于工具调用的 30 秒期限。
+
+## 部署位置与配置
+
+HTTP MCP 运行在 `apps/api` 的 Hono API 服务中，使用同一进程和 3001 端口。
+它不在 3000 端口的 Next.js Web 服务中，Web 默认也不会代理此路径。
+入口代理需要把 `/api/v1/mcp-server` 转发到 API。API 域名与 `TW_AUTH_BASE_URL`
+不同时，必须把实际 API 的 `host[:port]` 加入 `TW_MCP_ALLOWED_HOSTS`。
+
+Compose 已透传 `TW_MCP_ALLOWED_HOSTS` 与 `TW_MCP_READ_ONLY`；主机配置为空时使用
+认证基准 URL 的主机。Kubernetes 模板从可选的 `task-weaver-mcp` ConfigMap 读取
+`allowed-hosts`、`read-only`：
+
+```sh
+kubectl -n task-weaver create configmap task-weaver-mcp \
+  --from-literal=allowed-hosts=api.task-weaver.example.com \
+  --from-literal=read-only=true --dry-run=client -o yaml | kubectl apply -f -
+```
+
+按正常部署流程选取匹配的 API/Web 镜像，保留现有认证 Secret 和持久卷。
+修改 ConfigMap 后需要重新创建 API Pod；建议把镜像与配置一起更新。
+私有候选和最终公开镜像都应验证健康、版本/提交号、MCP 初始化/发现/读取、只读拒写
+及无效密钥拒绝。参见[升级说明](ce-upgrades.md#039-to-0310-mcp-server-upgrade)。
 
 ## 协作与限制
 

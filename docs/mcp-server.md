@@ -48,7 +48,7 @@ A generic MCP client configuration is:
       "command": "tw",
       "args": ["mcp", "serve", "--read-only"],
       "env": {
-        "TW_API_URL": "https://task-weaver.example.com"
+        "TW_API_URL": "https://api.task-weaver.example.com"
       }
     }
   }
@@ -69,7 +69,7 @@ messages; diagnostics go to stderr. EOF, SIGINT and SIGTERM close the transport.
 Set your client's MCP URL to:
 
 ```text
-https://task-weaver.example.com/api/v1/mcp-server
+https://api.task-weaver.example.com/api/v1/mcp-server
 ```
 
 Configure an `Authorization: Bearer <API_KEY>` header in its secret settings.
@@ -78,6 +78,12 @@ there is no session id, resumable stream or background subscription. POST uses
 JSON responses; GET/DELETE return 405. Protocol negotiation and validation use
 the official SDK. Clients must send the negotiated MCP-Protocol-Version header
 and the protocol-required Accept values.
+
+The MCP endpoint belongs to the Hono API service (`apps/api`, port 3001), not
+Next.js Web (port 3000). Route this path to the API service at your ingress or
+reverse proxy. The default Web service does not proxy `/api/v1/mcp-server`.
+When the API has a separate domain from `TW_AUTH_BASE_URL`, allow that exact API
+host explicitly with `TW_MCP_ALLOWED_HOSTS`.
 
 For operators:
 
@@ -91,6 +97,33 @@ For operators:
 - Set `TW_MCP_READ_ONLY=true` to hide and reject write tools for both the remote
   protocol endpoint and local clients' REST calls.
 - Keep proxy request timeouts above the server's 30-second tool deadline.
+
+## Compose and Kubernetes configuration
+
+Compose forwards `TW_MCP_ALLOWED_HOSTS` and `TW_MCP_READ_ONLY` to the API container.
+An empty host setting uses the host from `TW_AUTH_BASE_URL`. Set an explicit
+comma-separated list when your API origin differs from that URL.
+
+The Kubernetes API template reads these values from optional keys in a
+`task-weaver-mcp` ConfigMap. For example:
+
+```sh
+kubectl -n task-weaver create configmap task-weaver-mcp \
+  --from-literal=allowed-hosts=api.task-weaver.example.com \
+  --from-literal=read-only=true --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Render the matching API/Web image pair using the normal deployment procedure.
+Keep existing database/authentication Secrets and persistent volumes. A ConfigMap
+change requires recreating the API pod; change the image digest and configuration
+in the same rollout. For deployments that do not use the bundled template,
+provide the same environment variables through your deployment manager.
+
+After rollout, verify `/health` and `/api/v1/version`, then initialize/list/read
+with an API-key MCP client against the API origin. Confirm denied writes for a
+read-only client and reject a missing/revoked key. Repeat against the final
+public image digests and check their source commit identity. See
+[upgrade and recovery](ce-upgrades.md#039-to-0310-mcp-server-upgrade).
 
 ## Work with the tools
 

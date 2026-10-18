@@ -121,3 +121,17 @@ The 0.3.7 release publishes signed, multi-platform API and Web image indexes.
 This deployment example continues to require an operator-provided PostgreSQL
 database. For a local trial, the separate Compose file supplies a
 PostgreSQL/pgvector container and binds application ports to loopback only.
+
+## Inbound MCP Server (0.3.10+)
+
+MCP HTTP runs inside the API container on port 3001 at `/api/v1/mcp-server`.
+The Web container does not serve or proxy this endpoint. Route it to the API and
+use that API origin for MCP clients and `TW_API_URL` in local stdio setups.
+Set `TW_MCP_ALLOWED_HOSTS` to the actual public API host when it differs from
+`TW_AUTH_BASE_URL`; set `TW_MCP_READ_ONLY=true` for server-wide read-only access.
+Compose forwards both settings to API. Clients use a scoped API key on every
+call; browser cookies do not authenticate MCP. This feature requires a verified
+0.3.10-or-later matching image pair; the historical default image pair does not
+acquire new features without an explicit image override. See the
+[MCP Server guide](mcp-server.md) ([中文](mcp-server.zh-CN.md)) for local/remote
+setup, Kubernetes ConfigMap keys, protocol headers and diagnostics.

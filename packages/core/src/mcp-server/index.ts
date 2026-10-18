@@ -2,7 +2,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, McpError, ErrorCode, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
-  AuthenticationError, AuthorizationError, NotFoundError, ValidationError, ConflictError, ClaimConflictError, DependencyConflictError,
+  APPLICATION_VERSION, AuthenticationError, AuthorizationError, NotFoundError, ValidationError, ConflictError, ClaimConflictError, DependencyConflictError,
   mcpServerCatalog, mcpServerReadTools, isMcpServerToolAllowed, parseMcpServerArguments,
   MCP_SERVER_LIMITS, type McpServerToolName, type McpServerToolError,
 } from "@task-weaver/contracts";
@@ -91,7 +91,7 @@ export function createMcpToolCaller(execute: McpExecutor, options: McpServerOpti
 }
 
 export function createTaskWeaverMcpServer(call: ReturnType<typeof createMcpToolCaller>, options: { readOnly?: boolean } = {}) {
-  const server = new Server({ name: "task-weaver", version: "0.3.10" }, { capabilities: { tools: {} } });
+  const server = new Server({ name: "task-weaver", version: APPLICATION_VERSION }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: mcpServerCatalog
     .filter(tool => isMcpServerToolAllowed(tool.name, options.readOnly ?? false))
     .map(tool => {

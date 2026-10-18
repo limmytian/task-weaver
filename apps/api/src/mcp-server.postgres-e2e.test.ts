@@ -38,6 +38,10 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   };
   const success = async (name: string, args: unknown) => { const result = await call(name, args); assert.equal(result.ok, true, JSON.stringify(result)); return result.data; };
   assert.ok((await success("tw_projects_list", {})).items.some((p: { id: string }) => p.id === f.project.id));
+  const defaultHostApp = createApiApplication({ db, databaseUrl: databaseUrl!, env: { TW_AUTH_SECRET: f.configuration.secret, TW_AUTH_BASE_URL: f.configuration.baseURL, TW_AUTH_TRUSTED_ORIGINS: f.configuration.trustedOrigins[0], TW_MCP_ALLOWED_HOSTS: " ", TW_PRESET_SKILLS_SYNC: "disabled" } }).app;
+  const defaultHostRead = await defaultHostApp.request("http://127.0.0.1:3001/api/v1/mcp-server/tools/tw_projects_get", { method: "POST", headers: headers(), body: JSON.stringify({ id: f.project.id }) });
+  assert.equal(defaultHostRead.status, 200);
+  assert.equal((await defaultHostRead.json() as any).structuredContent.ok, true);
   const requirement = await success("tw_requirements_create", { projectId: f.project.id, title: "MCP requirement", status: "approved" });
   const task = await success("tw_tasks_create", { projectId: f.project.id, requirementId: requirement.id, title: "MCP task" });
   assert.equal((await success("tw_requirements_get", { id: requirement.id })).tasks, undefined);

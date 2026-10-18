@@ -19,6 +19,8 @@ services:
       TW_AUTH_BOOTSTRAP_SECRET: ${TW_AUTH_BOOTSTRAP_SECRET:-}
       NODE_ENV: production
       TW_VERSION_CHECK_ENABLED: ${TW_VERSION_CHECK_ENABLED:-true}
+      TW_MCP_ALLOWED_HOSTS: ${TW_MCP_ALLOWED_HOSTS:-}
+      TW_MCP_READ_ONLY: ${TW_MCP_READ_ONLY:-false}
       TW_DAEMON_MODE: polling
       SKILL_PACKAGE_STORAGE_DIR: /app/data/skill-packages
       TW_ATTACHMENT_STORAGE_DIR: /app/attachment-data

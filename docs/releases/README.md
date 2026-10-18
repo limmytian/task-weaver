@@ -6,6 +6,8 @@ Use the notes for your installed and target versions when planning an upgrade.
 
 | Version | Summary | Notes |
 | --- | --- | --- |
+| 0.3.10 | Inbound MCP Server with authenticated stdio/HTTP collaboration tools. | [English](0.3.10.md) · [简体中文](0.3.10.zh-CN.md) |
+| 0.3.9 | Verified human direct integration without a PR. | [English](0.3.9.md) · [简体中文](0.3.9.zh-CN.md) |
 | 0.3.8 | Configurable delivery, acceptance and integration; local artifacts and human PR reconciliation. | [English](0.3.8.md) · [简体中文](0.3.8.zh-CN.md) |
 | 0.3.7 | Model invocation accounting and attachment documents. | [English](0.3.7.md) |
 | 0.3.6 | Supervised Chat, live platform tools and streaming. | [English](0.3.6.md) |
