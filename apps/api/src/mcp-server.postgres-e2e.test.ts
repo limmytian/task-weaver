@@ -11,7 +11,8 @@ import { serve } from "@hono/node-server";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { createDb, runMigrations } from "@task-weaver/db";
+import { eq } from "drizzle-orm";
+import { createDb, runMigrations, apiKeys } from "@task-weaver/db";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 import { createApiApplication } from "./application";
 
@@ -25,6 +26,8 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const issue = (who: typeof f.owner, permissions: Array<"resource.read" | "resource.write">) => f.identity.issueKey(who.headers, who.context.actor.id, { name: "MCP fixture", expiresAt: null, grants: [{ scope: "project", projectId: f.project.id, permissions }] });
   const key = await issue(f.owner, ["resource.read", "resource.write"]);
   const readKey = await issue(f.owner, ["resource.read"]);
+  const expiredKey = await issue(f.owner, ["resource.read"]);
+  await db.update(apiKeys).set({ createdAt: new Date(Date.now() - 60_000), expiresAt: new Date(Date.now() - 1000) }).where(eq(apiKeys.id, expiredKey.id));
   const outsiderKey = await f.identity.issueKey(f.outsider.headers, f.outsider.context.actor.id, { name: "Outsider fixture", expiresAt: null, grants: [{ scope: "personal", actorId: f.outsider.context.actor.id, permissions: ["resource.read", "resource.write"] }] });
   const headers = (rawKey = key.rawKey) => ({ authorization: `Bearer ${rawKey}`, "content-type": "application/json" });
   const call = async (name: string, args: unknown, rawKey = key.rawKey) => {
@@ -83,6 +86,10 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const cancelled = await success("tw_tasks_create", { projectId: f.project.id, requirementId: requirement.id, title: "Cancelled fixture" });
   await success("tw_tasks_status", { id: cancelled.id, status: "cancelled" });
   assert.equal((await call("tw_tasks_status", { id: cancelled.id, status: "todo" })).ok, false);
+  const expired = await f.app.request("http://127.0.0.1:3001/api/v1/mcp-server/tools/tw_tasks_get", { method: "POST", headers: headers(expiredKey.rawKey), body: JSON.stringify({ id: task.id }) });
+  assert.equal(expired.status, 401);
+  const isolated = await Promise.all([call("tw_tasks_get", { id: task.id }), call("tw_tasks_get", { id: personalTask.data.id }, outsiderKey.rawKey)]);
+  assert.equal(isolated[0]!.data.id, task.id); assert.equal(isolated[1]!.data.id, personalTask.data.id);
   const missing = await f.app.request("http://127.0.0.1:3001/api/v1/mcp-server", { method: "POST", headers: { "x-actor-id": f.owner.context.actor.id, "x-actor-type": "human" } });
   assert.equal(missing.status, 401);
   const origin = await f.app.request("http://127.0.0.1:3001/api/v1/mcp-server", { method: "POST", headers: { ...headers(), origin: "https://untrusted.test" } });
@@ -149,6 +156,9 @@ test("MCP transports use live scoped authority and preserve collaboration guards
       assert.equal(visible.status, 200);
       const record = await visible.json() as { status: string; comments: unknown[] };
       assert.equal(record.status, "in_progress"); assert.equal(record.comments.length, 1);
+      const cli = await promisify(execFile)(process.execPath, ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url)), "task", "get", item.id, "--json"], { timeout: 15_000, env: { ...env, TW_CONFIG_DIR: directory, TW_API_URL: `http://${host}`, TW_API_KEY: key.rawKey } });
+      const cliRecord = JSON.parse(cli.stdout);
+      assert.equal(cliRecord.status, "in_progress"); assert.equal(cliRecord.comments.length, 1);
     }
     t.diagnostic("MCP Inspector 2.11.0 completed local and remote collaboration workflows.");
   }
