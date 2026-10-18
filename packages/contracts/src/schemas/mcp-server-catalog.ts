@@ -1,3 +1,4 @@
+import { mcpRetrievalScopeSchema, mcpPackageFilesSchema, mcpPackageReadSchema, mcpSliceCreateSchema, mcpSliceUpdateSchema, mcpPlanValidateSchema, mcpPlanApplySchema, mcpAggregateContextSchema } from "./mcp-server-planning";
 import { z } from "zod";
 import { listProjectsSchema } from "./projects";
 import { createRequirementSchema, updateRequirementSchema, listRequirementsSchema, createRequirementDependencySchema, linkDocumentToRequirementSchema } from "./requirements";
@@ -47,6 +48,20 @@ export const mcpServerCatalog = [
   tool("tw_documents_update", "Update Markdown using expectedVersion for concurrent change detection.", z.object({ id, patch: updateDocumentSchema.omit({ personalOwnerId: true, personalOwnerType: true, projectId: true, generatedBy: true, generationPrompt: true }).strict() }).strict()),
   tool("tw_document_task_links_add", "Link an authorized document to an authorized task.", linkDocumentToTaskSchema.extend({ id }).strict()),
   tool("tw_document_requirement_links_add", "Link an authorized document to an authorized requirement.", linkDocumentToRequirementSchema.extend({ id }).strict()),
+  tool("tw_context_bootstrap", "Read Task Weaver MCP collaboration conventions and discovery guidance.", z.object({}).strict()),
+  tool("tw_context_search", "Discover authorized skill summaries by intent; read full text separately.", mcpRetrievalScopeSchema.extend({ intent: z.string().trim().min(1).max(500), limit: z.number().int().min(1).max(20).default(5) }).strict()),
+  tool("tw_context_get", "Read one authorized skill document.", byId),
+  tool("tw_skill_packages_list", "List authorized skill package summaries.", mcpRetrievalScopeSchema.extend({ query: z.string().trim().min(1).max(500).optional(), offset: z.number().int().min(0).max(100000).default(0), limit: z.number().int().min(1).max(50).default(20) }).strict()),
+  tool("tw_skill_packages_get", "Read safe package metadata without storage locations or recursive files.", z.object({ packageId: id }).strict()),
+  tool("tw_skill_package_files", "List a bounded page of package file metadata.", mcpPackageFilesSchema),
+  tool("tw_skill_package_read", "Read one bounded readable package text file by relative path.", mcpPackageReadSchema),
+  tool("tw_execution_slices_list", "List a bounded page of requirement slice summaries.", byId.extend(page).strict()),
+  tool("tw_execution_slices_create", "Create a requirement slice with guarded task assignment.", z.object({ id, input: mcpSliceCreateSchema }).strict()),
+  tool("tw_execution_slices_update", "Update a slice using expectedUpdatedAt for concurrent change detection.", z.object({ id, expectedUpdatedAt: z.string().datetime(), patch: mcpSliceUpdateSchema }).strict()),
+  tool("tw_plan_validate", "Validate and preview a project plan without writes; checks write authority.", mcpPlanValidateSchema),
+  tool("tw_plan_apply", "Atomically apply a bounded project plan; retry with the same key and identical plan.", mcpPlanApplySchema),
+  tool("tw_tasks_context", "Read selected bounded task context sections; reports truncation and non-snapshot freshness.", mcpAggregateContextSchema),
+  tool("tw_requirements_context", "Read selected bounded requirement context sections; reports truncation and non-snapshot freshness.", mcpAggregateContextSchema),
   tool("tw_search", "Search authorized tasks, requirements and documents; results have a total bound, not page counts.", search),
 ] as const;
 
