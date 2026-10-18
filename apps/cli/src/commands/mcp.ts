@@ -5,6 +5,7 @@ import { createInterface } from 'readline/promises'
 import { get, post, patch } from '../client.js'
 import { printJson, printTable, printKv } from '../output.js'
 import { loadConfig } from '../config.js'
+import { serveMcp } from '../mcp-server.js'
 
 async function confirmLocalScopeShare(serverId: string): Promise<void> {
   if (!process.stdin.isTTY || !process.stderr.isTTY) {
@@ -30,7 +31,11 @@ async function confirmLocalScopeShare(serverId: string): Promise<void> {
 }
 
 export function registerMcp(program: Command): void {
-  const mcp = program.command('mcp').description('discover and invoke MCP tools via the registry')
+  const mcp = program.command('mcp').description('serve Task Weaver or discover external MCP registry tools')
+
+  mcp.command('serve').description('serve Task Weaver tools over authenticated stdio')
+    .option('--read-only', 'hide write tools and reject write calls')
+    .action(serveMcp)
 
   mcp
     .command('search <intent>')

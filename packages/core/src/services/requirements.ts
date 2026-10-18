@@ -1405,3 +1405,19 @@ async function getRequirementOrThrow(db: Database, id: string) {
   if (!requirement) throw new NotFoundError("Requirement not found");
   return requirement;
 }
+
+/** Read a requirement record without eagerly loading its collaboration history. */
+export async function getRequirementRecord(db: Database, id: string) {
+  const requirement = await db.query.requirements.findFirst({ where: eq(requirements.id, id) });
+  if (!requirement) throw new NotFoundError("Requirement not found");
+  return requirement;
+}
+
+export async function listRequirementDependenciesPage(db: Database, requirementId: string, page: { page: number; pageSize: number }, authorizedPredicate?: SQL) {
+  const where = and(eq(requirementDependencies.requirementId, requirementId), authorizedPredicate);
+  const [rows, total] = await Promise.all([
+    db.select({ link: requirementDependencies }).from(requirementDependencies).innerJoin(requirements, eq(requirements.id, requirementDependencies.dependsOnRequirementId)).where(where).orderBy(requirementDependencies.id).limit(page.pageSize).offset((page.page - 1) * page.pageSize),
+    db.select({ count: sql<number>`count(*)::int` }).from(requirementDependencies).innerJoin(requirements, eq(requirements.id, requirementDependencies.dependsOnRequirementId)).where(where),
+  ]);
+  return { items: rows.map(row => row.link), meta: { ...page, total: total[0]!.count, nextPage: page.page * page.pageSize < total[0]!.count ? page.page + 1 : null } };
+}

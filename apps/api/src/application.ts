@@ -28,6 +28,7 @@ import documentRoutes from "./routes/documents.js";
 import embeddingRoutes from "./routes/embeddings.js";
 import graphqlRoutes from "./graphql/index.js";
 import mcpRoutes from "./routes/mcp.js";
+import { createMcpServerRoutes } from "./routes/mcp-server.js";
 import memoryRoutes from "./routes/memory.js";
 import observabilityRoutes from "./routes/observability.js";
 import tiRoutes from "./routes/ti.js";
@@ -44,7 +45,7 @@ import webhookRoutes from "./routes/webhooks.js";
 import { mcpPool } from "./mcp-pool.js";
 import { createPartnersGatewayRuntime } from "@task-weaver/partners-gateway/runtime";
 
-export const TASK_WEAVER_VERSION = "0.3.9" as const;
+export const TASK_WEAVER_VERSION = "0.3.10" as const;
 
 interface ApplicationLogger {
   debug(message: string, details?: Record<string, unknown>): void;
@@ -314,6 +315,7 @@ export function createApiApplication(
   // Mounting its routes does not enable workers or outbound event delivery during A4 staging.
   services.healthChecks.push(...gateway.healthChecks);
   const controller = new AbortController();
+  const mcpBudget = { active: 0, pending: new Set<Promise<unknown>>() };
   const startedWorkers: (typeof services.workers)[number][] = [];
   const unsubscribe: Array<() => void> = [];
   let started = false;
@@ -341,6 +343,13 @@ export function createApiApplication(
     c.json({ error: "Resource not found", code: "not_found" }, 404),
   );
   app.route("/api/v1/auth", authenticationRoutes);
+  app.route("/api/v1/mcp-server", createMcpServerRoutes({
+    allowedHosts: (env.TW_MCP_ALLOWED_HOSTS?.trim() || new URL(authenticationConfiguration(env).baseURL).host)
+      .split(",").map(host => host.trim()).filter(Boolean),
+    readOnly: env.TW_MCP_READ_ONLY === "true",
+    budget: mcpBudget,
+    signal: controller.signal,
+  }));
   app.get("/health", async (requestContext) => {
     const checks = await Promise.all(
       services.healthChecks.map(async (healthCheck) => {
@@ -370,6 +379,7 @@ export function createApiApplication(
 
   async function stopRuntime(): Promise<void> {
     controller.abort();
+    await Promise.allSettled([...mcpBudget.pending]);
     const errors: unknown[] = [];
     for (const worker of startedWorkers.reverse()) {
       try {

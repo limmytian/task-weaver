@@ -36,7 +36,7 @@ importers:
         specifier: ^1.19.17
         version: 1.19.17(hono@4.13.9)
       '@modelcontextprotocol/sdk':
-        specifier: ^1.31.0
+        specifier: 1.31.0
         version: 1.31.0(zod@3.25.76)
       '@task-weaver/contracts':
         specifier: workspace:^
@@ -85,7 +85,7 @@ importers:
   apps/cli:
     dependencies:
       '@modelcontextprotocol/sdk':
-        specifier: ^1.31.0
+        specifier: 1.31.0
         version: 1.31.0(zod@4.6.5)
       '@task-weaver/contracts':
         specifier: workspace:^
@@ -274,7 +274,7 @@ importers:
   packages/core:
     dependencies:
       '@modelcontextprotocol/sdk':
-        specifier: ^1.31.0
+        specifier: 1.31.0
         version: 1.32.1(zod@3.25.76)
       '@task-weaver/contracts':
         specifier: workspace:^

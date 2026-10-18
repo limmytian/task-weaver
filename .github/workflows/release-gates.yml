@@ -45,6 +45,8 @@ jobs:
         run: pnpm test
       - name: Verify authentication with disposable PostgreSQL
         run: pnpm test:auth-postgres
+      - name: Verify inbound MCP with disposable PostgreSQL
+        run: pnpm test:mcp-postgres
       - name: Check rollout and Web interaction safeguards
         run: |
           pnpm check:repository-rollout

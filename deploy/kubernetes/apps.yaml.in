@@ -49,6 +49,18 @@ spec:
                   optional: true
             - name: NODE_ENV
               value: production
+            - name: TW_MCP_ALLOWED_HOSTS
+              valueFrom:
+                configMapKeyRef:
+                  name: task-weaver-mcp
+                  key: allowed-hosts
+                  optional: true
+            - name: TW_MCP_READ_ONLY
+              valueFrom:
+                configMapKeyRef:
+                  name: task-weaver-mcp
+                  key: read-only
+                  optional: true
             - name: TW_DAEMON_MODE
               value: polling
             - name: SKILL_PACKAGE_STORAGE_DIR

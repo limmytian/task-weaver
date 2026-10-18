@@ -121,3 +121,20 @@ public, publish a superseding patch and advisory rather than replacing bytes.
 For deployment recovery, stop writes and restore the pre-upgrade PostgreSQL
 database and matching skill-data snapshot before restarting the recorded old
 image digests. See [CE Install, Upgrade, and Recovery](ce-upgrades.md).
+
+## MCP acceptance for 0.3.10 and later
+
+Before promoting a candidate, run `pnpm test:mcp-postgres` and verify the actual
+Kubernetes API route with a scoped key. Record private candidate image digests,
+version and source commit, Host/Origin configuration, discovery/read results,
+read-only behavior and credential rejection. Never put keys or private
+infrastructure settings in the source repository.
+
+After owner-authorized main integration, the `Release gates` push workflow builds,
+scans and signs public main images before promoting `latest`. Formal immutable
+version tags and release bundles use the separate candidate/release workflows
+described above. Select the intended publication channel explicitly. Replace
+the Kubernetes API/Web pair with the verified public digests and repeat MCP and
+health/build-identity checks; do not treat the successful private rollout as
+verification of different public image bytes. Store instance-specific receipts
+and rollback references in the project's deployment record.

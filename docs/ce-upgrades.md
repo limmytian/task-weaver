@@ -118,3 +118,27 @@ Record source tag and commit, both image digests, migration journal before
 and after, database/PVC backup IDs, configuration validation output, health
 checks, smoke results, and the recovery rehearsal result. Remove disposable
 test environments only after evidence has been retained without credentials.
+
+## 0.3.9 to 0.3.10 MCP Server upgrade
+
+There is no new database migration in 0.3.10. Preserve the existing database,
+authentication Secrets, encrypted Chat keys, skill objects and attachment data.
+Record both old image digests and a verified database backup before rollout.
+
+Upgrade API and Web as a matching pair. HTTP MCP lives in the API process;
+configure the public route to API port 3001 and allow its exact host with
+`TW_MCP_ALLOWED_HOSTS` when the authentication base URL uses another host.
+The API Kubernetes template reads `allowed-hosts` and `read-only` from the
+optional `task-weaver-mcp` ConfigMap. Existing deployments may provide these
+variables directly. Compose now forwards both settings explicitly.
+
+Check health, build version/commit, authenticated tool discovery/read, read-only
+rejection and invalid-key rejection on the private candidate. After promotion,
+replace both images with the verified public OCI digests and repeat the checks,
+confirming that running pods pulled those public references. A movable `latest`
+tag alone is not sufficient evidence. If application-only verification fails,
+restore the recorded image/configuration pair; this patch introduces no schema
+change. Stop writes and use the full database/storage recovery procedure if a
+separate data or migration problem occurred.
+
+See [MCP setup](mcp-server.md) and its [Chinese translation](mcp-server.zh-CN.md).

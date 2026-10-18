@@ -671,3 +671,17 @@ Reuse a process UUID and start time across increasing revisions; fresh retries
 use fresh process UUIDs. Initial Ti registration requires the current attempt and
 worker lease. Reporting requires the assigned-agent or run-creator API key.
 See [rest-api-reference.md](rest-api-reference.md) for the endpoints.
+
+## Serving Task Weaver to MCP clients
+
+`tw mcp serve [--read-only]` exposes Task Weaver collaboration tools over local
+stdio using the configured API URL and subject-bound API key. It requires an API
+server with inbound MCP support. Remote clients can use Streamable HTTP at
+`/api/v1/mcp-server` with a Bearer key on every request. Both adapters use the same
+29-tool catalog, live resource authorization, dependency and workflow guards.
+Read-only mode hides writes and rejects known write names at dispatch.
+
+This inbound Server is separate from the outbound Registry commands above.
+OAuth-only onboarding, resources, prompts, attachments, daemon controls, registry
+management and release actions are not part of this catalog. See the
+[MCP Server guide](../../docs/mcp-server.md) for credentials, limits and setup.

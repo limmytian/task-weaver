@@ -26,7 +26,7 @@ import type {
   BatchUpdateTasksInput,
   CreatePersonalTaskInput,
 } from "@task-weaver/contracts";
-import { NotFoundError, ValidationError, ConflictError } from "@task-weaver/contracts";
+import { NotFoundError, ValidationError, ConflictError, DependencyConflictError } from "@task-weaver/contracts";
 import { checkBlockingDependencies } from "./claims";
 import { assertRequirementLease } from "./claims";
 import type { RequirementLeaseFence } from "@task-weaver/contracts";
@@ -536,7 +536,7 @@ export async function updateTaskStatus(
     const blockers = await checkBlockingDependencies(db, id);
     if (blockers.length > 0) {
       const blockerList = blockers.map(b => `"${b.title}" (${b.status})`).join(", ");
-      throw new ValidationError(
+      throw new DependencyConflictError(
         `Cannot move to '${newStatus}': blocked by unfinished dependencies: ${blockerList}. ` +
         `Complete them first, or use force=true to override.`,
       );
@@ -1140,4 +1140,24 @@ export async function getGanttChart(db: Database, projectId: string, authorizedP
       end: maxDate.toISOString(),
     },
   };
+}
+
+/** Bounded comment reads for external collaboration clients. */
+export async function listTaskCommentsPage(db: Database, taskId: string, page: { page: number; pageSize: number }) {
+  const where = eq(taskComments.taskId, taskId);
+  const [items, total] = await Promise.all([
+    db.select().from(taskComments).where(where).orderBy(sql`${taskComments.createdAt} desc`, taskComments.id).limit(page.pageSize).offset((page.page - 1) * page.pageSize),
+    db.select({ count: sql<number>`count(*)::int` }).from(taskComments).where(where),
+  ]);
+  return { items, meta: { ...page, total: total[0]!.count, nextPage: page.page * page.pageSize < total[0]!.count ? page.page + 1 : null } };
+}
+
+/** Only return upstream links whose target remains visible to the caller. */
+export async function listTaskDependenciesPage(db: Database, taskId: string, page: { page: number; pageSize: number }, authorizedPredicate?: SQL) {
+  const where = and(eq(taskDependencies.taskId, taskId), authorizedPredicate);
+  const [rows, total] = await Promise.all([
+    db.select({ link: taskDependencies }).from(taskDependencies).innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnTaskId)).where(where).orderBy(taskDependencies.id).limit(page.pageSize).offset((page.page - 1) * page.pageSize),
+    db.select({ count: sql<number>`count(*)::int` }).from(taskDependencies).innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnTaskId)).where(where),
+  ]);
+  return { items: rows.map(row => row.link), meta: { ...page, total: total[0]!.count, nextPage: page.page * page.pageSize < total[0]!.count ? page.page + 1 : null } };
 }

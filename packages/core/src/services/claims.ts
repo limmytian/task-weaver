@@ -1,3 +1,4 @@
+import { ClaimConflictError } from "@task-weaver/contracts";
 import type { SQL } from "drizzle-orm";
 import { qualifiedColumn } from "./resource-authorization";
 import { and, eq, gt, lt, sql } from "drizzle-orm";
@@ -62,7 +63,7 @@ export async function claimTask(
           .returning();
         return { claim: updated!, projectId: (row.project_id ?? row.projectId) as string };
       }
-      throw new ValidationError(
+      throw new ClaimConflictError(
         `Task is already claimed by '${existing.claimedBy}' until ${existing.expiresAt.toISOString()}. ` +
         `Wait for the claim to expire or ask them to release it.`,
       );

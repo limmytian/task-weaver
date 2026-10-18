@@ -1,5 +1,8 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
+  ["POST", new RegExp("^/api/v1/mcp-server(?:/tools/tw_[a-z_]+)?/?$")],
+  ["GET", new RegExp("^/api/v1/mcp-server/?$")],
+  ["DELETE", new RegExp("^/api/v1/mcp-server/?$")],
   ["POST", new RegExp("^/api/v1/plans/apply/?$")],
   ["POST", new RegExp("^/api/v1/documents/attachments/?$")],
   ["PUT", new RegExp("^/api/v1/documents/[0-9a-fA-F-]{36}/file/?$")],
