@@ -2464,3 +2464,22 @@ The server verifies that the configured target branch contains the delivered com
 Only authorized human management credentials may call it. Existing PR deliveries and
 explicit `git_pr` workflows must use PR synchronization. No configured acceptance or
 integration stage is automatically advanced. Use `tw req repo sync-direct --help`.
+
+### Inbound MCP Server (0.3.10)
+
+`POST /api/v1/mcp-server` serves JSON-RPC over stateless Streamable HTTP using the
+shared 29-tool collaboration catalog. Supply a subject-bound API key in the
+Authorization header on every request. Browser sessions and execution
+delegations are not accepted by this endpoint. GET/DELETE return 405 because no
+persistent SSE stream or session is offered.
+
+`POST /api/v1/mcp-server/tools/:name` is the authenticated JSON adapter used by
+`tw mcp serve`. Its body is the tool's strict argument object; its response is an
+MCP tool result with text content and structuredContent. This endpoint accepts
+only catalog tool names, applies the same read-only policy and live resource
+permissions, and cannot proxy arbitrary REST paths. Unknown tools or invalid
+arguments return HTTP 400; business errors return isError=true in the tool result.
+
+This is separate from the outbound `/api/v1/mcp/*` Registry. See the
+[MCP Server guide](../../docs/mcp-server.md) for setup, errors, bounds and
+[the contract](../../docs/mcp-server-contract.md) for the catalog.

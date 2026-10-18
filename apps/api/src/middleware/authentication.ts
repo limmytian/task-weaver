@@ -29,6 +29,8 @@ export async function authenticationMiddleware(c: Context<Env>, next: Next) {
   const headers = c.req.raw.headers;
   const origin = headers.get("origin");
   const trusted = origin !== null && c.get("auth").trustedOrigins.has(origin);
+  const mcpEndpoint = ["/api/v1/mcp-server", "/api/v1/mcp-server/"].includes(c.req.path);
+  const protocolHeaders = mcpEndpoint ? ["mcp-protocol-version", "mcp-session-id", "last-event-id"] : [];
   c.header("cache-control", "no-store");
   c.header("vary", "Origin");
   c.get("auth").assertOrigin(headers);
@@ -51,7 +53,7 @@ export async function authenticationMiddleware(c: Context<Env>, next: Next) {
       !["GET", "POST", "PATCH", "PUT", "DELETE"].includes(method) ||
       requested.some(
         (name) =>
-          !["authorization", "content-type", "x-csrf-token"].includes(name),
+          !["authorization", "content-type", "x-csrf-token", ...protocolHeaders].includes(name),
       )
     )
       throw new AuthorizationError("csrf_rejected");
@@ -62,7 +64,7 @@ export async function authenticationMiddleware(c: Context<Env>, next: Next) {
     c.header("access-control-allow-methods", "GET, POST, PATCH, PUT, DELETE");
     c.header(
       "access-control-allow-headers",
-      "Authorization, Content-Type, X-CSRF-Token, X-TW-Attachment-Metadata",
+      ["Authorization", "Content-Type", "X-CSRF-Token", "X-TW-Attachment-Metadata", ...protocolHeaders].join(", "),
     );
     return c.body(null, 204);
   }

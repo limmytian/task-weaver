@@ -1,8 +1,8 @@
 # Inbound MCP server contract
 
-This document specifies the 0.3.10 inbound interface. It is an implementation
-contract, not a claim that the transports or clients are already supported.
-The outbound MCP Registry remains a separate feature.
+This document specifies the 0.3.10 inbound interface and its tested acceptance
+boundaries. See the [usage guide](mcp-server.md) for setup and the verified client
+matrix. The outbound MCP Registry remains a separate feature.
 
 ## Protocol and implementation boundaries
 
@@ -20,6 +20,9 @@ running interoperability acceptance.
   routes. Use the SDK Web Standard Streamable HTTP transport in the Hono runtime.
   Start with stateless JSON responses: no persistent sessions, subscriptions or
   resumable event store. Unsupported GET/DELETE requests return 405.
+- Authenticated JSON tool adapter: `/api/v1/mcp-server/tools/:name`. Local
+  clients use the existing CLI REST request helper against this fixed allowlist;
+  the server executes the same authorized catalog as the protocol transport.
 - Local entry: `tw mcp serve [--read-only]`, using the SDK stdio transport and the
   existing CLI `request` helper. Require configured API credentials before serving.
   stdout is protocol-only; initialization failures and diagnostics use stderr.
@@ -44,8 +47,8 @@ The `tw_` names below are fixed for both transports.
 | `tw_tasks_create`, `tw_tasks_update` | taskService; project/personal creation routes and `/tasks/:id` | Preserve createTaskSchema membership refinement; personal owner derives from credentials; update uses expectedVersion |
 | `tw_tasks_status` | taskService.updateTaskStatus; `/tasks/:id/status` | id, status, optional reason; no force or daemon lease fields |
 | `tw_tasks_claim`, `tw_tasks_heartbeat`, `tw_tasks_release` | claimService; `/tasks/:id/claim`, `/heartbeat`, `/release` | Duration validated to 1–1440 minutes; optional release reason; holder identity derives from credentials |
-| `tw_task_comments_list`, `tw_task_comments_add` | taskService.getTaskDetail/addTaskComment; `/tasks/:id`, `/comments` | Dedicated bounded comment reads needed; add uses createTaskCommentSchema |
-| `tw_task_dependencies_list`, `tw_task_dependencies_add`, `tw_task_dependencies_remove` | taskService; `/tasks/:id`, `/dependencies[/:depId]` | Dedicated bounded dependency reads needed; add uses createTaskDependencySchema; removal includes parent id |
+| `tw_task_comments_list`, `tw_task_comments_add` | taskService.getTaskDetail/addTaskComment; `/tasks/:id`, `/comments` | listTaskCommentsPage; bounded JSON tool adapter; add uses createTaskCommentSchema |
+| `tw_task_dependencies_list`, `tw_task_dependencies_add`, `tw_task_dependencies_remove` | taskService; `/tasks/:id`, `/dependencies[/:depId]` | listTaskDependenciesPage; bounded JSON tool adapter; add uses createTaskDependencySchema; removal includes parent id |
 | `tw_documents_list`, `tw_documents_get` | documentService; `/documents`, `/documents/:id` | Existing listDocumentsSchema; only authorized metadata and Markdown content; no attachment payloads |
 | `tw_documents_create`, `tw_documents_update` | documentService; same routes | createDocumentSchema/updateDocumentSchema; owner identity cannot be supplied; update preserves expectedVersion |
 | `tw_document_task_links_add` | documentService; `/documents/:id/task-links` | document id plus linkDocumentToTaskSchema |
@@ -56,14 +59,15 @@ Audit findings that adapters must resolve before acceptance:
 
 1. `getTaskDetail` eagerly includes comments, notes and dependencies. Do not
    retrieve an unbounded detail and truncate it as the implementation of a list.
-   Add authorized paginated comment/dependency service and REST reads, then use
-   them in both transports. Detail responses must also remain bounded.
+   The implementation adds authorized paginated comment/dependency services,
+   exposed to stdio through the fixed JSON tool adapter and to HTTP directly. Detail responses must also remain bounded.
 2. Existing unified search is bounded per entity but has no cross-entity page
    contract. For MVP use a total limit of 20 by default, maximum 50, return
    `hasMore` and explicitly mark pagination unsupported; do not invent page counts
    or silently drop entity types. Bound per-entity queries and the merged result.
    Document-only search preserves existing keyword/fulltext/semantic/hybrid
-   modes and fallback metadata. Stable ordering must include an id tie-breaker.
+   modes and fallback metadata. Results preserve each source ordering and interleave entity types; matchedTypes
+   reports which sources matched. Search pagination remains unsupported.
 3. Authentication middleware rejects routes outside its ordinary resource
    classification. Explicitly classify the MCP endpoint and perform per-tool
    resource authorization; do not exempt it from authentication. Existing CORS
@@ -132,10 +136,10 @@ credentials. Preserve actor-attributed activity without duplicate mutation logs.
 
 | Target | Authentication | Required evidence | Current evidence |
 | --- | --- | --- | --- |
-| SDK 1.31.0 client, stdio | configured scoped key | initialize/list/read/write/read-only/shutdown | Not run |
-| SDK 1.31.0 client, Streamable HTTP | per-request Bearer | same plus Origin, revocation and concurrent identities | Not run |
-| Real stdio client | configured scoped key | exact client version and isolated collaboration workflow | Not run; select during acceptance |
-| Real remote client with custom headers | per-request Bearer | exact client version and isolated collaboration workflow | Not run; select during acceptance |
+| SDK 1.31.0 client, stdio | configured scoped key | initialize/list/read/write/read-only/shutdown | Passed in disposable PostgreSQL integration |
+| SDK 1.31.0 client, Streamable HTTP | per-request Bearer | same plus Origin, revocation and concurrent identities | Passed in disposable PostgreSQL integration |
+| Real stdio client | configured scoped key | exact client version and isolated collaboration workflow | MCP Inspector 2.11.0 CLI; isolated workflow passed |
+| Real remote client with custom headers | per-request Bearer | exact client version and isolated collaboration workflow | MCP Inspector 2.11.0 CLI; isolated workflow passed |
 | OAuth-only remote client | OAuth | Outside MVP | Unsupported |
 
 Negative tests cover unknown tools, malformed arguments, spoofed identity,

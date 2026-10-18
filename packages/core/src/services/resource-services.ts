@@ -57,6 +57,8 @@ const sources = {
   recommendation: recommendationImplementation, context: contextImplementation, package: packageImplementation, embedding: { ...embeddingImplementation, testEmbeddingProfile }, mcp: { ...mcpImplementation, pollLocalToolRequests, completeLocalToolRequest },
 };
 const readById: Record<string, ResourceKind> = {
+  getRequirementRecord: "requirement", listRequirementDependenciesPage: "requirement",
+  listTaskCommentsPage: "task", listTaskDependenciesPage: "task",
   getProject: "project", getRequirement: "requirement", getTask: "task", getTaskDetail: "task",
   getDocument: "document", getDocumentDetail: "document", getMemory: "memory", getExecutionSlice: "slice",
   getTaskClaim: "task", getRequirementClaim: "requirement", listExecutionSlices: "requirement",
@@ -511,7 +513,8 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     if (["getProjectStats", "getProjectHealthDashboard", "getKnowledgeGraph", "getRequirementHeatmap"].includes(name)) call[2] = predicates;
     if (["getGanttChart", "getRequirementBurndown"].includes(name)) call[2] = predicates.tasks;
     if (name === "getRequirementTaskDependencyGraph") call[2] = and(predicates.tasks, eq(tasks.projectId, scope.projectId!));
-    if (name === "getKanbanBoard") call[3] = predicates.tasks;
+    if (name === "getKanbanBoard" || name === "listTaskDependenciesPage") call[3] = predicates.tasks;
+    if (name === "listRequirementDependenciesPage") call[3] = predicates.requirements;
     if (name === "getDocumentRecommendations" || name === "getTaskRecommendations") {
       if (call[2]?.projectId) await requireResource(db, authority, "project", call[2].projectId);
       call[3] = predicates;

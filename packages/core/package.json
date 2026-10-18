@@ -7,7 +7,9 @@
     "./schemas": "./src/schemas/index.ts",
     "./types": "./src/types/index.ts",
     "./daemon-release-gate": "./src/services/daemon-release-gate.ts",
-    "./mcp-pool": "./src/services/mcp-pool.ts"
+    "./mcp-pool": "./src/services/mcp-pool.ts",
+    "./mcp-server": "./src/mcp-server/index.ts",
+    "./mcp-server/executor": "./src/mcp-server/executor.ts"
   },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
@@ -23,7 +25,7 @@
     "drizzle-orm": "^0.45.3",
     "zod": "^3.24.0",
     "zod-to-json-schema": "3.25.1",
-    "@modelcontextprotocol/sdk": "^1.31.0"
+    "@modelcontextprotocol/sdk": "1.31.0"
   },
   "devDependencies": {
     "@types/node": "^25.3.3",

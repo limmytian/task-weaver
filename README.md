@@ -192,6 +192,7 @@ checkout instructions above.
 ## Documentation and community
 
 - [Architecture](docs/design.md) ([简体中文](docs/design.zh-CN.md))
+- [MCP Server: local stdio and remote HTTP](docs/mcp-server.md) ([简体中文](docs/mcp-server.zh-CN.md))
 - [Authenticated accounts, CLI access and offline upgrade](docs/authenticated-access.md)
 - [Deployment and rollback](docs/deployment.md)
 - [Local Compose trial](docs/local-quickstart.md)
