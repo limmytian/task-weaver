@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   accountDtoSchema, accountLoginSchema, apiKeyDtoSchema, authErrorDtoSchema, authorizationGrantSchema,
+  bulkAgentProjectAccessSchema,
   credentialGrantsSchema, issueScopedApiKeySchema, principalSchema, PROJECT_ROLE_PERMISSIONS,
   PROJECT_ROLE_GRANTABLE_PERMISSIONS,
   projectMembershipDtoSchema, requestIdentitySnapshotSchema, sessionDtoSchema,
@@ -206,6 +207,17 @@ test("project roles do not imply tool calls, review, merge or instance authority
   assert.equal(projectMembershipDtoSchema.safeParse({ ...membership, explicitPermissions: ["execution.run", "execution.run"] }).success, false);
   assert.equal(PROJECT_ROLE_GRANTABLE_PERMISSIONS.member.length, 0);
   assert.equal(PROJECT_ROLE_GRANTABLE_PERMISSIONS.owner.includes("execution.merge"), true);
+});
+
+test("bulk Agent access requires a bounded, unique set of projects", () => {
+  assert.deepEqual(bulkAgentProjectAccessSchema.parse({ actorId, projectIds: [projectId, otherId] }), {
+    actorId,
+    projectIds: [projectId, otherId],
+  });
+  assert.equal(bulkAgentProjectAccessSchema.safeParse({ actorId, projectIds: [projectId, projectId] }).success, false);
+  assert.equal(bulkAgentProjectAccessSchema.safeParse({ actorId, projectIds: [] }).success, false);
+  assert.equal(bulkAgentProjectAccessSchema.safeParse({ actorId, projectIds: Array.from({ length: 51 }, (_, i) =>
+    `00000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`) }).success, false);
 });
 
 test("authentication and authorization errors share safe messages and stable codes", () => {

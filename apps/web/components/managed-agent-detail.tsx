@@ -19,8 +19,32 @@ export function ManagedAgentDetail({ actorId, onClose }: { actorId: string; onCl
   const [view, setView] = useState<"memberships" | "available">("memberships");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const projects = trpc.auth.agentProjects.useQuery({ actorId, view, query, page, pageSize: 20 });
+  const projects = trpc.auth.agentProjects.useQuery({ actorId, view, query, page, pageSize: 50 });
   const [editing, setEditing] = useState<ProjectOption | null>(null);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(() => new Set());
+  const [bulkError, setBulkError] = useState("");
+  const bulkGrant = trpc.auth.grantAgentProjectAccess.useMutation();
+  const confirmation = useIdentityConfirmation();
+  const utils = trpc.useUtils();
+  const bulkBusy = confirmation.confirming || bulkGrant.isPending;
+
+  async function grantFullAccess() {
+    const projectIds = [...selectedProjectIds];
+    if (!projectIds.length || !(await confirmation.confirm(`grant full available Agent permissions in ${projectIds.length} projects`))) return;
+    setBulkError("");
+    try {
+      await bulkGrant.mutateAsync({ actorId, projectIds });
+      await Promise.all([utils.auth.invalidate(), utils.apiKey.invalidate()]);
+      setSelectedProjectIds(new Set());
+      setBulkMode(false);
+      setView("memberships");
+      setQuery("");
+      setPage(1);
+    } catch {
+      setBulkError("Bulk access update denied or unavailable. No changes were applied; refresh the project list before retrying.");
+    }
+  }
   return (
     <section ref={panelRef} tabIndex={-1} aria-label="Agent details" className="min-w-0 space-y-4 rounded-md border p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -37,9 +61,22 @@ export function ManagedAgentDetail({ actorId, onClose }: { actorId: string; onCl
       <p className="break-all text-xs text-muted-foreground">Personal scope owner: {detail.data?.managedByActorId ?? "Loading…"}. This policy does not grant access to the manager&apos;s projects.</p>
       {detail.data?.status === "active" && <Link className="inline-block text-sm underline" href={`/projects/settings/api-keys?agent=${actorId}`}>Next: create a scoped Key for this Agent</Link>}
       <nav aria-label="Agent project access" className="flex flex-wrap gap-2">
-        <Button variant={view === "memberships" ? "default" : "outline"} onClick={() => { setView("memberships"); setQuery(""); setPage(1); setEditing(null); }}>Current memberships</Button>
-        {detail.data?.status === "active" && <Button variant={view === "available" ? "default" : "outline"} onClick={() => { setView("available"); setQuery(""); setPage(1); setEditing(null); }}>Add project access</Button>}
+        <Button variant={view === "memberships" ? "default" : "outline"} onClick={() => { setView("memberships"); setQuery(""); setPage(1); setEditing(null); setBulkMode(false); setSelectedProjectIds(new Set()); }}>Current memberships</Button>
+        {detail.data?.status === "active" && <Button variant={view === "available" ? "default" : "outline"} onClick={() => { setView("available"); setQuery(""); setPage(1); setEditing(null); setBulkMode(false); setSelectedProjectIds(new Set()); }}>Add project access</Button>}
       </nav>
+      {view === "available" && detail.data?.status === "active" && <div className="flex flex-wrap items-center gap-2">
+        <Button variant={bulkMode ? "default" : "outline"} onClick={() => { setBulkMode(!bulkMode); setSelectedProjectIds(new Set()); setBulkError(""); }}>
+          {bulkMode ? "Cancel bulk access" : "Bulk grant full access"}
+        </Button>
+        {bulkMode && <>
+          <span className="text-sm text-muted-foreground">Select projects across pages, then confirm once to grant the strongest role and all execution/tool permissions available to you.</span>
+          <Button variant="outline" disabled={projects.isFetching || !projects.data?.some(option => option.canManage)} onClick={() => setSelectedProjectIds(previous => new Set([...previous, ...(projects.data ?? []).filter(option => option.canManage).map(option => option.project.id)]))}>Select this page</Button>
+          <Button variant="outline" disabled={!selectedProjectIds.size} onClick={() => setSelectedProjectIds(new Set())}>Clear selection ({selectedProjectIds.size})</Button>
+          <Button disabled={bulkBusy || !selectedProjectIds.size} onClick={() => void grantFullAccess()}>{bulkBusy ? "Applying…" : `Grant full access (${selectedProjectIds.size})`}</Button>
+          {confirmation.dialog}
+          {bulkError && <p role="alert" className="w-full text-sm text-destructive">{bulkError}</p>}
+        </>}
+      </div>}
       <Input aria-label="Search authorized projects" placeholder="Search project names" value={query} onChange={event => { setQuery(event.target.value); setPage(1); }} />
       {(detail.error || projects.error) && <p role="alert">Agent permissions are unavailable. Refresh and check your current access.</p>}
       {projects.isFetching && <p role="status">Loading project access…</p>}
@@ -48,6 +85,15 @@ export function ManagedAgentDetail({ actorId, onClose }: { actorId: string; onCl
       </p>}
       {projects.data?.map(option => (
         <div key={option.project.id} className="space-y-2 rounded-md border p-3">
+          {bulkMode && <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" aria-label={`Select ${option.project.name} for full Agent access`} disabled={!option.canManage}
+              checked={selectedProjectIds.has(option.project.id)}
+              onChange={event => setSelectedProjectIds(previous => {
+                const next = new Set(previous);
+                if (event.target.checked) next.add(option.project.id); else next.delete(option.project.id);
+                return next;
+              })} /> Select for full access
+          </label>}
           <p className="break-words font-medium">{option.project.name}</p>
           <code className="block break-all text-xs">{option.project.id}</code>
           <p className="text-sm">Role: {option.membership?.role ?? "No membership"}</p>
@@ -55,7 +101,7 @@ export function ManagedAgentDetail({ actorId, onClose }: { actorId: string; onCl
           <p className="break-words text-sm">Explicit permissions: {option.membership?.explicitPermissions.join(", ") || "None"}</p>
           <p className="break-words text-sm">Effective project permissions: {detail.data?.status === "active" ? [...new Set([...option.rolePermissions, ...(option.membership?.explicitPermissions ?? [])])].join(", ") || "None" : "None"}. Key ceilings may further restrict these rights.</p>
           {detail.data?.status === "disabled" && <p className="text-sm text-muted-foreground">Historical membership only: this disabled Agent has no effective access.</p>}
-          {option.canManage && <Button variant="outline" onClick={() => setEditing(option)}>{option.membership ? "Edit permissions" : "Assign permissions"}</Button>}
+          {option.canManage && !bulkMode && <Button variant="outline" onClick={() => setEditing(option)}>{option.membership ? "Edit permissions" : "Assign permissions"}</Button>}
         </div>
       ))}
       <nav aria-label="Agent project pages" className="flex items-center gap-3">

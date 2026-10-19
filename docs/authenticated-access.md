@@ -49,6 +49,14 @@ has its own audit identity. Its managing human does not automatically inherit al
 content accessible to that Agent. Instance administrators do not inherit project
 membership or another human's personal data.
 
+When the same Agent needs broad access in several projects, use **Bulk grant full
+access** from Add project access. Select projects across pages and confirm once;
+Task Weaver applies the strongest role and all execution/tool permissions that
+the current administrator can grant in each selected project. The operation is
+atomic and fails as a whole if any selected project is no longer eligible. API
+Keys still require explicit grants for current scopes, and future projects are
+not added to an existing Key automatically.
+
 From Key settings, select self or an owned Agent, explicit grant targets/actions,
 and an expiry (or explicitly choose no time-based expiry). Issuance cannot exceed
 both issuer and subject authority. Project grants do not include personal space;

@@ -390,6 +390,41 @@ test(
       assert.equal((await identity.agentProjects(owner.headers, { actorId: agent.id }))[0]?.canManage, false);
       await assert.rejects(identity.setMembership(owner.headers, project.id, agent.id, { role: "member" }), NotFoundError);
     });
+    await t.test("Agent full access can be granted across projects in one atomic batch", async () => {
+      const agent = await identity.createAgent(owner.headers, { displayName: "Bulk permission fixture" });
+      const secondProject = await identity.createProject(owner.headers, { name: "Bulk permission second project" });
+      const result = await identity.grantAgentProjectAccess(owner.headers, {
+        actorId: agent.id,
+        projectIds: [project.id, secondProject.id],
+      });
+      assert.deepEqual(result, { updated: 2, projectIds: [project.id, secondProject.id] });
+      for (const projectId of [project.id, secondProject.id]) {
+        const [membership] = await db.select().from(projectMemberships).where(and(
+          eq(projectMemberships.projectId, projectId), eq(projectMemberships.actorId, agent.id),
+        ));
+        assert.equal(membership?.role, "maintainer");
+        assert.deepEqual(membership?.explicitPermissions, ["execution.run", "execution.review", "execution.merge", "mcp.invoke"]);
+      }
+
+      const rollbackAgent = await identity.createAgent(owner.headers, { displayName: "Bulk rollback fixture" });
+      const inaccessibleProject = await identity.createProject(outsider.headers, { name: "Bulk inaccessible project" });
+      await assert.rejects(identity.grantAgentProjectAccess(owner.headers, {
+        actorId: rollbackAgent.id,
+        projectIds: [project.id, inaccessibleProject.id],
+      }), AuthorizationError);
+      assert.equal((await db.select().from(projectMemberships).where(and(
+        eq(projectMemberships.projectId, project.id), eq(projectMemberships.actorId, rollbackAgent.id),
+      ))).length, 0);
+
+      await identity.setMembership(owner.headers, project.id, maintainer.account.actorId, { role: "maintainer" });
+      const managedByMaintainer = await identity.createAgent(maintainer.headers, { displayName: "Maintainer managed Agent" });
+      await identity.grantAgentProjectAccess(maintainer.headers, { actorId: managedByMaintainer.id, projectIds: [project.id] });
+      const [maintainerGranted] = await db.select().from(projectMemberships).where(and(
+        eq(projectMemberships.projectId, project.id), eq(projectMemberships.actorId, managedByMaintainer.id),
+      ));
+      assert.equal(maintainerGranted?.role, "member");
+      assert.deepEqual(maintainerGranted?.explicitPermissions, ["execution.run", "execution.review", "execution.merge", "mcp.invoke"]);
+    });
     await t.test("Agent disable serializes with credential issuance and deletion never revives it", async () => {
       const agent = await identity.createAgent(owner.headers, { displayName: "Concurrent retirement" });
       const outcomes = await Promise.allSettled([

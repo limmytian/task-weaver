@@ -565,6 +565,13 @@ export const setProjectMembershipSchema = z
     explicitPermissions: explicitProjectPermissionsSchema.default([]),
   })
   .strict();
+export const bulkAgentProjectAccessSchema = z
+  .object({
+    actorId: idSchema,
+    projectIds: z.array(idSchema).min(1).max(50)
+      .refine((projectIds) => new Set(projectIds).size === projectIds.length, "Duplicate projects are not allowed"),
+  })
+  .strict();
 export const managedAgentDtoSchema = z
   .object({
     id: idSchema,

@@ -10,6 +10,7 @@ import {
   createManagedAgentSchema,
   managedAgentListSchema,
   managedAgentProjectsSchema,
+  bulkAgentProjectAccessSchema,
   setProjectMembershipSchema,
   transferProjectOwnershipSchema,
   createProjectSchema,
@@ -195,6 +196,11 @@ export const authRouter = router({
         input.actorId,
         input.member,
       ),
+    ),
+  grantAgentProjectAccess: protectedProcedure
+    .input(bulkAgentProjectAccessSchema)
+    .mutation(({ ctx, input }) =>
+      ctx.auth.identity.grantAgentProjectAccess(ctx.req.headers, input),
     ),
   removeMember: protectedProcedure
     .input(membership)

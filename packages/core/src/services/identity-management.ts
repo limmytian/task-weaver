@@ -22,6 +22,7 @@ import {
   updateApiKeyGrantsSchema,
   createProjectSchema,
   createManagedAgentSchema,
+  bulkAgentProjectAccessSchema,
   managedAgentDtoSchema,
   managedAgentListSchema,
   managedAgentProjectsSchema,
@@ -404,6 +405,67 @@ export function createIdentityManagementService(
           },
         );
         return membershipDto(membership!);
+      });
+    },
+    async grantAgentProjectAccess(headers: Headers, input: unknown) {
+      const parsed = bulkAgentProjectAccessSchema.parse(input);
+      const context = await mutation(headers);
+      return db.transaction(async (tx) => {
+        await lockIdentityLifecycle(tx);
+        const { actor, manager } = await ownAgent(tx, context, parsed.actorId);
+        if (actor.deletedAt || actor.status !== "active") throw new NotFoundError("Agent not found");
+        if (actor.id === context.actor.id) throw new AuthorizationError();
+        if (context.credential.kind === "session") await requireRecentSession(tx, context);
+
+        const subject = await loadActivePrincipal(tx, actor.id).catch(error => {
+          if (error instanceof AuthenticationError) throw new NotFoundError("Agent not found");
+          throw error;
+        });
+        const updatedProjectIds: string[] = [];
+        for (const projectId of parsed.projectIds) {
+          const { authority, membership: caller } = await memberAdministrator(tx, context, projectId);
+          const canOwn = authority.grants.some(grant => grant.scope === "project" &&
+            grant.projectId === projectId && grant.permissions.includes("project.ownership.manage"));
+          const role: ProjectRole = canOwn ? "maintainer" : "member";
+          const explicitPermissions = PROJECT_ROLE_GRANTABLE_PERMISSIONS[caller.role]
+            .filter(permission => context.credential.kind === "session" || authority.grants.some(grant =>
+              grant.scope === "project" && grant.projectId === projectId && grant.permissions.includes(permission)));
+          const [existing] = await tx.select().from(projectMemberships).where(and(
+            eq(projectMemberships.projectId, projectId), eq(projectMemberships.actorId, actor.id),
+          ));
+
+          if (caller.role === "maintainer" && (roleRank[role] >= roleRank.maintainer ||
+            (existing && !existing.removedAt && roleRank[existing.role] >= roleRank.maintainer)))
+            throw new AuthorizationError();
+          if (context.credential.kind !== "session") {
+            const requested: AuthorizationGrant = {
+              scope: "project",
+              projectId,
+              permissions: [...new Set([...PROJECT_ROLE_PERMISSIONS[role], ...explicitPermissions])],
+            };
+            if (!grantsAreCovered([requested], authority.grants)) throw new AuthorizationError();
+          }
+
+          await revokeActorExecutions(tx, actor.id, projectId);
+          const [membership] = await tx.insert(projectMemberships).values({
+            projectId,
+            actorId: actor.id,
+            actorType: subject.type,
+            role,
+            explicitPermissions,
+          }).onConflictDoUpdate({
+            target: [projectMemberships.projectId, projectMemberships.actorId],
+            set: { role, explicitPermissions, removedAt: null, updatedAt: new Date() },
+          }).returning();
+          await auditIdentity(tx, "project.membership_changed", manager.id, subject.id, membership!.id, {
+            projectId,
+            role,
+            explicitPermissions: explicitPermissions.join(","),
+            bulkAgentAccess: "full-available",
+          });
+          updatedProjectIds.push(projectId);
+        }
+        return { updated: updatedProjectIds.length, projectIds: updatedProjectIds };
       });
     },
     async removeMembership(
