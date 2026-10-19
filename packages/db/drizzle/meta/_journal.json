@@ -498,6 +498,13 @@
       "when": 1792036800000,
       "tag": "0070_requirement_workflows",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1792368000000,
+      "tag": "0071_mcp_plan_receipts",
+      "breakpoints": true
     }
   ]
 }

@@ -33,6 +33,17 @@ export const mcpPlanSchema = planSchema.extend({
   documents: z.array(document).max(20).default([]),
   requirements: z.array(requirement).max(10).default([]),
 }).strict().superRefine((plan, ctx) => {
+  let nodes = 0;
+  function visit(value: unknown, path: Array<string | number>) {
+    if (!value || typeof value !== "object") return;
+    nodes++;
+    if (Array.isArray(value)) {
+      if (value.length > 100) ctx.addIssue({ code: "custom", path, message: "Plan arrays support at most 100 entries" });
+      value.forEach((item, index) => visit(item, [...path, index]));
+    } else for (const [key, item] of Object.entries(value)) visit(item, [...path, key]);
+  }
+  visit(plan, []);
+  if (nodes > 2000) ctx.addIssue({ code: "custom", path: [], message: "Plan graph exceeds the complexity limit" });
   const count = plan.requirements.reduce((sum, item) => sum + item.tasks.length, 0);
   if (count > 100) ctx.addIssue({ code: "custom", path: ["requirements"], message: "A plan supports at most 100 tasks" });
   const parsed = planSchema.safeParse(plan);
@@ -45,5 +56,6 @@ export const mcpAggregateContextSchema = z.object({
   sections: z.array(z.enum(["parent", "tasks", "slices", "dependencies", "documents", "claim", "activity"])).max(7)
     .default(["parent", "dependencies", "documents", "claim"]),
   limit: z.number().int().min(1).max(20).default(10),
+  offset: z.number().int().min(0).max(100000).default(0),
   maxBytes: z.number().int().min(2048).max(65536).default(32768),
 }).strict();

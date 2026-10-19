@@ -109,7 +109,7 @@ export async function registerPackage(
   return getPackage(db, pkg.id);
 }
 
-export async function listPackages(db: Database, input: ListSkillPackagesInput, authorizedPredicate?: SQL) {
+export async function listPackages(db: Database, input: ListSkillPackagesInput, authorizedPredicate?: SQL, compact = false) {
   const conditions = [buildPackageVisibilityCondition(input), authorizedPredicate];
   if (input.query) {
     const pattern = `%${input.query.replace(/[%_\\]/g, "\\$&")}%`;
@@ -123,11 +123,12 @@ export async function listPackages(db: Database, input: ListSkillPackagesInput, 
   }
 
   const items = await db.query.skillPackages.findMany({
+    columns: compact ? { id: true, name: true, summary: true, projectId: true, status: true, entryPath: true, updatedAt: true } : undefined,
     where: and(...conditions),
     with: {
       versions: {
         orderBy: (version, { desc }) => [desc(version.createdAt)],
-        limit: 1,
+        limit: compact ? 0 : 1,
       },
     },
     orderBy: (pkg, { desc }) => [desc(pkg.updatedAt)],
@@ -170,6 +171,7 @@ export async function readPackageTextFile(
   db: Database,
   input: ReadSkillPackageFileInput,
   storage: SkillPackageStorageAdapter,
+  maxBytes?: number,
 ) {
   const version = await resolvePackageVersion(db, input.packageId, input.version);
   const file = await db.query.skillPackageFiles.findFirst({
@@ -185,6 +187,9 @@ export async function readPackageTextFile(
   if (!file) throw new NotFoundError("Skill package file not found");
   if (!file.isReadableText) throw new ConflictError("Skill package file is not readable text", 0);
 
+  if (maxBytes !== undefined && (file.sizeBytes > maxBytes || (file.indexedDocument && Buffer.byteLength(file.indexedDocument.content, "utf8") > maxBytes))) {
+    throw new ValidationError("Package text exceeds the read limit");
+  }
   if (file.indexedDocument) {
     return {
       packageVersion: version,
@@ -201,8 +206,12 @@ export async function readPackageTextFile(
 
   const stored = await storage.getObject(file.storageObject.objectKey);
   const chunks: Buffer[] = [];
+  let bytes = 0;
   for await (const chunk of stored.body) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += buffer.length;
+    if (maxBytes !== undefined && bytes > maxBytes) throw new ValidationError("Package text exceeds the read limit");
+    chunks.push(buffer);
   }
 
   return {

@@ -708,6 +708,7 @@ export async function createExecutionSlice(
   requirementId: string,
   input: CreateExecutionSliceInput,
   actor: Actor,
+  compact = false,
 ) {
   const requirement = await getRequirementOrThrow(db, requirementId);
   const orderIndex = input.orderIndex ?? await nextExecutionSliceOrder(db, requirementId);
@@ -744,13 +745,13 @@ export async function createExecutionSlice(
 
   emit({ type: "requirement_updated", projectId: requirement.projectId, requirementId });
 
-  return getExecutionSlice(db, slice!.id);
+  return getExecutionSlice(db, slice!.id, compact);
 }
 
-export async function getExecutionSlice(db: Database, sliceId: string) {
+export async function getExecutionSlice(db: Database, sliceId: string, compact = false) {
   const slice = await db.query.executionSlices.findFirst({
     where: eq(executionSlices.id, sliceId),
-    with: { tasks: true, requirement: true },
+    with: { tasks: { limit: compact ? 0 : undefined }, requirement: true },
   });
   if (!slice) throw new NotFoundError("Execution slice not found");
   return slice;
@@ -761,8 +762,9 @@ export async function updateExecutionSlice(
   sliceId: string,
   input: UpdateExecutionSliceInput,
   actor: Actor,
+  compact = false,
 ) {
-  const existing = await getExecutionSlice(db, sliceId);
+  const existing = await getExecutionSlice(db, sliceId, compact);
   const { taskIds, leaseGeneration, daemonId, ...fields } = input;
 
   if (input.status || leaseGeneration !== undefined || daemonId !== undefined) {
@@ -780,7 +782,7 @@ export async function updateExecutionSlice(
     });
   }
 
-  const updateFields: Record<string, unknown> = { ...fields, updatedAt: new Date() };
+  const updateFields: Record<string, unknown> = { ...fields, updatedAt: new Date(Math.max(Date.now(), existing.updatedAt.getTime() + 1)) };
   if (input.description === null) updateFields.description = null;
   if (input.resultSummary === null) updateFields.resultSummary = null;
 
@@ -805,7 +807,7 @@ export async function updateExecutionSlice(
 
   emit({ type: "requirement_updated", projectId: existing.requirement.projectId, requirementId: existing.requirementId });
 
-  return getExecutionSlice(db, updated!.id);
+  return getExecutionSlice(db, updated!.id, compact);
 }
 
 export async function deleteExecutionSlice(db: Database, sliceId: string, actor: Actor) {

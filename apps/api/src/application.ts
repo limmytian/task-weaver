@@ -347,6 +347,7 @@ export function createApiApplication(
     allowedHosts: (env.TW_MCP_ALLOWED_HOSTS?.trim() || new URL(authenticationConfiguration(env).baseURL).host)
       .split(",").map(host => host.trim()).filter(Boolean),
     readOnly: env.TW_MCP_READ_ONLY === "true",
+    packageStorageDir: env.SKILL_PACKAGE_STORAGE_DIR,
     budget: mcpBudget,
     signal: controller.signal,
   }));

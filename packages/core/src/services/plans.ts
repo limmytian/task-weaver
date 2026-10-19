@@ -306,7 +306,7 @@ async function validateExistingEntities(
 
   for (const requirement of plan.requirements) {
     if (!requirement.existingId) continue;
-    const existing = await requirementService.getRequirement(db, requirement.existingId);
+    const existing = await requirementService.getRequirementRecord(db, requirement.existingId);
     if (existing.projectId !== plan.projectId) {
       throw new ValidationError(`Requirement ${requirement.key} belongs to a different project`);
     }
@@ -346,7 +346,7 @@ async function validateDirectRequirementRefs(
   ], known);
 
   for (const ref of refs) {
-    const requirement = await requirementService.getRequirement(db, ref);
+    const requirement = await requirementService.getRequirementRecord(db, ref);
     if (requirement.projectId !== plan.projectId) {
       throw new ValidationError(`Requirement reference ${ref} belongs to a different project`);
     }

@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+import { skillPackageStorageService } from "@task-weaver/core";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -9,6 +11,7 @@ import type { Env } from "../middleware/actor.js";
 export interface McpRouteOptions {
   allowedHosts: readonly string[];
   readOnly?: boolean;
+  packageStorageDir?: string;
   budget?: McpCallBudget;
   signal?: AbortSignal;
   executor?: (context: Env["Variables"]) => McpExecutor;
@@ -29,7 +32,7 @@ export function createMcpServerRoutes(options: McpRouteOptions) {
     await next();
   });
   const caller = (context: Env["Variables"], requestSignal: AbortSignal) => createMcpToolCaller(
-    options.executor?.(context) ?? createAuthorizedMcpExecutor(context.db, context.identity),
+    options.executor?.(context) ?? createAuthorizedMcpExecutor(context.db, context.identity, new skillPackageStorageService.LocalSkillPackageStorageAdapter(options.packageStorageDir ?? process.env.SKILL_PACKAGE_STORAGE_DIR ?? resolve(process.cwd(), "data", "skill-packages"))),
     { readOnly: options.readOnly, budget, signal: options.signal ? AbortSignal.any([requestSignal, options.signal]) : requestSignal },
   );
 
