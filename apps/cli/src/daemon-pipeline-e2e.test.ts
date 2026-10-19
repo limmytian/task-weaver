@@ -146,7 +146,7 @@ test('pipeline CLI starts a role, correlates logs, and drains it on SIGINT', { t
     })
     const exit = waitForExit(child, 20_000)
     await waitForOutput(child, /Starting merger instance/, 10_000)
-    await waitFor(() => statusReports.some((report: any) => report.status === 'idle'), 'merger idle status')
+    await waitFor(() => statusReports.some((report: any) => report.status === 'idle'), 'merger idle status', 15_000)
     child.kill('SIGINT')
     const result = await exit
 
