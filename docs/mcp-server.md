@@ -19,6 +19,16 @@ Agents need their own managed identity, project membership and key; their
 personal-space tools use their managing human's owner scope and still require
 an explicit personal grant. Project selection never expands a key's grants.
 
+Authorization scopes are `project`, `personal`, `global` and `instance`. Global
+`resource.read` is for global resources; it does not permit searching or reading
+every project. Project lists, search results and project data are filtered by
+current per-project read access. Project creation requires instance-scoped
+`project.create`. Automatically granting the creating credential read/write on
+its new project is planned for 0.3.11; the current candidate does not expand a
+credential's scope when it creates a project.
+Also planned for 0.3.11 is global `project.discover`, which permits searching
+project directory metadata only and does not grant access to project contents.
+
 Store credentials in your client's secret settings or your local CLI credential
 configuration. Never include a real key in a URL, repository file or screenshot.
 Revoking a key in Task Weaver takes effect on subsequent calls, including calls
