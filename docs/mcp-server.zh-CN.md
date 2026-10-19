@@ -1,6 +1,6 @@
 # 通过 MCP 客户端使用 Task Weaver
 
-0.3.11 的 MCP Server 通过本地 stdio 或远程 Streamable HTTP 提供 43 个协作工具。
+0.3.11 的 MCP Server 通过本地 stdio 或远程 Streamable HTTP 最多提供 44 个协作工具。
 已有 MCP Registry 用于把外部工具接入 Task Weaver，原有 `tw mcp` 命令保持兼容。
 英文规范见 [MCP Server](mcp-server.md)，工具契约见 [实现契约](mcp-server-contract.md)。
 
@@ -128,7 +128,7 @@ Inspector 使用临时 0600 配置并在结束后删除。Web 使用的详情接
 
 ## 0.3.11：规划与上下文
 
-新增 14 个工具，总计 43 个；只读模式可见 23 个。需使用 0.3.11 API，stdio
+新增 14 个工具，最多 44 个工具，其中 24 个只读；实际清单按实时授权过滤。需使用 0.3.11 API，stdio
 还需匹配版本 CLI；原有 29 个工具保持兼容。
 
 | 工具 | 用途 |
@@ -180,3 +180,45 @@ Inspector 使用临时 0600 配置并在结束后删除。Web 使用的详情接
 部署前先备份数据库和对象，并执行新增迁移 `0071_mcp_plan_receipts`。
 活动凭据的去重记录不可随意清理，否则重试可能重复写入。临时回退 0.3.10 时可以保留
 这张新增表；回退后新增工具不可用，API/CLI 再升级后恢复。
+
+## 0.3.11：授权、审计和审批
+
+HTTP 与 stdio 的工具清单按当前主体、Key、scope、只读配置与禁用策略动态过滤，
+每次调用重新检查实际目标。新版 stdio CLI 需要 `/api/v1/mcp-server/catalog`，
+接口不可用时拒绝提供清单。工具元数据列出来源和所需权限。
+
+`tw project discover --query NAME --json` 和 `tw_projects_discover` 需要
+`global.project.discover`，只返回 ID、名称、状态，每页最多 50 条，不授予项目内容权限。
+`project.create` 仍是 instance 权限。人类主体绑定的 Key 创建项目时，只为该 Key
+在同一事务内授予新项目的 `resource.read` 与 `resource.write`；其他 Key、Agent、
+已有或未来项目均不获权，且仍受实时成员关系、主体和凭据有效性约束。
+
+外部 Registry 的发现要求 `mcp.invoke`、服务器 active/connected、未过期及合法目标路径。
+服务器管理者可通过已知 ID 查看注册信息并恢复连接。服务器的 `readOnly=true`
+只允许管理员明确声明为只读的工具；未声明工具按写操作处理。使用以下命令声明顶层项目参数：
+
+```sh
+tw mcp tool-authorization TOOL_ID --target-project-argument projectId --json
+tw mcp tool-authorization READ_TOOL_ID --read-only --json
+tw mcp policy tw_plan_apply approval --project PROJECT_ID --json
+tw mcp approval APPROVAL_ID --json
+tw mcp approve APPROVAL_ID --json
+tw mcp call TOOL_ID --params '{"projectId":"PROJECT_ID"}' --approval APPROVAL_ID --json
+tw mcp policy '*' deny --project PROJECT_ID --json
+```
+
+配置或批准需要有对应 scope 的 `mcp.manage` 的人类凭据。`--personal` 选择个人空间，
+省略 scope 选择 global。默认策略为 `allow`，包括现有写操作；高风险操作应显式配置审批。
+优先级为 deny、approval、allow；`*` 可紧急禁用整个 scope，停用服务器可禁用其外部调用。
+
+调用返回 `approval_required` 和审批 ID。批准后以相同参数重试，inbound 参数携带
+`approvalId`，Registry 使用 `--approval`。审批有效期 10 分钟且仅用一次，绑定调用者、
+凭据、工具、目标状态、参数摘要、授权和策略版本。参数、资源、授权或策略变化使审批失效；
+执行时重新验证调用者及批准者凭据、当前授权和目标。审批记录不保存参数正文。
+
+`tw mcp audit --project PROJECT_ID --limit 20 --offset 0 --json` 按项目分页查看脱敏审计，
+需要 `audit.read`；个人空间需要本人 `mcp.manage`，全局需要 global `audit.read`。
+审计仅保存主体/凭据、scope、工具/服务器、时间、耗时、结果和稳定错误类别，
+不保存参数、结果正文、密钥或上游异常。运维执行
+`tw mcp audit-cleanup --project PROJECT_ID --json` 清理该 scope 超过 30 天的审计和已过期审批；
+如需自动保留期限，应由外部调度器定期执行。

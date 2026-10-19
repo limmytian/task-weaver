@@ -1,7 +1,10 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
+  ["GET", /^\/api\/v1\/mcp\/(?:audit|approvals\/[0-9a-f-]{36})\/?$/],
+  ["POST", /^\/api\/v1\/mcp\/(?:policy|audit\/cleanup|approvals\/[0-9a-f-]{36}\/approve)\/?$/],
+  ["PATCH", /^\/api\/v1\/mcp\/tools\/[0-9a-f-]{36}\/authorization\/?$/],
   ["POST", new RegExp("^/api/v1/mcp-server(?:/tools/tw_[a-z_]+)?/?$")],
-  ["GET", new RegExp("^/api/v1/mcp-server/?$")],
+  ["GET", new RegExp("^/api/v1/mcp-server(?:/catalog)?/?$")],
   ["DELETE", new RegExp("^/api/v1/mcp-server/?$")],
   ["POST", new RegExp("^/api/v1/plans/apply/?$")],
   ["POST", new RegExp("^/api/v1/documents/attachments/?$")],
@@ -59,7 +62,7 @@ const ordinaryRoutes: Array<[string, RegExp]> = [
   ["GET", new RegExp("^/api/v1/projects/[0-9a-fA-F-]{36}/requirements/heatmap/?$")],
   ["GET", new RegExp("^/api/v1/(?:tasks|documents)/[0-9a-fA-F-]{36}/recommendations/?$")],
 
-  ["GET", new RegExp("^/api/v1/projects/?$")],
+  ["GET", new RegExp("^/api/v1/projects(?:/discover)?/?$")],
   ["POST", new RegExp("^/api/v1/projects/?$")],
   ["GET", new RegExp("^/api/v1/projects/[0-9a-fA-F-]{36}/?$")],
   ["PATCH", new RegExp("^/api/v1/projects/[0-9a-fA-F-]{36}/?$")],

@@ -23,6 +23,7 @@ import {
   type VerifiedRequestContext,
 } from "@task-weaver/contracts";
 import * as service from "./api-keys";
+import { createResourceServices } from "./resource-services";
 import { getPersonalResourceOwner } from "./auth-principals";
 
 const databaseUrl = process.env.TW_AUTH_E2E_DATABASE_URL;
@@ -131,6 +132,40 @@ test(
         grants,
         expiresAt,
       });
+
+    await t.test("directory discovery is bounded and creator grants are atomic and key-specific", async () => {
+      const grants: AuthorizationGrant[] = [{ scope: "instance", permissions: ["project.create"] }, { scope: "global", permissions: ["project.discover"] }];
+      const creator = await issue([personal, ...grants]);
+      const sibling = await issue(grants);
+      const creatorContext = await service.authenticateScopedApiKey(db, creator.rawKey);
+      const siblingContext = await service.authenticateScopedApiKey(db, sibling.rawKey);
+      const resources = createResourceServices(creatorContext);
+      const actor = { id: owner.actor.id, type: "human" as const };
+      const created = await resources.projectService.createProject(db, { name: "Created directory fixture", description: "Private description" }, actor);
+      const directory = await createResourceServices(siblingContext).projectService.discoverProjects(db, { query: "Created directory fixture", pageSize: 1 });
+      assert.deepEqual(directory.items, [{ id: created.id, name: created.name, status: "active" }]);
+      await assert.rejects(createResourceServices(siblingContext).projectService.getProject(db, created.id), NotFoundError);
+      assert.equal((await resources.projectService.getProject(db, created.id)).id, created.id);
+      const live = await service.getLiveRequestAuthority(db, creatorContext);
+      assert.deepEqual(live.grants.find(g => g.scope === "project" && g.projectId === created.id)?.permissions, ["resource.read", "resource.write"]);
+      assert.equal(live.grants.some(g => g.scope === "project" && g.projectId === otherProject!.id), false);
+      const child = await service.issueScopedApiKey(db, creatorContext, owner.actor.id, { name: "Creator child", grants, expiresAt: null });
+      const childContext = await service.authenticateScopedApiKey(db, child.rawKey);
+      const childProject = await createResourceServices(childContext).projectService.createProject(db, { name: "Child creation" }, actor);
+      assert.equal((await createResourceServices(childContext).projectService.getProject(db, childProject.id)).id, childProject.id);
+      await assert.rejects(resources.projectService.getProject(db, childProject.id), NotFoundError);
+      const before = await db.select().from(apiKeys).where(eq(apiKeys.id, creator.id));
+      await assert.rejects(db.transaction(async tx => {
+        await resources.projectService.createProject(tx as unknown as typeof db, { name: "Rolled back creation" }, actor);
+        throw new Error("Rollback fixture");
+      }), /Rollback fixture/);
+      const after = await db.select().from(apiKeys).where(eq(apiKeys.id, creator.id));
+      assert.deepEqual(after[0]!.grants, before[0]!.grants);
+      assert.equal(after[0]!.grantVersion, before[0]!.grantVersion);
+      assert.equal((await resources.projectService.discoverProjects(db, { query: "Rolled back creation" })).items.length, 0);
+      await db.update(projectMemberships).set({ removedAt: new Date() }).where(eq(projectMemberships.projectId, created.id));
+      await assert.rejects(resources.projectService.getProject(db, created.id), NotFoundError);
+    });
 
     await t.test("ordinary grant edits preserve secrets, reject stale writes and permanently revoke descendants", async () => {
       const parent = await issue([personal, write]);

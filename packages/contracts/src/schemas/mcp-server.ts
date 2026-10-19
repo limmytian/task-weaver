@@ -18,6 +18,7 @@ export const mcpServerPageSchema = z.object({
 }).strict();
 
 export const mcpServerErrorCodeSchema = z.enum([
+  "approval_required",
   "validation_error",
   "unauthenticated",
   "forbidden",
@@ -39,11 +40,12 @@ export const mcpServerToolErrorSchema = z.object({
   error: z.object({
     code: mcpServerErrorCodeSchema,
     message: z.string().min(1).max(1000),
+    approvalId: z.string().uuid().optional(),
   }).strict(),
 }).strict();
 
 export const mcpServerReadTools = [
-  "tw_projects_list", "tw_projects_get",
+  "tw_projects_discover", "tw_projects_list", "tw_projects_get",
   "tw_requirements_list", "tw_requirements_get", "tw_requirement_dependencies_list",
   "tw_tasks_list", "tw_tasks_get", "tw_task_comments_list", "tw_task_dependencies_list",
   "tw_documents_list", "tw_documents_get", "tw_search",

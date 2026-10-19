@@ -124,7 +124,7 @@ export async function loadPrincipalGrants(
       permissions:
         principal.type === "human" && principal.instanceRole === "admin"
           ? [...AUTHORIZATION_SCOPE_PERMISSIONS.global]
-          : ["resource.read"],
+          : principal.type === "human" ? ["resource.read", "project.discover"] : ["resource.read"],
     },
   ];
   if (principal.type === "human") {

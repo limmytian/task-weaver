@@ -2,7 +2,7 @@ import { Command } from 'commander'
 import { Client } from '@modelcontextprotocol/sdk/client'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createInterface } from 'readline/promises'
-import { get, post, patch } from '../client.js'
+import { ApiError, get, post, patch } from '../client.js'
 import { printJson, printTable, printKv } from '../output.js'
 import { loadConfig } from '../config.js'
 import { serveMcp } from '../mcp-server.js'
@@ -32,6 +32,26 @@ async function confirmLocalScopeShare(serverId: string): Promise<void> {
 
 export function registerMcp(program: Command): void {
   const mcp = program.command('mcp').description('serve Task Weaver or discover external MCP registry tools')
+  mcp.command('audit').option('--limit <n>', 'page size', '20').option('--offset <n>', 'page offset', '0').option('--project <id>', 'project scope').option('--personal', 'personal scope').option('--json', 'output JSON')
+    .action(async opts => {
+      const query = new URLSearchParams({ limit: opts.limit, offset: opts.offset })
+      if (opts.project) query.set('projectId', opts.project)
+      if (opts.personal) query.set('personal', 'true')
+      printJson(await get(`/api/v1/mcp/audit?${query}`))
+    })
+  mcp.command('policy <toolId> <mode>').description('set allow, approval or deny for a tool or *')
+    .option('--project <id>', 'project scope').option('--personal', 'personal scope').option('--json', 'output JSON')
+    .action(async (toolId, mode, opts) => printJson(await post('/api/v1/mcp/policy', { toolId, mode, projectId: opts.project, personal: opts.personal ?? false })))
+  mcp.command('approval <id>').description('inspect approval binding metadata').option('--json', 'output JSON')
+    .action(async id => printJson(await get(`/api/v1/mcp/approvals/${id}`)))
+  mcp.command('audit-cleanup').option('--project <id>', 'project scope').option('--personal', 'personal scope').option('--json', 'output JSON')
+    .action(async opts => printJson(await post('/api/v1/mcp/audit/cleanup', { projectId: opts.project, personal: opts.personal ?? false })))
+  mcp.command('approve <id>').description('approve an exact invocation request').option('--json', 'output JSON')
+    .action(async id => printJson(await post(`/api/v1/mcp/approvals/${id}/approve`, {})))
+  mcp.command('tool-authorization <id>').description('configure trusted tool scope and read-only declarations')
+    .option('--read-only', 'declare a read-only tool').option('--target-project-argument <name>', 'top-level project ID argument').option('--json', 'output JSON')
+    .action(async (id, opts) => printJson(await patch(`/api/v1/mcp/tools/${id}/authorization`, { readOnly: opts.readOnly ?? false, targetProjectArgument: opts.targetProjectArgument ?? null })))
+
 
   mcp.command('serve').description('serve Task Weaver tools over authenticated stdio')
     .option('--read-only', 'hide write tools and reject write calls')
@@ -65,6 +85,7 @@ export function registerMcp(program: Command): void {
     .command('call <toolId>')
     .description('execute a tool via proxy')
     .option('--params <json>', 'tool arguments as JSON', '{}')
+    .option('--approval <id>', 'approved exact-operation request ID')
     .option('--json', 'output raw JSON')
     .action(async (toolId, opts) => {
       let args: Record<string, unknown> | undefined
@@ -74,7 +95,15 @@ export function registerMcp(program: Command): void {
         process.stderr.write('Error: --params must be valid JSON\n')
         process.exit(1)
       }
-      const data = await post(`/api/v1/mcp/tools/${toolId}/call`, { arguments: args })
+      const data = await post(`/api/v1/mcp/tools/${toolId}/call`, { arguments: args, approvalId: opts.approval }).catch(error => {
+        if (error instanceof ApiError && error.status === 409 && error.body && typeof error.body === 'object' && 'approvalId' in error.body) {
+          printJson(error.body)
+          process.exitCode = 1
+          return undefined
+        }
+        throw error
+      })
+      if (data === undefined) return
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)
     })

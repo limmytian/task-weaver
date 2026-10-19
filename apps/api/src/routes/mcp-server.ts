@@ -1,11 +1,11 @@
 import { resolve } from "node:path";
-import { skillPackageStorageService } from "@task-weaver/core";
+import { recordMcpInvocationAudit, personalResourceOwnerId, skillPackageStorageService } from "@task-weaver/core";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { AuthenticationError, MCP_SERVER_LIMITS } from "@task-weaver/contracts";
 import { createMcpToolCaller, createTaskWeaverMcpServer, isMcpArgumentError, type McpCallBudget, type McpExecutor } from "@task-weaver/core/mcp-server";
-import { createAuthorizedMcpExecutor } from "@task-weaver/core/mcp-server/executor";
+import { authorizedMcpToolNames, createAuthorizedMcpExecutor } from "@task-weaver/core/mcp-server/executor";
 import type { Env } from "../middleware/actor.js";
 
 export interface McpRouteOptions {
@@ -14,6 +14,7 @@ export interface McpRouteOptions {
   packageStorageDir?: string;
   budget?: McpCallBudget;
   signal?: AbortSignal;
+  visibleTools?: (context: Env["Variables"]) => Promise<readonly string[]>;
   executor?: (context: Env["Variables"]) => McpExecutor;
 }
 
@@ -33,7 +34,7 @@ export function createMcpServerRoutes(options: McpRouteOptions) {
   });
   const caller = (context: Env["Variables"], requestSignal: AbortSignal) => createMcpToolCaller(
     options.executor?.(context) ?? createAuthorizedMcpExecutor(context.db, context.identity, new skillPackageStorageService.LocalSkillPackageStorageAdapter(options.packageStorageDir ?? process.env.SKILL_PACKAGE_STORAGE_DIR ?? resolve(process.cwd(), "data", "skill-packages"))),
-    { readOnly: options.readOnly, budget, signal: options.signal ? AbortSignal.any([requestSignal, options.signal]) : requestSignal },
+    { readOnly: options.readOnly, onRejected: options.executor ? undefined : (name, code) => recordMcpInvocationAudit(context.db, context.identity, { personalOwnerId: personalResourceOwnerId(context.identity), personalOwnerType: "human" }, "task-weaver", name, Date.now(), code), budget, signal: options.signal ? AbortSignal.any([requestSignal, options.signal]) : requestSignal },
   );
 
   // Authenticated JSON adapter used by local stdio clients through CLI request().
@@ -48,13 +49,17 @@ export function createMcpServerRoutes(options: McpRouteOptions) {
       throw error;
     }
   });
+  routes.get("/catalog", async c => {
+    const names = await (options.visibleTools?.(c.var) ?? authorizedMcpToolNames(c.get("db"), c.get("identity")));
+    return c.json({ tools: names.filter(name => !options.readOnly || !/_(create|update|add|remove|status|claim|heartbeat|release|apply)$/.test(name)) });
+  });
   routes.all("/", async c => {
     if (c.req.method !== "POST") {
       c.header("Allow", "POST");
       return c.json({ error: "This stateless MCP endpoint does not offer an event stream or sessions" }, 405);
     }
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true, maxRequestBodySize: MCP_SERVER_LIMITS.requestBytes });
-    const server = createTaskWeaverMcpServer(caller(c.var, c.req.raw.signal), { readOnly: options.readOnly });
+    const server = createTaskWeaverMcpServer(caller(c.var, c.req.raw.signal), { readOnly: options.readOnly, visibleTools: () => options.visibleTools?.(c.var) ?? authorizedMcpToolNames(c.get("db"), c.get("identity")) });
     try {
       await server.connect(transport);
       return await transport.handleRequest(c.req.raw);

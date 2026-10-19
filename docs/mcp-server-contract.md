@@ -1,6 +1,6 @@
 # Inbound MCP server contract
 
-This document specifies the 0.3.10 inbound interface and its tested acceptance
+This document specifies the 0.3.11 inbound interface and its tested acceptance
 boundaries. See the [usage guide](mcp-server.md) for setup and the verified client
 matrix. The outbound MCP Registry remains a separate feature.
 
@@ -39,6 +39,7 @@ The `tw_` names below are fixed for both transports.
 
 | Tools | Existing service / REST source | Input and output rule |
 | --- | --- | --- |
+| `tw_projects_discover` | projectService; `/projects/discover` | Global directory permission; bounded ID/name/status only |
 | `tw_projects_list`, `tw_projects_get` | projectService; `/projects`, `/projects/:id` | Existing project filters plus bounded page; get by id |
 | `tw_requirements_list`, `tw_requirements_get` | requirementService; `/projects/:projectId/requirements`, `/requirements/:id` | List requires projectId; use listRequirementsSchema; detail by id |
 | `tw_requirements_create`, `tw_requirements_update` | requirementService; same routes | createRequirementSchema/updateRequirementSchema without workflow and lease controls; update takes id and patch |
@@ -152,3 +153,14 @@ workflow-stage actions remain outside this catalog.
 
 References: [published transport specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports),
 [official TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk).
+
+## Dynamic authorization and audit
+
+The maximum catalog is 44 tools (24 read-only); effective catalogs are filtered
+by live credential scopes and deny policies. `/api/v1/mcp-server/catalog` returns
+the same effective names to the stdio adapter. `_meta` identifies stable tool ID,
+source and required permissions. Target IDs always undergo facade authorization.
+Write inputs optionally accept `approvalId`. Errors may include
+`approval_required` and a UUID `error.approvalId`; approval does not bypass target
+or business-rule validation. See the [authorization guide](mcp-server.md#authorization-aware-discovery-and-approvals-0311)
+for exact policy, expiration, audit and retention behavior.

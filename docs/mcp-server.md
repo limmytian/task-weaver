@@ -1,11 +1,11 @@
 # Use Task Weaver from an MCP client
 
-Task Weaver's inbound MCP Server exposes 43 collaboration tools in 0.3.11 through local
+Task Weaver's inbound MCP Server offers a maximum of 44 collaboration tools in 0.3.11 through local
 stdio or remote Streamable HTTP. The existing MCP Registry connects **other**
 servers to Task Weaver; its `tw mcp search/tools/call/servers/register-local`
-commands retain their existing behavior.
+commands use live authorization-aware discovery.
 
-Both paths require an API server with the 0.3.10 inbound MCP implementation.
+Both paths require a matching 0.3.11 API server for authorization-aware catalogs.
 The local path also requires a matching `tw` CLI. The server uses SDK 1.31.0
 and targets published protocol revision 2025-11-25. See the
 [contract](mcp-server-contract.md) for exact names and boundaries.
@@ -208,7 +208,7 @@ and OAuth-only clients are not implied by the generic examples above. See [ä¸­æ–
 
 ## Planning and context tools (0.3.11)
 
-Version 0.3.11 adds 14 tools (43 total, 23 visible in read-only mode):
+Version 0.3.11 adds 14 planning/context tools. With project directory discovery, the maximum catalog is 44 tools, including 24 read-only tools. Each credential sees only its authorized subset:
 
 | Tools | Purpose |
 | --- | --- |
@@ -300,3 +300,78 @@ Back up database and objects before deployment. Do not drop receipt records
 while a credential is active: doing so removes retry protection. This additive
 table may remain when temporarily rolling back to 0.3.10; new tools will be
 unavailable until the API/CLI are upgraded again.
+
+## Authorization-aware discovery and approvals (0.3.11)
+
+`tools/list` is recomputed from current identity, Key grants, scope and read-only
+configuration on both HTTP and stdio. Tool metadata identifies the source and
+required permissions. Every target ID is checked again on invocation; a cached
+catalog is never an authorization grant. The stdio adapter requires the new
+`GET /api/v1/mcp-server/catalog` API and fails closed if it is unavailable.
+
+Use `tw project discover --query NAME --json` or `tw_projects_discover` with
+`global.project.discover` to search the project directory. Results contain only
+ID, name and status, with at most 50 entries per page. Descriptions, membership,
+counts and project contents are excluded. `global.resource.read` still grants
+only global resource access. `project.create` remains an instance permission.
+A human-bound Key that creates a project receives only that new project's
+`resource.read` and `resource.write`, atomically with project creation. Other
+Keys and Agents receive nothing. Live identity, credential ancestry and
+membership checks continue to apply; no management, execution or MCP permission
+is implied.
+
+Outbound Registry discovery requires `mcp.invoke`, an active connected server
+and a valid scope path. Disabled, disconnected and expired registrations are
+hidden. A server manager can still inspect a known registration to recover it.
+Use server `readOnly=true` to suppress tools without an explicit trusted
+read-only declaration. Declare a tool's top-level project argument when it can
+target projects independently of its server registration:
+
+```sh
+tw mcp tool-authorization TOOL_ID --target-project-argument projectId --json
+tw mcp tool-authorization READ_TOOL_ID --read-only --json
+```
+
+These declarations are configured by an authorized manager; they are not inferred
+from caller arguments. A project-targeting tool requires authorization for both
+the registration and the actual target project. Existing tools default to their
+server's scope and are conservatively treated as writes for read-only filtering.
+Private/local registration credential and client/node isolation still apply.
+
+Configure sensitive operations with an authorized human credential containing
+`mcp.manage` for the selected project, personal or global scope:
+
+```sh
+tw mcp policy tw_plan_apply approval --project PROJECT_ID --json
+tw mcp policy TOOL_ID approval --project PROJECT_ID --json
+tw mcp approval APPROVAL_ID --json
+tw mcp approve APPROVAL_ID --json
+tw mcp call TOOL_ID --params '{"projectId":"PROJECT_ID"}' --approval APPROVAL_ID --json
+tw mcp policy '*' deny --project PROJECT_ID --json
+```
+
+Use `--personal` instead of `--project` for personal scope; omitting both selects
+global scope. Policies are scope-isolated. Unconfigured tools default to `allow`,
+including existing writes; explicitly select high-risk operations for approval.
+`deny` takes precedence over `approval`, which takes precedence over `allow`.
+The wildcard `*` provides a scope-wide emergency disable; server deactivation
+also stops outbound calls. HTTP server read-only configuration and stdio
+`--read-only` continue to reject inbound writes.
+
+A blocked inbound write returns `approval_required` and `error.approvalId`.
+An outbound REST call returns HTTP 409 with `approvalId`; the CLI prints it.
+Approve the request, then retry the identical operation with `approvalId` in
+inbound tool arguments or `--approval` for Registry calls. Requests expire after
+10 minutes, are single-use and bind the caller/credential, tool, target state,
+parameter digest, grants and policy versions. Parameter, target, grant or policy
+changes invalidate them. Execution rechecks caller and approver credentials,
+authorization and target state. Concurrent/replayed approval use is rejected.
+
+Use `tw mcp audit --project PROJECT_ID --limit 20 --offset 0 --json` to page through
+project audit metadata with `audit.read`. Personal audit access requires that
+owner's `mcp.manage`; global audits require global `audit.read`. Records contain
+actor/credential, scope, server/tool, timestamp, duration, outcome and stable error
+category. They contain no parameters, result bodies, secrets or upstream errors.
+Operator cleanup through `tw mcp audit-cleanup --project PROJECT_ID --json`
+removes audit entries older than 30 days and expired approvals in that scope;
+schedule this command externally when automatic retention is required.

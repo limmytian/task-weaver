@@ -3,7 +3,7 @@ import { liveExecutionAuthority, type ExecutionBounds } from './execution-delega
 import { eq, and, gt, isNull, or, inArray } from "drizzle-orm";
 import {
   type Database,
-  apiKeys,
+  apiKeyProjectCreations, apiKeys,
   apiKeyEvents,
   authSessions,
   executionDelegations,
@@ -115,7 +115,12 @@ async function liveKeyAuthority(
     )
       throw new AuthenticationError("invalid_credential");
     const authority = await liveKeyAuthority(db, parent, now, seen, includeArchived);
-    grants = intersectGrants(grants, authority.grants);
+    const creations = actor.type === "human"
+      ? await db.select().from(apiKeyProjectCreations).where(eq(apiKeyProjectCreations.keyId, key.id)) : [];
+    const creationCeiling: AuthorizationGrant[] = creations.map(row => ({ scope: "project", projectId: row.projectId, permissions: ["resource.read", "resource.write"] }));
+    // Ancestors still validate identity, expiry and revocation. Only this key's
+    // own creations bypass their project ceiling; siblings inherit nothing.
+    grants = intersectGrants(grants, [...authority.grants, ...creationCeiling]);
   }
   if (!grants.length) throw new AuthorizationError();
   return { actor, grants, depth: seen.size };

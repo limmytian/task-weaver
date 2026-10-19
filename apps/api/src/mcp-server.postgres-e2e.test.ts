@@ -13,8 +13,8 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { createDb, runMigrations, apiKeys } from "@task-weaver/db";
-import { createResourceServices, skillPackageStorageService, registerSkillPackageSchema } from "@task-weaver/core";
+import { createDb, runMigrations, apiKeys, mcpInvocationApprovals, projectMemberships, mcpInvocationAudits } from "@task-weaver/db";
+import { cleanupMcpInvocationHistory, setMcpInvocationPolicy, approveMcpInvocation, listMcpInvocationAudits, createResourceServices, skillPackageStorageService, registerSkillPackageSchema } from "@task-weaver/core";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 import { createApiApplication } from "./application";
 
@@ -205,6 +205,75 @@ test("MCP transports use live scoped authority and preserve collaboration guards
     assert.equal((await invoke("tw_execution_slices_update", { id: stage.id, expectedUpdatedAt: stage.updatedAt, patch: { resultSummary: "Transport handoff" } })).resultSummary, "Transport handoff");
     assert.equal((await invoke("tw_tasks_context", { id: applied.refs.tasks[0].id })).entity.id, applied.refs.tasks[0].id);
   }
+  const directoryKey = await f.identity.issueKey(f.owner.headers, f.owner.context.actor.id, { name: "Directory-only fixture", expiresAt: null, grants: [{ scope: "global", permissions: ["project.discover"] }] });
+  const directoryResponse = await f.app.request("/api/v1/projects/discover?pageSize=1", { headers: headers(directoryKey.rawKey) });
+  assert.equal(directoryResponse.status, 200);
+  const directoryResult = await directoryResponse.json() as any;
+  assert.equal(directoryResult.items.length, 1);
+  assert.deepEqual(Object.keys(directoryResult.items[0]).sort(), ["id", "name", "status"]);
+  assert.equal((await f.app.request(`/api/v1/projects/${f.project.id}`, { headers: headers(directoryKey.rawKey) })).status, 404);
+  const directoryRemote = new Client({ name: "directory-http", version: "1" });
+  const directoryLocal = new Client({ name: "directory-stdio", version: "1" });
+  try {
+    await directoryRemote.connect(new StreamableHTTPClientTransport(new URL(`http://${host}/api/v1/mcp-server`), { requestInit: { headers: headers(directoryKey.rawKey) } }));
+    await directoryLocal.connect(new StdioClientTransport({ command: process.execPath, args: ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url)), "mcp", "serve"], env: { ...env, TW_CONFIG_DIR: directory, TW_API_URL: `http://${host}`, TW_API_KEY: directoryKey.rawKey }, stderr: "pipe" }));
+    for (const client of [directoryRemote, directoryLocal]) {
+      assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ["tw_projects_discover"]);
+      const result = await client.callTool({ name: "tw_projects_discover", arguments: { pageSize: 1 } });
+      assert.equal((result.structuredContent as any).ok, true);
+      assert.equal((await client.callTool({ name: "tw_projects_get", arguments: { id: f.project.id } })).isError, true);
+    }
+  } finally { await directoryRemote.close(); await directoryLocal.close(); }
+  // Dynamic discovery and exact-operation approvals are identical on real transports.
+  const scope = { projectId: f.project.id };
+  await setMcpInvocationPolicy(db, f.owner.context, scope, "tw_task_comments_add", "approval");
+  for (const client of [remote, writeLocal]) {
+    const args = { id: task.id, content: "Sensitive marker must not enter audit" };
+    const pending = await client.callTool({ name: "tw_task_comments_add", arguments: args });
+    const approvalId = (pending.structuredContent as any).error.approvalId;
+    assert.equal((pending.structuredContent as any).error.code, "approval_required");
+    await approveMcpInvocation(db, f.owner.context, approvalId);
+    const changed = await client.callTool({ name: "tw_task_comments_add", arguments: { ...args, content: "Changed", approvalId } });
+    assert.equal((changed.structuredContent as any).error.code, "forbidden");
+    const approved = await client.callTool({ name: "tw_task_comments_add", arguments: { ...args, approvalId } });
+    assert.notEqual(approved.isError, true, JSON.stringify(approved));
+    assert.equal((await client.callTool({ name: "tw_task_comments_add", arguments: { ...args, approvalId } })).isError, true);
+  }
+  for (const invalidation of ["expiry", "policy", "resource", "grant", "membership"]) {
+    const args = { id: task.id, content: "Invalidated approval" };
+    const pending = await call("tw_task_comments_add", args);
+    const approvalId = (pending.error as any).approvalId;
+    await approveMcpInvocation(db, f.owner.context, approvalId);
+    if (invalidation === "expiry") await db.update(mcpInvocationApprovals).set({ expiresAt: new Date(Date.now() - 1) }).where(eq(mcpInvocationApprovals.id, approvalId));
+    if (invalidation === "policy") await setMcpInvocationPolicy(db, f.owner.context, scope, "tw_task_comments_add", "approval");
+    if (invalidation === "resource") await success("tw_tasks_update", { id: task.id, patch: { title: "Changed after approval" } });
+    if (invalidation === "membership") await db.update(projectMemberships).set({ updatedAt: new Date() }).where(eq(projectMemberships.actorId, f.owner.context.actor.id));
+    if (invalidation === "grant") {
+      const [current] = await db.select().from(apiKeys).where(eq(apiKeys.id, key.id));
+      await db.update(apiKeys).set({ grantVersion: current!.grantVersion + 1 }).where(eq(apiKeys.id, key.id));
+    }
+    assert.equal((await call("tw_task_comments_add", { ...args, approvalId })).ok, false, invalidation);
+  }
+  await setMcpInvocationPolicy(db, f.owner.context, scope, "tw_task_comments_add", "deny");
+  for (const client of [remote, writeLocal]) {
+    assert.equal((await client.listTools()).tools.some(tool => tool.name === "tw_task_comments_add"), false);
+    assert.equal((await client.callTool({ name: "tw_task_comments_add", arguments: { id: task.id, content: "Cached discovery attack" } })).isError, true);
+  }
+  const audit = await listMcpInvocationAudits(db, f.owner.context, scope, 100);
+  assert(audit.some(row => row.errorCode === "approval_required"));
+  assert(audit.some(row => row.outcome === "success"));
+  assert.equal(JSON.stringify(audit).includes("Sensitive marker"), false);
+  assert.equal(JSON.stringify(audit).includes(key.rawKey), false);
+  await assert.rejects(listMcpInvocationAudits(db, f.outsider.context, scope));
+  const oldAudit = { actorId: f.owner.context.actor.id, credentialId: key.id, serverId: "task-weaver", toolId: "tw_tasks_get", outcome: "success", durationMs: 1, createdAt: new Date(Date.now() - 31 * 86_400_000) };
+  const [expiredProjectAudit, isolatedPersonalAudit] = await db.insert(mcpInvocationAudits).values([
+    { ...oldAudit, scopeKey: "project:" + f.project.id },
+    { ...oldAudit, scopeKey: "personal:" + f.outsider.context.actor.id },
+  ]).returning();
+  await cleanupMcpInvocationHistory(db, f.owner.context, scope);
+  assert.equal((await db.select().from(mcpInvocationAudits).where(eq(mcpInvocationAudits.id, expiredProjectAudit!.id))).length, 0);
+  assert.equal((await db.select().from(mcpInvocationAudits).where(eq(mcpInvocationAudits.id, isolatedPersonalAudit!.id))).length, 1);
+  await setMcpInvocationPolicy(db, f.owner.context, scope, "tw_task_comments_add", "allow");
   if (process.env.TW_MCP_INSPECTOR_BIN) {
     const configPath = join(directory, "inspector.json");
     await writeFile(configPath, JSON.stringify({ mcpServers: {
@@ -251,6 +320,8 @@ test("MCP transports use live scoped authority and preserve collaboration guards
     t.diagnostic("MCP Inspector 2.11.0 completed local and remote collaboration workflows.");
   }
   await f.identity.revokeKey(f.owner.headers, f.owner.context.actor.id, key.id);
+  await assert.rejects(remote.listTools());
+  await assert.rejects(local.listTools());
   await assert.rejects(remote.callTool({ name: "tw_tasks_get", arguments: { id: task.id } }));
   const revokedLocal = await local.callTool({ name: "tw_tasks_get", arguments: { id: task.id } });
   assert.equal(revokedLocal.isError, true);

@@ -14,7 +14,7 @@ import { createTRPCContextFactory } from "../apps/web/trpc/init";
 import { appRouter } from "../apps/web/trpc/routers/_app";
 const apiRequire = createRequire(new URL("../apps/api/package.json", import.meta.url));
 const { createDb, runMigrations, authInstanceState, mcpServers, mcpTools, mcpToolCalls, mcpLocalRequests } = apiRequire("@task-weaver/db");
-const { createAuthenticationRuntime, createResourceServices, NotFoundError, AuthorizationError, registerMcpServerSchema, searchMcpToolsSchema } = apiRequire("@task-weaver/core");
+const { configureMcpToolAuthorization, setMcpInvocationPolicy, approveMcpInvocation, listMcpInvocationAudits, McpApprovalRequired, createAuthenticationRuntime, createResourceServices, NotFoundError, AuthorizationError, registerMcpServerSchema, searchMcpToolsSchema } = apiRequire("@task-weaver/core");
 const { eq } = apiRequire("drizzle-orm");
 const databaseUrl = process.env.TW_AUTH_E2E_DATABASE_URL;
 
@@ -103,11 +103,14 @@ test("MCP authorization isolates discovery, local execution and live credentials
   await t.test("scope predicates run before limits and redact credentials", async () => {
     assert.equal((await rest(`mcp/servers/${remote.id}`, admin.headers)).status, 404);
     assert.equal((await rest(`mcp/servers/${remote.id}`, outsider.headers)).status, 404);
-    const read = await viewer.service.mcpRegistryService.getServer(db, remote.id);
+    await assert.rejects(viewer.service.mcpRegistryService.getServer(db, remote.id), NotFoundError);
+    const read = await owner.service.mcpRegistryService.getServer(db, remote.id);
     assert.ok(!JSON.stringify(read).includes("fixture-secret"));
     assert.ok(!JSON.stringify(read).includes("registeredCredentialId"));
+    await db.update(mcpServers).set({ status: "connected" }).where(eq(mcpServers.id, remote.id));
     const result = await viewer.service.mcpRegistryService.searchTools(db, searchMcpToolsSchema.parse({ projectId: project.id, intent: "needle", limit: 1 }));
-    assert.equal(result.length, 1); assert.equal(result[0].id, tool.id);
+    assert.equal(result.length, 0);
+    await assert.rejects(viewer.service.mcpRegistryService.getToolDetail(db, tool.id), AuthorizationError);
     await assert.rejects(viewer.service.mcpRegistryService.updateServer(db, remote.id, { active: false }, viewer.actor), AuthorizationError);
     await assert.rejects(owner.service.mcpRegistryService.callTool(db, tool.id, {}, owner.actor, pool), AuthorizationError);
     assert.equal(connected, 0);
@@ -133,6 +136,45 @@ test("MCP authorization isolates discovery, local execution and live credentials
     const audits = await db.select().from(mcpToolCalls).where(eq(mcpToolCalls.serverId, remote.id));
     assert.equal(audits.length, 2);
     assert.ok(audits.every((row: any) => row.input === null && row.output === null));
+    connected = 0;
+  });
+  await t.test("tool targets, read-only state and approval policies cannot widen invocation scope", async () => {
+    const key = await runtime.identity.issueKey(member.headers, member.actor.id, { name: "Scoped approval invocation", grants: [{ scope: "project", projectId: project.id, permissions: ["resource.read", "mcp.invoke"] }], expiresAt: null });
+    const context = await runtime.verify(new Headers({ authorization: `Bearer ${key.rawKey}` }));
+    const service = createResourceServices(context);
+    await configureMcpToolAuthorization(db, owner.context, tool.id, { readOnly: false, targetProjectArgument: "projectId" });
+    assert.equal((await service.mcpRegistryService.searchTools(db, searchMcpToolsSchema.parse({ projectId: project.id, intent: "needle" }))).length, 1);
+    assert((await service.mcpRegistryService.listServers(db, { projectId: project.id })).some((row: any) => row.id === remote.id));
+    await db.update(mcpServers).set({ status: "disconnected" }).where(eq(mcpServers.id, remote.id));
+    assert.equal((await service.mcpRegistryService.searchTools(db, searchMcpToolsSchema.parse({ projectId: project.id, intent: "needle" }))).length, 0);
+    await db.update(mcpServers).set({ status: "connected" }).where(eq(mcpServers.id, remote.id));
+    const before = connected;
+    await assert.rejects(service.mcpRegistryService.callTool(db, tool.id, { projectId: other.id }, member.actor, pool));
+    assert.equal(connected, before);
+    await db.update(mcpServers).set({ readOnly: true }).where(eq(mcpServers.id, remote.id));
+    assert.equal((await service.mcpRegistryService.searchTools(db, searchMcpToolsSchema.parse({ projectId: project.id, intent: "needle" }))).length, 0);
+    await assert.rejects(service.mcpRegistryService.callTool(db, tool.id, { projectId: project.id }, member.actor, pool), AuthorizationError);
+    await db.update(mcpServers).set({ readOnly: false }).where(eq(mcpServers.id, remote.id));
+    await setMcpInvocationPolicy(db, owner.context, { projectId: project.id }, tool.id, "approval");
+    const args = { projectId: project.id, secret: "audit-must-not-retain-this" };
+    let approvalId: string | undefined;
+    try { await service.mcpRegistryService.callTool(db, tool.id, args, member.actor, pool); }
+    catch (error) { assert(error instanceof McpApprovalRequired); approvalId = error.approvalId; }
+    assert(approvalId);
+    await approveMcpInvocation(db, owner.context, approvalId);
+    await assert.rejects(service.mcpRegistryService.callTool(db, tool.id, { ...args, secret: "changed" }, member.actor, pool, approvalId), AuthorizationError);
+    assert.equal((await service.mcpRegistryService.callTool(db, tool.id, args, member.actor, pool, approvalId)).isError, undefined);
+    await assert.rejects(service.mcpRegistryService.callTool(db, tool.id, args, member.actor, pool, approvalId), AuthorizationError);
+    await setMcpInvocationPolicy(db, owner.context, { projectId: project.id }, tool.id, "deny");
+    assert.equal((await service.mcpRegistryService.searchTools(db, searchMcpToolsSchema.parse({ projectId: project.id, intent: "needle" }))).length, 0);
+    await assert.rejects(service.mcpRegistryService.callTool(db, tool.id, args, member.actor, pool), AuthorizationError);
+    const audit = await listMcpInvocationAudits(db, owner.context, { projectId: project.id }, 100);
+    assert(audit.some((row: any) => row.errorCode === "approval_required"));
+    assert(!JSON.stringify(audit).includes(args.secret));
+    assert(!JSON.stringify(audit).includes(key.rawKey));
+    await assert.rejects(listMcpInvocationAudits(db, outsider.context, { projectId: project.id }));
+    await setMcpInvocationPolicy(db, owner.context, { projectId: project.id }, tool.id, "allow");
+    await configureMcpToolAuthorization(db, owner.context, tool.id, { readOnly: false, targetProjectArgument: null });
     connected = 0;
   });
   await t.test("supplied client/node IDs cannot impersonate a registration", async () => {

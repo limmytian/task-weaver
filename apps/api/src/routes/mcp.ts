@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import {
-  createResourceServices,
+  createResourceServices, getMcpInvocationApproval, McpApprovalRequired, listMcpInvocationAudits, setMcpInvocationPolicy, approveMcpInvocation, cleanupMcpInvocationHistory,
+  configureMcpToolAuthorization, listMcpInvocationAuditsSchema, mcpSecurityScopeSchema, setMcpInvocationPolicySchema, mcpToolAuthorizationSchema,
   personalResourceOwnerId,
   uploadMcpToolsSchema,
   completeLocalMcpRequestSchema,
@@ -15,6 +16,32 @@ import type { Env } from "../middleware/actor.js";
 import { mcpPool } from "../mcp-pool.js";
 
 const mcp = new Hono<Env>();
+
+const securityScope = (identity: Parameters<typeof personalResourceOwnerId>[0], input: { projectId?: string; personal: boolean }) => input.personal ? { personalOwnerId: personalResourceOwnerId(identity), personalOwnerType: "human" as const } : { projectId: input.projectId };
+
+mcp.get("/audit", async c => {
+  const parsed = listMcpInvocationAuditsSchema.safeParse(c.req.query());
+  if (!parsed.success || parsed.data.personal && parsed.data.projectId) return c.json({ error: "Invalid scope" }, 400);
+  const items = await listMcpInvocationAudits(c.get("db"), c.get("identity"), securityScope(c.get("identity"), parsed.data), parsed.data.limit, parsed.data.offset);
+  return c.json({ items, meta: { limit: parsed.data.limit, offset: parsed.data.offset } });
+});
+mcp.post("/policy", async c => {
+  const parsed = setMcpInvocationPolicySchema.safeParse(await c.req.json());
+  if (!parsed.success || parsed.data.personal && parsed.data.projectId) return c.json({ error: "Invalid policy" }, 400);
+  return c.json(await setMcpInvocationPolicy(c.get("db"), c.get("identity"), securityScope(c.get("identity"), parsed.data), parsed.data.toolId, parsed.data.mode));
+});
+mcp.get("/approvals/:id", async c => c.json(await getMcpInvocationApproval(c.get("db"), c.get("identity"), c.req.param("id"))));
+mcp.post("/approvals/:id/approve", async c => c.json(await approveMcpInvocation(c.get("db"), c.get("identity"), c.req.param("id"))));
+mcp.post("/audit/cleanup", async c => {
+  const parsed = mcpSecurityScopeSchema.safeParse(await c.req.json());
+  if (!parsed.success || parsed.data.personal && parsed.data.projectId) return c.json({ error: "Invalid scope" }, 400);
+  return c.json(await cleanupMcpInvocationHistory(c.get("db"), c.get("identity"), securityScope(c.get("identity"), parsed.data)));
+});
+mcp.patch("/tools/:id/authorization", async c => {
+  const parsed = mcpToolAuthorizationSchema.safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: "Invalid authorization" }, 400);
+  return c.json(await configureMcpToolAuthorization(c.get("db"), c.get("identity"), c.req.param("id"), parsed.data));
+});
 
 // -- Server endpoints --
 
@@ -93,6 +120,7 @@ mcp.patch("/servers/:id", async (c) => {
     return c.json(server);
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
+    if (err instanceof McpApprovalRequired) return c.json({ error: "approval_required", approvalId: err.approvalId }, 409);
     if (err instanceof ConflictError) return c.json({ error: err.message }, 409);
     throw err;
   }
@@ -153,6 +181,7 @@ mcp.post("/servers/:id/heartbeat", async (c) => {
     return c.json({ success: true, expiresAt: server.expiresAt });
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
+    if (err instanceof McpApprovalRequired) return c.json({ error: "approval_required", approvalId: err.approvalId }, 409);
     if (err instanceof ConflictError) return c.json({ error: err.message }, 409);
     throw err;
   }
@@ -238,10 +267,12 @@ mcp.post("/tools/:id/call", async (c) => {
       parsed.data.arguments,
       actor,
       mcpPool,
+      parsed.data.approvalId,
     );
     return c.json(result);
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
+    if (err instanceof McpApprovalRequired) return c.json({ error: "approval_required", approvalId: err.approvalId }, 409);
     if (err instanceof ConflictError) return c.json({ error: err.message }, 409);
     throw err;
   }

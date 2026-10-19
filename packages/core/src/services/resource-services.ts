@@ -3,13 +3,13 @@ import { requireDaemonLease } from './daemon-lease-authorization';
 import { createTiExecutionService, isTiExecutionOperation } from './ti-execution';
 import { inArray, and, eq, isNull, sql, desc } from "drizzle-orm";
 import {
-  projectPreferences, type Database, daemons, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
-  mcpTools, mcpLocalRequests, requirementRepositories, skillPackages, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
+  apiKeyProjectCreations, apiKeys, projectPreferences, type Database, daemons, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
+  mcpServers, mcpTools, mcpLocalRequests, requirementRepositories, skillPackages, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
   documentRequirementLinks, projectMemberships, activityLog, executionDelegations, taskComments, workflowOutputs,
 } from "@task-weaver/db";
 import {
   AuthenticationError, AuthorizationError, NotFoundError, ValidationError, type Actor,
-  type VerifiedRequestContext, stableActorReferenceSchema,
+  type VerifiedRequestContext, stableActorReferenceSchema, credentialGrantsSchema,
 } from "@task-weaver/contracts";
 import * as projectImplementation from "./projects";
 import * as requirementImplementation from "./requirements";
@@ -20,7 +20,7 @@ import * as memoryImplementation from "./memory";
 import * as recommendationImplementation from "./recommendations";
 import * as contextImplementation from "./context";
 import { invokeMcpTool, pollLocalToolRequests, completeLocalToolRequest } from "./mcp-local";
-import { mcpServerPredicate, requireMcpServer, requireLocalHost, credentialBinding } from "./mcp-authorization";
+import { mcpInvocationPredicate, mcpToolInvocationPredicate, requireMcpServer, requireLocalHost, credentialBinding } from "./mcp-authorization";
 import * as repositoryImplementation from "./repositories";
 import { repositoryPredicate, requireRepository, requireCatalogManagement } from "./repository-authorization";
 import * as mcpImplementation from "./mcp-registry";
@@ -111,7 +111,7 @@ function bindServices(context?: VerifiedRequestContext) {
         const db = args[0] as Database;
         if (group === "usage" && name === "reportTiUsage") return createTiExecutionService(context).invoke(db, "reportUsage", args.slice(1));
         if (group === "ti" && isTiExecutionOperation(name)) return createTiExecutionService(context).invoke(db, name, args.slice(1));
-        if (group === "mcp" && name === "callTool") return invokeMcpTool(db, context, args[1], args[2], args[3], args[4]);
+        if (group === "mcp" && name === "callTool") return invokeMcpTool(db, context, args[1], args[2], args[3], args[4], args[5]);
         return db.transaction(async tx => {
           // Serialize policy mutations with resource operations, including reads and nested relations.
           await lockIdentityLifecycle(tx);
@@ -142,6 +142,16 @@ function bindServices(context?: VerifiedRequestContext) {
             if (authority.actor.type !== "human" || !authority.grants.some(g => g.scope === "instance" && g.permissions.includes("project.create"))) throw new AuthorizationError();
             const [project] = await tx.insert(projects).values({ ...call[1], createdBy: actor.id }).returning();
             await tx.insert(projectMemberships).values({ projectId: project!.id, actorId: actor.id, actorType: "human", role: "owner" });
+            if (context.credential.kind === "api_key") {
+              const [key] = await tx.select().from(apiKeys).where(eq(apiKeys.id, context.credential.id)).for("update");
+              if (!key || key.actorId !== actor.id || !key.grants) throw new AuthorizationError();
+              await tx.insert(apiKeyProjectCreations).values({ keyId: key.id, projectId: project!.id });
+              await tx.update(apiKeys).set({
+                grants: [...credentialGrantsSchema.parse(key.grants), { scope: "project", projectId: project!.id, permissions: ["resource.read", "resource.write"] }],
+                grantVersion: key.grantVersion + 1,
+              }).where(eq(apiKeys.id, key.id));
+              await auditIdentity(tx, "credential.project_granted", actor.id, actor.id, project!.id, { keyId: key.id, permissions: "resource.read,resource.write" });
+            }
             await auditIdentity(tx, "project.created", actor.id, actor.id, project!.id);
             await tx.insert(activityLog).values({ entityType: "project", entityId: project!.id, action: "created", actorId: actor.id, actorType: actor.type });
             result = project;
@@ -389,8 +399,10 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     if (name === "listServers" || name === "searchTools") {
       if (id?.projectId) await requireResource(db, authority, "project", id.projectId);
       if (id?.includePersonal && (id.personalOwnerId || id.personalOwnerType)) requireScope(authority, id, "resource.read");
-      const predicate = mcpServerPredicate(authority, context);
-      call[2] = predicate; return;
+      const predicate = mcpInvocationPredicate(authority, context);
+      call[2] = and(predicate, sql`EXISTS (SELECT 1 FROM ${mcpTools} WHERE ${mcpTools.serverId} = ${mcpServers.id} AND ${mcpToolInvocationPredicate(authority)})`);
+      if (name === "searchTools") call[3] = mcpToolInvocationPredicate(authority);
+      return;
     }
     let serverId = id;
     if (name === "completeLocalToolRequest") {
@@ -403,12 +415,18 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
       if (!tool) throw new NotFoundError("Resource not found");
       serverId = tool.serverId;
     }
-    const permission = ["updateServer", "deleteServer", "syncTools", "uploadTools", "heartbeatServer", "pollLocalToolRequests", "completeLocalToolRequest"].includes(name) ? "mcp.manage" : name === "callTool" ? "mcp.invoke" : "resource.read";
+    const permission = ["updateServer", "deleteServer", "syncTools", "uploadTools", "heartbeatServer", "pollLocalToolRequests", "completeLocalToolRequest"].includes(name) ? "mcp.manage" : ["getToolDetail", "listServerTools", "callTool"].includes(name) ? "mcp.invoke" : "resource.read";
     if (!["getServer", "listServerTools", "getToolDetail", "callTool", "updateServer", "deleteServer", "syncTools", "uploadTools", "heartbeatServer", "pollLocalToolRequests", "completeLocalToolRequest"].includes(name)) throw new AuthorizationError();
     const server = await requireMcpServer(db, authority, context, serverId, permission);
+    if (name === "getServer" && !canAccessResource(authority, server, "mcp.invoke") && !canAccessResource(authority, server, "mcp.manage")) throw new NotFoundError("Resource not found");
+    if (name === "getToolDetail") {
+      const [visible] = await db.select({ id: mcpTools.id }).from(mcpTools).where(and(eq(mcpTools.id, id), mcpToolInvocationPredicate(authority)));
+      if (!visible) throw new NotFoundError("Resource not found");
+    }
+    if (name === "listServerTools") call[2] = mcpToolInvocationPredicate(authority);
     if (["heartbeatServer", "uploadTools", "pollLocalToolRequests", "completeLocalToolRequest"].includes(name)) requireLocalHost(server, context);
     if (["getToolDetail", "listServerTools", "callTool", "syncTools", "pollLocalToolRequests", "completeLocalToolRequest"].includes(name)
-      && (!server!.active || server!.expiresAt && server!.expiresAt <= new Date())) throw new NotFoundError("Resource not found");
+      && (!server!.active || name !== "syncTools" && server!.status !== "connected" || server!.expiresAt && server!.expiresAt <= new Date())) throw new NotFoundError("Resource not found");
     if (name === "callTool" || name === "syncTools") {
       const poolIndex = name === "callTool" ? 4 : 2;
       const pool = call[poolIndex] as mcpImplementation.McpPool;
@@ -601,6 +619,10 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
   }
   if (name === "getDocumentByTitle" || name === "resolveDocumentTitles") { call[2] = resourcePredicate(authority, documents); return; }
   if (name === "getBootstrapContext") return;
+  if (name === "discoverProjects") {
+    requireScope(authority, {}, "project.discover");
+    return;
+  }
   if (name === "createProject") return;
   if (name === "createTask" || name === "createPersonalTask") {
     call[1] = { ...call[1], ...(name === "createPersonalTask" ? { scope: "personal" } : {}) };
@@ -777,6 +799,11 @@ function redactMcpResult(authority: ResourceAuthority, value: any): any {
   if (Array.isArray(value)) return value.map(item => redactMcpResult(authority, item));
   if (!value || typeof value !== "object" || value instanceof Date) return value;
   const result = { ...value };
+  if ("serverId" in result && "inputSchema" in result) result.authorization = {
+    stableId: result.id, sourceServerId: result.serverId, requiredPermissions: ["mcp.invoke"],
+    targetScope: result.targetProjectArgument ? "project_argument" : "server",
+    projectArgument: result.targetProjectArgument ?? null, readOnly: result.readOnly ?? false,
+  };
   if ("registeredBy" in result && "transport" in result) {
     const config = result.config;
     result.config = canAccessResource(authority, result, "mcp.manage")

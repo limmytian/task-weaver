@@ -505,6 +505,20 @@
       "when": 1792368000000,
       "tag": "0071_mcp_plan_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1792380000000,
+      "tag": "0072_api_key_project_creations",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1792380001000,
+      "tag": "0073_mcp_security",
+      "breakpoints": true
     }
   ]
 }

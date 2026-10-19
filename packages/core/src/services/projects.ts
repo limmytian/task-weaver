@@ -786,3 +786,16 @@ async function deleteRequirementClaimsForProject(db: Database, projectId: string
       )`,
     );
 }
+
+/** Directory entries deliberately exclude descriptions, actors and project content. */
+export async function discoverProjects(db: Database, input: ListProjectsInput = {}) {
+  const page = input.page ?? 1;
+  const pageSize = Math.min(input.pageSize ?? 20, 50);
+  const where = and(
+    input.status ? eq(projects.status, input.status) : undefined,
+    input.query ? sql`${projects.name} ILIKE ${"%" + input.query + "%"}` : undefined,
+  );
+  const items = await db.select({ id: projects.id, name: projects.name, status: projects.status })
+    .from(projects).where(where).orderBy(projects.name, projects.id).limit(pageSize + 1).offset((page - 1) * pageSize);
+  return { items: items.slice(0, pageSize), meta: { page, pageSize, hasMore: items.length > pageSize } };
+}

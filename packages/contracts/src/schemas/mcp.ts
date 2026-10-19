@@ -52,6 +52,7 @@ export const registerMcpServerSchema = requireLocalScopeConsent(z.object({
   transport: mcpTransportSchema,
   config: z.union([mcpServerStdioConfigSchema, mcpServerHttpConfigSchema]),
   tags: z.array(z.string()).optional(),
+  readOnly: z.boolean().default(false),
   active: z.boolean().default(true),
   clientId: z.string().optional(),
   nodeId: z.string().optional(),
@@ -77,6 +78,7 @@ export const updateMcpServerSchema = requireLocalScopeConsent(z.object({
   transport: mcpTransportSchema.optional(),
   config: z.union([mcpServerStdioConfigSchema, mcpServerHttpConfigSchema]).optional(),
   tags: z.array(z.string()).optional(),
+  readOnly: z.boolean().optional(),
   active: z.boolean().optional(),
   clientId: z.string().optional(),
   nodeId: z.string().optional(),
@@ -100,6 +102,7 @@ export const searchMcpToolsSchema = z.object({
 });
 
 export const callMcpToolSchema = z.object({
+  approvalId: z.string().uuid().optional(),
   arguments: z.record(z.unknown()).refine(value => JSON.stringify(value).length <= 1_048_576, "MCP arguments exceed size limit").optional(),
 });
 
@@ -121,4 +124,22 @@ export const uploadMcpToolsSchema = z.object({
 export const completeLocalMcpRequestSchema = z.object({
   leaseToken: z.string().regex(/^[a-f0-9]{64}$/),
   result: z.record(z.unknown()).refine(value => JSON.stringify(value).length <= 1_048_576, "MCP result exceeds size limit"),
+}).strict();
+
+export const mcpSecurityScopeSchema = z.object({
+  projectId: z.string().uuid().optional(),
+  personal: queryBooleanSchema.default(false),
+}).strict();
+export const setMcpInvocationPolicySchema = mcpSecurityScopeSchema.extend({
+  toolId: z.string().min(1).max(255).regex(/^(\*|tw_[a-z_]+|[0-9a-f-]{36})$/),
+  mode: z.enum(["allow", "approval", "deny"]),
+}).strict();
+export const mcpToolAuthorizationSchema = z.object({
+  readOnly: z.boolean(),
+  targetProjectArgument: z.string().min(1).max(100).regex(/^[A-Za-z_][A-Za-z0-9_]*$/).nullable(),
+}).strict();
+
+export const listMcpInvocationAuditsSchema = mcpSecurityScopeSchema.extend({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).max(100000).default(0),
 }).strict();

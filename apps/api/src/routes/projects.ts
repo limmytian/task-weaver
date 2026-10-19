@@ -25,6 +25,13 @@ projects.get("/", async (c) => {
   return c.json(result);
 });
 
+// GET /discover - Search bounded directory metadata independently of content access.
+projects.get("/discover", async (c) => {
+  const parsed = listProjectsSchema.safeParse(c.req.query());
+  if (!parsed.success) return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
+  return c.json(await createResourceServices(c.get("identity")).projectService.discoverProjects(c.get("db"), parsed.data));
+});
+
 // POST / - Create a new project
 projects.post("/", async (c) => {
   const db = c.get("db");

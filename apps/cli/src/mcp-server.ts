@@ -23,7 +23,7 @@ export async function serveMcp(options: { readOnly?: boolean } = {}): Promise<vo
       if (!value || typeof value.ok !== 'boolean') throw new Error('Invalid MCP API result')
       if (!value.ok) {
         const parsed = mcpServerToolErrorSchema.parse(value)
-        throw new McpToolFailure(parsed.error.code, parsed.error.message)
+        throw new McpToolFailure(parsed.error.code, parsed.error.message, parsed.error.approvalId)
       }
       return value.data
     } catch (error) {
@@ -36,7 +36,10 @@ export async function serveMcp(options: { readOnly?: boolean } = {}): Promise<vo
       throw error
     }
   }, { readOnly: options.readOnly, signal: controller.signal })
-  const server = createTaskWeaverMcpServer(call, options)
+  const server = createTaskWeaverMcpServer(call, { ...options, visibleTools: async () => {
+    const result = await request<{ tools: string[] }>('GET', '/api/v1/mcp-server/catalog', undefined, { credential, signal: AbortSignal.timeout(MCP_SERVER_LIMITS.timeoutMs) })
+    return result.tools
+  } })
   const transport = new StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: MCP_SERVER_LIMITS.requestBytes })
   let stopping = false
   let resolveStopped: () => void = () => {}

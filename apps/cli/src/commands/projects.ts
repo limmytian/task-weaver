@@ -108,6 +108,17 @@ function printGraph(data: GraphData, opts: { format?: string; direction?: string
 
 export function registerProjects(program: Command): void {
   const project = program.command('project').description('manage projects')
+  project.command('discover').description('search bounded project directory metadata')
+    .option('--query <text>', 'project name query').option('--page <n>', 'page number', '1')
+    .option('--page-size <n>', 'maximum entries per page', '20').option('--json', 'output JSON')
+    .action(async opts => {
+      const query = new URLSearchParams({ page: opts.page, pageSize: opts.pageSize })
+      if (opts.query) query.set('query', opts.query)
+      const data = await get<{ items: Record<string, unknown>[] }>(`/api/v1/projects/discover?${query}`)
+      if (opts.json) printJson(data)
+      else printTable(data.items, ['id', 'name', 'status'])
+    })
+
 
   project
     .command('list')

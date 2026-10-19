@@ -56,6 +56,7 @@ export const authorizationPermissionSchema = z.enum([
   "resource.read",
   "resource.write",
   "project.create",
+  "project.discover",
   "project.manage",
   "project.members.manage",
   "project.ownership.manage",
@@ -114,6 +115,8 @@ export const AUTHORIZATION_SCOPE_PERMISSIONS = {
     "audit.read",
   ],
   global: [
+    "audit.read",
+    "project.discover",
     "resource.read",
     "resource.write",
     "global.manage",

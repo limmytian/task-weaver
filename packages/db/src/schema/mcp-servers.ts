@@ -41,6 +41,7 @@ export const mcpServers = pgTable(
     registeredBy: text("registered_by"),
     registeredCredentialId: text("registered_credential_id"),
     config: jsonb("config").notNull().$type<McpServerConfig>(),
+    readOnly: boolean("read_only").notNull().default(false),
     active: boolean("active").notNull().default(true),
     status: text("status", {
       enum: ["disconnected", "connected", "error"],
@@ -78,6 +79,8 @@ export const mcpTools = pgTable(
     name: text("name").notNull(),
     description: text("description"),
     inputSchema: jsonb("input_schema").$type<Record<string, unknown>>(),
+    readOnly: boolean("read_only").notNull().default(false),
+    targetProjectArgument: text("target_project_argument"),
     tags: text("tags").array(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()

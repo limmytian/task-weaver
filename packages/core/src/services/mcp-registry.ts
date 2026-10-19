@@ -1,4 +1,4 @@
-import { and, eq, or, sql, inArray, isNull, type SQL } from "drizzle-orm";
+import { asc, and, eq, or, sql, inArray, isNull, type SQL } from "drizzle-orm";
 import { type Database, mcpServers, mcpTools, mcpToolCalls } from "@task-weaver/db";
 import type { Actor } from "@task-weaver/contracts";
 import type {
@@ -58,6 +58,7 @@ export async function registerServer(
       config: input.config,
       tags: input.tags,
       active: input.active,
+      readOnly: input.readOnly,
       clientId: input.clientId,
       nodeId: input.nodeId,
       scope: input.transport === "stdio" ? (input.scope ?? "private") : null,
@@ -124,10 +125,7 @@ export async function listServers(
   }
   conditions.push(buildServerScopeCondition(filters ?? {}));
 
-  return db.query.mcpServers.findMany({
-    where: conditions.length > 0 ? and(...conditions) : undefined,
-    orderBy: (s, { asc }) => [asc(s.name)],
-  });
+  return db.select().from(mcpServers).where(and(...conditions)).orderBy(asc(mcpServers.name));
 }
 
 export async function updateServer(
@@ -173,6 +171,7 @@ export async function syncTools(
   db: Database,
   serverId: string,
   pool: McpPool,
+  _approvalId?: string,
 ) {
   const server = await getServer(db, serverId);
   let client: McpPoolClient;
@@ -307,14 +306,15 @@ export async function uploadTools(
     }
   }
 
+  await db.update(mcpServers).set({ status: "connected", lastConnectedAt: new Date(), statusMessage: null }).where(eq(mcpServers.id, serverId));
   return results;
 }
 
 // -- Tool Search --
 
-export async function searchTools(db: Database, input: SearchMcpToolsInput, authorizedServerPredicate?: SQL) {
+export async function searchTools(db: Database, input: SearchMcpToolsInput, authorizedServerPredicate?: SQL, authorizedToolPredicate?: SQL) {
   const likePattern = input.intent === "*" ? "%" : `%${input.intent}%`;
-  const conditions = [authorizedServerPredicate ? inArray(mcpTools.serverId, db.select({ id: mcpServers.id }).from(mcpServers).where(authorizedServerPredicate)) : undefined];
+  const conditions = [authorizedToolPredicate, authorizedServerPredicate ? inArray(mcpTools.serverId, db.select({ id: mcpServers.id }).from(mcpServers).where(authorizedServerPredicate)) : undefined];
 
   conditions.push(
     or(
@@ -365,6 +365,8 @@ export async function searchTools(db: Database, input: SearchMcpToolsInput, auth
       inputSchema: mcpTools.inputSchema,
       serverId: mcpTools.serverId,
       tags: mcpTools.tags,
+      readOnly: mcpTools.readOnly,
+      targetProjectArgument: mcpTools.targetProjectArgument,
     })
     .from(mcpTools)
     .where(and(...conditions))
@@ -463,6 +465,7 @@ export async function callTool(
   args: Record<string, unknown> | undefined,
   actor: Actor,
   pool: McpPool,
+  _approvalId?: string,
 ) {
   const tool = await db.query.mcpTools.findFirst({
     where: eq(mcpTools.id, toolId),
@@ -529,6 +532,6 @@ export async function callTool(
   }
 }
 
-export async function listServerTools(db: Database, serverId: string) {
-  return db.query.mcpTools.findMany({ where: eq(mcpTools.serverId, serverId) });
+export async function listServerTools(db: Database, serverId: string, authorizedPredicate?: SQL) {
+  return db.query.mcpTools.findMany({ where: and(eq(mcpTools.serverId, serverId), authorizedPredicate) });
 }

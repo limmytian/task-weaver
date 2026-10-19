@@ -5,7 +5,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createMcpServerRoutes } from "./mcp-server";
 import type { Env } from "../middleware/actor";
-import type { VerifiedRequestContext } from "@task-weaver/contracts";
+import { mcpServerCatalog, type VerifiedRequestContext } from "@task-weaver/contracts";
 
 const id = "11111111-1111-4111-8111-111111111111";
 function fixture(readOnly = false) {
@@ -20,6 +20,7 @@ function fixture(readOnly = false) {
     await next();
   });
   app.route("/api/v1/mcp-server", createMcpServerRoutes({ allowedHosts: ["localhost"], readOnly,
+    visibleTools: async () => mcpServerCatalog.map(tool => tool.name),
     executor: context => async (_name, args) => { calls.push(context.identity.actor.id); return { id: args.id, actor: context.identity.actor.id }; },
   }));
   const connect = async (token: string) => {
@@ -38,7 +39,7 @@ test("official HTTP SDK initializes, lists and isolates concurrent credentials",
   const f = fixture();
   const [a, b] = await Promise.all([f.connect("key-a"), f.connect("key-b")]);
   try {
-    assert.equal((await a.listTools()).tools.length, 43);
+    assert.equal((await a.listTools()).tools.length, 44);
     const results = await Promise.all([a.callTool({ name: "tw_tasks_get", arguments: { id } }), b.callTool({ name: "tw_tasks_get", arguments: { id } })]);
     assert.equal((results[0]!.structuredContent as { data: { actor: string } }).data.actor, "actor-a");
     assert.equal((results[1]!.structuredContent as { data: { actor: string } }).data.actor, "actor-b");
@@ -52,7 +53,7 @@ test("JSON adapter and HTTP transport apply read-only and strict arguments", asy
   const f = fixture(true);
   const client = await f.connect("key-a");
   try {
-    assert.equal((await client.listTools()).tools.length, 23);
+    assert.equal((await client.listTools()).tools.length, 24);
     const write = await client.callTool({ name: "tw_tasks_status", arguments: { id, status: "done" } });
     assert.equal(write.isError, true);
     const spoof = await f.app.request("/api/v1/mcp-server/tools/tw_tasks_get", { method: "POST", headers: { authorization: "Bearer key-a", "content-type": "application/json" }, body: JSON.stringify({ id, actorId: "actor-b" }) });

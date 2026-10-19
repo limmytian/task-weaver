@@ -1,3 +1,7 @@
+import { inArray } from "drizzle-orm";
+import { mcpInvocationPolicies } from "@task-weaver/db";
+import { mcpScopeKey } from "../services/mcp-security";
+import { secureMcpExecutor } from "./security";
 import { submitMcpPlan } from "./planning";
 import { readMcpContext } from "./context";
 import { mcpSlices } from "./slices";
@@ -5,9 +9,9 @@ import { readMcpPackage, readMcpSkill, listMcpPackages } from "./discovery";
 import type { SkillPackageStorageAdapter } from "../services/skill-package-storage";
 import type { Database } from "@task-weaver/db";
 import type { VerifiedRequestContext } from "@task-weaver/contracts";
-import { createTaskSchema, listTasksSchema, createRequirementSchema, updateRequirementSchema, updateTaskSchema, createDocumentSchema, updateDocumentSchema, listProjectsSchema, listRequirementsSchema, listDocumentsSchema } from "@task-weaver/contracts";
+import { AuthorizationError, mcpServerCatalog, mcpServerReadTools, createTaskSchema, listTasksSchema, createRequirementSchema, updateRequirementSchema, updateTaskSchema, createDocumentSchema, updateDocumentSchema, listProjectsSchema, listRequirementsSchema, listDocumentsSchema } from "@task-weaver/contracts";
 import { createResourceServices } from "../services/resource-services";
-import { personalResourceOwnerId } from "../services/resource-authorization";
+import { personalResourceOwnerId, resourceAuthority } from "../services/resource-authorization";
 import type { McpExecutor } from "./index";
 
 function paged(value: unknown) {
@@ -21,8 +25,9 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
   const { projectService: projects, requirementService: requirements, taskService: tasks, documentService: documents, claimService: claims } = services;
   const actor = { id: identity.actor.id, type: identity.actor.type };
   const owner = { personalOwnerId: personalResourceOwnerId(identity), personalOwnerType: "human" as const };
-  return async (name, raw, signal) => {
+  return secureMcpExecutor(db, identity, async (name, raw, signal, db) => {
     signal.throwIfAborted();
+    if (!(await authorizedMcpToolNames(db, identity)).includes(name)) throw new AuthorizationError();
     // Inputs have already passed the strict shared MCP schema. Re-parse business
     // payloads below to preserve refinements and defaults in the canonical contracts.
     const id = raw.id as string;
@@ -48,6 +53,7 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
       case "tw_skill_packages_get": return readMcpPackage(db, identity, "get", raw as { packageId: string }, storage);
       case "tw_skill_package_files": return readMcpPackage(db, identity, "files", raw as { packageId: string }, storage);
       case "tw_skill_package_read": return readMcpPackage(db, identity, "read", raw as { packageId: string }, storage);
+      case "tw_projects_discover": return projects.discoverProjects(db, listProjectsSchema.parse(raw));
       case "tw_projects_list": return paged(await projects.listProjects(db, { ...listProjectsSchema.parse(raw), view: "summary" }));
       case "tw_projects_get": return projects.getProject(db, id);
       case "tw_requirements_list": return paged(await requirements.listRequirements(db, { ...listRequirementsSchema.parse(raw), view: "summary" }));
@@ -96,5 +102,25 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
         return { items: items.slice(0, limit), meta: { limit, hasMore: items.length > limit, paginationSupported: false, matchedTypes: groups.map((group, index) => group.length ? ["task", "requirement", "document"][index] : null).filter(Boolean), documentSearch: documentResult.metadata } };
       }
     }
-  };
+  });
+}
+
+/** A catalog is a hint; facade operations still authorize the actual target IDs. */
+export async function authorizedMcpToolNames(db: Database, identity: VerifiedRequestContext): Promise<readonly string[]> {
+  const authority = await resourceAuthority(db, identity);
+  if (authority.bounds) return [];
+  const scopeKeys = authority.grants.flatMap(grant => grant.scope === "instance" ? [] : [mcpScopeKey(grant.scope === "project" ? { projectId: grant.projectId } : grant.scope === "personal" ? { personalOwnerId: grant.actorId } : {})]);
+  const policies = scopeKeys.length ? await db.select().from(mcpInvocationPolicies).where(inArray(mcpInvocationPolicies.scopeKey, scopeKeys)) : [];
+  const names: string[] = [];
+  for (const tool of mcpServerCatalog) {
+    const projectOnly = /^tw_(projects|requirements|requirement_dependencies|execution_slices|plan)_/.test(tool.name);
+    const permission = tool.name === "tw_projects_discover" ? "project.discover" : (mcpServerReadTools as readonly string[]).includes(tool.name) && tool.name !== "tw_plan_validate" ? "resource.read" : "resource.write";
+    for (const grant of authority.grants) {
+      if (grant.scope === "instance" || !grant.permissions.includes(permission)) continue;
+      if (projectOnly && tool.name !== "tw_projects_discover" && grant.scope !== "project") continue;
+      const scope = grant.scope === "project" ? { projectId: grant.projectId } : grant.scope === "personal" ? { personalOwnerId: grant.actorId } : {};
+      if (!policies.some(policy => policy.scopeKey === mcpScopeKey(scope) && [tool.name, "*"].includes(policy.toolId) && policy.mode === "deny")) { names.push(tool.name); break; }
+    }
+  }
+  return names;
 }

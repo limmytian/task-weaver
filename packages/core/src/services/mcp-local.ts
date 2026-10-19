@@ -1,23 +1,39 @@
+import { requireMcpApproval, recordMcpInvocationAudit, mcpPolicy, mcpScopeKey } from "./mcp-security";
+import { personalResourceOwnerId, type ResourceScope } from "./resource-authorization";
 import { createHash, randomBytes } from "node:crypto";
 import { and, eq, lt, inArray } from "drizzle-orm";
 import { type Database, mcpLocalRequests, mcpTools, mcpToolCalls } from "@task-weaver/db";
 import { NotFoundError, AuthorizationError, ConflictError, callMcpToolSchema, completeLocalMcpRequestSchema, type Actor, type VerifiedRequestContext } from "@task-weaver/contracts";
 import { lockIdentityLifecycle } from "./auth-security";
 import { resourceAuthority } from "./resource-authorization";
-import { credentialBinding, requireLocalHost, requireMcpServer } from "./mcp-authorization";
+import { credentialBinding, requireMcpToolTarget, requireLocalHost, requireMcpServer } from "./mcp-authorization";
 import { callTool, type McpPool } from "./mcp-registry";
 import { redactAssistantValues } from "./assistant-assets";
 
 async function requireQueuedTool(db: Database, item: typeof mcpLocalRequests.$inferSelect) {
   const tool = item.toolId ? await db.query.mcpTools.findFirst({ where: eq(mcpTools.id, item.toolId) }) : undefined;
   if (!tool || tool.serverId !== item.serverId || tool.name !== item.toolName) throw new NotFoundError("Resource not found");
+  const context = item.callerContext as unknown as VerifiedRequestContext;
+  const authority = await resourceAuthority(db, context);
+  const server = await requireMcpServer(db, authority, context, item.serverId, "mcp.invoke");
+  const scope = await requireMcpToolTarget(db, authority, server, tool, item.arguments ?? {});
+  const policy = await mcpPolicy(db, mcpScopeKey(scope), tool.id);
+  if (policy.mode === "approval") {
+    const approvalId = item.callerContext._mcpApprovalId;
+    if (typeof approvalId !== "string") throw new AuthorizationError();
+    await requireMcpApproval(db, context, scope, tool.id, approvalOperation(item.arguments ?? {}, tool, server), approvalId, false, true);
+  }
+  if (item.callerContext._mcpTool !== toolBinding(tool) || item.callerContext._mcpServer !== digest(serverBinding(server)) || policy.mode === "deny" || JSON.stringify(item.callerContext._mcpPolicy) !== JSON.stringify(policy)) throw new AuthorizationError();
 }
 
+const toolBinding = (tool: { id: string; name: string; inputSchema: unknown; readOnly: boolean; targetProjectArgument: string | null }) => JSON.stringify({ id: tool.id, name: tool.name, inputSchema: tool.inputSchema, readOnly: tool.readOnly, targetProjectArgument: tool.targetProjectArgument });
+const serverBinding = (server: { id: string; projectId: string | null; personalOwnerId: string | null; transport: string; config: unknown; readOnly: boolean }) => JSON.stringify({ id: server.id, projectId: server.projectId, personalOwnerId: server.personalOwnerId, transport: server.transport, config: server.config, readOnly: server.readOnly });
+const approvalOperation = (args: Record<string, unknown>, tool: unknown, server: Parameters<typeof serverBinding>[0]) => ({ args, tool, server: JSON.parse(serverBinding(server)) });
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const failed = () => ({ isError: true, content: [{ type: "text", text: "Local MCP invocation failed or expired" }] });
 
 /** Network waits happen outside lifecycle transactions so the client can consume its mailbox. */
-export async function invokeMcpTool(db: Database, context: VerifiedRequestContext, toolId: string, args: Record<string, unknown> | undefined, actor: Actor, pool: McpPool) {
+async function invokeMcpToolUnchecked(db: Database, context: VerifiedRequestContext, toolId: string, args: Record<string, unknown> | undefined, actor: Actor, pool: McpPool, approvalId?: string) {
   args = callMcpToolSchema.parse({ arguments: args }).arguments;
   const prepared = await db.transaction(async tx => {
     await lockIdentityLifecycle(tx);
@@ -27,7 +43,8 @@ export async function invokeMcpTool(db: Database, context: VerifiedRequestContex
     const tool = await tx.query.mcpTools.findFirst({ where: eq(mcpTools.id, toolId) });
     if (!tool) throw new NotFoundError("Resource not found");
     const server = await requireMcpServer(database, authority, context, tool.serverId, "mcp.invoke");
-    if (!server.active || server.expiresAt && server.expiresAt <= new Date()) throw new NotFoundError("Resource not found");
+    await requireMcpToolTarget(database, authority, server, tool, args);
+    if (!server.active || server.status !== "connected" || server.expiresAt && server.expiresAt <= new Date()) throw new NotFoundError("Resource not found");
     if (server.transport !== "stdio") {
       const partition = actor.id + ":" + credentialBinding(context);
       return { remote: { server, tool, partition } };
@@ -39,7 +56,7 @@ export async function invokeMcpTool(db: Database, context: VerifiedRequestContex
     if (pending.filter(item => item.expiresAt > new Date()).length >= 32) throw new ConflictError("Local MCP queue is full", 0);
     const [request] = await tx.insert(mcpLocalRequests).values({
       serverId: server.id, toolId: tool.id, toolName: tool.name,
-      callerContext: context as unknown as Record<string, unknown>,
+      callerContext: { ...context, _mcpApprovalId: approvalId ?? null, _mcpTool: toolBinding(tool), _mcpServer: digest(serverBinding(server)), _mcpPolicy: await mcpPolicy(database, mcpScopeKey(await requireMcpToolTarget(database, authority, server, tool, args)), tool.id) } as unknown as Record<string, unknown>,
       calledBy: actor.id, calledByType: actor.type, arguments: args,
       expiresAt: new Date(Date.now() + 30_000),
     }).returning();
@@ -53,8 +70,9 @@ export async function invokeMcpTool(db: Database, context: VerifiedRequestContex
       const authority = await resourceAuthority(database, context);
       const server = await requireMcpServer(database, authority, context, remote.server.id, "mcp.invoke");
       const tool = await tx.query.mcpTools.findFirst({ where: eq(mcpTools.id, toolId) });
-      if (!server.active || server.expiresAt && server.expiresAt <= new Date() || !tool
-        || tool.serverId !== remote.server.id || tool.name !== remote.tool.name
+      if (tool) await requireMcpToolTarget(database, authority, server, tool, args);
+      if (!server.active || server.status !== "connected" || server.expiresAt && server.expiresAt <= new Date() || !tool
+        || tool.serverId !== remote.server.id || toolBinding(tool) !== toolBinding(remote.tool) || serverBinding(server) !== serverBinding(remote.server)
         || server.transport !== remote.server.transport || JSON.stringify(server.config) !== JSON.stringify(remote.server.config)) throw new AuthorizationError();
     });
     // External connections/calls must not hold lifecycle locks needed by cancellation or progress reads.
@@ -79,7 +97,7 @@ export async function invokeMcpTool(db: Database, context: VerifiedRequestContex
         const database = tx as unknown as Database;
         const authority = await resourceAuthority(database, context);
         const server = await requireMcpServer(database, authority, context, request.serverId, "mcp.invoke");
-        if (!server.active || server.expiresAt && server.expiresAt <= new Date()) throw new NotFoundError("Resource not found");
+        if (!server.active || server.status !== "connected" || server.expiresAt && server.expiresAt <= new Date()) throw new NotFoundError("Resource not found");
         const item = await tx.query.mcpLocalRequests.findFirst({ where: eq(mcpLocalRequests.id, request.id) });
         if (!item || item.status === "cancelled") return { result: failed() };
         if (item.status !== "completed") return null;
@@ -110,7 +128,7 @@ export async function pollLocalToolRequests(db: Database, serverId: string) {
     const context = item.callerContext as unknown as VerifiedRequestContext;
     const authority = await resourceAuthority(db, context);
     const server = await requireMcpServer(db, authority, context, serverId, "mcp.invoke");
-    if (!server.active || server.expiresAt && server.expiresAt <= new Date()) throw new AuthorizationError();
+    if (!server.active || server.status !== "connected" || server.expiresAt && server.expiresAt <= new Date()) throw new AuthorizationError();
     await requireQueuedTool(db, item);
   } catch {
     await db.update(mcpLocalRequests).set({ status: "cancelled", arguments: null, callerContext: {} }).where(eq(mcpLocalRequests.id, item.id));
@@ -128,7 +146,7 @@ export async function completeLocalToolRequest(db: Database, id: string, input: 
   const context = item.callerContext as unknown as VerifiedRequestContext;
   const authority = await resourceAuthority(db, context);
   const server = await requireMcpServer(db, authority, context, item.serverId, "mcp.invoke");
-  if (!server.active || server.expiresAt && server.expiresAt <= new Date()) throw new NotFoundError("Resource not found");
+  if (!server.active || server.status !== "connected" || server.expiresAt && server.expiresAt <= new Date()) throw new NotFoundError("Resource not found");
   await requireQueuedTool(db, item);
   await db.update(mcpLocalRequests).set({ status: "completed", result: input.result, arguments: null, leaseHash: null }).where(eq(mcpLocalRequests.id, id));
   await db.insert(mcpToolCalls).values({
@@ -139,4 +157,42 @@ export async function completeLocalToolRequest(db: Database, id: string, input: 
     errorMessage: input.result.isError ? "Local MCP tool reported an error" : null,
   });
   return { completed: true };
+}
+
+export async function invokeMcpTool(db: Database, context: VerifiedRequestContext, toolId: string, args: Record<string, unknown> | undefined, actor: Actor, pool: McpPool, approvalId?: string) {
+  const start = Date.now();
+  let scope: ResourceScope = { personalOwnerId: personalResourceOwnerId(context), personalOwnerType: "human" };
+  let serverId = "unknown";
+  try {
+    const authority = await resourceAuthority(db, context);
+    const tool = await db.query.mcpTools.findFirst({ where: eq(mcpTools.id, toolId) });
+    if (!tool) throw new NotFoundError("Resource not found");
+    const server = await requireMcpServer(db, authority, context, tool.serverId, "mcp.invoke");
+    serverId = server.id;
+    if (!server.active || server.status !== "connected" || server.expiresAt && server.expiresAt <= new Date()) throw new NotFoundError("Resource not found");
+    scope = await requireMcpToolTarget(db, authority, server, tool, args);
+    const policy = await mcpPolicy(db, mcpScopeKey(scope), toolId);
+    await requireMcpApproval(db, context, scope, toolId, approvalOperation(args ?? {}, tool, server), approvalId);
+    const checkedPool: McpPool = {
+      disconnect: id => pool.disconnect(id),
+      isConnected: id => pool.isConnected(id),
+      getOrConnect: async record => {
+        const current = await mcpPolicy(db, mcpScopeKey(scope), toolId);
+        if (current.mode === "deny" || JSON.stringify(current) !== JSON.stringify(policy)) throw new AuthorizationError();
+        const client = await pool.getOrConnect(record);
+        return { listTools: () => client.listTools(), callTool: async input => {
+          const current = await mcpPolicy(db, mcpScopeKey(scope), toolId);
+          if (JSON.stringify(current) !== JSON.stringify(policy)) throw new AuthorizationError();
+          if (approvalId) await requireMcpApproval(db, context, scope, toolId, approvalOperation(args ?? {}, tool, server), approvalId, false, true);
+          return client.callTool(input);
+        } };
+      },
+    };
+    const result = await invokeMcpToolUnchecked(db, context, toolId, args, actor, checkedPool, approvalId);
+    await recordMcpInvocationAudit(db, context, scope, serverId, toolId, start, undefined, Boolean((result as { isError?: boolean }).isError));
+    return result;
+  } catch (error) {
+    await recordMcpInvocationAudit(db, context, scope, serverId, toolId, start, error);
+    throw error;
+  }
 }
