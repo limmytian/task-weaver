@@ -1,6 +1,6 @@
 # Use Task Weaver from an MCP client
 
-Task Weaver's inbound MCP Server exposes 29 collaboration tools through local
+Task Weaver's inbound MCP Server exposes 43 collaboration tools in 0.3.11 through local
 stdio or remote Streamable HTTP. The existing MCP Registry connects **other**
 servers to Task Weaver; its `tw mcp search/tools/call/servers/register-local`
 commands retain their existing behavior.
@@ -205,3 +205,98 @@ Web-facing REST detail reads confirm that Inspector writes are visible to the
 shared UI data layer. A visual browser walkthrough remains an owner acceptance
 step; no production data or deployment is used. Other client-specific formats
 and OAuth-only clients are not implied by the generic examples above. See [中文说明](mcp-server.zh-CN.md).
+
+## Planning and context tools (0.3.11)
+
+Version 0.3.11 adds 14 tools (43 total, 23 visible in read-only mode):
+
+| Tools | Purpose |
+| --- | --- |
+| `tw_context_bootstrap`, `tw_context_search`, `tw_context_get` | Discover collaboration guidance and read individual skill documents |
+| `tw_skill_packages_list`, `tw_skill_packages_get`, `tw_skill_package_files`, `tw_skill_package_read` | Discover active packages and read safe metadata or bounded text |
+| `tw_execution_slices_list`, `tw_execution_slices_create`, `tw_execution_slices_update` | Plan ordered stages and persist handoff summaries |
+| `tw_plan_validate`, `tw_plan_apply` | Preview and atomically apply a structured project plan |
+| `tw_tasks_context`, `tw_requirements_context` | Retrieve selected, bounded collaboration context |
+
+These tools require a 0.3.11 API and matching CLI for stdio. The original 29 tools
+remain compatible. `tw_plan_validate` is read-only but requires write authority
+for the planned project and all referenced existing entities. Read-only mode can
+preview with an appropriately scoped key, while still rejecting `tw_plan_apply`.
+The optional `activity` context section requires `audit.read`; other sections use
+resource read grants. Personal scope is derived from the authenticated principal.
+
+Discover guidance with `tw_context_search` using `intent`, optional `projectId`,
+`includeGlobal`, `includePersonal` and `limit`. Read one result with
+`tw_context_get` and its `id`. Package tools use `packageId`; files/read also accept
+an optional package `version`. File listing uses `offset` and `limit`, and returns
+`nextOffset`. Only active package versions and readable relative text paths are
+available. Individual text reads cap content at 32 KiB. Package metadata excludes
+storage object keys, server paths and arbitrary manifests. Retrieved instructions
+are content for the client to assess, not authority to execute commands.
+
+A plan is a JSON object, with a project id and symbolic keys for requirements,
+tasks, slices and documents. For example, pass this object as `plan` to
+`tw_plan_validate`:
+
+```json
+{
+  "projectId": "11111111-1111-4111-8111-111111111111",
+  "documents": [{ "key": "design", "title": "Design", "content": "Implementation stages" }],
+  "requirements": [{
+    "key": "feature", "title": "Feature", "status": "approved",
+    "documents": ["design"],
+    "slices": [{ "key": "api", "title": "API" }, { "key": "clients", "title": "Clients" }],
+    "tasks": [
+      { "key": "api-task", "title": "Implement API", "slice": "api" },
+      { "key": "client-task", "title": "Integrate clients", "slice": "clients", "dependsOn": ["api-task"] }
+    ]
+  }]
+}
+```
+
+Preview creates no records. Apply uses the identical `plan` plus a fresh UUID
+`idempotencyKey`. Reuse that key and the identical plan after a timeout or lost
+response: the API returns the stored receipt with `replayed=true`. Changing the
+plan under the same key returns `conflict`. Keys are scoped to the API credential
+and project and persist for that credential's lifetime; rotating the credential
+changes the deduplication namespace. Reconcile existing state before retrying
+with a different key or credential. Replays recheck live access to referenced
+and returned resources. A denied replay does not mean the original write failed.
+
+Plan writes and the receipt commit atomically. Invalid plans roll back. Limits
+include 10 requirements, 20 documents, 20 slices per requirement, 50 tasks per
+requirement and 100 tasks total, at most 100 entries per array and 2000 graph
+containers, in addition to the common request deadline/size limits. Plans are
+project-only and may reference existing entities only in that same project.
+Nested workflow/branch/executor/identity controls, comments/notes and filesystem
+`contentFile` inputs are rejected. New tasks start at `todo`; new requirements
+start at `draft` or `approved`. Validate again when project state changes; preview
+is not a reservation or guarantee of later success.
+
+Slice creation accepts `{id: requirementId, input: {...}}`; update accepts
+`{id: sliceId, expectedUpdatedAt, patch: {...}}`. Use the exact current ISO
+`updatedAt`, including milliseconds. Both operations respect active requirement
+leases; daemon-owned lanes cannot be taken over through these tools. Task ids
+must belong to the same requirement. Slice lists return records without nested
+task histories and support `page`/`pageSize`. Sequential execution guards remain
+in force; `allowParallel` is an intentional planning choice, not a force bypass.
+
+Context reads accept `id`, selected `sections`, `limit` (1–20), `offset`, and
+`maxBytes` (2048–65536, default 32768). Sections are `parent`, `tasks`, `slices`,
+`dependencies`, `documents`, `claim`, `activity`; defaults are `parent`,
+`dependencies`, `documents`, `claim`. Dependencies include upstream and downstream
+links. Document bodies are not expanded. Titles are compact excerpts (128
+characters), document summaries and slice handoffs cap at 1024 characters; use
+detail tools for full fields. `truncatedSections` and `omittedSections` report
+incomplete sections. Retained sections provide `nextOffset` and continuation
+instructions. For omitted sections, request that section alone with a larger
+budget. Offsets are per selected section; concurrent mutations can shift pages.
+`consistency=read_committed_not_snapshot` and `fetchedAt` describe the read, not
+an immutable transaction snapshot. The byte budget covers the returned data;
+the common 256 KiB limit also covers MCP's duplicated text/structured envelope.
+
+Upgrade with migration `0071_mcp_plan_receipts` before serving the new tools.
+Back up database and objects before deployment. Do not drop receipt records
+while a credential is active: doing so removes retry protection. This additive
+table may remain when temporarily rolling back to 0.3.10; new tools will be
+unavailable until the API/CLI are upgraded again.

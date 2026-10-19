@@ -142,3 +142,17 @@ change. Stop writes and use the full database/storage recovery procedure if a
 separate data or migration problem occurred.
 
 See [MCP setup](mcp-server.md) and its [Chinese translation](mcp-server.zh-CN.md).
+
+## 0.3.10 to 0.3.11: MCP planning upgrade
+
+Take database and object backups, then run migration `0071_mcp_plan_receipts`.
+This adds a credential/project-scoped idempotency receipt table; preserve its
+rows for active credentials. Deploy matching API/Web images and upgrade local
+CLI clients. Verify the 43-tool catalog (23 read-only tools), a mutation-free
+plan preview, identical-key replay, slice conflict rejection and bounded context
+pagination on both transports. Verify current key grants, including optional
+`audit.read` for activity sections. See [the MCP guide](mcp-server.md#planning-and-context-tools-0311).
+
+A temporary rollback can retain the additive table while running 0.3.10, but
+new tools will be unavailable. Restore from backup only under the normal recovery
+procedure; deleting receipts independently can make delayed retries duplicate work.

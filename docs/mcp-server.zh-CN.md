@@ -1,6 +1,6 @@
 # 通过 MCP 客户端使用 Task Weaver
 
-0.3.10 的 MCP Server 通过本地 stdio 或远程 Streamable HTTP 提供 29 个协作工具。
+0.3.11 的 MCP Server 通过本地 stdio 或远程 Streamable HTTP 提供 43 个协作工具。
 已有 MCP Registry 用于把外部工具接入 Task Weaver，原有 `tw mcp` 命令保持兼容。
 英文规范见 [MCP Server](mcp-server.md)，工具契约见 [实现契约](mcp-server-contract.md)。
 
@@ -125,3 +125,58 @@ pnpm test:mcp-postgres
 JavaScript 入口后执行数据库命令，可复现 Inspector 验收；未设置时仅运行 SDK 验收。
 Inspector 使用临时 0600 配置并在结束后删除。Web 使用的详情接口已确认可见写入结果，
 浏览器视觉操作仍由用户验收。通用配置示例不代表已验证所有客户端。
+
+## 0.3.11：规划与上下文
+
+新增 14 个工具，总计 43 个；只读模式可见 23 个。需使用 0.3.11 API，stdio
+还需匹配版本 CLI；原有 29 个工具保持兼容。
+
+| 工具 | 用途 |
+| --- | --- |
+| `tw_context_bootstrap`、`tw_context_search`、`tw_context_get` | 获取使用规范、检索技能摘要、读取单个技能 |
+| `tw_skill_packages_list`、`tw_skill_packages_get`、`tw_skill_package_files`、`tw_skill_package_read` | 查询活动技能包、文件元数据和有界文本 |
+| `tw_execution_slices_list`、`tw_execution_slices_create`、`tw_execution_slices_update` | 规划执行阶段、更新交接摘要 |
+| `tw_plan_validate`、`tw_plan_apply` | 无写入预览与原子应用计划 |
+| `tw_tasks_context`、`tw_requirements_context` | 按需聚合任务或需求背景 |
+
+先用 `tw_context_search` 的 `intent` 搜索，可指定 `projectId`、`includeGlobal`、
+`includePersonal` 和 `limit`，再通过 `tw_context_get` 的 `id` 读取正文。
+技能包工具使用 `packageId`，文件工具可选 `version`。文件列表用 `offset`、
+`limit` 分页，返回 `nextOffset`。仅提供活动包版本和可读相对文本路径，单个文本
+最多 32 KiB，不返回存储位置、主机路径和任意 manifest。检索内容本身不构成执行授权。
+
+批量计划用 JSON 的 `plan` 参数提交，包含项目、需求、任务、切片、文档和符号引用。
+完整示例见[英文规范](mcp-server.md#planning-and-context-tools-0311)。
+`tw_plan_validate` 不写入，但会检查项目及所有已有引用对象的写权限。
+只读模式允许有相应写权限的密钥预览，仍拒绝应用。
+
+`tw_plan_apply` 额外要求 UUID `idempotencyKey`。超时或响应丢失后，使用同一密钥、
+相同计划和相同 key 重试，已提交结果返回 `replayed=true`；同 key 不同计划返回
+`conflict`。去重记录按 API 凭据和项目隔离，在凭据生命周期内保留；轮换凭据会改变
+去重范围，换 key 或凭据重试前应核对现有状态。重放仍校验当前权限；重放被拒不代表
+原写入失败。业务写入和记录同事务提交，非法计划整体回滚；预览不是状态预留。
+
+计划限制为最多 10 个需求、20 篇文档、每需求 20 个切片与 50 个任务、合计 100 个任务，
+每数组最多 100 项、最多 2000 个图容器，同时遵守公共请求大小和超时限制。
+仅支持同项目已有对象引用，拒绝嵌套工作流、分支、执行器、身份控制、评论笔记和
+`contentFile` 本地路径。新任务从 `todo` 开始，新需求从 `draft` 或 `approved` 开始。
+
+切片创建使用 `{id: requirementId, input: {...}}`；更新使用
+`{id: sliceId, expectedUpdatedAt, patch: {...}}`，时间戳须使用读取到的精确 ISO 值。
+遵守需求租约、任务归属和阶段顺序，不接管 daemon 执行通道。列表支持 `page/pageSize`，
+不展开任务历史。`allowParallel` 表达有意并行的规划，不绕过其他约束。
+
+聚合上下文参数为 `id`、`sections`、`limit`（1–20）、`offset` 和 `maxBytes`
+（2048–65536，默认 32768）。分区包括 `parent/tasks/slices/dependencies/documents/claim/activity`，
+默认读取 `parent/dependencies/documents/claim`；其中 `activity` 额外要求 `audit.read`。
+依赖同时包含上游和下游；文档只返回摘要。标题为最多 128 字符的节选，文档摘要和切片
+交接摘要最多 1024 字符，全文通过详情工具读取。
+
+`truncatedSections/omittedSections` 明确标记未完整返回的分区。保留分区提供
+`nextOffset` 和续读说明；被省略分区可单独请求并扩大预算。偏移量按分区使用，并发修改
+可能改变分页。`read_committed_not_snapshot` 和 `fetchedAt` 不承诺不可变快照。
+数据预算之外，完整 MCP 响应还受文本与结构化副本合计 256 KiB 限制。
+
+部署前先备份数据库和对象，并执行新增迁移 `0071_mcp_plan_receipts`。
+活动凭据的去重记录不可随意清理，否则重试可能重复写入。临时回退 0.3.10 时可以保留
+这张新增表；回退后新增工具不可用，API/CLI 再升级后恢复。
