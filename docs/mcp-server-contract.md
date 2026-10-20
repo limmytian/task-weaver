@@ -156,7 +156,7 @@ References: [published transport specification](https://modelcontextprotocol.io/
 
 ## Dynamic authorization and audit
 
-The maximum catalog is 44 tools (24 read-only); effective catalogs are filtered
+The effective tool catalog is filtered
 by live credential scopes and deny policies. `/api/v1/mcp-server/catalog` returns
 the same effective names to the stdio adapter. `_meta` identifies stable tool ID,
 source and required permissions. Target IDs always undergo facade authorization.

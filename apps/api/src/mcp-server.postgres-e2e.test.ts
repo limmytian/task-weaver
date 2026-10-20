@@ -283,6 +283,36 @@ test("MCP transports use live scoped authority and preserve collaboration guards
     assert.equal(refreshedMemory.sourceFreshness, "current");
     await invoke("tw_memories_forget", { id: sourceMemory.id, expectedVersion: refreshedMemory.version, confirmed: true });
   }
+  // Personal-only retrieval must not accidentally include a readable global memory.
+  const globalMemoryKey = await f.identity.issueKey(f.admin.headers, f.admin.context.actor.id, { name: "Global memory fixture", expiresAt: null, grants: [{ scope: "global", permissions: ["resource.read", "resource.write"] }] });
+  const mixedMemoryKey = await f.identity.issueKey(f.owner.headers, f.owner.context.actor.id, { name: "Personal and global memory fixture", expiresAt: null, grants: [{ scope: "global", permissions: ["resource.read"] }, { scope: "personal", actorId: f.owner.context.actor.id, permissions: ["resource.read", "resource.write"] }] });
+  const globalMemoryInput = { title: "Scoped continuity evidence", content: "Global evidence", scope: "global", confirmed: true, idempotencyKey: randomUUID() };
+  const globalMemory = await call("tw_memories_record", globalMemoryInput, globalMemoryKey.rawKey);
+  assert.equal(globalMemory.ok, true);
+  const personalMemory = await call("tw_memories_record", { ...globalMemoryInput, content: "Personal evidence", scope: "personal", idempotencyKey: randomUUID() }, mixedMemoryKey.rawKey);
+  assert.equal(personalMemory.ok, true);
+  const personalOnly = await call("tw_memories_search", { query: globalMemoryInput.title, includePersonal: true, includeGlobal: false }, mixedMemoryKey.rawKey);
+  assert.deepEqual(personalOnly.data.items.map((item: any) => item.id), [personalMemory.data.id]);
+  assert.equal((await call("tw_memories_get", { id: personalMemory.data.id }, key.rawKey)).ok, false);
+  assert.equal((await call("tw_memories_get", { id: personalMemory.data.id }, outsiderKey.rawKey)).ok, false);
+  // A receipt cannot leak the current record after it moves outside the retrying key's grants.
+  await createResourceServices(f.admin.context).memoryService.updateMemory(db, globalMemory.data.id, { personalOwnerId: f.admin.context.actor.id, personalOwnerType: "human", expectedVersion: 1 }, { id: f.admin.context.actor.id, type: "human" });
+  const movedReplay = await call("tw_memories_record", globalMemoryInput, globalMemoryKey.rawKey);
+  assert.equal(movedReplay.ok, false);
+  assert.equal(JSON.stringify(movedReplay).includes(globalMemoryInput.content), false);
+  const budgetMemories = [];
+  for (let i = 0; i < 5; i++) {
+    const saved = await call("tw_memories_record", { title: `Unicode budget evidence ${i}`, content: "汉".repeat(10000), tags: Array.from({ length: 20 }, () => "字".repeat(100)), scope: "global", confirmed: true, idempotencyKey: randomUUID() }, globalMemoryKey.rawKey);
+    assert.equal(saved.ok, true);
+    budgetMemories.push(saved.data);
+  }
+  const budgetSearch = await call("tw_memories_search", { query: "Unicode budget evidence", limit: 20 }, globalMemoryKey.rawKey);
+  assert.equal(budgetSearch.ok, true);
+  assert.ok(Buffer.byteLength(JSON.stringify(budgetSearch.data)) <= CAPABILITY_LIMITS.summaryBytes);
+  assert.equal(budgetSearch.data.meta.hasMore, true);
+  assert.ok(budgetSearch.data.items.length > 0 && budgetSearch.data.items.length < budgetMemories.length);
+  await f.identity.revokeKey(f.owner.headers, f.owner.context.actor.id, mixedMemoryKey.id);
+  assert.equal((await f.app.request(`/api/v1/memories/${personalMemory.data.id}`, { headers: headers(mixedMemoryKey.rawKey) })).status, 401);
   const directoryKey = await f.identity.issueKey(f.owner.headers, f.owner.context.actor.id, { name: "Directory-only fixture", expiresAt: null, grants: [{ scope: "global", permissions: ["project.discover"] }] });
   const directoryResponse = await f.app.request("/api/v1/projects/discover?pageSize=1", { headers: headers(directoryKey.rawKey) });
   assert.equal(directoryResponse.status, 200);
@@ -404,8 +434,15 @@ test("MCP transports use live scoped authority and preserve collaboration guards
     }
     t.diagnostic("MCP Inspector 2.11.0 completed local and remote collaboration workflows.");
   }
+  const memoryCli = async (...args: string[]) => promisify(execFile)(process.execPath, ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url)), "memory", ...args], { timeout: 15_000, env: { ...env, TW_CONFIG_DIR: directory, TW_API_URL: `http://${host}`, TW_API_KEY: key.rawKey } });
+  const cliMemory = JSON.parse((await memoryCli("record", "--project", f.project.id, "--title", "CLI continuity", "--content", "CLI handoff", "--key", randomUUID(), "--json")).stdout);
+  assert.equal(JSON.parse((await memoryCli("get", cliMemory.id, "--json")).stdout).version, 1);
+  assert.equal(JSON.parse((await memoryCli("update", cliMemory.id, "--content", "Reviewed CLI handoff", "--expected-version", "1", "--json")).stdout).version, 2);
+  await assert.rejects(memoryCli("update", cliMemory.id, "--content", "Stale edit", "--expected-version", "1", "--json"));
+  await memoryCli("forget", cliMemory.id, "--expected-version", "2");
   await f.identity.revokeKey(f.owner.headers, f.owner.context.actor.id, key.id);
   await assert.rejects(remote.listTools());
+  await assert.rejects(remote.callTool({ name: "tw_memories_search", arguments: { query: "handoff", projectId: f.project.id } }));
   await assert.rejects(local.listTools());
   await assert.rejects(remote.callTool({ name: "tw_tasks_get", arguments: { id: task.id } }));
   const revokedLocal = await local.callTool({ name: "tw_tasks_get", arguments: { id: task.id } });

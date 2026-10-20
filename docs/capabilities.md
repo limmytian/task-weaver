@@ -81,9 +81,10 @@ HTTP or the real CLI stdio subprocess. This does not certify a particular client
 UI, native skill loader, OAuth-only client or dynamic schema refresh behavior.
 Use the ordinary tool-call path when a client's native loading features differ.
 
-Skill text and package reads already have scoped inbound tools. Memory services
-and external MCP registry calls exist through REST/CLI, but should be advertised
-through the inbound bootstrap only once their corresponding inbound tools are
-implemented. Isolated executable skills and plugins require their own runtime
+Skill text, package reads and memory lifecycle operations have scoped inbound
+tools. Memory previews require explicit review before saving and detect changed
+source evidence; see [memory continuity](memories.md). External MCP registry calls
+exist through REST/CLI and need an inbound bridge before bootstrap can advertise
+them. Isolated executable skills and plugins require their own runtime
 proof. Runtime discovery is the source of availability; release notes record
 historical feature boundaries.
