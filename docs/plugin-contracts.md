@@ -88,6 +88,8 @@ origin/isolation configuration is unavailable, never a successful setup.
 
 ## Real-application acceptance
 
+See the [concrete counter and failure matrix](plugin-acceptance.md).
+
 Use the actual Task Weaver application, API and isolated worker, not a replacement
 host. Install one small extension with a page, a namespaced API and persistent
 owned state. Verify:
