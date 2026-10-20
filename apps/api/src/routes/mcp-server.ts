@@ -3,7 +3,7 @@ import { recordMcpInvocationAudit, personalResourceOwnerId, skillPackageStorageS
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { AuthenticationError, MCP_SERVER_LIMITS } from "@task-weaver/contracts";
+import { AuthenticationError, MCP_SERVER_LIMITS, isMcpServerToolAllowed } from "@task-weaver/contracts";
 import { createMcpToolCaller, createTaskWeaverMcpServer, isMcpArgumentError, type McpCallBudget, type McpExecutor } from "@task-weaver/core/mcp-server";
 import { authorizedMcpToolNames, createAuthorizedMcpExecutor } from "@task-weaver/core/mcp-server/executor";
 import type { Env } from "../middleware/actor.js";
@@ -57,7 +57,7 @@ export function createMcpServerRoutes(options: McpRouteOptions) {
   });
   routes.get("/catalog", async c => {
     const names = await (options.visibleTools?.(c.var) ?? authorizedMcpToolNames(c.get("db"), c.get("identity")));
-    return c.json({ tools: names.filter(name => !options.readOnly || !/_(create|update|add|remove|status|claim|heartbeat|release|apply)$/.test(name)) });
+    return c.json({ tools: names.filter(name => isMcpServerToolAllowed(name, options.readOnly ?? false)) });
   });
   routes.all("/", async c => {
     if (c.req.method !== "POST") {

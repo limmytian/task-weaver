@@ -55,6 +55,8 @@ test("JSON adapter and HTTP transport apply read-only and strict arguments", asy
   const client = await f.connect("key-a");
   try {
     assert.equal((await client.listTools()).tools.length, mcpServerReadTools.length);
+    const catalog = await f.app.request("/api/v1/mcp-server/catalog", { headers: { authorization: "Bearer key-a" } });
+    assert.deepEqual((await catalog.json() as { tools: string[] }).tools.sort(), [...mcpServerReadTools].sort());
     const write = await client.callTool({ name: "tw_tasks_status", arguments: { id, status: "done" } });
     assert.equal(write.isError, true);
     const spoof = await f.app.request("/api/v1/mcp-server/tools/tw_tasks_get", { method: "POST", headers: { authorization: "Bearer key-a", "content-type": "application/json" }, body: JSON.stringify({ id, actorId: "actor-b" }) });
