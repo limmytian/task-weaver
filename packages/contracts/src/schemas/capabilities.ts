@@ -74,8 +74,9 @@ export const capabilityManifestSchema = z.object({
 }).strict().superRefine((value, ctx) => {
   const references = new Set<string>();
   for (const [index, dependency] of value.dependencies.entries()) {
-    const key = capabilityStableId(dependency.reference);
-    if (key === capabilityStableId(value.reference) || references.has(key)) {
+    const key = `tw:${dependency.reference.kind}:${dependency.reference.id.toLowerCase()}`;
+    const rootKey = `tw:${value.reference.kind}:${value.reference.id.toLowerCase()}`;
+    if (key === rootKey || references.has(key)) {
       ctx.addIssue({ code: "custom", path: ["dependencies", index], message: "Dependencies must be unique and cannot reference the capability itself" });
     }
     references.add(key);
@@ -114,3 +115,12 @@ export const capabilityBootstrapSchema = z.object({
 }).strict();
 
 export type CapabilityBootstrap = z.infer<typeof capabilityBootstrapSchema>;
+
+export const skillCapabilityDeclarationSchema = z.object({
+  executionMode: capabilityExecutionModeSchema.default("instructions"),
+  dependencies: z.array(capabilityDependencySchema).max(CAPABILITY_LIMITS.dependencies).default([]),
+}).strict();
+
+export const resolveSkillCapabilitiesSchema = z.object({
+  packageId: z.string().uuid(), version: exactVersion.optional(),
+}).strict();

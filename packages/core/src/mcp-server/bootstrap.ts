@@ -5,6 +5,7 @@ const hints = [
   "tw_skill_packages_get", "tw_skill_package_files", "tw_skill_package_read",
   "tw_projects_list", "tw_tasks_context", "tw_requirements_context",
   "tw_memories_search", "tw_memories_get",
+  "tw_skill_packages_resolve",
 ] as const;
 
 /** Discovery hints only: execution still checks live grants and each target. */

@@ -1,5 +1,6 @@
 import { mcpRetrievalScopeSchema, mcpPackageFilesSchema, mcpPackageReadSchema, mcpSliceCreateSchema, mcpSliceUpdateSchema, mcpPlanValidateSchema, mcpPlanApplySchema, mcpAggregateContextSchema } from "./mcp-server-planning";
 import { z } from "zod";
+import { resolveSkillCapabilitiesSchema } from "./capabilities";
 import { mcpMemorySearchSchema, mcpMemoryGetSchema, mcpMemoryRecordSchema, mcpMemoryUpdateSchema, mcpMemoryForgetSchema, mcpMemoryPreviewSchema } from "./mcp-memory";
 import { listProjectsSchema } from "./projects";
 import { createRequirementSchema, updateRequirementSchema, listRequirementsSchema, createRequirementDependencySchema, linkDocumentToRequirementSchema } from "./requirements";
@@ -58,7 +59,8 @@ export const mcpServerCatalog = [
   tool("tw_memories_update", "Revise a memory using its exact current version.", mcpMemoryUpdateSchema),
   tool("tw_memories_forget", "Explicitly forget a memory at its current version; old save retries cannot restore it.", mcpMemoryForgetSchema),
   tool("tw_context_search", "Discover authorized skill summaries by intent; read full text separately.", mcpRetrievalScopeSchema.extend({ intent: z.string().trim().min(1).max(500), limit: z.number().int().min(1).max(20).default(5) }).strict()),
-  tool("tw_context_get", "Read one authorized skill document.", byId),
+  tool("tw_context_get", "Read one authorized skill document; use expectedVersion for a pinned dependency.", byId.extend({ expectedVersion: z.number().int().min(1).optional() }).strict()),
+  tool("tw_skill_packages_resolve", "Resolve a bounded, permission-checked graph of exact skill and tool dependencies without loading their bodies or executing them.", resolveSkillCapabilitiesSchema),
   tool("tw_skill_packages_list", "List authorized skill package summaries.", mcpRetrievalScopeSchema.extend({ query: z.string().trim().min(1).max(500).optional(), offset: z.number().int().min(0).max(100000).default(0), limit: z.number().int().min(1).max(50).default(20) }).strict()),
   tool("tw_skill_packages_get", "Read safe package metadata without storage locations or recursive files.", z.object({ packageId: id }).strict()),
   tool("tw_skill_package_files", "List a bounded page of package file metadata.", mcpPackageFilesSchema),

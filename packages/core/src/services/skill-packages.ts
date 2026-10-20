@@ -20,10 +20,11 @@ import type {
   UpdateSkillPackageVersionStatusInput,
   VerifySkillPackageStorageInput,
 } from "@task-weaver/contracts";
-import { ConflictError, NotFoundError, ValidationError } from "@task-weaver/contracts";
+import { ConflictError, NotFoundError, ValidationError, skillCapabilityDeclarationSchema } from "@task-weaver/contracts";
 import type { SkillPackageStorageAdapter } from "./skill-package-storage";
+import { canonicalJson } from "./capability-digest";
 import { sha256Hex } from "./skill-package-storage";
-import { createDocument, deleteDocument, updateDocument } from "./documents";
+import { createDocument, updateDocument } from "./documents";
 
 const TEXT_EXTENSIONS = new Set([
   ".md",
@@ -53,6 +54,9 @@ export async function registerPackage(
   storage: SkillPackageStorageAdapter,
   authorizedDocumentPredicate?: SQL,
 ) {
+  if (input.manifest.capabilities !== undefined && !skillCapabilityDeclarationSchema.safeParse(input.manifest.capabilities).success) {
+    throw new ValidationError("Skill capability declaration is invalid");
+  }
   if (input.storageBackend !== storage.backend) {
     throw new ValidationError(`Storage backend "${input.storageBackend}" is not available`);
   }
@@ -73,7 +77,7 @@ export async function registerPackage(
   });
 
   const version = existingVersion
-    ? await replaceExistingVersion(db, existingVersion.id, input, actor, storage, normalizedFiles, authorizedDocumentPredicate)
+    ? reuseImmutableVersion(existingVersion, input, normalizedFiles)
     : await createPackageVersion(db, pkg.id, input, actor, normalizedFiles);
 
   if (!existingVersion) {
@@ -187,10 +191,10 @@ export async function readPackageTextFile(
   if (!file) throw new NotFoundError("Skill package file not found");
   if (!file.isReadableText) throw new ConflictError("Skill package file is not readable text", 0);
 
-  if (maxBytes !== undefined && (file.sizeBytes > maxBytes || (file.indexedDocument && Buffer.byteLength(file.indexedDocument.content, "utf8") > maxBytes))) {
+  if (maxBytes !== undefined && file.sizeBytes > maxBytes) {
     throw new ValidationError("Package text exceeds the read limit");
   }
-  if (file.indexedDocument) {
+  if (file.indexedDocument && (maxBytes === undefined || Buffer.byteLength(file.indexedDocument.content, "utf8") <= maxBytes) && sha256Hex(file.indexedDocument.content) === file.sha256) {
     return {
       packageVersion: version,
       file,
@@ -214,10 +218,12 @@ export async function readPackageTextFile(
     chunks.push(buffer);
   }
 
+  const content = Buffer.concat(chunks);
+  if (sha256Hex(content) !== file.sha256) throw new ConflictError("Skill package storage failed its pinned content hash", 0);
   return {
     packageVersion: version,
     file,
-    content: Buffer.concat(chunks).toString("utf8"),
+    content: content.toString("utf8"),
     source: "storage" as const,
   };
 }
@@ -646,54 +652,17 @@ async function createPackageVersion(
   return created!;
 }
 
-async function replaceExistingVersion(
-  db: Database,
-  versionId: string,
+function reuseImmutableVersion(
+  version: typeof skillPackageVersions.$inferSelect,
   input: RegisterSkillPackageInput,
-  actor: Actor,
-  storage: SkillPackageStorageAdapter,
   files: NormalizedRegisteredFile[],
-  authorizedDocumentPredicate?: SQL,
 ) {
-  const existingFiles = await db.query.skillPackageFiles.findMany({
-    where: eq(skillPackageFiles.packageVersionId, versionId),
-    with: {
-      storageObject: true,
-    },
-  });
-
-  for (const file of existingFiles) {
-    if (file.indexedDocumentId) {
-      await deleteDocument(db, file.indexedDocumentId, actor).catch(() => undefined);
-    }
-    if (file.storageObject?.storageBackend === storage.backend) {
-      await storage.deleteObject(file.storageObject.objectKey).catch(() => undefined);
-    }
+  const stableFiles = (manifest: Record<string, unknown>) => ({ ...manifest, files: [...((manifest.files ?? []) as Array<{ path: string }>)].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) });
+  if (version.entryPath !== input.entryPath || canonicalJson(version.manifest) !== canonicalJson(input.manifest)
+      || canonicalJson(stableFiles(version.fileManifest)) !== canonicalJson(stableFiles(buildFileManifest(files)))) {
+    throw new ConflictError("Skill package versions are immutable; register changed content under a new version", 0);
   }
-
-  await db.delete(skillPackageFiles).where(eq(skillPackageFiles.packageVersionId, versionId));
-  await db.delete(skillPackageStorageObjects).where(eq(skillPackageStorageObjects.packageVersionId, versionId));
-
-  const [updated] = await db
-    .update(skillPackageVersions)
-    .set({
-      status: "active",
-      sourceType: input.sourceType,
-      entryPath: input.entryPath,
-      manifest: input.manifest,
-      fileManifest: buildFileManifest(files),
-      storageBackend: input.storageBackend,
-      storageKeyPrefix: input.storageKeyPrefix,
-      fileCount: files.length,
-      totalSizeBytes: files.reduce((sum, file) => sum + file.content.byteLength, 0),
-      updatedAt: new Date(),
-    })
-    .where(eq(skillPackageVersions.id, versionId))
-    .returning();
-
-  const packageId = updated!.packageId;
-  await storeFiles(db, packageId, versionId, input, actor, storage, files, authorizedDocumentPredicate);
-  return updated!;
+  return version;
 }
 
 async function storeFiles(

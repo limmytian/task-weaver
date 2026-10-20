@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, or, ne, not } from "drizzle-orm";
 import { documents, skillPackages, skillPackageVersions, skillPackageFiles, type Database } from "@task-weaver/db";
-import { NotFoundError, ValidationError, type VerifiedRequestContext } from "@task-weaver/contracts";
+import { NotFoundError, ValidationError, ConflictError, type VerifiedRequestContext } from "@task-weaver/contracts";
 import { lockIdentityLifecycle } from "../services/auth-security";
 import { resourceAuthority, requireResource, personalResourceOwnerId } from "../services/resource-authorization";
 import { requirePackage, packageResourcePredicate } from "../services/asset-authorization";
@@ -38,13 +38,14 @@ export async function readMcpPackage(db: Database, identity: VerifiedRequestCont
   });
 }
 
-export async function readMcpSkill(db: Database, identity: VerifiedRequestContext, id: string) {
+export async function readMcpSkill(db: Database, identity: VerifiedRequestContext, id: string, expectedVersion?: number) {
   return db.transaction(async tx => {
     await lockIdentityLifecycle(tx);
     const authority = await resourceAuthority(tx, identity);
     await requireResource(tx as unknown as Database, authority, "document", id);
-    const [record] = await tx.select({ content: documents.content, docType: documents.docType }).from(documents).where(eq(documents.id, id));
+    const [record] = await tx.select({ content: documents.content, docType: documents.docType, version: documents.version }).from(documents).where(eq(documents.id, id));
     if (!record || record.docType !== "skill") throw new NotFoundError("Resource not found");
+    if (expectedVersion !== undefined && expectedVersion !== record.version) throw new ConflictError("Skill changed; resolve its capability manifest again", record.version);
     // Package quarantine and version availability apply to direct document reads too.
     const unavailable = await tx.select({ id: skillPackageFiles.id }).from(skillPackageFiles)
       .innerJoin(skillPackageVersions, eq(skillPackageVersions.id, skillPackageFiles.packageVersionId))

@@ -7,6 +7,7 @@ import { readMcpContext } from "./context";
 import { mcpSlices } from "./slices";
 import { buildCapabilityBootstrap } from "./bootstrap";
 import { mcpMemory } from "./memory";
+import { resolveMcpSkill } from "./skill-resolution";
 import { readMcpPackage, readMcpSkill, listMcpPackages } from "./discovery";
 import type { SkillPackageStorageAdapter } from "../services/skill-package-storage";
 import type { Database } from "@task-weaver/db";
@@ -37,6 +38,7 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
     const page = { page: raw.page as number, pageSize: raw.pageSize as number };
     switch (name) {
       case "tw_memories_search": return mcpMemory(db, identity, "search", raw);
+      case "tw_skill_packages_resolve": return resolveMcpSkill(db, identity, raw as { packageId: string; version?: string }, signal);
       case "tw_memories_preview": return mcpMemory(db, identity, "preview", raw);
       case "tw_memories_get": return mcpMemory(db, identity, "get", raw);
       case "tw_memories_record": return mcpMemory(db, identity, "record", raw);
@@ -57,7 +59,7 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
         const items = await services.contextService.searchContext(db, { intent: raw.intent as string, limit: raw.limit as number, mode: "summary", projectId: raw.projectId as string | undefined, includeGlobal: raw.includeGlobal as boolean, includePersonal: raw.includePersonal as boolean, ...(raw.includePersonal ? owner : {}) });
         return { items: items.map(({ skillPackage: _package, ...item }) => item), meta: { limit: raw.limit, paginationSupported: false } };
       }
-      case "tw_context_get": return readMcpSkill(db, identity, id);
+      case "tw_context_get": return readMcpSkill(db, identity, id, raw.expectedVersion as number | undefined);
       case "tw_skill_packages_list": return listMcpPackages(db, identity, raw as unknown as Parameters<typeof listMcpPackages>[2]);
       case "tw_skill_packages_get": return readMcpPackage(db, identity, "get", raw as { packageId: string }, storage);
       case "tw_skill_package_files": return readMcpPackage(db, identity, "files", raw as { packageId: string }, storage);

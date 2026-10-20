@@ -1,7 +1,7 @@
 import type { SQL } from "drizzle-orm";
 import { and, eq, isNull, or, sql, desc } from "drizzle-orm";
 import { type Database, memories, memoryReceipts, tasks, requirements, documents, projects } from "@task-weaver/db";
-import { createHash } from "node:crypto";
+import { capabilityDigest } from "./capability-digest";
 import type { Actor } from "@task-weaver/contracts";
 import type {
   RecordMemoryInput,
@@ -95,10 +95,7 @@ export async function recordMemory(
 ) {
   const { idempotencyKey, ...payload } = input;
   const scopeKey = input.projectId ? `project:${input.projectId}` : input.personalOwnerId ? `personal:${input.personalOwnerType}:${input.personalOwnerId}` : "global";
-  // Normalize key order recursively so equivalent retries share the same receipt.
-  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
-    : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, canonical(v)])) : value;
-  const payloadHash = createHash("sha256").update(JSON.stringify(canonical(payload))).digest("hex");
+  const payloadHash = capabilityDigest(payload);
   const receiptWhere = and(eq(memoryReceipts.actorId, actor.id), eq(memoryReceipts.actorType, actor.type), eq(memoryReceipts.scopeKey, scopeKey), idempotencyKey ? eq(memoryReceipts.key, idempotencyKey) : undefined);
   if (idempotencyKey) {
     const [receipt] = await db.insert(memoryReceipts).values({ actorId: actor.id, actorType: actor.type, scopeKey, key: idempotencyKey, payloadHash }).onConflictDoNothing().returning();

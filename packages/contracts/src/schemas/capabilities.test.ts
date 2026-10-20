@@ -27,6 +27,7 @@ test("execution manifests reject self, duplicate, floating and unbounded depende
   ]) assert.equal(capabilityManifestSchema.safeParse({ ...manifest, dependencies }).success, false);
   assert.equal(capabilityManifestSchema.safeParse({ ...manifest, entryPath: "../secret" }).success, false);
   assert.equal(capabilityManifestSchema.safeParse({ ...manifest, command: "arbitrary-process" }).success, false);
+  assert.equal(capabilityManifestSchema.safeParse({ ...manifest, dependencies: [{ reference: { kind: "skill", id: "invalid" } }] }).success, false);
   for (const version of ["latest", "*", "^1.0", ">=1.0", "1.0 || 2.0"]) {
     assert.equal(capabilityManifestSchema.safeParse({ ...manifest, dependencies: [{ ...dependency, version }] }).success, false);
   }
