@@ -1,5 +1,6 @@
+import { repositoryReadinessInputSchema } from "./repositories";
 import { mcpRegistrySearchSchema, mcpRegistryToolSchema, mcpRegistryCallSchema, mcpRegistryReadinessSchema } from "./mcp-bridge";
-import { mcpRetrievalScopeSchema, mcpPackageFilesSchema, mcpPackageReadSchema, mcpSliceCreateSchema, mcpSliceUpdateSchema, mcpPlanValidateSchema, mcpPlanApplySchema, mcpAggregateContextSchema, mcpDependencyGraphSchema, mcpDocumentHistorySchema, mcpDocumentVersionSchema } from "./mcp-server-planning";
+import { mcpRetrievalScopeSchema, mcpPackageFilesSchema, mcpPackageReadSchema, mcpSliceCreateSchema, mcpSliceUpdateSchema, mcpPlanValidateSchema, mcpPlanApplySchema, mcpAggregateContextSchema, mcpDependencyGraphSchema, mcpDocumentHistorySchema, mcpDocumentVersionSchema, mcpRepositoryListSchema, mcpScheduleListSchema, mcpUsageSummarySchema } from "./mcp-server-planning";
 import { z } from "zod";
 import { resolveSkillCapabilitiesSchema, runSkillCapabilitySchema } from "./capabilities";
 import { mcpMemorySearchSchema, mcpMemoryGetSchema, mcpMemoryRecordSchema, mcpMemoryUpdateSchema, mcpMemoryForgetSchema, mcpMemoryPreviewSchema } from "./mcp-memory";
@@ -23,6 +24,10 @@ function tool(name: McpServerToolName, description: string, schema: z.AnyZodObje
 
 /** One catalog for both transports. Business refinements are applied again before dispatch. */
 export const mcpServerCatalog = [
+  tool("tw_repositories_list", "List bounded visible repository catalog summaries; project membership alone does not grant private catalog visibility.", mcpRepositoryListSchema),
+  tool("tw_repository_readiness", "Read repository policy readiness without cloning or exposing credential/checkout configuration; unknown is not execution-ready.", repositoryReadinessInputSchema.extend({ id }).strict()),
+  tool("tw_schedules_list", "List bounded authorized schedule summaries without task prompts, execution or schedule changes.", mcpScheduleListSchema),
+  tool("tw_usage_summary", "Read scoped aggregate token reporting and coverage with audit.read permission; missing reports remain unknown.", mcpUsageSummarySchema),
   tool("tw_document_history", "List bounded historical document revision metadata without loading snapshot bodies.", mcpDocumentHistorySchema),
   tool("tw_document_version", "Read an authorized historical Markdown snapshot in bounded Unicode-character chunks.", mcpDocumentVersionSchema),
   tool("tw_dependencies_graph", "Read a bounded authorized dependency graph in both directions with current claims; does not claim work or bypass dependency guards.", mcpDependencyGraphSchema),
@@ -94,6 +99,7 @@ export function parseMcpServerArguments(name: McpServerToolName, value: unknown)
       throw new z.ZodError([{ code: "custom", path: ["scope"], message: "Document scope conflicts with projectId" }]);
     }
   }
+  if (name === "tw_schedules_list" && ((input.scope === "project" && !input.projectId) || (input.scope === "personal" && input.projectId))) throw new z.ZodError([{ code: "custom", path: ["scope"], message: "Schedule scope conflicts with projectId" }]);
   if (name === "tw_tasks_list" || name === "tw_search") {
     const scoped = input as z.infer<typeof taskList>;
     if (scoped.scope === "project" && !scoped.projectId && name === "tw_tasks_list") {

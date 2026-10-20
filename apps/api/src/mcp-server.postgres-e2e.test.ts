@@ -1,3 +1,4 @@
+import { createRepositorySchema, createScheduleSchema } from "@task-weaver/contracts";
 import { capabilityDigest } from "@task-weaver/core";
 import { hostedMcpRuntimeProfileSchema } from "@task-weaver/contracts";
 import { Server as ProtocolServer } from "@modelcontextprotocol/sdk/server/index.js";
@@ -167,6 +168,29 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const forged = await f.app.request("http://127.0.0.1:3001/api/v1/mcp-server/tools/tw_tasks_get", { method: "POST", headers: { ...headers(outsiderKey.rawKey), "x-actor-id": f.owner.context.actor.id }, body: JSON.stringify({ id: task.id }) });
   assert.equal((await forged.json() as any).structuredContent.ok, false);
 
+  const operationServices = createResourceServices(f.owner.context);
+  const catalogRepository = await operationServices.repositoryService.createRepository(db, createRepositorySchema.parse({ provider: "generic", host: "example.test", namespace: "fixture", name: "context", visibility: "private", ownerId: f.owner.context.actor.id, ownerType: "human", httpsCloneUrl: "https://example.test/fixture/context.git", authPolicy: { credentialProfileRef: "fixture-private-profile" } }), f.owner.context.actor);
+  const operationalKey = await f.identity.issueKey(f.owner.headers, f.owner.context.actor.id, { name: "Operational context fixture", expiresAt: null, grants: [{ scope: "project", projectId: f.project.id, permissions: ["resource.read", "audit.read"] }, { scope: "personal", actorId: f.owner.context.actor.id, permissions: ["resource.read"] }] });
+  const operational = async (name: string, args: Record<string, unknown>) => { const value = await call(name, args, operationalKey.rawKey); assert.equal(value.ok, true, JSON.stringify(value)); return value.data; };
+  const catalog = await operational("tw_repositories_list", { scope: "personal" });
+  assert.ok(catalog.items.some((item: any) => item.id === catalogRepository.id));
+  assert.equal(JSON.stringify(catalog).includes("fixture-private-profile"), false);
+  assert.equal(JSON.stringify(catalog).includes("httpsCloneUrl"), false);
+  const repositoryReadiness = await operational("tw_repository_readiness", { id: catalogRepository.id, nodeId: "fixture-node" });
+  assert.equal(repositoryReadiness.state, "needs_configuration");
+  assert.equal(JSON.stringify(repositoryReadiness).includes("fixture-private-profile"), false);
+  assert.equal((await call("tw_repository_readiness", { id: catalogRepository.id }, outsiderKey.rawKey)).ok, false);
+  const schedule = await operationServices.scheduleService.createSchedule(db, createScheduleSchema.parse({ targetScope: "project", projectId: f.project.id, requirementId: requirement.id, kind: "one_off", title: "Fixture scheduled context", startsAt: new Date(Date.now() + 3600000), taskTemplate: { title: "Future fixture task", description: "not-exposed-schedule-prompt" } }), f.owner.context.actor);
+  const schedulePage = await success("tw_schedules_list", { scope: "project", projectId: f.project.id, limit: 1 });
+  assert.equal(schedulePage.items[0].id, schedule.id);
+  assert.equal(JSON.stringify(schedulePage).includes("not-exposed-schedule-prompt"), false);
+  assert.equal((await call("tw_schedules_list", { scope: "project", projectId: f.project.id }, outsiderKey.rawKey)).ok, false);
+  assert.equal((await call("tw_usage_summary", { projectId: f.project.id })).ok, false);
+  const usage = await operational("tw_usage_summary", { projectId: f.project.id });
+  assert.equal(usage.runs, 0);
+  assert.equal(usage.coverage, null);
+  assert.equal((await call("tw_usage_summary", { projectId: f.project.id, since: "2020-01-01T00:00:00.000Z", until: "2026-01-01T00:00:00.000Z" }, operationalKey.rawKey)).ok, false);
+
   let networkApp = f.app;
   const http = serve({ fetch: req => networkApp.fetch(req), hostname: "127.0.0.1", port: 0 });
   await once(http, "listening");
@@ -176,7 +200,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const remote = new Client({ name: "real-http-sdk", version: "1.31.0" });
   await remote.connect(new StreamableHTTPClientTransport(new URL(`http://${host}/api/v1/mcp-server`), { requestInit: { headers: headers() } }));
   t.after(() => remote.close());
-  assert.equal((await remote.listTools()).tools.length, mcpServerCatalog.length - 7);
+  assert.equal((await remote.listTools()).tools.length, mcpServerCatalog.length - 8);
   assert.equal((await remote.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   const directory = await mkdtemp(join(tmpdir(), "tw-mcp-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -211,7 +235,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const restBootstrapResponse = await f.app.request("/api/v1/context/bootstrap", { headers: headers() });
   assert.equal(restBootstrapResponse.status, 200);
   assert.deepEqual((await restBootstrapResponse.json() as any).capabilityBootstrap, localBootstrap);
-  assert.equal((await local.listTools()).tools.length, mcpServerReadTools.length - 5);
+  assert.equal((await local.listTools()).tools.length, mcpServerReadTools.length - 6);
   assert.equal((await local.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   assert.equal((await local.callTool({ name: "tw_tasks_status", arguments: { id: task.id, status: "done" } })).isError, true);
   // 0.3.11 planning and context use the same authenticated executor on both transports.
@@ -798,7 +822,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
       const initialization = await inspector(transportName, "initialize");
       assert.equal(initialization.protocolVersion, "2025-11-25");
       const tools = await inspector(transportName, "tools/list");
-      assert.equal(tools.tools.length, mcpServerCatalog.length - 7);
+      assert.equal(tools.tools.length, mcpServerCatalog.length - 8);
       const invoke = async (name: string, args: unknown) => {
         const result = await inspector(transportName, "tools/call", name, args);
         assert.equal(result.structuredContent.ok, true, JSON.stringify(result));

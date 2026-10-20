@@ -77,3 +77,20 @@ export const mcpDocumentVersionSchema = z.object({
   offset: z.number().int().min(0).max(10000000).default(0),
   limit: z.number().int().min(1).max(8000).default(4000),
 }).strict();
+
+export const mcpRepositoryListSchema = z.object({
+  scope: z.enum(["global", "personal"]).default("personal"),
+  query: z.string().trim().min(1).max(500).optional(),
+  offset: z.number().int().min(0).max(100000).default(0),
+  limit: z.number().int().min(1).max(20).default(10),
+}).strict();
+export const mcpScheduleListSchema = z.object({
+  scope: z.enum(["project", "personal"]).default("project"),
+  projectId: id.optional(),
+  offset: z.number().int().min(0).max(100000).default(0),
+  limit: z.number().int().min(1).max(20).default(10),
+}).strict();
+export const mcpUsageSummarySchema = z.object({
+  projectId: id, requirementId: id.optional(), taskId: id.optional(),
+  since: z.string().datetime().optional(), until: z.string().datetime().optional(),
+}).strict();

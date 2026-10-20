@@ -1,3 +1,4 @@
+import { requireRepository } from "../services/repository-authorization";
 import { requireMcpServer, requireMcpToolTarget } from "../services/mcp-authorization";
 import { lockIdentityLifecycle } from "../services/auth-security";
 import { eq } from "drizzle-orm";
@@ -19,7 +20,10 @@ async function target(db: Database, identity: VerifiedRequestContext, name: McpS
   const projectId = raw.projectId ?? (raw.plan as { projectId?: string } | undefined)?.projectId;
   let scope: ResourceScope = {};
   let revision: unknown = null;
-  if (name === "tw_dependencies_graph") {
+  if (name === "tw_repository_readiness") {
+    const repository = await requireRepository(db, authority, raw.id as string);
+    scope = repository.visibility === "instance" ? {} : { personalOwnerId: repository.ownerId, personalOwnerType: "human" };
+  } else if (name === "tw_dependencies_graph") {
     scope = await requireResource(db, authority, raw.kind as "task" | "requirement", raw.id as string, "resource.read");
   } else if (name === "tw_mcp_readiness") {
     scope = await requireMcpServer(db, authority, identity, raw.serverId as string, "resource.read");

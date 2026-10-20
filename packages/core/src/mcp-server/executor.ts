@@ -1,3 +1,4 @@
+import { readOperationalContext } from "./operational-context";
 import { readDocumentHistory } from "./document-history";
 import { readDependencyGraph } from "./dependency-graph";
 import { getMcpServerReadiness } from "../services/mcp-readiness";
@@ -46,6 +47,10 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
     const id = raw.id as string;
     const page = { page: raw.page as number, pageSize: raw.pageSize as number };
     switch (name) {
+      case "tw_repositories_list": return readOperationalContext(db, identity, "repositories", raw);
+      case "tw_repository_readiness": return readOperationalContext(db, identity, "readiness", raw);
+      case "tw_schedules_list": return readOperationalContext(db, identity, "schedules", raw);
+      case "tw_usage_summary": return readOperationalContext(db, identity, "usage", raw);
       case "tw_document_history": return readDocumentHistory(db, identity, "list", raw as unknown as Parameters<typeof readDocumentHistory>[3]);
       case "tw_document_version": return readDocumentHistory(db, identity, "read", raw as unknown as Parameters<typeof readDocumentHistory>[3]);
       case "tw_dependencies_graph": return readDependencyGraph(db, identity, raw as unknown as Parameters<typeof readDependencyGraph>[2], signal);
@@ -143,7 +148,7 @@ export async function authorizedMcpToolNames(db: Database, identity: VerifiedReq
   const names: string[] = [];
   for (const tool of mcpServerCatalog) {
     const projectOnly = /^tw_(projects|requirements|requirement_dependencies|execution_slices|plan)_/.test(tool.name);
-    const permission = tool.name.startsWith("tw_mcp_") ? "mcp.invoke" : tool.name === "tw_projects_discover" ? "project.discover" : (mcpServerReadTools as readonly string[]).includes(tool.name) && tool.name !== "tw_plan_validate" ? "resource.read" : "resource.write";
+    const permission = tool.name === "tw_usage_summary" ? "audit.read" : tool.name.startsWith("tw_mcp_") ? "mcp.invoke" : tool.name === "tw_projects_discover" ? "project.discover" : (mcpServerReadTools as readonly string[]).includes(tool.name) && tool.name !== "tw_plan_validate" ? "resource.read" : "resource.write";
     for (const grant of authority.grants) {
       if (grant.scope === "instance" || !grant.permissions.includes(permission)) continue;
       if (projectOnly && tool.name !== "tw_projects_discover" && grant.scope !== "project") continue;

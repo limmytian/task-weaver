@@ -35,3 +35,24 @@ Document sections retain `linkType` (`references`, `documents`, `output`),
 reference material from declared outputs. A link is not a historical snapshot or
 an acceptance decision. Read an explicit document revision when exact historical
 text matters, and inspect the requirement workflow for delivery acceptance.
+
+## Operational visibility
+
+- `tw_repositories_list` reads bounded personal or global catalog summaries.
+  Repository visibility remains independent of projects linking the repository;
+  project membership does not expose a private catalog. Clone URLs, credential
+  profiles and checkout paths are omitted.
+- `tw_repository_readiness` reports the existing repository policy resolver's
+  state without cloning or authenticating to a forge. An `unknown` result is
+  not a successful runtime verification.
+- `tw_schedules_list` retrieves project or credential-owner personal summaries,
+  including status, timezone and next run. Task templates and prompts are omitted;
+  the read does not enable, modify or trigger schedules.
+- `tw_usage_summary` requires project `audit.read` as well as ordinary project
+  read access. It defaults to 30 days and accepts at most a 90-day query window.
+  Counts, nullable token totals and reporting coverage retain the existing usage
+  service's accounting caveats. Missing reports are not invented as zero usage.
+
+Operational pages are limited to 20 summaries and 16 KiB with explicit
+continuation offsets. Every target and stored relation is reauthorized through
+existing resource, catalog and metadata policies.
