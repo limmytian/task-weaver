@@ -75,3 +75,5 @@ export { capabilityDigest } from "./capability-digest";
 export { McpInvocationBusy } from "./mcp-invocation-budget";
 
 export { getMcpServerReadiness } from "./mcp-readiness";
+
+export { pluginSigningPayload, verifyPluginManifest, type PluginTrustKey } from "./plugin-trust";
