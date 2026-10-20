@@ -1,11 +1,11 @@
 # Use Task Weaver from an MCP client
 
-Task Weaver's inbound MCP Server offers a maximum of 44 collaboration tools in 0.3.11 through local
+Task Weaver's inbound MCP Server offers collaboration tools through local
 stdio or remote Streamable HTTP. The existing MCP Registry connects **other**
 servers to Task Weaver; its `tw mcp search/tools/call/servers/register-local`
 commands use live authorization-aware discovery.
 
-Both paths require a matching 0.3.11 API server for authorization-aware catalogs.
+Both paths require an API server with authorization-aware catalog support.
 The local path also requires a matching `tw` CLI. The server uses SDK 1.31.0
 and targets published protocol revision 2025-11-25. See the
 [contract](mcp-server-contract.md) for exact names and boundaries.
@@ -206,9 +206,9 @@ shared UI data layer. A visual browser walkthrough remains an owner acceptance
 step; no production data or deployment is used. Other client-specific formats
 and OAuth-only clients are not implied by the generic examples above. See [中文说明](mcp-server.zh-CN.md).
 
-## Planning and context tools (0.3.11)
+## Planning and context tools
 
-Version 0.3.11 adds 14 planning/context tools. With project directory discovery, the maximum catalog is 44 tools, including 24 read-only tools. Each credential sees only its authorized subset:
+Planning/context tools support skill discovery, execution slices, atomic plans and bounded context. Each credential sees only its authorized subset; use live tool discovery for the current catalog:
 
 | Tools | Purpose |
 | --- | --- |
@@ -218,8 +218,8 @@ Version 0.3.11 adds 14 planning/context tools. With project directory discovery,
 | `tw_plan_validate`, `tw_plan_apply` | Preview and atomically apply a structured project plan |
 | `tw_tasks_context`, `tw_requirements_context` | Retrieve selected, bounded collaboration context |
 
-These tools require a 0.3.11 API and matching CLI for stdio. The original 29 tools
-remain compatible. `tw_plan_validate` is read-only but requires write authority
+Use an API that advertises these tools and a matching CLI for stdio. See
+[upgrade compatibility](ce-upgrades.md) for minimum release boundaries. `tw_plan_validate` is read-only but requires write authority
 for the planned project and all referenced existing entities. Read-only mode can
 preview with an appropriately scoped key, while still rejecting `tw_plan_apply`.
 The optional `activity` context section requires `audit.read`; other sections use
@@ -301,7 +301,7 @@ while a credential is active: doing so removes retry protection. This additive
 table may remain when temporarily rolling back to 0.3.10; new tools will be
 unavailable until the API/CLI are upgraded again.
 
-## Authorization-aware discovery and approvals (0.3.11)
+## Authorization-aware discovery and approvals
 
 `tools/list` is recomputed from current identity, Key grants, scope and read-only
 configuration on both HTTP and stdio. Tool metadata identifies the source and

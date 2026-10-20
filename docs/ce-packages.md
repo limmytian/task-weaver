@@ -39,11 +39,12 @@ pnpm build
 pnpm typecheck
 pnpm test
 pnpm release:verify
-pnpm release:notes 0.2.0
-pnpm release:pack-ce 0.2.0
+: "${RELEASE_VERSION:?Set the reviewed release version}"
+pnpm release:notes "$RELEASE_VERSION"
+pnpm release:pack-ce "$RELEASE_VERSION"
 ```
 
-The package version in all six source manifests must match the requested
+The package version in all public package manifests must match the requested
 release version. `release:pack-ce` stages only compiled JavaScript, TypeScript
 declarations, Core database migrations, the license, and third-party notices.
 It emits six tarballs and `release-artifacts/npm/npm-artifacts.json` containing

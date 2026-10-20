@@ -83,7 +83,7 @@ database without an explicit compatibility test.
 Render the manifests with immutable image references:
 
 ```sh
-TW_RELEASE_VERSION=0.2.0 \
+TW_RELEASE_VERSION="${RELEASE_VERSION:?Set the reviewed release version}" \
 TW_API_IMAGE="$API_IMAGE_DIGEST" \
 TW_WEB_IMAGE="$WEB_IMAGE_DIGEST" \
 pnpm deploy:render-kubernetes
@@ -151,7 +151,7 @@ rows for active credentials. Deploy matching API/Web images and upgrade local
 CLI clients. Verify the effective catalog (up to 44 tools, including 24 read-only tools), a mutation-free
 plan preview, identical-key replay, slice conflict rejection and bounded context
 pagination on both transports. Verify current key grants, including optional
-`audit.read` for activity sections. See [the MCP guide](mcp-server.md#planning-and-context-tools-0311).
+`audit.read` for activity sections. See [the MCP guide](mcp-server.md#planning-and-context-tools).
 
 A temporary rollback can retain the additive table while running 0.3.10, but
 new tools will be unavailable. Restore from backup only under the normal recovery

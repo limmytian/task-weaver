@@ -604,7 +604,7 @@ PostgreSQL NOTIFY path:
 
 ## 12. Authentication and Authorization
 
-0.3.3 uses closed local accounts, revocable database sessions and subject-bound
+The application uses closed local accounts, revocable database sessions and subject-bound
 scoped API keys. A human key remains a human identity; a managed Agent has its own
 stable actor and managing human. Rotation changes the credential, not the actor.
 REST, tRPC, GraphQL, SSR and events use the same live core authorization rules.

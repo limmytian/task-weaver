@@ -5,7 +5,7 @@ The CE/Pro edition split and standalone private application implementation are
 retired. The old private experiments remain historical evidence; no repository
 history, runtime configuration, published tag or release asset is deleted.
 
-The next development version is 0.3.0 because public SDK/default-port/extension
+The transition targeted 0.3.0 because public SDK/default-port/extension
 migration exports and the Gateway `./module` export are removed. Gateway
 `./runtime` is a first-party integration entry, not a third-party plugin loader.
 Shared contracts, business services, the existing Core migration history and

@@ -260,7 +260,7 @@ Every mutation is recorded: `entityType`, `entityId`, `action`, `actorId`, `acto
 
 ## Authentication
 
-0.3.3 requires a revocable browser session or a subject-bound scoped API Key.
+Access requires a revocable browser session or a subject-bound scoped API Key.
 Create the Key through authenticated account settings for self or an owned Agent,
 with explicit grants and expiry (including an explicit no-expiry choice).
 
@@ -312,7 +312,7 @@ administrators provision/recover accounts with finite one-time activation.
 Legacy actor strings/Keys are not verified identity: offline upgrade requires
 explicit owner mappings, quarantines unmapped data and reissues scoped Keys.
 SLO, unconverted background workers and personal autonomous Ti remain closed.
-Source integration targets 0.3.3 and does not authorize release/deployment.
+Source integration does not authorize release/deployment.
 
 ## Conventions
 
@@ -481,7 +481,7 @@ The Web Daemons page shows daemon status, active worker lanes, current requireme
 `tw daemon review` and `tw daemon merge` split review from final merge for requirement branches that have already been finalized to `in_review`:
 
 ```bash
-tw daemon review --project $PROJECT_ID --workers 1 --base 0.3.3 \
+tw daemon review --project $PROJECT_ID --workers 1 --base main \
   --check "pnpm typecheck" \
   --check "pnpm test" \
   --prompt-file ~/.config/tw/review-extra.md

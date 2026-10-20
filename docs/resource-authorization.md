@@ -8,7 +8,7 @@ Query predicates filter project membership, explicitly granted human personal ow
 
 ## Coverage inventory
 
-| Surface | Current 0.3.3 boundary |
+| Surface | Authorization boundary |
 | --- | --- |
 | Projects, requirements, tasks, claims, documents/history, memories and links | Context-bound core services; current membership, human personal ownership and credential ceiling; validate both relation endpoints |
 | Search, title resolution, recommendations, graphs, board/gantt and context | Scoped SQL candidates before limits, totals, ranking and nested relation expansion |

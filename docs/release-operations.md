@@ -122,7 +122,7 @@ For deployment recovery, stop writes and restore the pre-upgrade PostgreSQL
 database and matching skill-data snapshot before restarting the recorded old
 image digests. See [CE Install, Upgrade, and Recovery](ce-upgrades.md).
 
-## MCP acceptance for 0.3.10 and later
+## MCP acceptance
 
 Before promoting a candidate, run `pnpm test:mcp-postgres` and verify the actual
 Kubernetes API route with a scoped key. Record private candidate image digests,

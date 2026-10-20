@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { StringDecoder } from 'node:string_decoder'
+import { APPLICATION_VERSION } from '@task-weaver/contracts'
 import type { ExecutorFailure, ExecutorObservation, ExecutorTool } from '@task-weaver/contracts'
 
 const reasons: Record<ExecutorFailure, string> = {
@@ -115,7 +116,7 @@ export async function queryCodexQuota(profileId: string, env = process.env, comm
     child.stdin.on('error',()=>finish(unknown()))
     child.stderr.on('data',()=>{ /* Never retain provider diagnostics or account identifiers. */ })
     const send = (value: unknown) => child.stdin.write(JSON.stringify(value)+'\n')
-    child.once('spawn',()=>send({id:1,method:'initialize',params:{clientInfo:{name:'task_weaver_quota',version:'0.3.4'}}}))
+    child.once('spawn',()=>send({id:1,method:'initialize',params:{clientInfo:{name:'task_weaver_quota',version:APPLICATION_VERSION}}}))
     child.stdout.on('data',(chunk: Buffer)=>{
       total += chunk.length; if (total > 512*1024) return finish(unknown())
       pending += chunk.toString('utf8')

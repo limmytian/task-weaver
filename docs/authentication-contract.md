@@ -6,7 +6,7 @@ package; `@task-weaver/core` and its `schemas`/`types` entry points re-export th
 contracts for compatibility. REST, tRPC, GraphQL, CLI, streams and background
 execution must share the same server identity resolver and core authorization.
 
-The 0.3.3 source implements these contracts across the authorized resource and
+The application implements these contracts across the authorized resource and
 execution surfaces. Unconverted operations remain explicitly denied. See
 [authenticated access](authenticated-access.md) for account UX, CLI setup and
 offline upgrade/recovery; source acceptance does not authorize production rollout.
@@ -455,7 +455,7 @@ CLI inspection: `tw auth agents list --status disabled --query name --json`,
 require a browser session rather than an ordinary CLI API key.
 
 
-## Ordinary Key grant editing (0.3.4)
+## Ordinary Key grant editing
 
 Apply migration `0060_key_grant_version` before starting updated services. Existing
 bound Keys start at grant version 1. Safe Key metadata now includes `grantVersion`;

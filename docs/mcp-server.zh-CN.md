@@ -1,13 +1,13 @@
 # 通过 MCP 客户端使用 Task Weaver
 
-0.3.11 的 MCP Server 通过本地 stdio 或远程 Streamable HTTP 最多提供 44 个协作工具。
+MCP Server 通过本地 stdio 或远程 Streamable HTTP 提供协作工具，实际清单以实时发现为准。
 已有 MCP Registry 用于把外部工具接入 Task Weaver，原有 `tw mcp` 命令保持兼容。
 英文规范见 [MCP Server](mcp-server.md)，工具契约见 [实现契约](mcp-server-contract.md)。
 
 ## 认证与接入
 
-两种方式都需要包含 0.3.10 MCP 实现的 API 服务。本地方式还需要匹配的 CLI。
-首版使用绑定主体的 scoped API Key；只读授权使用 `resource.read`，需要写入时再增加
+两种方式都需要支持实时授权工具清单的 API 服务，本地方式还需要匹配的 CLI。
+使用绑定主体的 scoped API Key；只读授权使用 `resource.read`，需要写入时再增加
 `resource.write`。项目选择不会扩大密钥权限。代理使用独立身份、项目成员关系及密钥；
 个人空间归属来自服务端核验的管理者身份，仍需明确的个人空间授权。
 
@@ -126,10 +126,10 @@ JavaScript 入口后执行数据库命令，可复现 Inspector 验收；未设�
 Inspector 使用临时 0600 配置并在结束后删除。Web 使用的详情接口已确认可见写入结果，
 浏览器视觉操作仍由用户验收。通用配置示例不代表已验证所有客户端。
 
-## 0.3.11：规划与上下文
+## 规划与上下文
 
-新增 14 个工具，最多 44 个工具，其中 24 个只读；实际清单按实时授权过滤。需使用 0.3.11 API，stdio
-还需匹配版本 CLI；原有 29 个工具保持兼容。
+规划与上下文工具支持技能发现、执行切片、原子计划和有界上下文；实际清单按实时授权过滤。
+API 必须在工具清单中提供对应能力，stdio 还需匹配的 CLI；最低版本边界见[升级说明](ce-upgrades.md)。
 
 | 工具 | 用途 |
 | --- | --- |
@@ -146,7 +146,7 @@ Inspector 使用临时 0600 配置并在结束后删除。Web 使用的详情接
 最多 32 KiB，不返回存储位置、主机路径和任意 manifest。检索内容本身不构成执行授权。
 
 批量计划用 JSON 的 `plan` 参数提交，包含项目、需求、任务、切片、文档和符号引用。
-完整示例见[英文规范](mcp-server.md#planning-and-context-tools-0311)。
+完整示例见[英文规范](mcp-server.md#planning-and-context-tools)。
 `tw_plan_validate` 不写入，但会检查项目及所有已有引用对象的写权限。
 只读模式允许有相应写权限的密钥预览，仍拒绝应用。
 
@@ -181,7 +181,7 @@ Inspector 使用临时 0600 配置并在结束后删除。Web 使用的详情接
 活动凭据的去重记录不可随意清理，否则重试可能重复写入。临时回退 0.3.10 时可以保留
 这张新增表；回退后新增工具不可用，API/CLI 再升级后恢复。
 
-## 0.3.11：授权、审计和审批
+## 授权、审计和审批
 
 HTTP 与 stdio 的工具清单按当前主体、Key、scope、只读配置与禁用策略动态过滤，
 每次调用重新检查实际目标。新版 stdio CLI 需要 `/api/v1/mcp-server/catalog`，

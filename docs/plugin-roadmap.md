@@ -1,7 +1,9 @@
-# Deferred Plugin Ecosystem Roadmap
+# Plugin Ecosystem Roadmap
 
-Status: low-priority planning only, not scheduled implementation. One Task Weaver
-application hosts official and third-party extensions; there is no separate Pro
+Status: included in the owner-requested capability iteration planning in Task
+Weaver; implementation has not started. Use the linked project requirements and
+iteration documents for current priority and scope. One Task Weaver application
+hosts official and third-party extensions; there is no separate Pro
 application. A catalog is a later distribution layer, not a substitute for safe
 runtime integration. Payments, ratings and marketplace UI are not current scope.
 

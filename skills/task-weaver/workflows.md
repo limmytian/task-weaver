@@ -78,7 +78,7 @@ Bootstrap a new project from scratch.
 
 ---
 
-## Configurable Requirement Delivery (0.3.8)
+## Configurable Requirement Delivery
 
 New requirements resolve a versioned workflow at creation. The project default applies when no requirement override is provided; without a project default the `basic` workflow requires no output and skips acceptance and integration. Existing requirements with a null workflow retain the legacy Git behavior until explicitly updated while draft or approved.
 
@@ -624,4 +624,4 @@ For larger teams, partition work at the requirement level:
 
 This reduces contention and makes parallel work natural.
 
-For human integration without a PR, use `tw req repo sync-direct` (0.3.9) to verify the delivered commit against the configured target branch, then complete the normal requirement/workflow controls. See [human delivery reconciliation](../../docs/manual-pr-reconciliation.md).
+For human integration without a PR, use `tw req repo sync-direct` to verify the delivered commit against the configured target branch, then complete the normal requirement/workflow controls. See [human delivery reconciliation](../../docs/manual-pr-reconciliation.md).
