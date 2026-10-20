@@ -37,8 +37,8 @@ export async function readMcpContext(db: Database, identity: VerifiedRequestCont
       } else if (section === "documents") {
         const columns = { id: documents.id, title: sql<string>`left(${documents.title}, 128)`, summary: sql<string | null>`left(${documents.summary}, 1024)`, version: documents.version, updatedAt: documents.updatedAt };
         rows = kind === "task"
-          ? await tx.select(columns).from(documents).innerJoin(documentTaskLinks, eq(documentTaskLinks.documentId, documents.id)).where(and(eq(documentTaskLinks.taskId, input.id), resourcePredicate(authority, documents))).orderBy(documents.id).limit(input.limit + 1).offset(input.offset)
-          : await tx.select(columns).from(documents).innerJoin(documentRequirementLinks, eq(documentRequirementLinks.documentId, documents.id)).where(and(eq(documentRequirementLinks.requirementId, input.id), resourcePredicate(authority, documents))).orderBy(documents.id).limit(input.limit + 1).offset(input.offset);
+          ? await tx.select({ ...columns, linkType: documentTaskLinks.linkType, linkedAt: documentTaskLinks.createdAt }).from(documents).innerJoin(documentTaskLinks, eq(documentTaskLinks.documentId, documents.id)).where(and(eq(documentTaskLinks.taskId, input.id), resourcePredicate(authority, documents))).orderBy(documents.id).limit(input.limit + 1).offset(input.offset)
+          : await tx.select({ ...columns, linkType: documentRequirementLinks.linkType, linkedAt: documentRequirementLinks.createdAt }).from(documents).innerJoin(documentRequirementLinks, eq(documentRequirementLinks.documentId, documents.id)).where(and(eq(documentRequirementLinks.requirementId, input.id), resourcePredicate(authority, documents))).orderBy(documents.id).limit(input.limit + 1).offset(input.offset);
         continuation = "tw_documents_get";
       } else if (section === "dependencies") {
         if (kind === "task") {

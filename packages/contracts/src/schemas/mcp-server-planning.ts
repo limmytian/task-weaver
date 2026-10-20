@@ -67,3 +67,13 @@ export const mcpDependencyGraphSchema = z.object({
   maxEdges: z.number().int().min(1).max(100).default(40),
   maxBytes: z.number().int().min(2048).max(32768).default(16384),
 }).strict();
+
+export const mcpDocumentHistorySchema = z.object({
+  id, offset: z.number().int().min(0).max(100000).default(0),
+  limit: z.number().int().min(1).max(20).default(10),
+}).strict();
+export const mcpDocumentVersionSchema = z.object({
+  id, version: z.number().int().min(1).max(2147483647),
+  offset: z.number().int().min(0).max(10000000).default(0),
+  limit: z.number().int().min(1).max(8000).default(4000),
+}).strict();

@@ -42,7 +42,7 @@ async function target(db: Database, identity: VerifiedRequestContext, name: McpS
     const [record] = await db.select().from(skillPackages).where(eq(skillPackages.id, raw.packageId));
     revision = record;
   } else if (typeof raw.id === "string") {
-    const kind: ResourceKind = name.startsWith("tw_memories_") ? "memory" : name.startsWith("tw_projects_") ? "project" : name.startsWith("tw_requirements_") || name.startsWith("tw_requirement_") || name === "tw_document_requirement_links_add" || name === "tw_execution_slices_list" || name === "tw_execution_slices_create" ? "requirement" : name === "tw_execution_slices_update" ? "slice" : name.startsWith("tw_documents_") || name.startsWith("tw_document_task") || name === "tw_context_get" ? "document" : "task";
+    const kind: ResourceKind = name.startsWith("tw_memories_") ? "memory" : name.startsWith("tw_projects_") ? "project" : name.startsWith("tw_requirements_") || name.startsWith("tw_requirement_") || name === "tw_document_requirement_links_add" || name === "tw_execution_slices_list" || name === "tw_execution_slices_create" ? "requirement" : name === "tw_execution_slices_update" ? "slice" : name.startsWith("tw_documents_") || name.startsWith("tw_document_task") || name === "tw_document_history" || name === "tw_document_version" || name === "tw_context_get" ? "document" : "task";
     scope = await requireResource(db, authority, kind, raw.id, permission);
     const table = kind === "memory" ? memories : kind === "project" ? projects : kind === "requirement" ? requirements : kind === "slice" ? executionSlices : kind === "document" ? documents : tasks;
     const [record] = await db.select().from(table).where(eq(table.id, raw.id));

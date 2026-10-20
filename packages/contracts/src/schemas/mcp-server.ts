@@ -51,6 +51,7 @@ export const mcpServerReadTools = [
   "tw_documents_list", "tw_documents_get", "tw_search",
   "tw_context_bootstrap", "tw_context_search", "tw_context_get",
   "tw_skill_packages_list", "tw_skill_packages_get", "tw_skill_package_files", "tw_skill_package_read",
+  "tw_document_history", "tw_document_version",
   "tw_dependencies_graph",
   "tw_execution_slices_list", "tw_plan_validate", "tw_tasks_context", "tw_requirements_context",
   "tw_memories_search", "tw_memories_get", "tw_memories_preview",
