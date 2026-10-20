@@ -4,6 +4,7 @@ const hints = [
   "tw_context_search", "tw_context_get", "tw_skill_packages_list",
   "tw_skill_packages_get", "tw_skill_package_files", "tw_skill_package_read",
   "tw_projects_list", "tw_tasks_context", "tw_requirements_context",
+  "tw_memories_search", "tw_memories_get",
 ] as const;
 
 /** Discovery hints only: execution still checks live grants and each target. */
@@ -21,7 +22,9 @@ export function buildCapabilityBootstrap(visibleTools: readonly string[]): Capab
     capabilities: {
       skills: instructionAccess(["tw_context_search", "tw_context_get"]),
       skillPackages: instructionAccess(["tw_skill_packages_list", "tw_skill_packages_get", "tw_skill_package_files", "tw_skill_package_read"]),
-      memories: unavailable("Inbound memory tools are not available yet. Use the scoped tw memory CLI or REST interface."),
+      memories: visibleTools.includes("tw_memories_search") && visibleTools.includes("tw_memories_get")
+        ? { state: "available", executionMode: "remote" }
+        : { state: "unavailable", reason: "not_configured", remediation: "Use tools/list to inspect memory read grants and policy." },
       externalTools: unavailable("Inbound registry discovery and calls are not available yet. Use scoped tw mcp search/tool/call or REST."),
       hostedExecution: unavailable("Use an explicitly configured local runtime for executable skills; hosted workers are not available yet."),
       plugins: unavailable("Isolated plugin installation is not available yet."),

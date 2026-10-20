@@ -519,6 +519,13 @@
       "when": 1792380001000,
       "tag": "0073_mcp_security",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1792472400000,
+      "tag": "0074_memory_lifecycle",
+      "breakpoints": true
     }
   ]
 }

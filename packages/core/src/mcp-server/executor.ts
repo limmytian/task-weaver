@@ -6,6 +6,7 @@ import { submitMcpPlan } from "./planning";
 import { readMcpContext } from "./context";
 import { mcpSlices } from "./slices";
 import { buildCapabilityBootstrap } from "./bootstrap";
+import { mcpMemory } from "./memory";
 import { readMcpPackage, readMcpSkill, listMcpPackages } from "./discovery";
 import type { SkillPackageStorageAdapter } from "../services/skill-package-storage";
 import type { Database } from "@task-weaver/db";
@@ -35,6 +36,11 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
     const id = raw.id as string;
     const page = { page: raw.page as number, pageSize: raw.pageSize as number };
     switch (name) {
+      case "tw_memories_search": return mcpMemory(db, identity, "search", raw);
+      case "tw_memories_get": return mcpMemory(db, identity, "get", raw);
+      case "tw_memories_record": return mcpMemory(db, identity, "record", raw);
+      case "tw_memories_update": return mcpMemory(db, identity, "update", raw);
+      case "tw_memories_forget": return mcpMemory(db, identity, "forget", raw);
       case "tw_plan_validate": return submitMcpPlan(db, identity, { plan: raw.plan }, signal);
       case "tw_plan_apply": return submitMcpPlan(db, identity, { plan: raw.plan, idempotencyKey: raw.idempotencyKey as string }, signal);
       case "tw_tasks_context": return readMcpContext(db, identity, "task", raw as unknown as Parameters<typeof readMcpContext>[3], signal);

@@ -9,7 +9,8 @@ test("bootstrap filters denied tools and cannot advertise hosted runtimes as rea
   assert.equal(result.tools.includes("tw_context_get"), false);
   assert.equal(result.capabilities.skills.state, "unavailable");
   assert.deepEqual(result.capabilities.skillPackages, { state: "available", executionMode: "instructions" });
-  for (const name of ["memories", "externalTools", "hostedExecution", "plugins"] as const) {
+  assert.equal(result.capabilities.memories.state, "available");
+  for (const name of ["externalTools", "hostedExecution", "plugins"] as const) {
     assert.equal(result.capabilities[name].state, "unavailable");
   }
   assert.ok(result.tools.every(name => !/_(create|update|apply|status|claim)$/.test(name)));

@@ -179,6 +179,10 @@ function bindServices(context?: VerifiedRequestContext) {
             }
           } else {
             result = await implementation(...call);
+            if (name === "recordMemory") {
+              await requireResource(txDb, authority, "memory", result.id, "resource.write");
+              await checkMemoryEntity(txDb, authority, result);
+            }
           }
           if (["recordMemory", "updateMemory", "forgetMemory", "unlinkDocuments", "unlinkDocumentFromTask", "unlinkDocumentFromRequirement", "removeTaskDependency"].includes(name)) {
             const entityId = typeof call[1] === "string" ? call[1] : result?.id;

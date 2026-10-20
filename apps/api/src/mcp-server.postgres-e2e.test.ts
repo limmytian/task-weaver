@@ -17,7 +17,7 @@ import { createDb, runMigrations, apiKeys, mcpInvocationApprovals, projectMember
 import { cleanupMcpInvocationHistory, setMcpInvocationPolicy, approveMcpInvocation, listMcpInvocationAudits, createResourceServices, skillPackageStorageService, registerSkillPackageSchema } from "@task-weaver/core";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 import { createApiApplication } from "./application";
-import { capabilityBootstrapSchema, CAPABILITY_LIMITS } from "@task-weaver/contracts";
+import { capabilityBootstrapSchema, CAPABILITY_LIMITS, mcpServerCatalog, mcpServerReadTools } from "@task-weaver/contracts";
 
 const databaseUrl = process.env.TW_MCP_E2E_DATABASE_URL;
 test("MCP transports use live scoped authority and preserve collaboration guards", { skip: !databaseUrl, timeout: 120_000 }, async t => {
@@ -117,7 +117,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const remote = new Client({ name: "real-http-sdk", version: "1.31.0" });
   await remote.connect(new StreamableHTTPClientTransport(new URL(`http://${host}/api/v1/mcp-server`), { requestInit: { headers: headers() } }));
   t.after(() => remote.close());
-  assert.equal((await remote.listTools()).tools.length, 43);
+  assert.equal((await remote.listTools()).tools.length, mcpServerCatalog.length - 1);
   assert.equal((await remote.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   const directory = await mkdtemp(join(tmpdir(), "tw-mcp-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -152,7 +152,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const restBootstrapResponse = await f.app.request("/api/v1/context/bootstrap", { headers: headers() });
   assert.equal(restBootstrapResponse.status, 200);
   assert.deepEqual((await restBootstrapResponse.json() as any).capabilityBootstrap, localBootstrap);
-  assert.equal((await local.listTools()).tools.length, 23);
+  assert.equal((await local.listTools()).tools.length, mcpServerReadTools.length - 1);
   assert.equal((await local.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   assert.equal((await local.callTool({ name: "tw_tasks_status", arguments: { id: task.id, status: "done" } })).isError, true);
   // 0.3.11 planning and context use the same authenticated executor on both transports.
@@ -232,6 +232,35 @@ test("MCP transports use live scoped authority and preserve collaboration guards
     const stage = (await invoke("tw_execution_slices_list", { id: applied.refs.requirements[0].id })).items[0];
     assert.equal((await invoke("tw_execution_slices_update", { id: stage.id, expectedUpdatedAt: stage.updatedAt, patch: { resultSummary: "Transport handoff" } })).resultSummary, "Transport handoff");
     assert.equal((await invoke("tw_tasks_context", { id: applied.refs.tasks[0].id })).entity.id, applied.refs.tasks[0].id);
+    const memoryInput = { title: `${transportName} continuity memory`, content: "Preserve the verified handoff between sessions.", projectId: f.project.id, confirmed: true, idempotencyKey: randomUUID() };
+    const [saved, replayed] = await Promise.all([invoke("tw_memories_record", memoryInput), invoke("tw_memories_record", memoryInput)]);
+    assert.equal(saved.id, replayed.id);
+    assert.equal(saved.version, 1);
+    const resumed = await local.callTool({ name: "tw_memories_get", arguments: { id: saved.id } });
+    assert.equal((resumed.structuredContent as any).data.content, memoryInput.content);
+    const found = await invoke("tw_memories_search", { query: "continuity memory", projectId: f.project.id });
+    assert.ok(found.items.some((item: any) => item.id === saved.id));
+    assert.equal(found.items[0].content, undefined);
+    assert.equal(found.meta.expiresRenewed, false);
+    assert.ok(Buffer.byteLength(JSON.stringify(found)) <= CAPABILITY_LIMITS.summaryBytes);
+    const conflictingSave = await client.callTool({ name: "tw_memories_record", arguments: { ...memoryInput, content: "Different content" } });
+    assert.equal((conflictingSave.structuredContent as any).error.code, "version_conflict");
+    const changes = await Promise.all(["First edit", "Second edit"].map(content => client.callTool({ name: "tw_memories_update", arguments: { id: saved.id, patch: { content, expectedVersion: 1 } } })));
+    assert.equal(changes.filter(result => !result.isError).length, 1);
+    const current = await invoke("tw_memories_get", { id: saved.id });
+    assert.equal(current.version, 2);
+    assert.equal((await client.callTool({ name: "tw_memories_forget", arguments: { id: saved.id, expectedVersion: 1, confirmed: true } })).isError, true);
+    await invoke("tw_memories_forget", { id: saved.id, expectedVersion: current.version, confirmed: true });
+    assert.equal((await client.callTool({ name: "tw_memories_get", arguments: { id: saved.id } })).isError, true);
+    assert.equal((await client.callTool({ name: "tw_memories_record", arguments: memoryInput })).isError, true);
+    const expired = await invoke("tw_memories_record", { ...memoryInput, idempotencyKey: randomUUID(), expiresAt: new Date(Date.now() - 1000).toISOString() });
+    assert.equal((await client.callTool({ name: "tw_memories_get", arguments: { id: expired.id } })).isError, true);
+    assert.equal((await invoke("tw_memories_get", { id: expired.id, includeExpired: true })).expired, true);
+    assert.equal((await invoke("tw_memories_search", { query: memoryInput.title, projectId: f.project.id })).items.length, 0);
+    assert.equal((await call("tw_memories_get", { id: expired.id, includeExpired: true }, outsiderKey.rawKey)).ok, false);
+    assert.equal((await call("tw_memories_record", { ...memoryInput, idempotencyKey: randomUUID() }, readKey.rawKey)).ok, false);
+    assert.equal((await local.callTool({ name: "tw_memories_record", arguments: { ...memoryInput, idempotencyKey: randomUUID() } })).isError, true);
+    await invoke("tw_memories_forget", { id: expired.id, expectedVersion: expired.version, confirmed: true });
   }
   const directoryKey = await f.identity.issueKey(f.owner.headers, f.owner.context.actor.id, { name: "Directory-only fixture", expiresAt: null, grants: [{ scope: "global", permissions: ["project.discover"] }] });
   const directoryResponse = await f.app.request("/api/v1/projects/discover?pageSize=1", { headers: headers(directoryKey.rawKey) });
@@ -330,7 +359,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
       const initialization = await inspector(transportName, "initialize");
       assert.equal(initialization.protocolVersion, "2025-11-25");
       const tools = await inspector(transportName, "tools/list");
-      assert.equal(tools.tools.length, 43);
+      assert.equal(tools.tools.length, mcpServerCatalog.length - 1);
       const invoke = async (name: string, args: unknown) => {
         const result = await inspector(transportName, "tools/call", name, args);
         assert.equal(result.structuredContent.ok, true, JSON.stringify(result));

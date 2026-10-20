@@ -1,5 +1,6 @@
 import { mcpRetrievalScopeSchema, mcpPackageFilesSchema, mcpPackageReadSchema, mcpSliceCreateSchema, mcpSliceUpdateSchema, mcpPlanValidateSchema, mcpPlanApplySchema, mcpAggregateContextSchema } from "./mcp-server-planning";
 import { z } from "zod";
+import { mcpMemorySearchSchema, mcpMemoryGetSchema, mcpMemoryRecordSchema, mcpMemoryUpdateSchema, mcpMemoryForgetSchema } from "./mcp-memory";
 import { listProjectsSchema } from "./projects";
 import { createRequirementSchema, updateRequirementSchema, listRequirementsSchema, createRequirementDependencySchema, linkDocumentToRequirementSchema } from "./requirements";
 import { createTaskSchema, createPersonalTaskSchema, updateTaskSchema, updateTaskStatusSchema, claimTaskSchema, releaseTaskSchema, createTaskCommentSchema, createTaskDependencySchema } from "./tasks";
@@ -50,6 +51,11 @@ export const mcpServerCatalog = [
   tool("tw_document_task_links_add", "Link an authorized document to an authorized task.", linkDocumentToTaskSchema.extend({ id }).strict()),
   tool("tw_document_requirement_links_add", "Link an authorized document to an authorized requirement.", linkDocumentToRequirementSchema.extend({ id }).strict()),
   tool("tw_context_bootstrap", "Read Task Weaver MCP collaboration conventions and discovery guidance.", z.object({}).strict()),
+  tool("tw_memories_search", "Discover bounded memory summaries without renewing expiry; read full content separately.", mcpMemorySearchSchema),
+  tool("tw_memories_get", "Read one authorized active memory and its revision/provenance.", mcpMemoryGetSchema),
+  tool("tw_memories_record", "Explicitly save a confirmed memory; reuse the same key and payload after an ambiguous response.", mcpMemoryRecordSchema),
+  tool("tw_memories_update", "Revise a memory using its exact current version.", mcpMemoryUpdateSchema),
+  tool("tw_memories_forget", "Explicitly forget a memory at its current version; old save retries cannot restore it.", mcpMemoryForgetSchema),
   tool("tw_context_search", "Discover authorized skill summaries by intent; read full text separately.", mcpRetrievalScopeSchema.extend({ intent: z.string().trim().min(1).max(500), limit: z.number().int().min(1).max(20).default(5) }).strict()),
   tool("tw_context_get", "Read one authorized skill document.", byId),
   tool("tw_skill_packages_list", "List authorized skill package summaries.", mcpRetrievalScopeSchema.extend({ query: z.string().trim().min(1).max(500).optional(), offset: z.number().int().min(0).max(100000).default(0), limit: z.number().int().min(1).max(50).default(20) }).strict()),
@@ -70,7 +76,7 @@ export function parseMcpServerArguments(name: McpServerToolName, value: unknown)
   const definition = mcpServerCatalog.find(tool => tool.name === name)!;
   const input = definition.schema.parse(value);
   if (name === "tw_tasks_create") return { ...createTaskSchema.parse(input), ...(input.approvalId ? { approvalId: input.approvalId } : {}) };
-  if (name === "tw_documents_create") {
+  if (name === "tw_documents_create" || name === "tw_memories_record") {
     if ((input.scope === "project" && !input.projectId) || ((input.scope === "personal" || input.scope === "global") && input.projectId)) {
       throw new z.ZodError([{ code: "custom", path: ["scope"], message: "Document scope conflicts with projectId" }]);
     }
