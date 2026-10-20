@@ -1,3 +1,4 @@
+import { mcpPool } from "../mcp-pool";
 import { resolve } from "node:path";
 import { recordMcpInvocationAudit, personalResourceOwnerId, skillPackageStorageService } from "@task-weaver/core";
 import { Hono } from "hono";
@@ -25,6 +26,7 @@ export function createMcpServerRoutes(options: McpRouteOptions) {
   const budget: McpCallBudget = options.budget ?? { active: 0 };
   routes.use("*", bodyLimit({ maxSize: MCP_SERVER_LIMITS.requestBytes, onError: c => c.json({ error: "Request exceeds the MCP limit" }, 413) }));
   routes.use("*", async (c, next) => {
+    if (c.req.header("x-task-weaver-mcp-hop")) return c.json({ error: "Recursive MCP forwarding is not allowed" }, 400);
     const identity = c.get("identity");
     if (identity.credential.kind !== "api_key" || !c.req.header("authorization")) throw new AuthenticationError();
     // Never use forwarded Host values as authority. Reverse proxies must preserve
@@ -39,8 +41,9 @@ export function createMcpServerRoutes(options: McpRouteOptions) {
       new skillPackageStorageService.LocalSkillPackageStorageAdapter(options.packageStorageDir ?? process.env.SKILL_PACKAGE_STORAGE_DIR ?? resolve(process.cwd(), "data", "skill-packages")),
       options.runtimeProfiles,
       options.readOnly,
+      mcpPool,
     ),
-    { readOnly: options.readOnly, onRejected: options.executor ? undefined : (name, code) => recordMcpInvocationAudit(context.db, context.identity, { personalOwnerId: personalResourceOwnerId(context.identity), personalOwnerType: "human" }, "task-weaver", name, Date.now(), code), budget, signal: options.signal ? AbortSignal.any([requestSignal, options.signal]) : requestSignal },
+    { readOnly: options.readOnly, onRejected: options.executor ? undefined : async (name, code) => { await recordMcpInvocationAudit(context.db, context.identity, { personalOwnerId: personalResourceOwnerId(context.identity), personalOwnerType: "human" }, "task-weaver", name, Date.now(), code); }, budget, signal: options.signal ? AbortSignal.any([requestSignal, options.signal]) : requestSignal },
   );
 
   // Authenticated JSON adapter used by local stdio clients through CLI request().

@@ -1,3 +1,7 @@
+import { Server as ProtocolServer } from "@modelcontextprotocol/sdk/server/index.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { mcpPool } from "./mcp-pool";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFile } from "node:child_process";
@@ -117,7 +121,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const remote = new Client({ name: "real-http-sdk", version: "1.31.0" });
   await remote.connect(new StreamableHTTPClientTransport(new URL(`http://${host}/api/v1/mcp-server`), { requestInit: { headers: headers() } }));
   t.after(() => remote.close());
-  assert.equal((await remote.listTools()).tools.length, mcpServerCatalog.length - 3);
+  assert.equal((await remote.listTools()).tools.length, mcpServerCatalog.length - 6);
   assert.equal((await remote.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   const directory = await mkdtemp(join(tmpdir(), "tw-mcp-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -152,7 +156,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const restBootstrapResponse = await f.app.request("/api/v1/context/bootstrap", { headers: headers() });
   assert.equal(restBootstrapResponse.status, 200);
   assert.deepEqual((await restBootstrapResponse.json() as any).capabilityBootstrap, localBootstrap);
-  assert.equal((await local.listTools()).tools.length, mcpServerReadTools.length - 2);
+  assert.equal((await local.listTools()).tools.length, mcpServerReadTools.length - 4);
   assert.equal((await local.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   assert.equal((await local.callTool({ name: "tw_tasks_status", arguments: { id: task.id, status: "done" } })).isError, true);
   // 0.3.11 planning and context use the same authenticated executor on both transports.
@@ -420,6 +424,65 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   assert.equal((await db.select().from(mcpInvocationAudits).where(eq(mcpInvocationAudits.id, expiredProjectAudit!.id))).length, 0);
   assert.equal((await db.select().from(mcpInvocationAudits).where(eq(mcpInvocationAudits.id, isolatedPersonalAudit!.id))).length, 1);
   await setMcpInvocationPolicy(db, f.owner.context, scope, "tw_task_comments_add", "allow");
+  // Exercise the actual external MCP transport rather than a fake registry client.
+  let externalCalls = 0;
+  const externalHttp = serve({ hostname: "127.0.0.1", port: 0, fetch: async req => {
+    if (req.method !== "POST") return new Response(null, { status: 405 });
+    assert.equal(req.headers.get("x-task-weaver-mcp-hop"), "1");
+    const server = new ProtocolServer({ name: "external-fixture", version: "1" }, { capabilities: { tools: {} } });
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{ name: "fixture_echo", description: "Echo a reviewed message", inputSchema: { type: "object", properties: { message: { type: "string" } }, required: ["message"] } }] }));
+    server.setRequestHandler(CallToolRequestSchema, async request => { externalCalls++; return { content: [{ type: "text", text: String(request.params.arguments?.message) }] }; });
+    const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
+    await server.connect(transport);
+    try { return await transport.handleRequest(req); } finally { await server.close(); }
+  } });
+  await once(externalHttp, "listening");
+  t.after(async () => { if ("closeAllConnections" in externalHttp) externalHttp.closeAllConnections(); await new Promise<void>(resolve => externalHttp.close(() => resolve())); });
+  const registryService = createResourceServices(f.owner.context).mcpRegistryService;
+  const externalServer = await registryService.registerServer(db, { name: "external-fixture", transport: "streamable-http", config: { url: `http://127.0.0.1:${(externalHttp.address() as { port: number }).port}/mcp` }, projectId: f.project.id, active: true, readOnly: false, tags: [] }, f.owner.context.actor);
+  t.after(() => mcpPool.disconnect(externalServer.id));
+  const synced = await registryService.syncTools(db, externalServer.id, mcpPool);
+  const externalTool = synced[0]!;
+  await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: "member", explicitPermissions: ["mcp.invoke"] });
+  const registryKey = await f.identity.issueKey(f.owner.headers, agent.id, { name: "External MCP fixture", expiresAt: null, grants: [{ scope: "project", projectId: f.project.id, permissions: ["resource.read", "mcp.invoke"] }] });
+  const recursiveServer = await registryService.registerServer(db, { name: "recursive-fixture", transport: "streamable-http", config: { url: `http://${host}/api/v1/mcp-server`, headers: { authorization: `Bearer ${registryKey.rawKey}` } }, projectId: f.project.id, active: true, readOnly: false, tags: [] }, f.owner.context.actor);
+  t.after(() => mcpPool.disconnect(recursiveServer.id));
+  await assert.rejects(registryService.syncTools(db, recursiveServer.id, mcpPool));
+  const registryClient = new Client({ name: "registry-http", version: "1" });
+  await registryClient.connect(new StreamableHTTPClientTransport(new URL(`http://${host}/api/v1/mcp-server`), { requestInit: { headers: headers(registryKey.rawKey) } }));
+  t.after(() => registryClient.close());
+  const registryStdio = new Client({ name: "registry-stdio", version: "1" });
+  await registryStdio.connect(new StdioClientTransport({ command: process.execPath, args: ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url)), "mcp", "serve"], env: { ...env, PATH: "/no-local-tools", TW_CONFIG_DIR: directory, TW_API_URL: `http://${host}`, TW_API_KEY: registryKey.rawKey }, stderr: "pipe" }));
+  t.after(() => registryStdio.close());
+  const registryCall = async (name: string, args: Record<string, unknown>) => (await registryClient.callTool({ name, arguments: args })).structuredContent as any;
+  const discovered = await registryCall("tw_mcp_search", { intent: "fixture_echo", projectId: f.project.id });
+  assert.equal(discovered.ok, true, JSON.stringify(discovered));
+  assert.equal(discovered.data.items[0].reference.id, externalTool.id);
+  assert.equal(JSON.stringify(discovered).includes("inputSchema"), false);
+  const detail = await registryCall("tw_mcp_tool", { toolId: externalTool.id });
+  assert.equal(detail.ok, true, JSON.stringify(detail));
+  const invocation = { toolId: externalTool.id, schemaHash: detail.data.schemaHash, arguments: { message: "external-ok" }, confirmed: true };
+  assert.equal((await registryCall("tw_mcp_call", { ...invocation, schemaHash: "0".repeat(64) })).error.code, "version_conflict");
+  assert.equal(externalCalls, 0);
+  const invoked = await registryCall("tw_mcp_call", invocation);
+  assert.equal(invoked.ok, true, JSON.stringify(invoked));
+  assert.equal(invoked.data.result.content[0].text, "external-ok");
+  assert.ok((await listMcpInvocationAudits(db, f.owner.context, scope, 100)).some(audit => audit.id === invoked.data.result._meta["task-weaver/auditId"] && audit.toolId === externalTool.id));
+  assert.equal(externalCalls, 1);
+  const stdioInvocation = await registryStdio.callTool({ name: "tw_mcp_call", arguments: invocation });
+  assert.notEqual(stdioInvocation.isError, true, JSON.stringify(stdioInvocation));
+  assert.equal((stdioInvocation.structuredContent as any).data.result.content[0].text, "external-ok");
+  await setMcpInvocationPolicy(db, f.owner.context, scope, externalTool.id, "approval");
+  const approval = await registryCall("tw_mcp_call", invocation);
+  assert.equal(approval.error.code, "approval_required", JSON.stringify(approval));
+  await approveMcpInvocation(db, f.owner.context, approval.error.approvalId);
+  assert.equal((await registryCall("tw_mcp_call", { ...invocation, targetApprovalId: approval.error.approvalId })).ok, true);
+  assert.equal((await registryCall("tw_mcp_call", { ...invocation, targetApprovalId: approval.error.approvalId })).ok, false);
+  await setMcpInvocationPolicy(db, f.owner.context, scope, externalTool.id, "deny");
+  assert.equal((await registryCall("tw_mcp_search", { intent: "fixture_echo", projectId: f.project.id })).data.items.length, 0);
+  assert.equal((await registryCall("tw_mcp_tool", { toolId: externalTool.id })).ok, false);
+  assert.equal((await registryCall("tw_mcp_call", invocation)).ok, false);
+  assert.equal(externalCalls, 3);
   if (process.env.TW_SKILL_RUNTIME_TEST_IMAGE) {
     const previousHostMarker = process.env.TW_SKILL_HOST_SECRET;
     process.env.TW_SKILL_HOST_SECRET = "fixture-host-secret";
@@ -534,7 +597,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
       const initialization = await inspector(transportName, "initialize");
       assert.equal(initialization.protocolVersion, "2025-11-25");
       const tools = await inspector(transportName, "tools/list");
-      assert.equal(tools.tools.length, mcpServerCatalog.length - 3);
+      assert.equal(tools.tools.length, mcpServerCatalog.length - 6);
       const invoke = async (name: string, args: unknown) => {
         const result = await inspector(transportName, "tools/call", name, args);
         assert.equal(result.structuredContent.ok, true, JSON.stringify(result));

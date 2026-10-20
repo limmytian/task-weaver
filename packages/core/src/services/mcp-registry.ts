@@ -466,6 +466,7 @@ export async function callTool(
   actor: Actor,
   pool: McpPool,
   _approvalId?: string,
+  _expectedSchemaHash?: string,
 ) {
   const tool = await db.query.mcpTools.findFirst({
     where: eq(mcpTools.id, toolId),

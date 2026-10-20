@@ -6,7 +6,9 @@ test("read-only dispatch rejects known writes and arbitrary executors", () => {
   assert.equal(isMcpServerToolAllowed("tw_tasks_status", true), false);
   assert.equal(isMcpServerToolAllowed("tw_tasks_status", false), true);
   assert.equal(isMcpServerToolAllowed("tw_tasks_get", true), true);
-  for (const name of ["tw_mcp_call", "tw_daemon_start", "request", "__proto__", "toString"]) {
+  assert.equal(isMcpServerToolAllowed("tw_mcp_call", true), false);
+  assert.equal(isMcpServerToolAllowed("tw_mcp_call", false), true);
+  for (const name of [ "tw_daemon_start", "request", "__proto__", "toString"]) {
     assert.equal(isMcpServerToolAllowed(name, false), false);
   }
 });

@@ -50,7 +50,10 @@ class McpConnectionPool {
 
     if (server.transport === "stdio") throw new Error("Client-hosted stdio must execute on the registered client");
 
-    const httpConfig = config as { url: string; headers?: Record<string, string> };
+    const configured = config as { url: string; headers?: Record<string, string> };
+    const headers = new Headers(configured.headers);
+    headers.set("x-task-weaver-mcp-hop", "1");
+    const httpConfig = { ...configured, headers: Object.fromEntries(headers) };
     if (server.transport === "sse") return new SSEClientTransport(new URL(httpConfig.url), { requestInit: { headers: httpConfig.headers }, eventSourceInit: { fetch: (url, init) => fetch(url, { ...init, headers: { ...httpConfig.headers, ...Object.fromEntries(new Headers(init?.headers)) } }) } });
     return new StreamableHTTPClientTransport(new URL(httpConfig.url), { requestInit: { headers: httpConfig.headers } });
   }

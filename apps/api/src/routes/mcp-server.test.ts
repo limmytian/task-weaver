@@ -74,5 +74,7 @@ test("MCP rejects missing credentials, untrusted hosts and oversized input befor
   assert.equal(large.status, 413);
   const unsupported = await f.app.request("/api/v1/mcp-server", { headers: { authorization: "Bearer key-a", accept: "text/event-stream" } });
   assert.equal(unsupported.status, 405);
+  const recursive = await f.app.request("/api/v1/mcp-server", { method: "POST", headers: { authorization: "Bearer key-a", "x-task-weaver-mcp-hop": "1" } });
+  assert.equal(recursive.status, 400);
   assert.equal(f.calls.length, 0);
 });

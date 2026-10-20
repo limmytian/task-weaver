@@ -4,7 +4,7 @@ import { listSkillRuntimes } from "../services/skill-runtime";
 const hints = [
   "tw_context_search", "tw_context_get", "tw_skill_packages_list",
   "tw_skill_packages_get", "tw_skill_package_files", "tw_skill_package_read",
-  "tw_skill_runtimes_list", "tw_tasks_context", "tw_requirements_context",
+  "tw_skill_runtimes_list", "tw_mcp_search", "tw_mcp_tool",
   "tw_memories_search", "tw_memories_get",
   "tw_skill_packages_resolve",
 ] as const;
@@ -27,7 +27,7 @@ export function buildCapabilityBootstrap(visibleTools: readonly string[], hosted
       memories: visibleTools.includes("tw_memories_search") && visibleTools.includes("tw_memories_get")
         ? { state: "available", executionMode: "remote" }
         : { state: "unavailable", reason: "not_configured", remediation: "Use tools/list to inspect memory read grants and policy." },
-      externalTools: unavailable("Inbound registry discovery and calls are not available yet. Use scoped tw mcp search/tool/call or REST."),
+      externalTools: visibleTools.includes("tw_mcp_search") && visibleTools.includes("tw_mcp_tool") ? { state: "available", executionMode: "remote" } : unavailable("Inspect tools/list for registry invocation grants; external schemas are loaded on demand."),
       hostedExecution: hostedExecution ?? { state: "unavailable", reason: "not_configured", remediation: "Inspect tw_skill_runtimes_list and request the required resource.write/mcp.invoke grants before using an isolated skill." },
       plugins: unavailable("Isolated plugin installation is not available yet."),
     },

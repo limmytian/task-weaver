@@ -83,9 +83,8 @@ Use the ordinary tool-call path when a client's native loading features differ.
 
 Skill text, package reads and memory lifecycle operations have scoped inbound
 tools. Memory previews require explicit review before saving and detect changed
-source evidence; see [memory continuity](memories.md). External MCP registry calls
-exist through REST/CLI and need an inbound bridge before bootstrap can advertise
-them. Eligible executable skills have an opt-in isolated runtime with real
+source evidence; see [memory continuity](memories.md). External MCP registry discovery, schema reads and confirmed calls share
+the inbound connection; see [MCP bridge](mcp-bridge.md). Eligible executable skills have an opt-in isolated runtime with real
 HTTP, stdio and CLI acceptance; see [skill runtimes](skill-runtimes.md). Plugin
 execution still requires its own runtime proof. Runtime discovery is the source of availability; release notes record
 historical feature boundaries.

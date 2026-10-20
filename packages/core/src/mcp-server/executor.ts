@@ -1,3 +1,5 @@
+import { registryOperation } from "./registry";
+import type { McpPool } from "../services/mcp-registry";
 import { inArray } from "drizzle-orm";
 import { mcpInvocationPolicies } from "@task-weaver/db";
 import { mcpScopeKey } from "../services/mcp-security";
@@ -25,7 +27,7 @@ function paged(value: unknown) {
 }
 
 /** Only the API constructs this executor, using server-verified request context. */
-export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequestContext, storage?: SkillPackageStorageAdapter, runtimeProfiles?: string, readOnly = false): McpExecutor {
+export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequestContext, storage?: SkillPackageStorageAdapter, runtimeProfiles?: string, readOnly = false, registryPool?: McpPool): McpExecutor {
   const liveDb = db;
   const services = createResourceServices(identity);
   const { projectService: projects, requirementService: requirements, taskService: tasks, documentService: documents, claimService: claims } = services;
@@ -40,6 +42,9 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
     const id = raw.id as string;
     const page = { page: raw.page as number, pageSize: raw.pageSize as number };
     switch (name) {
+      case "tw_mcp_search": return registryOperation(db, liveDb, identity, "search", raw, registryPool, signal);
+      case "tw_mcp_tool": return registryOperation(db, liveDb, identity, "tool", raw, registryPool, signal);
+      case "tw_mcp_call": return registryOperation(db, liveDb, identity, "call", raw, registryPool, signal);
       case "tw_skill_runtimes_list": return listSkillRuntimes(runtimeProfiles);
       case "tw_skills_run": return prepareSkillExecution(db, liveDb, identity, raw, storage, runtimeProfiles, signal);
       case "tw_memories_search": return mcpMemory(db, identity, "search", raw);
@@ -130,7 +135,7 @@ export async function authorizedMcpToolNames(db: Database, identity: VerifiedReq
   const names: string[] = [];
   for (const tool of mcpServerCatalog) {
     const projectOnly = /^tw_(projects|requirements|requirement_dependencies|execution_slices|plan)_/.test(tool.name);
-    const permission = tool.name === "tw_projects_discover" ? "project.discover" : (mcpServerReadTools as readonly string[]).includes(tool.name) && tool.name !== "tw_plan_validate" ? "resource.read" : "resource.write";
+    const permission = tool.name.startsWith("tw_mcp_") ? "mcp.invoke" : tool.name === "tw_projects_discover" ? "project.discover" : (mcpServerReadTools as readonly string[]).includes(tool.name) && tool.name !== "tw_plan_validate" ? "resource.read" : "resource.write";
     for (const grant of authority.grants) {
       if (grant.scope === "instance" || !grant.permissions.includes(permission)) continue;
       if (projectOnly && tool.name !== "tw_projects_discover" && grant.scope !== "project") continue;

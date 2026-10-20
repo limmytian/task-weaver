@@ -1,6 +1,7 @@
+import { requireMcpServer, requireMcpToolTarget } from "../services/mcp-authorization";
 import { lockIdentityLifecycle } from "../services/auth-security";
 import { eq } from "drizzle-orm";
-import { type Database, projects, tasks, requirements, documents, executionSlices, skillPackages, memories } from "@task-weaver/db";
+import { type Database, projects, tasks, requirements, documents, executionSlices, skillPackages, memories, mcpTools } from "@task-weaver/db";
 import { AuthorizationError, mcpServerReadTools, type VerifiedRequestContext, type McpServerToolName } from "@task-weaver/contracts";
 import { resourceAuthority, requireResource, requireScope, personalResourceOwnerId, type ResourceKind, type ResourceScope } from "../services/resource-authorization";
 import { requireMcpApproval, recordMcpInvocationAudit, mcpPolicy, mcpScopeKey } from "../services/mcp-security";
@@ -18,7 +19,13 @@ async function target(db: Database, identity: VerifiedRequestContext, name: McpS
   const projectId = raw.projectId ?? (raw.plan as { projectId?: string } | undefined)?.projectId;
   let scope: ResourceScope = {};
   let revision: unknown = null;
-  if (name === "tw_skills_run") {
+  if (name === "tw_mcp_tool" || name === "tw_mcp_call") {
+    const tool = await db.query.mcpTools.findFirst({ where: eq(mcpTools.id, raw.toolId as string) });
+    if (!tool) throw new AuthorizationError();
+    const server = await requireMcpServer(db, authority, identity, tool.serverId, "mcp.invoke");
+    scope = name === "tw_mcp_call" ? await requireMcpToolTarget(db, authority, server, tool, raw.arguments as Record<string, unknown>) : server;
+    revision = { tool, server };
+  } else if (name === "tw_skills_run") {
     scope = raw.scope === "personal" ? { personalOwnerId: personalResourceOwnerId(identity), personalOwnerType: "human" }
       : raw.scope === "global" ? {} : { projectId: raw.projectId as string };
     requireScope(authority, scope, "resource.write");
@@ -70,6 +77,10 @@ export function secureMcpExecutor(db: Database, identity: VerifiedRequestContext
         return value;
       });
       const completed = deferred ? await deferred.run() : result;
+      if (deferred) {
+        const current = await target(db, identity, name, input);
+        if (mcpScopeKey(current.scope) !== mcpScopeKey(scope) || JSON.stringify(await mcpPolicy(db, mcpScopeKey(current.scope), name)) !== JSON.stringify(policy)) throw new AuthorizationError();
+      }
       await recordMcpInvocationAudit(db, identity, scope, "task-weaver", name, start);
       return completed;
     } catch (error) {
