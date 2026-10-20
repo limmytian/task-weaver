@@ -69,14 +69,22 @@ host-controlled migration path exists. Uploaded privileged SQL is never accepted
 
 ## Frontend boundary
 
-Plugin HTML must run in a sandboxed iframe on a configured separate origin, with
-no host session token and no access to the Core DOM. The trusted application
+Plugin HTML must run in a sandboxed iframe on a dedicated configured origin,
+distinct from both Web and API origins, with no host session token and no access
+to the Core DOM. The trusted static gateway must not forward cookies, authorization
+headers or Core API routes into plugin code. Serve sandbox restrictions through
+response headers as well as the iframe attribute; direct navigation must not
+turn an artifact into credentialed Core-origin code. The trusted application
 viewer must constrain frame navigation, scripts, connections and nested frames;
 script restrictions alone do not prevent navigation-based data exfiltration.
 The narrow message broker validates source window, origin/provenance, nonce,
 message shape, size, installation and current grants. It derives target scope
 from the installation rather than trusting a message's project or namespace.
-Missing origin/isolation configuration is unavailable, never a successful setup.
+A sandbox without `allow-same-origin` produces an opaque message origin. Accept
+its `null` origin only together with the exact iframe window and fresh bridge
+nonce; never accept arbitrary null-origin messages or relax Core CORS for them.
+Replies target only that pinned frame and contain no host credential. Missing
+origin/isolation configuration is unavailable, never a successful setup.
 
 ## Real-application acceptance
 
@@ -94,3 +102,9 @@ owned state. Verify:
 Only then enable runtime discovery and evaluate a modest directory with artifact
 provenance and maintenance ownership. Payments, ratings, unrestricted API
 replacement and arbitrary DOM/DB mutation are outside this first contract.
+
+The frontend implementation must follow the [HTML sandbox boundary](https://html.spec.whatwg.org/multipage/iframe-embed-object.html#attr-iframe-sandbox)
+and [CSP frame-source policy](https://www.w3.org/TR/CSP3/#directive-frame-src), then
+prove its behavior in a real browser. Separate artifact hosting limits the
+privilege of directly visited hostile content; a parent frame allowlist constrains
+embedded navigation. Specification review is not a substitute for browser tests.
