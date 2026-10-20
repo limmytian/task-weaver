@@ -1,3 +1,4 @@
+import { McpConnectionBackoff } from "./mcp-connection-backoff";
 import { HostedMcpTransport, resolveHostedMcpRuntime } from "./mcp-hosted-runtime";
 import { APPLICATION_VERSION } from "@task-weaver/contracts";
 import { createHash } from "node:crypto";
@@ -28,6 +29,7 @@ export interface McpServerRecord {
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 class McpConnectionPool {
+  private backoff = new McpConnectionBackoff();
   private connections = new Map<string, PoolEntry>();
   private pending = new Map<string, { serverId: string; promise: Promise<Client>; cancelled: boolean }>();
   private reaperInterval: ReturnType<typeof setInterval> | null = null;
@@ -46,15 +48,17 @@ class McpConnectionPool {
     const pending = this.pending.get(key);
     if (pending) return pending.promise;
     if (this.pending.size + this.connections.size >= 64) throw new Error("MCP connection capacity is exhausted");
+    this.backoff.assertReady(key);
     const state = { serverId: server.id, promise: undefined as unknown as Promise<Client>, cancelled: false };
     const promise = (async () => {
       const client = new Client({ name: "task-weaver-proxy", version: APPLICATION_VERSION });
       const transport = await this.createTransport(server);
       try { await client.connect(transport, { timeout: 10000 }); }
-      catch { await transport.close(); throw new Error("MCP server initialization failed"); }
+      catch { this.backoff.failed(key); await transport.close(); throw new Error("MCP server initialization failed"); }
       if (state.cancelled) { await client.close(); throw new Error("MCP connection was cancelled"); }
       const onclose = client.onclose;
-      client.onclose = () => { if (this.connections.get(key)?.client === client) this.connections.delete(key); onclose?.(); };
+      client.onclose = () => { if (this.connections.get(key)?.client === client) { this.connections.delete(key); this.backoff.failed(key); } onclose?.(); };
+      this.backoff.succeeded(key);
       this.connections.set(key, { serverId: server.id, client, transport, lastUsed: new Date(), valid: server.transport === "hosted-stdio" ? () => {
         try { return configurationHash === createHash("sha256").update(JSON.stringify({ transport: server.transport, config: server.config, runtime: resolveHostedMcpRuntime(server).fingerprint })).digest("hex"); }
         catch { return false; }
@@ -85,8 +89,8 @@ class McpConnectionPool {
     await Promise.allSettled([...this.pending.values()].filter(entry => entry.serverId === serverId).map(entry => entry.promise));
     for (const [key, entry] of this.connections) {
       if (entry.serverId !== serverId) continue;
-      try { await entry.client.close(); } catch { /* Best-effort close. */ }
       this.connections.delete(key);
+      try { await entry.client.close(); } catch { /* Best-effort close. */ }
     }
   }
 

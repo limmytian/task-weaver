@@ -113,7 +113,7 @@ function bindServices(context?: VerifiedRequestContext) {
         if (group === "usage" && name === "reportTiUsage") return createTiExecutionService(context).invoke(db, "reportUsage", args.slice(1));
         if (group === "ti" && isTiExecutionOperation(name)) return createTiExecutionService(context).invoke(db, name, args.slice(1));
         if (group === "mcp" && name === "syncTools") return synchronizeAuthorizedMcpTools(db, context, args[1], args[2]);
-        if (group === "mcp" && name === "callTool") return invokeMcpTool(db, context, args[1], args[2], args[3], args[4], args[5], args[6]);
+        if (group === "mcp" && name === "callTool") return invokeMcpTool(db, context, args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
         return db.transaction(async tx => {
           // Serialize policy mutations with resource operations, including reads and nested relations.
           await lockIdentityLifecycle(tx);

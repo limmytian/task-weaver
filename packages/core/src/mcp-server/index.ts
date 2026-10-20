@@ -1,3 +1,4 @@
+import { McpInvocationBusy } from "../services/mcp-invocation-budget";
 import { McpApprovalRequired } from "../services/mcp-security";
 export { buildCapabilityBootstrap, readCapabilityBootstrap } from "./bootstrap";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -32,6 +33,7 @@ function toolResult(value: Record<string, unknown>, isError = false): CallToolRe
   return { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value, ...(isError ? { isError: true } : {}) };
 }
 function publicFailure(error: unknown): McpServerToolError {
+  if (error instanceof McpInvocationBusy) return failure("busy", error.message);
   if (error instanceof McpApprovalRequired) return { ok: false, error: { code: "approval_required", message: error.message, approvalId: error.approvalId } };
   if (error instanceof McpToolFailure) return { ok: false, error: { code: error.code, message: error.message, ...(error.approvalId ? { approvalId: error.approvalId } : {}) } };
   if (error instanceof AuthenticationError) return failure("unauthenticated", "Authentication required.");

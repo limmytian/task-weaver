@@ -10,7 +10,7 @@ import { NotFoundError, ConflictError, ValidationError, mcpServerStdioConfigSche
 
 export interface McpPoolClient {
   listTools(): Promise<{ tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }> }>;
-  callTool(params: { name: string; arguments?: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  callTool(params: { name: string; arguments?: Record<string, unknown> }, resultSchema?: undefined, options?: { signal?: AbortSignal; timeout?: number }): Promise<Record<string, unknown>>;
 }
 
 export interface McpPool {
@@ -467,6 +467,7 @@ export async function callTool(
   pool: McpPool,
   _approvalId?: string,
   _expectedSchemaHash?: string,
+  signal?: AbortSignal,
 ) {
   const tool = await db.query.mcpTools.findFirst({
     where: eq(mcpTools.id, toolId),
@@ -499,7 +500,9 @@ export async function callTool(
   }
 
   try {
-    const result = await client.callTool({ name: tool.name, arguments: args });
+    signal?.throwIfAborted();
+    const result = await client.callTool({ name: tool.name, arguments: args }, undefined, { signal, timeout: 25000 });
+    signal?.throwIfAborted();
     const durationMs = Date.now() - startTime;
     const isError = Boolean((result as { isError?: boolean }).isError);
 

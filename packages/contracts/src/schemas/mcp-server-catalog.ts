@@ -1,4 +1,4 @@
-import { mcpRegistrySearchSchema, mcpRegistryToolSchema, mcpRegistryCallSchema } from "./mcp-bridge";
+import { mcpRegistrySearchSchema, mcpRegistryToolSchema, mcpRegistryCallSchema, mcpRegistryReadinessSchema } from "./mcp-bridge";
 import { mcpRetrievalScopeSchema, mcpPackageFilesSchema, mcpPackageReadSchema, mcpSliceCreateSchema, mcpSliceUpdateSchema, mcpPlanValidateSchema, mcpPlanApplySchema, mcpAggregateContextSchema } from "./mcp-server-planning";
 import { z } from "zod";
 import { resolveSkillCapabilitiesSchema, runSkillCapabilitySchema } from "./capabilities";
@@ -23,6 +23,7 @@ function tool(name: McpServerToolName, description: string, schema: z.AnyZodObje
 
 /** One catalog for both transports. Business refinements are applied again before dispatch. */
 export const mcpServerCatalog = [
+  tool("tw_mcp_readiness", "Inspect live scoped registry/runtime availability without exposing server credentials or launching a tool.", mcpRegistryReadinessSchema),
   tool("tw_mcp_search", "Discover bounded authorized external tool summaries without loading schemas.", mcpRegistrySearchSchema),
   tool("tw_mcp_tool", "Read one authorized external tool schema and its exact schema hash.", mcpRegistryToolSchema),
   tool("tw_mcp_call", "Invoke a confirmed external tool with its exact schema hash; targetApprovalId is the registry target approval, approvalId is the optional facade approval. Never blindly retry a dispatched call.", mcpRegistryCallSchema),

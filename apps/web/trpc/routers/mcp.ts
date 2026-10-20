@@ -1,3 +1,4 @@
+import { mcpServerReadinessSchema } from "@task-weaver/contracts";
 import { z } from "zod";
 import { router, ordinaryResourceProcedure } from "../init";
 import {
@@ -5,7 +6,7 @@ import {
   personalResourceOwnerId,
   AuthorizationError,
   NotFoundError,
-  ConflictError,
+  ConflictError, ValidationError,
   registerMcpServerSchema,
   updateMcpServerSchema,
 } from "@task-weaver/core";
@@ -27,12 +28,21 @@ export const mcpRouter = router({
       });
     }),
 
+  readiness: ordinaryResourceProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .query(async ({ ctx, input }) => mcpServerReadinessSchema.parse(await forwardMcpRequest(ctx.req, "/servers/" + input.id + "/readiness", "GET"))),
+
   get: ordinaryResourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       const server = await createResourceServices(ctx.identity).mcpRegistryService.getServer(ctx.db, input.id);
-      const tools = await createResourceServices(ctx.identity).mcpRegistryService.listServerTools(ctx.db, input.id);
-      return { server, tools };
+      try {
+        const tools = await createResourceServices(ctx.identity).mcpRegistryService.listServerTools(ctx.db, input.id);
+        return { server, tools, toolsUnavailable: false };
+      } catch (error) {
+        if (!(error instanceof AuthorizationError || error instanceof NotFoundError || error instanceof ValidationError)) throw error;
+        return { server, tools: [], toolsUnavailable: true };
+      }
     }),
 
   create: ordinaryResourceProcedure
@@ -61,7 +71,7 @@ export const mcpRouter = router({
     }),
 });
 
-async function forwardMcpRequest(request: Request, path: string, method: "POST" | "DELETE" | "PATCH", body?: unknown) {
+async function forwardMcpRequest(request: Request, path: string, method: "POST" | "DELETE" | "PATCH" | "GET", body?: unknown) {
   const headers = new Headers();
   for (const name of ["authorization", "cookie", "origin", "x-csrf-token"]) {
     const value = request.headers.get(name);

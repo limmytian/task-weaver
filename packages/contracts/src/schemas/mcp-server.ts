@@ -55,7 +55,7 @@ export const mcpServerReadTools = [
   "tw_memories_search", "tw_memories_get", "tw_memories_preview",
   "tw_skill_packages_resolve",
   "tw_skill_runtimes_list",
-  "tw_mcp_search", "tw_mcp_tool",
+  "tw_mcp_search", "tw_mcp_tool", "tw_mcp_readiness",
 ] as const;
 
 export const mcpServerWriteTools = [

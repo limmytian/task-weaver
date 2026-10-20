@@ -19,7 +19,9 @@ async function target(db: Database, identity: VerifiedRequestContext, name: McpS
   const projectId = raw.projectId ?? (raw.plan as { projectId?: string } | undefined)?.projectId;
   let scope: ResourceScope = {};
   let revision: unknown = null;
-  if (name === "tw_mcp_tool" || name === "tw_mcp_call") {
+  if (name === "tw_mcp_readiness") {
+    scope = await requireMcpServer(db, authority, identity, raw.serverId as string, "resource.read");
+  } else if (name === "tw_mcp_tool" || name === "tw_mcp_call") {
     const tool = await db.query.mcpTools.findFirst({ where: eq(mcpTools.id, raw.toolId as string) });
     if (!tool) throw new AuthorizationError();
     const server = await requireMcpServer(db, authority, identity, tool.serverId, "mcp.invoke");

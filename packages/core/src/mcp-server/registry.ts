@@ -38,8 +38,15 @@ export async function registryOperation(db: Database, liveDb: Database, identity
   if (Buffer.byteLength(JSON.stringify(raw.arguments)) > 16384) throw new ValidationError("External tool arguments exceed the 16384-byte limit");
   return new DeferredMcpOperation(async () => {
     signal.throwIfAborted();
-    const result = await service.callTool(liveDb, tool.id, raw.arguments as Record<string, unknown>, identity.actor, pool, raw.targetApprovalId as string | undefined, schemaHash);
-    signal.throwIfAborted();
-    return { toolId: tool.id, schemaHash, untrustedOutput: true, result };
+    const deadline = AbortSignal.timeout(raw.timeoutMs as number);
+    const dispatchSignal = AbortSignal.any([signal, deadline]);
+    try {
+      const result = await service.callTool(liveDb, tool.id, raw.arguments as Record<string, unknown>, identity.actor, pool, raw.targetApprovalId as string | undefined, schemaHash, dispatchSignal);
+      dispatchSignal.throwIfAborted();
+      return { toolId: tool.id, schemaHash, untrustedOutput: true, result };
+    } catch (error) {
+      if (deadline.aborted && !signal.aborted) throw new McpToolFailure("timeout", "External call deadline expired; a dispatched write may have committed. Inspect current state before retrying.");
+      throw error;
+    }
   }, async () => {});
 }

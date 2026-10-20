@@ -1,3 +1,4 @@
+import { McpInvocationBusy } from "./mcp-invocation-budget";
 import { createHash } from "node:crypto";
 import { and, eq, inArray, lt, desc } from "drizzle-orm";
 import { type Database, authActors, projectMemberships, apiKeys, mcpInvocationAudits, mcpInvocationPolicies, mcpInvocationApprovals } from "@task-weaver/db";
@@ -102,7 +103,7 @@ export async function listMcpInvocationAudits(db: Database, identity: VerifiedRe
   });
 }
 export async function recordMcpInvocationAudit(db: Database, identity: VerifiedRequestContext, scope: ResourceScope, serverId: string, toolId: string, start: number, error?: unknown, isError = false) {
-  const errorCode = typeof error === "string" && ["read_only", "validation_error"].includes(error) ? error : error instanceof McpApprovalRequired ? "approval_required" : error instanceof AuthorizationError ? "permission_denied" : error instanceof NotFoundError ? "not_found" : error ? "invocation_failed" : isError ? "upstream_error" : null;
+  const errorCode = error instanceof McpInvocationBusy ? "busy" : typeof error === "string" && ["read_only", "validation_error"].includes(error) ? error : error instanceof McpApprovalRequired ? "approval_required" : error instanceof AuthorizationError ? "permission_denied" : error instanceof NotFoundError ? "not_found" : error ? "invocation_failed" : isError ? "upstream_error" : null;
   const [audit] = await db.insert(mcpInvocationAudits).values({ actorId: identity.actor.id, credentialId: identity.credential.id, scopeKey: mcpScopeKey(scope), serverId, toolId, durationMs: Math.max(0, Date.now() - start), outcome: errorCode ? "error" : "success", errorCode }).returning({ id: mcpInvocationAudits.id });
   return audit!;
 }

@@ -42,7 +42,7 @@ const ordinaryRoutes: Array<[string, RegExp]> = [
   ["DELETE", new RegExp("^/api/v1/(?:requirements|tasks)/[0-9a-fA-F-]{36}/repositories/[0-9a-fA-F-]{36}/?$")],
   ["GET", new RegExp("^/api/v1/repositories(?:/[0-9a-fA-F-]{36}(?:/readiness)?)?/?$")],
   ["GET", new RegExp("^/api/v1/(?:requirements|tasks)/[0-9a-fA-F-]{36}/repositories/?$")],
-  ["GET", new RegExp("^/api/v1/mcp/(?:servers(?:/[0-9a-fA-F-]{36})?|tools/(?:search|[0-9a-fA-F-]{36}))/?$")],
+  ["GET", new RegExp("^/api/v1/mcp/(?:servers(?:/[0-9a-fA-F-]{36}(?:/readiness)?)?|tools/(?:search|[0-9a-fA-F-]{36}))/?$")],
   ["POST", new RegExp("^/api/v1/mcp/(?:servers|servers/[0-9a-fA-F-]{36}/(?:sync|heartbeat|upload-tools|poll)|tools/[0-9a-fA-F-]{36}/call|requests/[0-9a-fA-F-]{36}/result)/?$")],
   ["PATCH", new RegExp("^/api/v1/mcp/servers/[0-9a-fA-F-]{36}/?$")],
   ["DELETE", new RegExp("^/api/v1/mcp/servers/[0-9a-fA-F-]{36}/?$")],

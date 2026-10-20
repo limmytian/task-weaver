@@ -123,7 +123,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const remote = new Client({ name: "real-http-sdk", version: "1.31.0" });
   await remote.connect(new StreamableHTTPClientTransport(new URL(`http://${host}/api/v1/mcp-server`), { requestInit: { headers: headers() } }));
   t.after(() => remote.close());
-  assert.equal((await remote.listTools()).tools.length, mcpServerCatalog.length - 6);
+  assert.equal((await remote.listTools()).tools.length, mcpServerCatalog.length - 7);
   assert.equal((await remote.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   const directory = await mkdtemp(join(tmpdir(), "tw-mcp-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -158,7 +158,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const restBootstrapResponse = await f.app.request("/api/v1/context/bootstrap", { headers: headers() });
   assert.equal(restBootstrapResponse.status, 200);
   assert.deepEqual((await restBootstrapResponse.json() as any).capabilityBootstrap, localBootstrap);
-  assert.equal((await local.listTools()).tools.length, mcpServerReadTools.length - 4);
+  assert.equal((await local.listTools()).tools.length, mcpServerReadTools.length - 5);
   assert.equal((await local.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   assert.equal((await local.callTool({ name: "tw_tasks_status", arguments: { id: task.id, status: "done" } })).isError, true);
   // 0.3.11 planning and context use the same authenticated executor on both transports.
@@ -435,7 +435,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
     assert.equal(req.headers.get("x-task-weaver-mcp-hop"), "1");
     const server = new ProtocolServer({ name: "external-fixture", version: "1" }, { capabilities: { tools: {} } });
     server.setRequestHandler(ListToolsRequestSchema, async () => { if (schemaDelay) { schemaRequested(); await new Promise(resolve => setTimeout(resolve, 1500)); } return { tools: [{ name: "fixture_echo", description: "Echo a reviewed message", inputSchema: { type: "object", properties: { message: { type: "string" } }, required: ["message"] } }] }; });
-    server.setRequestHandler(CallToolRequestSchema, async request => { externalCalls++; return { content: [{ type: "text", text: String(request.params.arguments?.message) }] }; });
+    server.setRequestHandler(CallToolRequestSchema, async request => { externalCalls++; if (request.params.arguments?.message === "slow") await new Promise(resolve => setTimeout(resolve, 1000)); return { content: [{ type: "text", text: String(request.params.arguments?.message) }] }; });
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
     await server.connect(transport);
     try { return await transport.handleRequest(req); } finally { await server.close(); }
@@ -465,6 +465,10 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   assert.equal(JSON.stringify(discovered).includes("inputSchema"), false);
   const detail = await registryCall("tw_mcp_tool", { toolId: externalTool.id });
   assert.equal(detail.ok, true, JSON.stringify(detail));
+  const observed = await registryCall("tw_mcp_readiness", { serverId: externalServer.id });
+  assert.equal(observed.data.availability.state, "available");
+  assert.equal(observed.data.credentials, "unknown");
+  assert.equal(JSON.stringify(observed).includes("headers"), false);
   const invocation = { toolId: externalTool.id, schemaHash: detail.data.schemaHash, arguments: { message: "external-ok" }, confirmed: true };
   assert.equal((await registryCall("tw_mcp_call", { ...invocation, schemaHash: "0".repeat(64) })).error.code, "version_conflict");
   assert.equal(externalCalls, 0);
@@ -499,6 +503,19 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   assert.equal((await registryCall("tw_mcp_tool", { toolId: externalTool.id })).ok, false);
   assert.equal((await registryCall("tw_mcp_call", invocation)).ok, false);
   assert.equal(externalCalls, 3);
+  await setMcpInvocationPolicy(db, f.owner.context, scope, externalTool.id, "allow");
+  const timed = performance.now();
+  const timeoutResult = await registryCall("tw_mcp_call", { ...invocation, arguments: { message: "slow" }, timeoutMs: 100 });
+  assert.equal(timeoutResult.error.code, "timeout", JSON.stringify(timeoutResult));
+  assert.ok(performance.now() - timed < 1000, "External timeout must reach the downstream request");
+  assert.equal((await registryCall("tw_mcp_call", invocation)).ok, true);
+  const baselineCalls = externalCalls;
+  const concurrent = Array.from({ length: 4 }, () => registryCall("tw_mcp_call", { ...invocation, arguments: { message: "slow" }, timeoutMs: 2000 }));
+  for (let i = 0; i < 100 && externalCalls < baselineCalls + 4; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(externalCalls, baselineCalls + 4);
+  assert.equal((await registryCall("tw_mcp_call", invocation)).error.code, "busy");
+  assert.ok((await Promise.all(concurrent)).every(result => result.ok));
+  assert.equal((await registryCall("tw_mcp_call", invocation)).ok, true);
   if (process.env.TW_SKILL_RUNTIME_TEST_IMAGE) {
     const previousHostMarker = process.env.TW_SKILL_HOST_SECRET;
     process.env.TW_SKILL_HOST_SECRET = "fixture-host-secret";
@@ -536,6 +553,12 @@ test("MCP transports use live scoped authority and preserve collaboration guards
     const hostedTools = await registryService.syncTools(db, hostedServer.id, mcpPool);
     assert.equal(hostedTools[0]!.name, "hosted_echo");
     const hostedDetail = await registryCall("tw_mcp_tool", { toolId: hostedTools[0]!.id });
+    const hostedReadiness = await registryCall("tw_mcp_readiness", { serverId: hostedServer.id });
+    assert.equal(hostedReadiness.data.availability.state, "available");
+    assert.equal(hostedReadiness.data.runtime.network, "none");
+    assert.equal(JSON.stringify(hostedReadiness).includes("fixture-private-token"), false);
+    const cliReadiness = await promisify(execFile)(process.execPath, ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url)), "mcp", "readiness", hostedServer.id, "--json"], { env: { ...env, PATH: "/no-local-tools", TW_CONFIG_DIR: directory, TW_API_URL: `http://${host}`, TW_API_KEY: registryKey.rawKey } });
+    assert.equal(JSON.parse(cliReadiness.stdout).availability.state, "available");
     const hostedInvocation = { toolId: hostedTools[0]!.id, schemaHash: hostedDetail.data.schemaHash, arguments: {}, confirmed: true };
     for (const client of [registryClient, registryStdio]) {
       const result = await client.callTool({ name: "tw_mcp_call", arguments: hostedInvocation });
@@ -555,6 +578,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
     assert.equal((await registryCall("tw_mcp_call", hostedInvocation)).ok, true);
     delete process.env.TW_MCP_SECRET_FIXTURE;
     assert.equal((await registryCall("tw_mcp_call", hostedInvocation)).ok, false);
+    assert.equal((await registryCall("tw_mcp_readiness", { serverId: hostedServer.id })).data.availability.state, "unavailable");
     process.env.TW_MCP_SECRET_FIXTURE = "fixture-private-token";
     process.env.TW_MCP_RUNTIME_PROFILES = "[]";
     assert.equal((await registryCall("tw_mcp_call", hostedInvocation)).ok, false);
@@ -663,7 +687,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
       const initialization = await inspector(transportName, "initialize");
       assert.equal(initialization.protocolVersion, "2025-11-25");
       const tools = await inspector(transportName, "tools/list");
-      assert.equal(tools.tools.length, mcpServerCatalog.length - 6);
+      assert.equal(tools.tools.length, mcpServerCatalog.length - 7);
       const invoke = async (name: string, args: unknown) => {
         const result = await inspector(transportName, "tools/call", name, args);
         assert.equal(result.structuredContent.ok, true, JSON.stringify(result));

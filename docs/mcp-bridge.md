@@ -37,3 +37,33 @@ Server registration, synchronization, credential configuration and the explicit
 local bridge remain available through REST/CLI. Discoverability is subject to live
 server health and grants. This bridge does not provision server-side stdio
 workers, install dependencies, or claim that all configured services are ready.
+
+## Readiness, deadlines and admission
+
+`tw_mcp_readiness` or `tw mcp readiness SERVER_ID --json` returns scoped
+configuration and observed connection state without exposing headers, Secret
+values or launching a tool. The management page shows the same status, remediation
+and observation time, and accepts approved hosted profile references. Managers
+can inspect an unavailable registration even when tool schemas cannot load.
+Remote credential validity remains `unknown` until the upstream service accepts
+an operation; a registered name does not establish OAuth readiness.
+
+`tw_mcp_call.timeoutMs` is 100–25000 milliseconds (default 25000). Cancellation
+and deadlines reach downstream SDK requests and cancel local mailbox waits. A
+remote write may continue or commit despite a disconnected or cancelled client;
+inspect external state before deciding to retry. SDK cancellation notifications
+are best effort on stateless transports; a bounded call deadline remains the
+fallback. No dispatched tool call is automatically replayed.
+
+Per API host, each actor/server pair permits four active invocation requests,
+with 32 per server and 64 overall. Admission has a burst of 20 requests per pair
+and refills at five per second. `busy` means admission failed before dispatch;
+REST returns 429 with `Retry-After`. These host-local limits supplement existing
+credential grants and do not claim a distributed quota across replicas. Memory
+and skill reads are outside this external-tool budget.
+
+Failed connection initialization uses a bounded passive cooldown from one to
+30 seconds, partitioned by credential/configuration. An explicit later call or
+synchronization may reconnect; unrelated connections remain usable. Successful
+initialization resets the cooldown. Credential, policy, profile, schema and
+configuration changes are still checked for each operation.
