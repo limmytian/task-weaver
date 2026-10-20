@@ -1,5 +1,5 @@
 import { mcpRegistrySearchSchema, mcpRegistryToolSchema, mcpRegistryCallSchema, mcpRegistryReadinessSchema } from "./mcp-bridge";
-import { mcpRetrievalScopeSchema, mcpPackageFilesSchema, mcpPackageReadSchema, mcpSliceCreateSchema, mcpSliceUpdateSchema, mcpPlanValidateSchema, mcpPlanApplySchema, mcpAggregateContextSchema } from "./mcp-server-planning";
+import { mcpRetrievalScopeSchema, mcpPackageFilesSchema, mcpPackageReadSchema, mcpSliceCreateSchema, mcpSliceUpdateSchema, mcpPlanValidateSchema, mcpPlanApplySchema, mcpAggregateContextSchema, mcpDependencyGraphSchema } from "./mcp-server-planning";
 import { z } from "zod";
 import { resolveSkillCapabilitiesSchema, runSkillCapabilitySchema } from "./capabilities";
 import { mcpMemorySearchSchema, mcpMemoryGetSchema, mcpMemoryRecordSchema, mcpMemoryUpdateSchema, mcpMemoryForgetSchema, mcpMemoryPreviewSchema } from "./mcp-memory";
@@ -23,6 +23,7 @@ function tool(name: McpServerToolName, description: string, schema: z.AnyZodObje
 
 /** One catalog for both transports. Business refinements are applied again before dispatch. */
 export const mcpServerCatalog = [
+  tool("tw_dependencies_graph", "Read a bounded authorized dependency graph in both directions with current claims; does not claim work or bypass dependency guards.", mcpDependencyGraphSchema),
   tool("tw_mcp_readiness", "Inspect live scoped registry/runtime availability without exposing server credentials or launching a tool.", mcpRegistryReadinessSchema),
   tool("tw_mcp_search", "Discover bounded authorized external tool summaries without loading schemas.", mcpRegistrySearchSchema),
   tool("tw_mcp_tool", "Read one authorized external tool schema and its exact schema hash.", mcpRegistryToolSchema),

@@ -1,3 +1,4 @@
+import { readDependencyGraph } from "./dependency-graph";
 import { getMcpServerReadiness } from "../services/mcp-readiness";
 import { ValidationError } from "@task-weaver/contracts";
 import { registryOperation } from "./registry";
@@ -44,6 +45,7 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
     const id = raw.id as string;
     const page = { page: raw.page as number, pageSize: raw.pageSize as number };
     switch (name) {
+      case "tw_dependencies_graph": return readDependencyGraph(db, identity, raw as unknown as Parameters<typeof readDependencyGraph>[2], signal);
       case "tw_mcp_readiness": { if (!registryPool) throw new ValidationError("Registry runtime is not configured"); return getMcpServerReadiness(db, identity, raw.serverId as string, registryPool); }
       case "tw_mcp_search": return registryOperation(db, liveDb, identity, "search", raw, registryPool, signal);
       case "tw_mcp_tool": return registryOperation(db, liveDb, identity, "tool", raw, registryPool, signal);

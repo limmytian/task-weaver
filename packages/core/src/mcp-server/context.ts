@@ -1,10 +1,10 @@
 import { and, asc, desc, eq, gt, or, sql } from "drizzle-orm";
-import { type Database, tasks, requirements, executionSlices, documents, taskDependencies, requirementDependencies, documentTaskLinks, documentRequirementLinks, taskClaims, requirementClaims, activityLog } from "@task-weaver/db";
+import { type Database, tasks, requirements, executionSlices, documents, taskDependencies, requirementDependencies, documentTaskLinks, documentRequirementLinks, taskClaims, requirementClaims, activityLog, taskComments, taskNotes } from "@task-weaver/db";
 import type { VerifiedRequestContext } from "@task-weaver/contracts";
 import { lockIdentityLifecycle } from "../services/auth-security";
 import { resourceAuthority, requireResource, resourcePredicate, taskResourcePredicate } from "../services/resource-authorization";
 
-const taskColumns = { id: tasks.id, title: sql<string>`left(${tasks.title}, 128)`, status: tasks.status, priority: tasks.priority, projectId: tasks.projectId, requirementId: tasks.requirementId, executionSliceId: tasks.executionSliceId, version: tasks.version, updatedAt: tasks.updatedAt };
+const taskColumns = { id: tasks.id, title: sql<string>`left(${tasks.title}, 128)`, status: tasks.status, assignee: tasks.assignee, priority: tasks.priority, projectId: tasks.projectId, requirementId: tasks.requirementId, executionSliceId: tasks.executionSliceId, version: tasks.version, updatedAt: tasks.updatedAt };
 const requirementColumns = { id: requirements.id, title: sql<string>`left(${requirements.title}, 128)`, status: requirements.status, priority: requirements.priority, projectId: requirements.projectId, updatedAt: requirements.updatedAt };
 const sliceColumns = { id: executionSlices.id, title: sql<string>`left(${executionSlices.title}, 128)`, status: executionSlices.status, orderIndex: executionSlices.orderIndex, allowParallel: executionSlices.allowParallel, resultSummary: sql<string | null>`left(${executionSlices.resultSummary}, 1024)`, updatedAt: executionSlices.updatedAt };
 
@@ -48,6 +48,10 @@ export async function readMcpContext(db: Database, identity: VerifiedRequestCont
           rows = await tx.select({ id: requirementDependencies.id, requirementId: requirementDependencies.requirementId, dependsOnRequirementId: requirementDependencies.dependsOnRequirementId, type: requirementDependencies.type }).from(requirementDependencies).innerJoin(requirements, or(and(eq(requirementDependencies.requirementId, input.id), eq(requirements.id, requirementDependencies.dependsOnRequirementId)), and(eq(requirementDependencies.dependsOnRequirementId, input.id), eq(requirements.id, requirementDependencies.requirementId)))).where(resourcePredicate(authority, requirements)).orderBy(requirementDependencies.id).limit(input.limit + 1).offset(input.offset);
           continuation = "tw_requirement_dependencies_list";
         }
+      } else if ((section === "comments" || section === "notes") && kind === "task") {
+        const table = section === "comments" ? taskComments : taskNotes;
+        rows = await tx.select({ id: table.id, content: sql<string>`left(${table.content}, 2048)`, authorId: table.authorId, authorType: table.authorType, createdAt: table.createdAt, updatedAt: table.updatedAt }).from(table).where(eq(table.taskId, input.id)).orderBy(desc(table.createdAt), table.id).limit(input.limit + 1).offset(input.offset);
+        continuation = "Refresh this task context section with the next offset; use REST for full text";
       } else if (section === "claim") {
         const table = kind === "task" ? taskClaims : requirementClaims;
         rows = await tx.select({ claimedBy: table.claimedBy, claimedByType: table.claimedByType, expiresAt: table.expiresAt }).from(table).where(and(eq(kind === "task" ? taskClaims.taskId : requirementClaims.requirementId, input.id), gt(table.expiresAt, new Date()))).limit(1);
