@@ -1,4 +1,5 @@
 export * from "./common";
+export * from "./capabilities";
 export * from "./auth";
 export * from "./projects";
 export * from "./requirements";
