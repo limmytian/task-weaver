@@ -1,6 +1,6 @@
 import type { SQL } from "drizzle-orm";
 import { and, eq, isNull, or, sql, desc } from "drizzle-orm";
-import { type Database, memories, memoryReceipts } from "@task-weaver/db";
+import { type Database, memories, memoryReceipts, tasks, requirements, documents, projects } from "@task-weaver/db";
 import { createHash } from "node:crypto";
 import type { Actor } from "@task-weaver/contracts";
 import type {
@@ -9,7 +9,7 @@ import type {
   SearchMemoryInput,
   ListMemoriesInput,
 } from "@task-weaver/contracts";
-import { NotFoundError, ConflictError } from "@task-weaver/contracts";
+import { NotFoundError, ConflictError, ValidationError } from "@task-weaver/contracts";
 
 // -- Helpers --
 
@@ -79,6 +79,15 @@ export function calculateSlidingRenewal(
 
 // -- CRUD --
 
+async function assertMemorySource(db: Database, input: { entityType?: string | null; entityId?: string | null; provenance?: Record<string, unknown> | null }) {
+  if (input.provenance?.origin !== "reviewed_source") return;
+  if (!input.entityType || !input.entityId || typeof input.provenance.sourceUpdatedAt !== "string") throw new ValidationError("Reviewed memory requires a source and its observed update time");
+  const table = input.entityType === "task" ? tasks : input.entityType === "requirement" ? requirements : input.entityType === "document" ? documents : projects;
+  const [source] = await db.select({ updatedAt: table.updatedAt }).from(table).where(eq(table.id, input.entityId));
+  if (!source) throw new NotFoundError("Memory source not found");
+  if (source.updatedAt.getTime() !== new Date(input.provenance.sourceUpdatedAt).getTime()) throw new ConflictError("Memory source changed; preview it again before saving", 0);
+}
+
 export async function recordMemory(
   db: Database,
   input: RecordMemoryInput,
@@ -100,6 +109,7 @@ export async function recordMemory(
       return getMemory(db, existing.memoryId);
     }
   }
+  await assertMemorySource(db, input);
   const [memory] = await db
     .insert(memories)
     .values({
@@ -139,6 +149,7 @@ export async function updateMemory(
 ) {
   const current = await getMemory(db, id);
   if (input.expectedVersion !== undefined && input.expectedVersion !== current.version) throw new ConflictError("Memory changed", current.version);
+  if (input.provenance) await assertMemorySource(db, { ...current, provenance: input.provenance });
 
   const { expectedVersion: _version, ...patch } = input;
   const updates: Record<string, unknown> = { ...patch, updatedAt: new Date(), version: sql`${memories.version} + 1` };

@@ -12,6 +12,16 @@ ownership is derived from the credential. A saved entry records its author,
 source entity, provenance, expiry and revision. Provenance is descriptive data,
 not execution authority or a claim that retrieved instructions are trusted.
 
+`tw_memories_preview` reads an authorized task, requirement or Markdown document
+and returns a bounded, source-linked draft. It writes no memory and makes no
+model call. Review and edit the excerpt before saving; the preview does not claim
+to be an automatic semantic summary. A document attachment needs a separate text
+extraction. The returned source update time must still match when a reviewed
+candidate is saved. If the source changes, preview again. Reading an existing
+source-derived memory reports `sourceFreshness`; a changed source does not
+silently rewrite the saved evidence. There is no automatic promotion of tool
+output or conversations into durable instructions.
+
 Retry the same save with the identical normalized payload and key after an
 ambiguous response. It returns the current saved memory; it does not overwrite a
 subsequent edit. A different payload with the same key fails. Receipts are scoped

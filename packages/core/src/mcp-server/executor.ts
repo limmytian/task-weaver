@@ -37,6 +37,7 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
     const page = { page: raw.page as number, pageSize: raw.pageSize as number };
     switch (name) {
       case "tw_memories_search": return mcpMemory(db, identity, "search", raw);
+      case "tw_memories_preview": return mcpMemory(db, identity, "preview", raw);
       case "tw_memories_get": return mcpMemory(db, identity, "get", raw);
       case "tw_memories_record": return mcpMemory(db, identity, "record", raw);
       case "tw_memories_update": return mcpMemory(db, identity, "update", raw);

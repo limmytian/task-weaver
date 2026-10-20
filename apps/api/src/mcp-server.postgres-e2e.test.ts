@@ -261,6 +261,27 @@ test("MCP transports use live scoped authority and preserve collaboration guards
     assert.equal((await call("tw_memories_record", { ...memoryInput, idempotencyKey: randomUUID() }, readKey.rawKey)).ok, false);
     assert.equal((await local.callTool({ name: "tw_memories_record", arguments: { ...memoryInput, idempotencyKey: randomUUID() } })).isError, true);
     await invoke("tw_memories_forget", { id: expired.id, expectedVersion: expired.version, confirmed: true });
+    const source = await invoke("tw_documents_create", { projectId: f.project.id, title: `${transportName} reviewable evidence`, content: "Review this evidence before saving.\n" + "Source text. ".repeat(80) });
+    const previewInput = { sourceType: "document", sourceId: source.id, projectId: f.project.id, maxChars: 128 };
+    const proposal = await invoke("tw_memories_preview", previewInput);
+    assert.equal(proposal.persisted, false);
+    assert.equal(proposal.requiresConfirmation, true);
+    assert.equal(proposal.truncated, true);
+    assert.equal(proposal.candidate.content.length, 128);
+    assert.equal((await invoke("tw_memories_search", { query: source.title, projectId: f.project.id })).items.length, 0);
+    assert.equal((await local.callTool({ name: "tw_memories_preview", arguments: previewInput })).isError, undefined);
+    assert.equal((await call("tw_memories_preview", previewInput, outsiderKey.rawKey)).ok, false);
+    await invoke("tw_documents_update", { id: source.id, patch: { expectedVersion: source.version, content: "Updated source evidence" } });
+    assert.equal((await client.callTool({ name: "tw_memories_record", arguments: { ...proposal.candidate, confirmed: true, idempotencyKey: randomUUID() } })).isError, true);
+    const reviewed = await invoke("tw_memories_preview", previewInput);
+    const sourceMemory = await invoke("tw_memories_record", { ...reviewed.candidate, confirmed: true, idempotencyKey: randomUUID() });
+    assert.equal(sourceMemory.sourceFreshness, "current");
+    await invoke("tw_documents_update", { id: source.id, patch: { expectedVersion: source.version + 1, content: "Later source revision" } });
+    assert.equal((await invoke("tw_memories_get", { id: sourceMemory.id })).sourceFreshness, "changed");
+    const refreshed = await invoke("tw_memories_preview", previewInput);
+    const refreshedMemory = await invoke("tw_memories_update", { id: sourceMemory.id, patch: { content: refreshed.candidate.content, provenance: refreshed.candidate.provenance, expectedVersion: sourceMemory.version } });
+    assert.equal(refreshedMemory.sourceFreshness, "current");
+    await invoke("tw_memories_forget", { id: sourceMemory.id, expectedVersion: refreshedMemory.version, confirmed: true });
   }
   const directoryKey = await f.identity.issueKey(f.owner.headers, f.owner.context.actor.id, { name: "Directory-only fixture", expiresAt: null, grants: [{ scope: "global", permissions: ["project.discover"] }] });
   const directoryResponse = await f.app.request("/api/v1/projects/discover?pageSize=1", { headers: headers(directoryKey.rawKey) });

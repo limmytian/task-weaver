@@ -22,3 +22,8 @@ export const mcpMemoryUpdateSchema = z.object({ id, patch: updateMemorySchema.om
   expectedVersion: z.number().int().min(1),
 }).strict() }).strict();
 export const mcpMemoryForgetSchema = z.object({ id, expectedVersion: z.number().int().min(1), confirmed: z.literal(true) }).strict();
+export const mcpMemoryPreviewSchema = z.object({
+  sourceType: z.enum(["task", "requirement", "document"]), sourceId: id,
+  scope: z.enum(["global", "project", "personal"]).default("project"), projectId: id.optional(),
+  maxChars: z.number().int().min(128).max(8192).default(2048),
+}).strict();

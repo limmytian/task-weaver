@@ -33,6 +33,7 @@ export const recordMemorySchema = z.object({
 });
 
 export const updateMemorySchema = z.object({
+  provenance: memoryProvenanceSchema.optional(),
   title: z.string().min(1).max(500).optional(),
   content: z.string().min(1).optional(),
   memoryType: memoryTypeSchema.optional(),
