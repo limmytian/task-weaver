@@ -17,6 +17,7 @@ import { createDb, runMigrations, apiKeys, mcpInvocationApprovals, projectMember
 import { cleanupMcpInvocationHistory, setMcpInvocationPolicy, approveMcpInvocation, listMcpInvocationAudits, createResourceServices, skillPackageStorageService, registerSkillPackageSchema } from "@task-weaver/core";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 import { createApiApplication } from "./application";
+import { capabilityBootstrapSchema, CAPABILITY_LIMITS } from "@task-weaver/contracts";
 
 const databaseUrl = process.env.TW_MCP_E2E_DATABASE_URL;
 test("MCP transports use live scoped authority and preserve collaboration guards", { skip: !databaseUrl, timeout: 120_000 }, async t => {
@@ -120,10 +121,37 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   assert.equal((await remote.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   const directory = await mkdtemp(join(tmpdir(), "tw-mcp-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
+  const coldBootstrapStarted = performance.now();
   const local = new Client({ name: "real-stdio-sdk", version: "1.31.0" });
   const env = Object.fromEntries(Object.entries(process.env).filter((pair): pair is [string, string] => pair[1] !== undefined));
   const transport = new StdioClientTransport({ command: process.execPath, args: ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url)), "mcp", "serve", "--read-only"], env: { ...env, TW_CONFIG_DIR: directory, TW_API_URL: `http://${host}`, TW_API_KEY: key.rawKey }, stderr: "pipe" });
   await local.connect(transport); t.after(() => local.close());
+  const bootstrap = async (client: Client) => {
+    const result = await client.callTool({ name: "tw_context_bootstrap", arguments: {} });
+    assert.notEqual(result.isError, true);
+    const data = capabilityBootstrapSchema.parse((result.structuredContent as any).data);
+    assert.ok(Buffer.byteLength(JSON.stringify(data)) <= CAPABILITY_LIMITS.bootstrapBytes);
+    return data;
+  };
+  const localBootstrap = await bootstrap(local);
+  const coldBootstrapMs = performance.now() - coldBootstrapStarted;
+  assert.ok(coldBootstrapMs <= 5000, `Cold stdio bootstrap took ${coldBootstrapMs} ms`);
+  assert.deepEqual(localBootstrap, await bootstrap(remote));
+  assert.equal(localBootstrap.capabilities.skills.state, "available");
+  assert.equal(localBootstrap.capabilities.hostedExecution.state, "unavailable");
+  const warmBootstrapMs: number[] = [];
+  for (let i = 0; i < 10; i++) {
+    const start = performance.now();
+    await bootstrap(remote);
+    warmBootstrapMs.push(performance.now() - start);
+  }
+  warmBootstrapMs.sort((a, b) => a - b);
+  const warmP95Ms = warmBootstrapMs[Math.ceil(warmBootstrapMs.length * 0.95) - 1]!;
+  assert.ok(warmP95Ms <= 1000, `Warm bootstrap p95 took ${warmP95Ms} ms`);
+  t.diagnostic(JSON.stringify({ coldStdioBootstrapMs: Math.round(coldBootstrapMs), warmHttpBootstrapP95Ms: Math.round(warmP95Ms), bootstrapBytes: Buffer.byteLength(JSON.stringify(localBootstrap)) }));
+  const restBootstrapResponse = await f.app.request("/api/v1/context/bootstrap", { headers: headers() });
+  assert.equal(restBootstrapResponse.status, 200);
+  assert.deepEqual((await restBootstrapResponse.json() as any).capabilityBootstrap, localBootstrap);
   assert.equal((await local.listTools()).tools.length, 23);
   assert.equal((await local.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   assert.equal((await local.callTool({ name: "tw_tasks_status", arguments: { id: task.id, status: "done" } })).isError, true);
@@ -226,6 +254,13 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   } finally { await directoryRemote.close(); await directoryLocal.close(); }
   // Dynamic discovery and exact-operation approvals are identical on real transports.
   const scope = { projectId: f.project.id };
+  await setMcpInvocationPolicy(db, f.owner.context, scope, "tw_context_get", "deny");
+  for (const client of [remote, local]) {
+    const deniedBootstrap = await bootstrap(client);
+    assert.equal(deniedBootstrap.tools.includes("tw_context_get"), false);
+    assert.equal(deniedBootstrap.capabilities.skills.state, "unavailable");
+  }
+  await setMcpInvocationPolicy(db, f.owner.context, scope, "tw_context_get", "allow");
   await setMcpInvocationPolicy(db, f.owner.context, scope, "tw_task_comments_add", "approval");
   for (const client of [remote, writeLocal]) {
     const args = { id: task.id, content: "Sensitive marker must not enter audit" };

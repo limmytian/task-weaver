@@ -10,6 +10,11 @@ The local path also requires a matching `tw` CLI. The server uses SDK 1.31.0
 and targets published protocol revision 2025-11-25. See the
 [contract](mcp-server-contract.md) for exact names and boundaries.
 
+Start with `tw_context_bootstrap` for small, permission-filtered capability hints.
+It distinguishes readable skill guidance from executable hosting; see
+[capability contracts and loading budgets](capabilities.md). The CLI/REST context
+bootstrap includes the same object as `capabilityBootstrap`.
+
 ## Credentials
 
 Sign in to Task Weaver, open API key management, and issue a subject-bound key

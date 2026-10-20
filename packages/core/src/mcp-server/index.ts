@@ -1,4 +1,5 @@
 import { McpApprovalRequired } from "../services/mcp-security";
+export { buildCapabilityBootstrap } from "./bootstrap";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, McpError, ErrorCode, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { zodToJsonSchema } from "zod-to-json-schema";

@@ -4,6 +4,10 @@ MCP Server 通过本地 stdio 或远程 Streamable HTTP 提供协作工具，实
 已有 MCP Registry 用于把外部工具接入 Task Weaver，原有 `tw mcp` 命令保持兼容。
 英文规范见 [MCP Server](mcp-server.md)，工具契约见 [实现契约](mcp-server-contract.md)。
 
+可先调用 `tw_context_bootstrap` 获取小体积、按权限过滤的能力提示。
+它区分可读取的技能指导与可执行的托管能力；CLI/REST 引导中的 `capabilityBootstrap`
+返回同一对象。契约与加载预算见[英文规范](capabilities.md)。
+
 ## 认证与接入
 
 两种方式都需要支持实时授权工具清单的 API 服务，本地方式还需要匹配的 CLI。
