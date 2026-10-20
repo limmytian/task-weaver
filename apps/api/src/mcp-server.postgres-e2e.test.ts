@@ -1,3 +1,5 @@
+import { capabilityDigest } from "@task-weaver/core";
+import { hostedMcpRuntimeProfileSchema } from "@task-weaver/contracts";
 import { Server as ProtocolServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -426,11 +428,13 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   await setMcpInvocationPolicy(db, f.owner.context, scope, "tw_task_comments_add", "allow");
   // Exercise the actual external MCP transport rather than a fake registry client.
   let externalCalls = 0;
+  let schemaDelay = false;
+  let schemaRequested = () => {};
   const externalHttp = serve({ hostname: "127.0.0.1", port: 0, fetch: async req => {
     if (req.method !== "POST") return new Response(null, { status: 405 });
     assert.equal(req.headers.get("x-task-weaver-mcp-hop"), "1");
     const server = new ProtocolServer({ name: "external-fixture", version: "1" }, { capabilities: { tools: {} } });
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{ name: "fixture_echo", description: "Echo a reviewed message", inputSchema: { type: "object", properties: { message: { type: "string" } }, required: ["message"] } }] }));
+    server.setRequestHandler(ListToolsRequestSchema, async () => { if (schemaDelay) { schemaRequested(); await new Promise(resolve => setTimeout(resolve, 1500)); } return { tools: [{ name: "fixture_echo", description: "Echo a reviewed message", inputSchema: { type: "object", properties: { message: { type: "string" } }, required: ["message"] } }] }; });
     server.setRequestHandler(CallToolRequestSchema, async request => { externalCalls++; return { content: [{ type: "text", text: String(request.params.arguments?.message) }] }; });
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
     await server.connect(transport);
@@ -472,6 +476,18 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const stdioInvocation = await registryStdio.callTool({ name: "tw_mcp_call", arguments: invocation });
   assert.notEqual(stdioInvocation.isError, true, JSON.stringify(stdioInvocation));
   assert.equal((stdioInvocation.structuredContent as any).data.result.content[0].text, "external-ok");
+  const schemaWait = new Promise<void>(resolve => { schemaRequested = resolve; });
+  schemaDelay = true;
+  const delayedSync = registryService.syncTools(db, externalServer.id, mcpPool);
+  await schemaWait;
+  const unrelatedStarted = performance.now();
+  await success("tw_memories_search", { projectId: f.project.id, query: "continuity" });
+  assert.ok(performance.now() - unrelatedStarted < 1000, "External synchronization must not hold the identity lifecycle lock");
+  await registryService.updateServer(db, externalServer.id, { active: false }, f.owner.context.actor);
+  await assert.rejects(delayedSync);
+  schemaDelay = false;
+  await registryService.updateServer(db, externalServer.id, { active: true }, f.owner.context.actor);
+  await registryService.syncTools(db, externalServer.id, mcpPool);
   await setMcpInvocationPolicy(db, f.owner.context, scope, externalTool.id, "approval");
   const approval = await registryCall("tw_mcp_call", invocation);
   assert.equal(approval.error.code, "approval_required", JSON.stringify(approval));
@@ -495,6 +511,56 @@ test("MCP transports use live scoped authority and preserve collaboration guards
     await runtimeClient.connect(new StreamableHTTPClientTransport(new URL(`http://${host}/api/v1/mcp-server`), { requestInit: { headers: headers(runtimeKey.rawKey) } }));
     t.after(() => runtimeClient.close());
     const invokeRuntime = async (name: string, input: Record<string, unknown>) => { const result = await runtimeClient.callTool({ name, arguments: input }); assert.notEqual(result.isError, true, JSON.stringify(result)); return (result.structuredContent as any).data; };
+    const previousMcpProfiles = process.env.TW_MCP_RUNTIME_PROFILES;
+    const previousMcpSecret = process.env.TW_MCP_SECRET_FIXTURE;
+    process.env.TW_MCP_SECRET_FIXTURE = "fixture-private-token";
+    t.after(() => { if (previousMcpProfiles === undefined) delete process.env.TW_MCP_RUNTIME_PROFILES; else process.env.TW_MCP_RUNTIME_PROFILES = previousMcpProfiles; if (previousMcpSecret === undefined) delete process.env.TW_MCP_SECRET_FIXTURE; else process.env.TW_MCP_SECRET_FIXTURE = previousMcpSecret; });
+    const hostedScript = String.raw`set -eu
+ test "$(id -u)" = 65534
+ if env | grep -q "^TW_API_KEY="; then exit 12; fi
+ test "$APP_SECRET" = fixture-private-token
+ if grep -q eth0 /proc/net/dev; then exit 10; fi
+ if touch /hosted-write 2>/dev/null; then exit 11; fi
+ while IFS= read -r line; do
+ id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+ case "$line" in
+ *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"hosted-fixture","version":"1"}}}\n' "$id" ;;
+ *'"method":"tools/list"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"hosted_echo","description":"Isolated fixture","inputSchema":{"type":"object"}}]}}\n' "$id" ;;
+ *'"method":"tools/call"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"isolated-mcp-ok %s"}]}}\n' "$id" "$APP_SECRET" ;;
+ esac
+ done`;
+    const hostedProfile = hostedMcpRuntimeProfileSchema.parse({ id: "fixture-hosted", image: process.env.TW_SKILL_RUNTIME_TEST_IMAGE, command: "/bin/sh", args: ["-c", hostedScript], projectIds: [f.project.id], secretReferences: { APP_SECRET: "TW_MCP_SECRET_FIXTURE" } });
+    process.env.TW_MCP_RUNTIME_PROFILES = JSON.stringify([hostedProfile]);
+    const hostedServer = await registryService.registerServer(db, { name: "hosted-fixture", transport: "hosted-stdio", config: { profileId: hostedProfile.id, profileHash: capabilityDigest(hostedProfile) }, projectId: f.project.id, active: true, readOnly: false, tags: [] }, f.owner.context.actor);
+    t.after(() => mcpPool.disconnect(hostedServer.id));
+    const hostedTools = await registryService.syncTools(db, hostedServer.id, mcpPool);
+    assert.equal(hostedTools[0]!.name, "hosted_echo");
+    const hostedDetail = await registryCall("tw_mcp_tool", { toolId: hostedTools[0]!.id });
+    const hostedInvocation = { toolId: hostedTools[0]!.id, schemaHash: hostedDetail.data.schemaHash, arguments: {}, confirmed: true };
+    for (const client of [registryClient, registryStdio]) {
+      const result = await client.callTool({ name: "tw_mcp_call", arguments: hostedInvocation });
+      assert.notEqual(result.isError, true, JSON.stringify(result));
+      assert.ok(JSON.stringify(result).includes("isolated-mcp-ok"));
+      assert.equal(JSON.stringify(result).includes("fixture-private-token"), false);
+    }
+    await mcpPool.disconnect(hostedServer.id);
+    assert.equal(mcpPool.isConnected(hostedServer.id), false);
+    assert.equal((await registryCall("tw_mcp_call", hostedInvocation)).ok, true);
+    const disabledHosted = await f.app.request(`/api/v1/mcp/servers/${hostedServer.id}`, { method: "PATCH", headers: f.owner.headers, body: JSON.stringify({ active: false }) });
+    assert.equal(disabledHosted.status, 200, await disabledHosted.clone().text());
+    assert.equal(mcpPool.isConnected(hostedServer.id), false);
+    assert.equal((await registryCall("tw_mcp_call", hostedInvocation)).ok, false);
+    const enabledHosted = await f.app.request(`/api/v1/mcp/servers/${hostedServer.id}`, { method: "PATCH", headers: f.owner.headers, body: JSON.stringify({ active: true }) });
+    assert.equal(enabledHosted.status, 200);
+    assert.equal((await registryCall("tw_mcp_call", hostedInvocation)).ok, true);
+    delete process.env.TW_MCP_SECRET_FIXTURE;
+    assert.equal((await registryCall("tw_mcp_call", hostedInvocation)).ok, false);
+    process.env.TW_MCP_SECRET_FIXTURE = "fixture-private-token";
+    process.env.TW_MCP_RUNTIME_PROFILES = "[]";
+    assert.equal((await registryCall("tw_mcp_call", hostedInvocation)).ok, false);
+    await mcpPool.disconnect(hostedServer.id);
+    const hostedRemaining = await promisify(execFile)("docker", ["ps", "-aq", "--filter", "label=task-weaver.mcp-runtime=true"]);
+    assert.equal(hostedRemaining.stdout.trim(), "");
     const runtimeListing = await invokeRuntime("tw_skill_runtimes_list", {});
     const runtimeProfile = runtimeListing.items[0];
     assert.equal(runtimeProfile.availability.state, "available");

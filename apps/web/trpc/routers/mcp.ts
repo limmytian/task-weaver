@@ -44,7 +44,7 @@ export const mcpRouter = router({
   update: ordinaryResourceProcedure
     .input(z.object({ id: z.string().uuid(), data: updateMcpServerSchema }))
     .mutation(async ({ ctx, input }) => {
-      return createResourceServices(ctx.identity).mcpRegistryService.updateServer(ctx.db, input.id, input.data, ctx.actor);
+      return forwardMcpRequest(ctx.req, "/servers/" + input.id, "PATCH", input.data);
     }),
 
   delete: ordinaryResourceProcedure
@@ -61,14 +61,15 @@ export const mcpRouter = router({
     }),
 });
 
-async function forwardMcpRequest(request: Request, path: string, method: "POST" | "DELETE") {
+async function forwardMcpRequest(request: Request, path: string, method: "POST" | "DELETE" | "PATCH", body?: unknown) {
   const headers = new Headers();
   for (const name of ["authorization", "cookie", "origin", "x-csrf-token"]) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
+  if (body !== undefined) headers.set("content-type", "application/json");
   const apiUrl = process.env.TW_API_URL || "http://localhost:3001";
-  const response = await fetch(apiUrl + "/api/v1/mcp" + path, { method, headers, redirect: "error" });
+  const response = await fetch(apiUrl + "/api/v1/mcp" + path, { method, headers, redirect: "error", body: body === undefined ? undefined : JSON.stringify(body) });
   if (response.status === 403) throw new AuthorizationError();
   if (response.status === 404) throw new NotFoundError("Resource not found");
   if (response.status === 409) throw new ConflictError("MCP operation conflicted", 0);

@@ -69,3 +69,5 @@ export { createChatModelService } from "./chat-models";
 export { createAttachmentService, handleAttachmentRequest, cleanupAttachmentGarbage, attachmentPreviewType } from "./attachments";
 
 export * from "./mcp-security";
+
+export { capabilityDigest } from "./capability-digest";

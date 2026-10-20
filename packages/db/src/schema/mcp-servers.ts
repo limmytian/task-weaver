@@ -24,7 +24,9 @@ export interface McpServerHttpConfig {
   headers?: Record<string, string>;
 }
 
-export type McpServerConfig = McpServerStdioConfig | McpServerHttpConfig;
+export interface McpServerHostedConfig { profileId: string; profileHash: string }
+
+export type McpServerConfig = McpServerStdioConfig | McpServerHttpConfig | McpServerHostedConfig;
 
 export const mcpServers = pgTable(
   "mcp_servers",
@@ -36,7 +38,7 @@ export const mcpServers = pgTable(
     personalOwnerId: text("personal_owner_id"),
     personalOwnerType: actorTypeEnum("personal_owner_type"),
     transport: text("transport", {
-      enum: ["stdio", "sse", "streamable-http"],
+      enum: ["stdio", "sse", "streamable-http", "hosted-stdio"],
     }).notNull(),
     registeredBy: text("registered_by"),
     registeredCredentialId: text("registered_credential_id"),

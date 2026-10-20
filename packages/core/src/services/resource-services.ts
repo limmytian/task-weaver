@@ -1,3 +1,4 @@
+import { synchronizeAuthorizedMcpTools } from "./mcp-sync";
 import { getArchivedResourceReadAuthority } from "./api-keys";
 import { requireDaemonLease } from './daemon-lease-authorization';
 import { createTiExecutionService, isTiExecutionOperation } from './ti-execution';
@@ -111,6 +112,7 @@ function bindServices(context?: VerifiedRequestContext) {
         const db = args[0] as Database;
         if (group === "usage" && name === "reportTiUsage") return createTiExecutionService(context).invoke(db, "reportUsage", args.slice(1));
         if (group === "ti" && isTiExecutionOperation(name)) return createTiExecutionService(context).invoke(db, name, args.slice(1));
+        if (group === "mcp" && name === "syncTools") return synchronizeAuthorizedMcpTools(db, context, args[1], args[2]);
         if (group === "mcp" && name === "callTool") return invokeMcpTool(db, context, args[1], args[2], args[3], args[4], args[5], args[6]);
         return db.transaction(async tx => {
           // Serialize policy mutations with resource operations, including reads and nested relations.
@@ -811,7 +813,8 @@ function redactMcpResult(authority: ResourceAuthority, value: any): any {
   if ("registeredBy" in result && "transport" in result) {
     const config = result.config;
     result.config = canAccessResource(authority, result, "mcp.manage")
-      ? result.transport === "stdio" ? { command: config.command, args: config.args }
+      ? result.transport === "hosted-stdio" ? { profileId: config.profileId, profileHash: config.profileHash }
+        : result.transport === "stdio" ? { command: config.command, args: config.args }
         : { url: config.url }
       : result.transport === "stdio" ? { command: "" } : { url: "" };
     result.statusMessage = null;

@@ -9,7 +9,7 @@ import { capabilityDigest } from "./capability-digest";
 export type SkillRuntimeProfile = z.infer<typeof skillRuntimeProfileSchema>;
 const exec = promisify(execFile);
 
-async function readonlyImageVolumes(image: string, workspace: boolean): Promise<string[]> {
+export async function readonlyImageVolumes(image: string, workspace: boolean): Promise<string[]> {
   const info = await exec("docker", ["info", "--format", "{{json .}}"], { timeout: 1500, maxBuffer: 65536 });
   const limits = JSON.parse(info.stdout) as { OSType: string; MemoryLimit: boolean; CpuCfsQuota: boolean; PidsLimit: boolean };
   if (limits.OSType !== "linux" || !limits.MemoryLimit || !limits.CpuCfsQuota || !limits.PidsLimit) throw new ValidationError("Skill execution requires a Linux engine with enforced memory, CPU and process limits");

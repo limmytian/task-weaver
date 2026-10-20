@@ -1,3 +1,4 @@
+import { resolveHostedMcpRuntime } from "./mcp-hosted-runtime";
 import { and, eq, isNotNull, or, sql } from "drizzle-orm";
 import { type Database, mcpServers, mcpTools, authActors } from "@task-weaver/db";
 import { AuthorizationError, NotFoundError, type AuthorizationPermission, type VerifiedRequestContext } from "@task-weaver/contracts";
@@ -22,6 +23,7 @@ export async function requireMcpServer(db: Database, authority: ResourceAuthorit
   await requireResource(db, authority, "mcp", id, permission);
   const [server] = await db.select().from(mcpServers).where(and(eq(mcpServers.id, id), mcpServerPredicate(authority, context)));
   if (!server) throw new NotFoundError("Resource not found");
+  if (permission === "mcp.invoke" && server.transport === "hosted-stdio") resolveHostedMcpRuntime(server);
   return server;
 }
 

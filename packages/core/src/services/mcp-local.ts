@@ -1,3 +1,4 @@
+import { resolveHostedMcpRuntime } from "./mcp-hosted-runtime";
 import { requireMcpApproval, recordMcpInvocationAudit, mcpPolicy, mcpScopeKey } from "./mcp-security";
 import { personalResourceOwnerId, type ResourceScope } from "./resource-authorization";
 import { createHash, randomBytes } from "node:crypto";
@@ -29,7 +30,7 @@ async function requireQueuedTool(db: Database, item: typeof mcpLocalRequests.$in
 }
 
 const toolBinding = (tool: { id: string; name: string; inputSchema: unknown; readOnly: boolean; targetProjectArgument: string | null }) => JSON.stringify({ id: tool.id, name: tool.name, inputSchema: tool.inputSchema, readOnly: tool.readOnly, targetProjectArgument: tool.targetProjectArgument });
-const serverBinding = (server: { id: string; projectId: string | null; personalOwnerId: string | null; transport: string; config: unknown; readOnly: boolean }) => JSON.stringify({ id: server.id, projectId: server.projectId, personalOwnerId: server.personalOwnerId, transport: server.transport, config: server.config, readOnly: server.readOnly });
+const serverBinding = (server: { id: string; projectId: string | null; personalOwnerId: string | null; transport: string; config: unknown; readOnly: boolean }) => JSON.stringify({ id: server.id, projectId: server.projectId, personalOwnerId: server.personalOwnerId, transport: server.transport, config: server.config, readOnly: server.readOnly, runtime: server.transport === "hosted-stdio" ? resolveHostedMcpRuntime(server).fingerprint : undefined });
 const approvalOperation = (args: Record<string, unknown>, tool: unknown, server: Parameters<typeof serverBinding>[0]) => ({ args, tool, server: JSON.parse(serverBinding(server)) });
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const failed = () => ({ isError: true, content: [{ type: "text", text: "Local MCP invocation failed or expired" }] });
@@ -90,7 +91,7 @@ async function invokeMcpToolUnchecked(db: Database, context: VerifiedRequestCont
     });
     await revalidate();
     const headers = (remote.server.config as { headers?: Record<string, string> }).headers ?? {};
-    return redactAssistantValues(result, Object.values(headers));
+    return redactAssistantValues(result, [...Object.values(headers), ...(remote.server.transport === "hosted-stdio" ? Object.values(resolveHostedMcpRuntime(remote.server).secrets) : [])]);
   }
   const request = prepared.request;
   try {

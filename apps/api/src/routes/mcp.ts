@@ -117,6 +117,7 @@ mcp.patch("/servers/:id", async (c) => {
 
   try {
     const server = await createResourceServices(c.get("identity")).mcpRegistryService.updateServer(db, id, parsed.data, actor);
+    if (parsed.data.active === false || parsed.data.config || parsed.data.readOnly !== undefined || parsed.data.projectId !== undefined || parsed.data.personalOwnerId !== undefined) await mcpPool.disconnect(id);
     return c.json(server);
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);

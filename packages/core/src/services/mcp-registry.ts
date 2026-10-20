@@ -6,7 +6,7 @@ import type {
   UpdateMcpServerInput,
   SearchMcpToolsInput,
 } from "@task-weaver/contracts";
-import { NotFoundError, ConflictError, ValidationError, mcpServerStdioConfigSchema, mcpServerHttpConfigSchema } from "@task-weaver/contracts";
+import { NotFoundError, ConflictError, ValidationError, mcpServerStdioConfigSchema, mcpServerHttpConfigSchema, mcpServerHostedConfigSchema } from "@task-weaver/contracts";
 
 export interface McpPoolClient {
   listTools(): Promise<{ tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }> }>;
@@ -20,9 +20,9 @@ export interface McpPool {
 }
 
 function validateConfig(transport: string, config: unknown) {
-  const schema = transport === "stdio" ? mcpServerStdioConfigSchema : mcpServerHttpConfigSchema;
+  const schema = transport === "hosted-stdio" ? mcpServerHostedConfigSchema : transport === "stdio" ? mcpServerStdioConfigSchema : mcpServerHttpConfigSchema;
   if (!schema.safeParse(config).success) throw new ValidationError("MCP config does not match its transport");
-  if (transport !== "stdio") {
+  if (transport === "sse" || transport === "streamable-http") {
     const url = new URL((config as { url: string }).url);
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new ValidationError("MCP endpoint must be HTTP(S) without URL credentials");
   }
