@@ -11,6 +11,7 @@ export type Env = {
     identity: VerifiedRequestContext;
     auth: AuthenticationRuntime;
     skillRuntimeProfiles?: string;
+    mcpReadOnly?: boolean;
   };
 };
 

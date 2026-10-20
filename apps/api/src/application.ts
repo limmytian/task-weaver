@@ -331,6 +331,7 @@ export function createApiApplication(
     requestContext.set("db", options.db);
     requestContext.set("auth", auth);
     requestContext.set("skillRuntimeProfiles", env.TW_SKILL_RUNTIME_PROFILES);
+    requestContext.set("mcpReadOnly", env.TW_MCP_READ_ONLY === "true");
     await next();
   });
   app.use("*", authenticationMiddleware);

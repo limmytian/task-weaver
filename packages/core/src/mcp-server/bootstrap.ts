@@ -36,6 +36,10 @@ export function buildCapabilityBootstrap(visibleTools: readonly string[], hosted
       maxSummaryBytes: CAPABILITY_LIMITS.summaryBytes, maxDependencyNodes: CAPABILITY_LIMITS.manifestEntries,
     },
     authorization: "recheck_each_operation",
+    ...(hostedExecution?.state === "available" && visibleTools.includes("tw_skills_run") ? { execution: {
+      resolve: "tw_skill_packages_resolve", runtimes: "tw_skill_runtimes_list", run: "tw_skills_run",
+      guidance: "Resolve exact package dependencies, inspect a ready profile, then confirm the graph hash, image, profile hash, execution scope and JSON input. Scripts run without network or inherited credentials and return bounded text results.",
+    } } : {}),
   });
   if (Buffer.byteLength(JSON.stringify(result), "utf8") > CAPABILITY_LIMITS.bootstrapBytes) {
     throw new Error("Capability bootstrap exceeds its byte budget");

@@ -28,6 +28,14 @@ ordinary source availability does not imply runtime readiness. No Docker socket,
 host credential files or unrelated filesystem paths enter a skill container.
 Do not bake credentials into a runtime image.
 
+Runtime discovery probes the exact image and interpreter in a constrained
+container. Results include `checkedAt` and `recheckAt`, are coalesced and cached
+for 30 seconds, and never cache caller permissions. Missing images or
+interpreters return an unavailable status with remediation. The launcher requires
+a Linux Docker engine that supports memory, CPU and process limits. Image-declared
+volumes are overridden with bounded read-only temporary mounts so they cannot
+silently introduce writable anonymous volumes.
+
 ## Package declaration and invocation
 
 Add `executionMode: "isolated"` and a runtime entry to the version manifest's
@@ -48,6 +56,18 @@ version, graph `manifestHash`, `runtimeImage`, `runtimeProfileHash`, execution
 scope and `confirmed: true`. Input is one JSON object delivered on stdin.
 The container receives `/work/manifest.json` through `TW_SKILL_MANIFEST`, mapping
 the root and dependency directories. No TW key or provider credential is passed.
+
+The CLI exposes the same workflow without local language tools:
+
+```bash
+tw context package resolve "$PACKAGE_ID" --version "$PACKAGE_VERSION" --json
+tw context runtimes --json
+tw context run "$PACKAGE_ID" --version "$PACKAGE_VERSION" --manifest-hash "$MANIFEST_HASH" --runtime-image "$RUNTIME_IMAGE" --profile-hash "$PROFILE_HASH" --scope project --project "$PROJECT_ID" --input-file input.json --confirm --json
+```
+
+Inspect the resolved graph and ready profile before supplying those values.
+Approval-protected calls additionally accept `--approval`. The explicit
+`--confirm` flag is required; failed runtime results set a failing exit status.
 
 Execution requires read access to every source dependency and both
 `resource.write` and `mcp.invoke` in the selected project/personal/global execution

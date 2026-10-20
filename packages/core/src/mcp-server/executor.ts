@@ -14,7 +14,7 @@ import { readMcpPackage, readMcpSkill, listMcpPackages } from "./discovery";
 import type { SkillPackageStorageAdapter } from "../services/skill-package-storage";
 import type { Database } from "@task-weaver/db";
 import type { VerifiedRequestContext } from "@task-weaver/contracts";
-import { AuthorizationError, mcpServerCatalog, mcpServerReadTools, createTaskSchema, listTasksSchema, createRequirementSchema, updateRequirementSchema, updateTaskSchema, createDocumentSchema, updateDocumentSchema, listProjectsSchema, listRequirementsSchema, listDocumentsSchema } from "@task-weaver/contracts";
+import { AuthorizationError, isMcpServerToolAllowed, mcpServerCatalog, mcpServerReadTools, createTaskSchema, listTasksSchema, createRequirementSchema, updateRequirementSchema, updateTaskSchema, createDocumentSchema, updateDocumentSchema, listProjectsSchema, listRequirementsSchema, listDocumentsSchema } from "@task-weaver/contracts";
 import { createResourceServices } from "../services/resource-services";
 import { personalResourceOwnerId, resourceAuthority, canAccessResource } from "../services/resource-authorization";
 import type { McpExecutor } from "./index";
@@ -25,7 +25,7 @@ function paged(value: unknown) {
 }
 
 /** Only the API constructs this executor, using server-verified request context. */
-export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequestContext, storage?: SkillPackageStorageAdapter, runtimeProfiles?: string): McpExecutor {
+export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequestContext, storage?: SkillPackageStorageAdapter, runtimeProfiles?: string, readOnly = false): McpExecutor {
   const liveDb = db;
   const services = createResourceServices(identity);
   const { projectService: projects, requirementService: requirements, taskService: tasks, documentService: documents, claimService: claims } = services;
@@ -33,7 +33,7 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
   const owner = { personalOwnerId: personalResourceOwnerId(identity), personalOwnerType: "human" as const };
   return secureMcpExecutor(db, identity, async (name, raw, signal, db) => {
     signal.throwIfAborted();
-    const visibleTools = await authorizedMcpToolNames(db, identity);
+    const visibleTools = (await authorizedMcpToolNames(db, identity)).filter(tool => isMcpServerToolAllowed(tool, readOnly));
     if (!visibleTools.includes(name)) throw new AuthorizationError();
     // Inputs have already passed the strict shared MCP schema. Re-parse business
     // payloads below to preserve refinements and defaults in the canonical contracts.
@@ -135,7 +135,7 @@ export async function authorizedMcpToolNames(db: Database, identity: VerifiedReq
       if (grant.scope === "instance" || !grant.permissions.includes(permission)) continue;
       if (projectOnly && tool.name !== "tw_projects_discover" && grant.scope !== "project") continue;
       const scope = grant.scope === "project" ? { projectId: grant.projectId } : grant.scope === "personal" ? { personalOwnerId: grant.actorId } : {};
-      if (tool.name === "tw_skills_run" && !canAccessResource(authority, scope, "mcp.invoke")) continue;
+      if (["tw_skills_run", "tw_skill_runtimes_list"].includes(tool.name) && !canAccessResource(authority, scope, "mcp.invoke")) continue;
       if (!policies.some(policy => policy.scopeKey === mcpScopeKey(scope) && [tool.name, "*"].includes(policy.toolId) && policy.mode === "deny")) { names.push(tool.name); break; }
     }
   }

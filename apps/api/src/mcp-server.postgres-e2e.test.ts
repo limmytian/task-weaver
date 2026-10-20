@@ -117,7 +117,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const remote = new Client({ name: "real-http-sdk", version: "1.31.0" });
   await remote.connect(new StreamableHTTPClientTransport(new URL(`http://${host}/api/v1/mcp-server`), { requestInit: { headers: headers() } }));
   t.after(() => remote.close());
-  assert.equal((await remote.listTools()).tools.length, mcpServerCatalog.length - 2);
+  assert.equal((await remote.listTools()).tools.length, mcpServerCatalog.length - 3);
   assert.equal((await remote.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   const directory = await mkdtemp(join(tmpdir(), "tw-mcp-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -152,7 +152,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const restBootstrapResponse = await f.app.request("/api/v1/context/bootstrap", { headers: headers() });
   assert.equal(restBootstrapResponse.status, 200);
   assert.deepEqual((await restBootstrapResponse.json() as any).capabilityBootstrap, localBootstrap);
-  assert.equal((await local.listTools()).tools.length, mcpServerReadTools.length - 1);
+  assert.equal((await local.listTools()).tools.length, mcpServerReadTools.length - 2);
   assert.equal((await local.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   assert.equal((await local.callTool({ name: "tw_tasks_status", arguments: { id: task.id, status: "done" } })).isError, true);
   // 0.3.11 planning and context use the same authenticated executor on both transports.
@@ -426,16 +426,20 @@ test("MCP transports use live scoped authority and preserve collaboration guards
     t.after(() => { if (previousHostMarker === undefined) delete process.env.TW_SKILL_HOST_SECRET; else process.env.TW_SKILL_HOST_SECRET = previousHostMarker; });
     await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: "member", explicitPermissions: ["mcp.invoke"] });
     const runtimeKey = await f.identity.issueKey(f.owner.headers, agent.id, { name: "Isolated runtime fixture", expiresAt: null, grants: [{ scope: "project", projectId: f.project.id, permissions: ["resource.read", "resource.write", "mcp.invoke"] }, { scope: "global", permissions: ["resource.read"] }] });
-    const profiles = JSON.stringify([{ id: "fixture-shell", image: process.env.TW_SKILL_RUNTIME_TEST_IMAGE, interpreter: "shell", timeoutMs: 3000 }]);
+    const profiles = JSON.stringify([{ id: "fixture-shell", image: process.env.TW_SKILL_RUNTIME_TEST_IMAGE, interpreter: "shell", timeoutMs: 3000 }, { id: "fixture-missing-node", image: process.env.TW_SKILL_RUNTIME_TEST_IMAGE, interpreter: "node", timeoutMs: 3000 }]);
     networkApp = createApiApplication({ db, databaseUrl: databaseUrl!, env: { TW_AUTH_SECRET: f.configuration.secret, TW_AUTH_BASE_URL: f.configuration.baseURL, TW_AUTH_TRUSTED_ORIGINS: f.configuration.trustedOrigins[0], TW_MCP_ALLOWED_HOSTS: host, TW_PRESET_SKILLS_SYNC: "disabled", TW_SKILL_RUNTIME_PROFILES: profiles } }).app;
     const runtimeClient = new Client({ name: "isolated-runtime-http", version: "1" });
     await runtimeClient.connect(new StreamableHTTPClientTransport(new URL(`http://${host}/api/v1/mcp-server`), { requestInit: { headers: headers(runtimeKey.rawKey) } }));
     t.after(() => runtimeClient.close());
     const invokeRuntime = async (name: string, input: Record<string, unknown>) => { const result = await runtimeClient.callTool({ name, arguments: input }); assert.notEqual(result.isError, true, JSON.stringify(result)); return (result.structuredContent as any).data; };
-    const runtimeProfile = (await invokeRuntime("tw_skill_runtimes_list", {})).items[0];
+    const runtimeListing = await invokeRuntime("tw_skill_runtimes_list", {});
+    const runtimeProfile = runtimeListing.items[0];
     assert.equal(runtimeProfile.availability.state, "available");
+    assert.equal(runtimeListing.items[1].availability.state, "unavailable");
+    assert.equal(runtimeListing.items[1].availability.reason, "dependency_missing");
+    assert.equal((await invokeRuntime("tw_skill_runtimes_list", {})).items[0].checkedAt, runtimeProfile.checkedAt);
     assert.equal((await invokeRuntime("tw_context_bootstrap", {})).capabilities.hostedExecution.state, "available");
-    const script = "set -eu\ntest \"$(id -u)\" = 65534\ntest -z \"${TW_API_KEY:-}\"\ntest -z \"${TW_SKILL_HOST_SECRET:-}\"\ntest ! -S /var/run/docker.sock\nif touch /work/root/changed 2>/dev/null; then exit 12; fi\nif grep -q eth0 /proc/net/dev; then exit 13; fi\nprintf 'sandbox-ok\\n'\ncat\n";
+    const script = "set -eu\ntest \"$(id -u)\" = 65534\ntest -z \"${TW_API_KEY:-}\"\ntest -z \"${TW_SKILL_HOST_SECRET:-}\"\ntest ! -S /var/run/docker.sock\nif [ -f /sys/fs/cgroup/memory.max ]; then test \"$(cat /sys/fs/cgroup/memory.max)\" = 268435456; fi\nif [ -f /sys/fs/cgroup/pids.max ]; then test \"$(cat /sys/fs/cgroup/pids.max)\" = 64; fi\nif touch /work/root/changed 2>/dev/null; then exit 12; fi\nif grep -q eth0 /proc/net/dev; then exit 13; fi\nprintf 'sandbox-ok\\n'\ncat\n";
     const registerExecutable = (name: string, text: string) => registerSkill({ name, version: "1.0", manifest: { capabilities: { executionMode: "isolated", runtime: { profileId: "fixture-shell", scriptPath: "run.sh" } } }, files: [{ path: "SKILL.md", contentBase64: Buffer.from("Run the declared script in the configured isolated profile.").toString("base64") }, { path: "run.sh", contentBase64: Buffer.from(text).toString("base64"), isExecutable: true }] });
     const executable = await registerExecutable("Isolated fixture skill", script);
     const resolvedRun = await invokeRuntime("tw_skill_packages_resolve", { packageId: executable.id, version: "1.0" });
@@ -461,6 +465,19 @@ test("MCP transports use live scoped authority and preserve collaboration guards
     t.after(() => runtimeLocal.close());
     const withoutLocalTools = await runtimeLocal.callTool({ name: "tw_skills_run", arguments: run });
     assert.equal((withoutLocalTools.structuredContent as any).data.status, "succeeded", JSON.stringify(withoutLocalTools));
+    const runtimeReadOnly = new Client({ name: "runtime-read-only-stdio", version: "1" });
+    await runtimeReadOnly.connect(new StdioClientTransport({ command: process.execPath, args: ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url)), "mcp", "serve", "--read-only"], env: { ...env, PATH: "/no-local-tools", TW_CONFIG_DIR: directory, TW_API_URL: `http://${host}`, TW_API_KEY: runtimeKey.rawKey }, stderr: "pipe" }));
+    t.after(() => runtimeReadOnly.close());
+    const readOnlyBootstrap = await runtimeReadOnly.callTool({ name: "tw_context_bootstrap", arguments: {} });
+    assert.equal((readOnlyBootstrap.structuredContent as any).data.capabilities.hostedExecution.state, "unavailable");
+    assert.equal((await runtimeReadOnly.callTool({ name: "tw_skills_run", arguments: run })).isError, true);
+    const contextCli = async (...args: string[]) => promisify(execFile)(process.execPath, ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url)), "context", ...args], { timeout: 20_000, env: { ...env, PATH: "/no-local-tools", TW_CONFIG_DIR: directory, TW_API_URL: `http://${host}`, TW_API_KEY: runtimeKey.rawKey } });
+    const cliGraph = JSON.parse((await contextCli("package", "resolve", executable.id, "--version", "1.0", "--json")).stdout);
+    assert.equal(cliGraph.manifestHash, resolvedRun.manifestHash);
+    assert.equal(JSON.parse((await contextCli("runtimes", "--json")).stdout).items[0].profileHash, runtimeProfile.profileHash);
+    const cliRunArgs = ["run", executable.id, "--project", f.project.id, "--version", "1.0", "--manifest-hash", resolvedRun.manifestHash, "--runtime-image", runtimeProfile.image, "--profile-hash", runtimeProfile.profileHash, "--json"];
+    await assert.rejects(contextCli(...cliRunArgs));
+    assert.equal(JSON.parse((await contextCli(...cliRunArgs, "--confirm")).stdout).status, "succeeded");
     const shared = await createResourceServices(f.admin.context).skillPackageService.registerPackage(db, registerSkillPackageSchema.parse({ name: "Shared executable fixture", version: "1.0", manifest: { capabilities: { executionMode: "isolated", runtime: { profileId: "fixture-shell", scriptPath: "run.sh" } } }, files: [{ path: "SKILL.md", contentBase64: Buffer.from("Shared read-only skill guidance").toString("base64") }, { path: "run.sh", contentBase64: Buffer.from("printf 'shared-skill-ok'\n").toString("base64") }] }), { id: f.admin.context.actor.id, type: "human" }, packageStorage);
     const sharedManifest = await invokeRuntime("tw_skill_packages_resolve", { packageId: shared.id, version: "1.0" });
     const sharedRun = { ...run, packageId: shared.id, manifestHash: sharedManifest.manifestHash };
@@ -517,7 +534,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
       const initialization = await inspector(transportName, "initialize");
       assert.equal(initialization.protocolVersion, "2025-11-25");
       const tools = await inspector(transportName, "tools/list");
-      assert.equal(tools.tools.length, mcpServerCatalog.length - 2);
+      assert.equal(tools.tools.length, mcpServerCatalog.length - 3);
       const invoke = async (name: string, args: unknown) => {
         const result = await inspector(transportName, "tools/call", name, args);
         assert.equal(result.structuredContent.ok, true, JSON.stringify(result));

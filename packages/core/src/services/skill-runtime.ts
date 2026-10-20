@@ -9,6 +9,49 @@ import { capabilityDigest } from "./capability-digest";
 export type SkillRuntimeProfile = z.infer<typeof skillRuntimeProfileSchema>;
 const exec = promisify(execFile);
 
+async function readonlyImageVolumes(image: string, workspace: boolean): Promise<string[]> {
+  const info = await exec("docker", ["info", "--format", "{{json .}}"], { timeout: 1500, maxBuffer: 65536 });
+  const limits = JSON.parse(info.stdout) as { OSType: string; MemoryLimit: boolean; CpuCfsQuota: boolean; PidsLimit: boolean };
+  if (limits.OSType !== "linux" || !limits.MemoryLimit || !limits.CpuCfsQuota || !limits.PidsLimit) throw new ValidationError("Skill execution requires a Linux engine with enforced memory, CPU and process limits");
+  const result = await exec("docker", ["image", "inspect", image, "--format", "{{json .Config.Volumes}}"], { timeout: 1500, maxBuffer: 16384 });
+  const value = JSON.parse(result.stdout) as Record<string, unknown> | null;
+  const paths = Object.keys(value ?? {});
+  if (paths.length > 16 || paths.some(path => path.length > 512 || !/^\/[a-zA-Z0-9_./-]+$/.test(path) || path.split("/").includes(".."))) throw new ValidationError("Runtime image declares unsupported volume paths");
+  // Image-declared anonymous volumes must not silently introduce writable disk mounts.
+  return paths.filter(path => path !== "/tmp" && !(workspace && path === "/work")).map(path => `--tmpfs=${path}:ro,noexec,nosuid,size=1m`);
+}
+
+type RuntimeSnapshot = { availability: CapabilityAvailability; checkedAt: string; recheckAt: string };
+const readiness = new Map<string, { expires: number; result: Promise<RuntimeSnapshot> }>();
+
+async function inspectRuntime(profile: SkillRuntimeProfile): Promise<RuntimeSnapshot> {
+  const key = capabilityDigest(profile);
+  const cached = readiness.get(key);
+  if (cached && cached.expires > Date.now()) return cached.result;
+  const entry = { expires: Infinity, result: undefined as unknown as Promise<RuntimeSnapshot> };
+  entry.result = (async () => {
+    let availability: CapabilityAvailability;
+    let name: string | undefined;
+    try {
+      const volumes = await readonlyImageVolumes(profile.image, false);
+      name = `tw-skill-probe-${randomUUID()}`;
+      const interpreter = profile.interpreter === "shell" ? "/bin/sh" : profile.interpreter === "python" ? "python3" : "node";
+      await exec("docker", ["run", "--rm", "--pull=never", "--name", name, "--label=task-weaver.skill-runtime=true", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--user=65534:65534", "--memory=64m", "--cpus=0.25", "--pids-limit=16", "--tmpfs=/tmp:rw,noexec,nosuid,size=1m", ...volumes, "--entrypoint", interpreter, profile.image, ...(profile.interpreter === "shell" ? ["-c", "exit 0"] : ["--version"])], { timeout: 2000, killSignal: "SIGKILL", maxBuffer: 4096 });
+      availability = { state: "available", executionMode: "isolated" };
+    } catch {
+      availability = { state: "unavailable", reason: "dependency_missing", remediation: "Provision this exact image and its declared interpreter on the dedicated runtime host." };
+    } finally {
+      if (name) await exec("docker", ["rm", "--force", "--volumes", name], { timeout: 2500, maxBuffer: 4096 }).catch(() => undefined);
+    }
+    const checkedAt = new Date().toISOString();
+    entry.expires = Date.now() + 30000;
+    return { availability, checkedAt, recheckAt: new Date(entry.expires).toISOString() };
+  })();
+  readiness.set(key, entry);
+  if (readiness.size > 32) readiness.delete(readiness.keys().next().value!);
+  return entry.result;
+}
+
 export function configuredSkillRuntimes(config?: string): SkillRuntimeProfile[] {
   if (!config) return [];
   let value: unknown;
@@ -22,13 +65,13 @@ export async function listSkillRuntimes(config?: string) {
   let profiles: SkillRuntimeProfile[];
   try { profiles = configuredSkillRuntimes(config); }
   catch { return { items: [], status: "invalid_configuration", remediation: "Ask an administrator to validate the trusted runtime profile configuration.", network: "none", inheritedCredentials: false, maxOutputBytes: 65536 }; }
-  const items = await Promise.all(profiles.map(async profile => {
-    let availability: CapabilityAvailability;
-    try {
-      await exec("docker", ["image", "inspect", profile.image, "--format", "{{.Id}}"], { timeout: 1500, maxBuffer: 4096 });
-      availability = { state: "available", executionMode: "isolated" };
-    } catch { availability = { state: "unavailable", reason: "not_configured", remediation: "Provision this exact image and a dedicated Docker runtime host before invoking the skill." }; }
-    return { ...profile, profileHash: capabilityDigest(profile), availability };
+  const items = new Array<SkillRuntimeProfile & RuntimeSnapshot & { profileHash: string }>(profiles.length);
+  let index = 0;
+  await Promise.all(Array.from({ length: Math.min(2, profiles.length) }, async () => {
+    while (index < profiles.length) {
+      const current = index++, profile = profiles[current]!;
+      items[current] = { ...profile, profileHash: capabilityDigest(profile), ...await inspectRuntime(profile) };
+    }
   }));
   return { items, status: items.length ? "configured" : "not_configured", network: "none", inheritedCredentials: false, maxOutputBytes: 65536, inputFormat: "json_stdin", outputFormat: "text", persistentArtifacts: false };
 }
@@ -40,7 +83,8 @@ export async function executeIsolatedSkill(profile: SkillRuntimeProfile, directo
   signal.throwIfAborted();
   const name = `tw-skill-${randomUUID()}`;
   const interpreter = profile.interpreter === "shell" ? "/bin/sh" : profile.interpreter === "python" ? "python3" : "node";
-  const args = ["run", "--rm", "--pull=never", "--name", name, "--label", "task-weaver.skill-runtime=true", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=64", "--memory=256m", "--cpus=1", "--user=65534:65534", "--tmpfs=/tmp:rw,noexec,nosuid,size=32m", "--workdir=/work/root", "--mount", `type=bind,src=${directory},dst=/work,readonly`, "--env=TW_SKILL_MANIFEST=/work/manifest.json", "--entrypoint", interpreter, "-i", profile.image, `/work/root/${scriptPath}`];
+  const volumes = await readonlyImageVolumes(profile.image, true).catch(() => { throw new ValidationError("The configured runtime image is unavailable or has unsupported volumes"); });
+  const args = ["run", "--rm", "--pull=never", "--name", name, "--label", "task-weaver.skill-runtime=true", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=64", "--memory=256m", "--cpus=1", "--user=65534:65534", "--tmpfs=/tmp:rw,noexec,nosuid,size=32m", ...volumes, "--workdir=/work/root", "--mount", `type=bind,src=${directory},dst=/work,readonly`, "--env=TW_SKILL_MANIFEST=/work/manifest.json", "--entrypoint", interpreter, "-i", profile.image, `/work/root/${scriptPath}`];
   let stdout = "", stderr = "", bytes = 0, timedOut = false, outputTruncated = false;
   const decoders = { stdout: new StringDecoder("utf8"), stderr: new StringDecoder("utf8") };
   const started = Date.now();
@@ -53,7 +97,7 @@ export async function executeIsolatedSkill(profile: SkillRuntimeProfile, directo
     stopping = true;
     child.kill("SIGTERM");
     killTimer = setTimeout(() => child.kill("SIGKILL"), 1000); killTimer.unref();
-    void exec("docker", ["rm", "--force", name], { timeout: 5000, maxBuffer: 4096 }).catch(() => undefined);
+    void exec("docker", ["rm", "--force", "--volumes", name], { timeout: 5000, maxBuffer: 4096 }).catch(() => undefined);
   };
   const onAbort = () => stop();
   signal.addEventListener("abort", onAbort, { once: true });
@@ -88,6 +132,6 @@ export async function executeIsolatedSkill(profile: SkillRuntimeProfile, directo
     clearTimeout(timer);
     clearTimeout(killTimer);
     signal.removeEventListener("abort", onAbort);
-    await exec("docker", ["rm", "--force", name], { timeout: 5000, maxBuffer: 4096 }).catch(() => undefined);
+    await exec("docker", ["rm", "--force", "--volumes", name], { timeout: 5000, maxBuffer: 4096 }).catch(() => undefined);
   }
 }

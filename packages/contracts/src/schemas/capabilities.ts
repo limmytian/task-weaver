@@ -118,6 +118,12 @@ export const capabilityBootstrapSchema = z.object({
     maxDependencyNodes: z.literal(CAPABILITY_LIMITS.manifestEntries),
   }).strict(),
   authorization: z.literal("recheck_each_operation"),
+  execution: z.object({
+    resolve: z.literal("tw_skill_packages_resolve"),
+    runtimes: z.literal("tw_skill_runtimes_list"),
+    run: z.literal("tw_skills_run"),
+    guidance: z.string().max(500),
+  }).strict().optional(),
 }).strict();
 
 export type CapabilityBootstrap = z.infer<typeof capabilityBootstrapSchema>;

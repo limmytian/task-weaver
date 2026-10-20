@@ -22,6 +22,7 @@ import { registerEmbeddings } from './commands/embeddings.js'
 
 const program = new Command()
   .name('tw')
+  .enablePositionalOptions()
   .description('Task Weaver CLI — a shared workspace for humans and AI agents; manage projects, tasks, and documents')
   .version(APPLICATION_VERSION)
 
