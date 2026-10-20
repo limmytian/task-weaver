@@ -34,3 +34,5 @@ export * from "./mcp-plan-receipts";
 export * from "./api-key-project-creations";
 
 export * from "./mcp-security";
+
+export * from "./plugins";

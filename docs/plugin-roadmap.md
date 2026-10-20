@@ -1,9 +1,11 @@
 # Plugin Ecosystem Roadmap
 
-Status: shared manifest and lifecycle contract work has started; isolated runtime
-and real-application proof remain pending. See [plugin contracts](plugin-contracts.md). Use the linked
-project requirements and
-iteration documents for current priority and scope. One Task Weaver application
+Status: shared contracts, publisher verification and the internal offline backend
+worker with durable installation-owned state are implemented and tested. Public
+installation/lifecycle APIs, the isolated application viewer and full
+real-application proof remain pending. See [plugin contracts](plugin-contracts.md).
+Use the linked project requirements and iteration documents for current priority
+and scope. One Task Weaver application
 hosts official and third-party extensions; there is no separate Pro
 application. A catalog is a later distribution layer, not a substitute for safe
 runtime integration. Payments, ratings and marketplace UI are not current scope.

@@ -77,9 +77,9 @@ export async function listSkillRuntimes(config?: string) {
 }
 
 /** The image and interpreter are operator-controlled; package code only runs inside Docker. */
-export async function executeIsolatedSkill(profile: SkillRuntimeProfile, directory: string, scriptPath: string, input: unknown, signal: AbortSignal) {
+export async function executeIsolatedSkill(profile: SkillRuntimeProfile, directory: string, scriptPath: string, input: unknown, signal: AbortSignal, inputLimit: 16384 | 131072 = 16384) {
   const encoded = JSON.stringify(input);
-  if (Buffer.byteLength(encoded, "utf8") > 16384) throw new ValidationError("Skill input exceeds the 16384-byte limit");
+  if (Buffer.byteLength(encoded, "utf8") > inputLimit) throw new ValidationError("Runtime input exceeds its host byte limit");
   signal.throwIfAborted();
   const name = `tw-skill-${randomUUID()}`;
   const interpreter = profile.interpreter === "shell" ? "/bin/sh" : profile.interpreter === "python" ? "python3" : "node";

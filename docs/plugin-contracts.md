@@ -110,3 +110,48 @@ and [CSP frame-source policy](https://www.w3.org/TR/CSP3/#directive-frame-src), 
 prove its behavior in a real browser. Separate artifact hosting limits the
 privilege of directly visited hostile content; a parent frame allowlist constrains
 embedded navigation. Specification review is not a substitute for browser tests.
+
+## Backend implementation status
+
+The internal `invokeInstalledPlugin` broker and `preparePluginWorker` now implement
+installation-scoped state and an offline backend worker. They are not public
+installation APIs or an enabled application viewer. Installation/lifecycle UI,
+dedicated frontend hosting and the full browser acceptance matrix are still
+required before advertising plugin availability.
+
+The worker uses operator-supplied digest-pinned profiles and publisher keys;
+request payloads cannot choose either configuration. It materializes a
+self-contained immutable skill-package artifact, checks its resolved capability
+manifest hash, complete file inventory and original content hashes, and runs the
+backend entry in a fresh constrained container. Dependency-bearing plugin
+artifacts are rejected initially. The backend receives one JSON object with
+`method`, bounded `input` and, only with `storage.read`, its installation's state
+entries (`key`, `version`, `value`, `deleted`). It emits exactly one JSON response
+matching the backend result contract. There is no outgoing Core broker surface.
+
+The trusted host applies storage patches and an actor-bound idempotency receipt
+in one short transaction after rechecking live caller authority and installation
+revision. A read method cannot write; concurrent independent writes must satisfy
+each key's current version. Concurrent identical requests may run duplicate pure
+workers but commit only once. The installation row serializes quota enforcement;
+worker execution holds no identity or installation lock. Deleted keys retain
+versions and count toward the 32-key quota, preventing stale delete/recreate
+requests and unlimited tombstones. The complete serialized namespace, including
+keys and version metadata, must fit the 64 KiB quota. Runtime failures and denied
+calls do not persist receipt payloads or state. Audits contain method/revision and
+changed-key count, never backend input, state or output.
+
+The host checks caller/installation/publisher/profile availability while a worker
+runs and before committing its result. Container cancellation includes forced
+container removal. The per-process admission limits are eight prepared workspaces and four active plugin workers;
+operators still need external host resource limits and worker supervision. This
+first implementation creates a fresh worker per call; no warm latency claim is
+made. The parent application must keep plugins unavailable until its dedicated
+origin and lifecycle implementation have passed acceptance.
+
+Run `pnpm test:plugin-postgres` for the real PostgreSQL/container backend proof.
+It uses disposable storage and publisher keys, verifies durable state across
+fresh containers, CAS conflicts, identical retries, read-method write rejection,
+installation disable during execution, live caller and publisher revocation, and
+physical user/filesystem/network/credential isolation. It does not stand in for
+the pending application/browser acceptance.
