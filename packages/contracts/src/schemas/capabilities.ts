@@ -62,6 +62,11 @@ export const capabilityDependencySchema = z.object({
   version: exactVersion.optional(),
 }).strict();
 
+export const skillRuntimeEntrySchema = z.object({
+  profileId: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
+  scriptPath: skillPackagePathSchema.refine(value => !/[\\\x00-\x1f]/.test(value) && !/^[a-zA-Z]:/.test(value) && value.split("/").filter(Boolean).length <= 32, "Runtime entry paths must be portable relative paths with at most 32 segments"),
+}).strict();
+
 export const capabilityManifestSchema = z.object({
   schemaVersion: z.literal(1),
   reference: capabilityReferenceSchema,
@@ -70,6 +75,7 @@ export const capabilityManifestSchema = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   executionMode: capabilityExecutionModeSchema,
   entryPath: skillPackagePathSchema.optional(),
+  runtime: skillRuntimeEntrySchema.optional(),
   dependencies: z.array(capabilityDependencySchema).max(CAPABILITY_LIMITS.dependencies).default([]),
 }).strict().superRefine((value, ctx) => {
   const references = new Set<string>();
@@ -119,8 +125,29 @@ export type CapabilityBootstrap = z.infer<typeof capabilityBootstrapSchema>;
 export const skillCapabilityDeclarationSchema = z.object({
   executionMode: capabilityExecutionModeSchema.default("instructions"),
   dependencies: z.array(capabilityDependencySchema).max(CAPABILITY_LIMITS.dependencies).default([]),
-}).strict();
+  runtime: skillRuntimeEntrySchema.optional(),
+}).strict().superRefine((value, ctx) => {
+  if (value.executionMode === "isolated" && !value.runtime) ctx.addIssue({ code: "custom", path: ["runtime"], message: "Isolated skills require a declared runtime profile and script path" });
+});
 
 export const resolveSkillCapabilitiesSchema = z.object({
   packageId: z.string().uuid(), version: exactVersion.optional(),
+}).strict();
+
+export const skillRuntimeProfileSchema = z.object({
+  id: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
+  image: z.string().max(512).regex(/^[a-zA-Z0-9][a-zA-Z0-9._:/-]*@sha256:[a-f0-9]{64}$/),
+  interpreter: z.enum(["node", "python", "shell"]),
+  timeoutMs: z.number().int().min(100).max(10000).default(3000),
+}).strict();
+
+export const runSkillCapabilitySchema = resolveSkillCapabilitiesSchema.extend({
+  scope: z.enum(["project", "personal", "global"]).default("project"),
+  projectId: z.string().uuid().optional(),
+  version: exactVersion,
+  manifestHash: z.string().regex(/^[a-f0-9]{64}$/),
+  runtimeImage: skillRuntimeProfileSchema.shape.image,
+  runtimeProfileHash: z.string().regex(/^[a-f0-9]{64}$/),
+  input: z.record(z.unknown()).default({}),
+  confirmed: z.literal(true),
 }).strict();

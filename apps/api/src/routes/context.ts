@@ -22,7 +22,7 @@ import {
 import type { Env } from "../middleware/actor.js";
 import { z } from "zod";
 import { resolve } from "node:path";
-import { buildCapabilityBootstrap } from "@task-weaver/core/mcp-server";
+import { readCapabilityBootstrap } from "@task-weaver/core/mcp-server";
 import { authorizedMcpToolNames } from "@task-weaver/core/mcp-server/executor";
 
 const context = new Hono<Env>();
@@ -77,7 +77,7 @@ context.get("/search", async (c) => {
 // GET /bootstrap - Get bootstrap context (minimal starting info)
 context.get("/bootstrap", async (c) => {
   const bootstrap = await createResourceServices(c.get("identity")).contextService.getBootstrapContext(c.get("db"));
-  const capabilityBootstrap = buildCapabilityBootstrap(await authorizedMcpToolNames(c.get("db"), c.get("identity")));
+  const capabilityBootstrap = await readCapabilityBootstrap(await authorizedMcpToolNames(c.get("db"), c.get("identity")), c.get("skillRuntimeProfiles"));
   return c.json({ ...bootstrap, capabilityBootstrap });
 });
 

@@ -330,6 +330,7 @@ export function createApiApplication(
   app.use("*", async (requestContext, next) => {
     requestContext.set("db", options.db);
     requestContext.set("auth", auth);
+    requestContext.set("skillRuntimeProfiles", env.TW_SKILL_RUNTIME_PROFILES);
     await next();
   });
   app.use("*", authenticationMiddleware);
@@ -349,6 +350,7 @@ export function createApiApplication(
       .split(",").map(host => host.trim()).filter(Boolean),
     readOnly: env.TW_MCP_READ_ONLY === "true",
     packageStorageDir: env.SKILL_PACKAGE_STORAGE_DIR,
+    runtimeProfiles: env.TW_SKILL_RUNTIME_PROFILES,
     budget: mcpBudget,
     signal: controller.signal,
   }));

@@ -1,5 +1,5 @@
 import { McpApprovalRequired } from "../services/mcp-security";
-export { buildCapabilityBootstrap } from "./bootstrap";
+export { buildCapabilityBootstrap, readCapabilityBootstrap } from "./bootstrap";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, McpError, ErrorCode, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
@@ -103,7 +103,7 @@ export function createTaskWeaverMcpServer(call: ReturnType<typeof createMcpToolC
     .map(tool => {
       const readOnly = (mcpServerReadTools as readonly string[]).includes(tool.name);
       const destructive = /_(update|remove|status|forget)$/.test(tool.name);
-      return { _meta: { available: true, stableId: tool.name, source: "task-weaver", requiredPermissions: [readOnly ? "resource.read" : "resource.write"], targetAuthorization: "Every target is checked against current credential scope on each call." }, name: tool.name, description: tool.description, inputSchema: zodToJsonSchema(tool.schema, { target: "jsonSchema7", $refStrategy: "none" }) as { type: "object" },
+      return { _meta: { available: true, stableId: tool.name, source: "task-weaver", requiredPermissions: tool.name === "tw_skills_run" ? ["resource.read", "resource.write", "mcp.invoke"] : [readOnly ? "resource.read" : "resource.write"], targetAuthorization: "Every target is checked against current credential scope on each call." }, name: tool.name, description: tool.description, inputSchema: zodToJsonSchema(tool.schema, { target: "jsonSchema7", $refStrategy: "none" }) as { type: "object" },
         annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly && destructive, idempotentHint: readOnly, openWorldHint: true } };
     }) };
   });

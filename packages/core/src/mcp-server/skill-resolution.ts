@@ -40,5 +40,5 @@ export async function resolveMcpSkill(db: Database, identity: VerifiedRequestCon
     throw new NotFoundError("Capability is not available for skill resolution");
   });
   if (Buffer.byteLength(JSON.stringify(result), "utf8") > 65536) throw new McpToolFailure("result_too_large", "Resolved capability manifest exceeds the 65536-byte limit.");
-  return { ...result, maxNodes: CAPABILITY_LIMITS.manifestEntries, instructionsOnly: result.nodes.every(node => node.executionMode === "instructions"), executionAuthorized: false };
+  return { ...result, manifestHash: capabilityDigest(result), maxNodes: CAPABILITY_LIMITS.manifestEntries, instructionsOnly: result.nodes.every(node => node.executionMode === "instructions"), executionAuthorized: false };
 }

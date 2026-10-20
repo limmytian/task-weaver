@@ -12,6 +12,7 @@ export interface McpRouteOptions {
   allowedHosts: readonly string[];
   readOnly?: boolean;
   packageStorageDir?: string;
+  runtimeProfiles?: string;
   budget?: McpCallBudget;
   signal?: AbortSignal;
   visibleTools?: (context: Env["Variables"]) => Promise<readonly string[]>;
@@ -33,7 +34,11 @@ export function createMcpServerRoutes(options: McpRouteOptions) {
     await next();
   });
   const caller = (context: Env["Variables"], requestSignal: AbortSignal) => createMcpToolCaller(
-    options.executor?.(context) ?? createAuthorizedMcpExecutor(context.db, context.identity, new skillPackageStorageService.LocalSkillPackageStorageAdapter(options.packageStorageDir ?? process.env.SKILL_PACKAGE_STORAGE_DIR ?? resolve(process.cwd(), "data", "skill-packages"))),
+    options.executor?.(context) ?? createAuthorizedMcpExecutor(
+      context.db, context.identity,
+      new skillPackageStorageService.LocalSkillPackageStorageAdapter(options.packageStorageDir ?? process.env.SKILL_PACKAGE_STORAGE_DIR ?? resolve(process.cwd(), "data", "skill-packages")),
+      options.runtimeProfiles,
+    ),
     { readOnly: options.readOnly, onRejected: options.executor ? undefined : (name, code) => recordMcpInvocationAudit(context.db, context.identity, { personalOwnerId: personalResourceOwnerId(context.identity), personalOwnerType: "human" }, "task-weaver", name, Date.now(), code), budget, signal: options.signal ? AbortSignal.any([requestSignal, options.signal]) : requestSignal },
   );
 

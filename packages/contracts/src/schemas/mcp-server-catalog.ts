@@ -1,6 +1,6 @@
 import { mcpRetrievalScopeSchema, mcpPackageFilesSchema, mcpPackageReadSchema, mcpSliceCreateSchema, mcpSliceUpdateSchema, mcpPlanValidateSchema, mcpPlanApplySchema, mcpAggregateContextSchema } from "./mcp-server-planning";
 import { z } from "zod";
-import { resolveSkillCapabilitiesSchema } from "./capabilities";
+import { resolveSkillCapabilitiesSchema, runSkillCapabilitySchema } from "./capabilities";
 import { mcpMemorySearchSchema, mcpMemoryGetSchema, mcpMemoryRecordSchema, mcpMemoryUpdateSchema, mcpMemoryForgetSchema, mcpMemoryPreviewSchema } from "./mcp-memory";
 import { listProjectsSchema } from "./projects";
 import { createRequirementSchema, updateRequirementSchema, listRequirementsSchema, createRequirementDependencySchema, linkDocumentToRequirementSchema } from "./requirements";
@@ -61,6 +61,8 @@ export const mcpServerCatalog = [
   tool("tw_context_search", "Discover authorized skill summaries by intent; read full text separately.", mcpRetrievalScopeSchema.extend({ intent: z.string().trim().min(1).max(500), limit: z.number().int().min(1).max(20).default(5) }).strict()),
   tool("tw_context_get", "Read one authorized skill document; use expectedVersion for a pinned dependency.", byId.extend({ expectedVersion: z.number().int().min(1).optional() }).strict()),
   tool("tw_skill_packages_resolve", "Resolve a bounded, permission-checked graph of exact skill and tool dependencies without loading their bodies or executing them.", resolveSkillCapabilitiesSchema),
+  tool("tw_skill_runtimes_list", "Inspect operator-configured digest-pinned isolated runtime profiles and readiness.", z.object({}).strict()),
+  tool("tw_skills_run", "Explicitly execute a pinned skill in a configured isolated container without network or inherited credentials; requires resource.write and mcp.invoke.", runSkillCapabilitySchema),
   tool("tw_skill_packages_list", "List authorized skill package summaries.", mcpRetrievalScopeSchema.extend({ query: z.string().trim().min(1).max(500).optional(), offset: z.number().int().min(0).max(100000).default(0), limit: z.number().int().min(1).max(50).default(20) }).strict()),
   tool("tw_skill_packages_get", "Read safe package metadata without storage locations or recursive files.", z.object({ packageId: id }).strict()),
   tool("tw_skill_package_files", "List a bounded page of package file metadata.", mcpPackageFilesSchema),
@@ -79,7 +81,7 @@ export function parseMcpServerArguments(name: McpServerToolName, value: unknown)
   const definition = mcpServerCatalog.find(tool => tool.name === name)!;
   const input = definition.schema.parse(value);
   if (name === "tw_tasks_create") return { ...createTaskSchema.parse(input), ...(input.approvalId ? { approvalId: input.approvalId } : {}) };
-  if (name === "tw_documents_create" || name === "tw_memories_record" || name === "tw_memories_preview") {
+  if (name === "tw_documents_create" || name === "tw_memories_record" || name === "tw_memories_preview" || name === "tw_skills_run") {
     if ((input.scope === "project" && !input.projectId) || ((input.scope === "personal" || input.scope === "global") && input.projectId)) {
       throw new z.ZodError([{ code: "custom", path: ["scope"], message: "Document scope conflicts with projectId" }]);
     }

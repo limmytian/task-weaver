@@ -1,15 +1,16 @@
 import { CAPABILITY_LIMITS, capabilityBootstrapSchema, type CapabilityAvailability, type CapabilityBootstrap } from "@task-weaver/contracts";
+import { listSkillRuntimes } from "../services/skill-runtime";
 
 const hints = [
   "tw_context_search", "tw_context_get", "tw_skill_packages_list",
   "tw_skill_packages_get", "tw_skill_package_files", "tw_skill_package_read",
-  "tw_projects_list", "tw_tasks_context", "tw_requirements_context",
+  "tw_skill_runtimes_list", "tw_tasks_context", "tw_requirements_context",
   "tw_memories_search", "tw_memories_get",
   "tw_skill_packages_resolve",
 ] as const;
 
 /** Discovery hints only: execution still checks live grants and each target. */
-export function buildCapabilityBootstrap(visibleTools: readonly string[]): CapabilityBootstrap {
+export function buildCapabilityBootstrap(visibleTools: readonly string[], hostedExecution?: CapabilityAvailability): CapabilityBootstrap {
   const tools = hints.filter(name => visibleTools.includes(name));
   const instructionAccess = (required: readonly string[]): CapabilityAvailability => required.every(name => tools.includes(name as typeof tools[number]))
     ? { state: "available", executionMode: "instructions" }
@@ -27,7 +28,7 @@ export function buildCapabilityBootstrap(visibleTools: readonly string[]): Capab
         ? { state: "available", executionMode: "remote" }
         : { state: "unavailable", reason: "not_configured", remediation: "Use tools/list to inspect memory read grants and policy." },
       externalTools: unavailable("Inbound registry discovery and calls are not available yet. Use scoped tw mcp search/tool/call or REST."),
-      hostedExecution: unavailable("Use an explicitly configured local runtime for executable skills; hosted workers are not available yet."),
+      hostedExecution: hostedExecution ?? { state: "unavailable", reason: "not_configured", remediation: "Inspect tw_skill_runtimes_list and request the required resource.write/mcp.invoke grants before using an isolated skill." },
       plugins: unavailable("Isolated plugin installation is not available yet."),
     },
     loading: {
@@ -40,4 +41,12 @@ export function buildCapabilityBootstrap(visibleTools: readonly string[]): Capab
     throw new Error("Capability bootstrap exceeds its byte budget");
   }
   return result;
+}
+
+export async function readCapabilityBootstrap(visibleTools: readonly string[], config?: string) {
+  if (!visibleTools.includes("tw_skills_run")) return buildCapabilityBootstrap(visibleTools);
+  const runtimes = await listSkillRuntimes(config);
+  return buildCapabilityBootstrap(visibleTools, runtimes.items.some(item => item.availability.state === "available")
+    ? { state: "available", executionMode: "isolated" }
+    : { state: "unavailable", reason: "not_configured", remediation: "Provision an operator-approved runtime image and inspect tw_skill_runtimes_list for readiness." });
 }

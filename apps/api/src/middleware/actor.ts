@@ -10,6 +10,7 @@ export type Env = {
     actor: Actor;
     identity: VerifiedRequestContext;
     auth: AuthenticationRuntime;
+    skillRuntimeProfiles?: string;
   };
 };
 

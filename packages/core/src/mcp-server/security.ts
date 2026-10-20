@@ -6,6 +6,11 @@ import { resourceAuthority, requireResource, requireScope, personalResourceOwner
 import { requireMcpApproval, recordMcpInvocationAudit, mcpPolicy, mcpScopeKey } from "../services/mcp-security";
 import type { McpExecutor } from "./index";
 
+/** Trusted preparation completes under the policy lock; isolated work runs after commit. */
+export class DeferredMcpOperation {
+  constructor(readonly run: () => Promise<unknown>, readonly dispose: () => Promise<void>) {}
+}
+
 async function target(db: Database, identity: VerifiedRequestContext, name: McpServerToolName, raw: Record<string, unknown>) {
   const authority = await resourceAuthority(db, identity);
   const write = !(mcpServerReadTools as readonly string[]).includes(name);
@@ -13,7 +18,15 @@ async function target(db: Database, identity: VerifiedRequestContext, name: McpS
   const projectId = raw.projectId ?? (raw.plan as { projectId?: string } | undefined)?.projectId;
   let scope: ResourceScope = {};
   let revision: unknown = null;
-  if (typeof raw.packageId === "string") {
+  if (name === "tw_skills_run") {
+    scope = raw.scope === "personal" ? { personalOwnerId: personalResourceOwnerId(identity), personalOwnerType: "human" }
+      : raw.scope === "global" ? {} : { projectId: raw.projectId as string };
+    requireScope(authority, scope, "resource.write");
+    requireScope(authority, scope, "mcp.invoke");
+    await requireResource(db, authority, "package", raw.packageId as string, "resource.read");
+    const [record] = await db.select().from(skillPackages).where(eq(skillPackages.id, raw.packageId as string));
+    revision = record;
+  } else if (typeof raw.packageId === "string") {
     scope = await requireResource(db, authority, "package", raw.packageId, permission);
     const [record] = await db.select().from(skillPackages).where(eq(skillPackages.id, raw.packageId));
     revision = record;
@@ -38,6 +51,7 @@ export function secureMcpExecutor(db: Database, identity: VerifiedRequestContext
   return async (name, raw, signal) => {
     const start = Date.now();
     let scope: ResourceScope = { personalOwnerId: personalResourceOwnerId(identity), personalOwnerType: "human" };
+    let deferred: DeferredMcpOperation | undefined;
     const { approvalId, ...input } = raw;
     try {
       const resolved = await target(db, identity, name, input);
@@ -51,13 +65,18 @@ export function secureMcpExecutor(db: Database, identity: VerifiedRequestContext
         const current = await target(database, identity, name, input);
         if (JSON.stringify(await mcpPolicy(database, mcpScopeKey(current.scope), name)) !== JSON.stringify(policy)) throw new AuthorizationError();
         if (current.write) await requireMcpApproval(database, identity, current.scope, name, { input, revision: current.revision }, approvalId as string | undefined);
-        return execute(name, input, signal, database);
+        const value = await execute(name, input, signal, database);
+        if (value instanceof DeferredMcpOperation) deferred = value;
+        return value;
       });
+      const completed = deferred ? await deferred.run() : result;
       await recordMcpInvocationAudit(db, identity, scope, "task-weaver", name, start);
-      return result;
+      return completed;
     } catch (error) {
       await recordMcpInvocationAudit(db, identity, scope, "task-weaver", name, start, error);
       throw error;
+    } finally {
+      await deferred?.dispose();
     }
   };
 }

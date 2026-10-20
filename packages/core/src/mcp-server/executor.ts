@@ -5,7 +5,9 @@ import { secureMcpExecutor } from "./security";
 import { submitMcpPlan } from "./planning";
 import { readMcpContext } from "./context";
 import { mcpSlices } from "./slices";
-import { buildCapabilityBootstrap } from "./bootstrap";
+import { readCapabilityBootstrap } from "./bootstrap";
+import { prepareSkillExecution } from "./skill-execution";
+import { listSkillRuntimes } from "../services/skill-runtime";
 import { mcpMemory } from "./memory";
 import { resolveMcpSkill } from "./skill-resolution";
 import { readMcpPackage, readMcpSkill, listMcpPackages } from "./discovery";
@@ -14,7 +16,7 @@ import type { Database } from "@task-weaver/db";
 import type { VerifiedRequestContext } from "@task-weaver/contracts";
 import { AuthorizationError, mcpServerCatalog, mcpServerReadTools, createTaskSchema, listTasksSchema, createRequirementSchema, updateRequirementSchema, updateTaskSchema, createDocumentSchema, updateDocumentSchema, listProjectsSchema, listRequirementsSchema, listDocumentsSchema } from "@task-weaver/contracts";
 import { createResourceServices } from "../services/resource-services";
-import { personalResourceOwnerId, resourceAuthority } from "../services/resource-authorization";
+import { personalResourceOwnerId, resourceAuthority, canAccessResource } from "../services/resource-authorization";
 import type { McpExecutor } from "./index";
 
 function paged(value: unknown) {
@@ -23,7 +25,8 @@ function paged(value: unknown) {
 }
 
 /** Only the API constructs this executor, using server-verified request context. */
-export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequestContext, storage?: SkillPackageStorageAdapter): McpExecutor {
+export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequestContext, storage?: SkillPackageStorageAdapter, runtimeProfiles?: string): McpExecutor {
+  const liveDb = db;
   const services = createResourceServices(identity);
   const { projectService: projects, requirementService: requirements, taskService: tasks, documentService: documents, claimService: claims } = services;
   const actor = { id: identity.actor.id, type: identity.actor.type };
@@ -37,6 +40,8 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
     const id = raw.id as string;
     const page = { page: raw.page as number, pageSize: raw.pageSize as number };
     switch (name) {
+      case "tw_skill_runtimes_list": return listSkillRuntimes(runtimeProfiles);
+      case "tw_skills_run": return prepareSkillExecution(db, liveDb, identity, raw, storage, runtimeProfiles, signal);
       case "tw_memories_search": return mcpMemory(db, identity, "search", raw);
       case "tw_skill_packages_resolve": return resolveMcpSkill(db, identity, raw as { packageId: string; version?: string }, signal);
       case "tw_memories_preview": return mcpMemory(db, identity, "preview", raw);
@@ -53,7 +58,7 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
       case "tw_execution_slices_update": return mcpSlices(db, identity, "update", raw);
       case "tw_context_bootstrap": {
         await services.contextService.getBootstrapContext(db);
-        return buildCapabilityBootstrap(visibleTools);
+        return readCapabilityBootstrap(visibleTools, runtimeProfiles);
       }
       case "tw_context_search": {
         const items = await services.contextService.searchContext(db, { intent: raw.intent as string, limit: raw.limit as number, mode: "summary", projectId: raw.projectId as string | undefined, includeGlobal: raw.includeGlobal as boolean, includePersonal: raw.includePersonal as boolean, ...(raw.includePersonal ? owner : {}) });
@@ -130,6 +135,7 @@ export async function authorizedMcpToolNames(db: Database, identity: VerifiedReq
       if (grant.scope === "instance" || !grant.permissions.includes(permission)) continue;
       if (projectOnly && tool.name !== "tw_projects_discover" && grant.scope !== "project") continue;
       const scope = grant.scope === "project" ? { projectId: grant.projectId } : grant.scope === "personal" ? { personalOwnerId: grant.actorId } : {};
+      if (tool.name === "tw_skills_run" && !canAccessResource(authority, scope, "mcp.invoke")) continue;
       if (!policies.some(policy => policy.scopeKey === mcpScopeKey(scope) && [tool.name, "*"].includes(policy.toolId) && policy.mode === "deny")) { names.push(tool.name); break; }
     }
   }

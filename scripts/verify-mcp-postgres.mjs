@@ -14,9 +14,11 @@ try {
   }
   assert.ok(ready, "Disposable PostgreSQL did not become ready");
   const port = JSON.parse(docker("inspect", name))[0].NetworkSettings.Ports["5432/tcp"][0].HostPort;
+  const runtimeImage = JSON.parse(docker("image", "inspect", "pgvector/pgvector:0.8.6-pg16-bookworm"))[0].RepoDigests?.[0];
+  assert.match(runtimeImage ?? "", /^.+@sha256:[a-f0-9]{64}$/, "Container acceptance requires the actual digest-pinned fixture image");
   const result = spawnSync("pnpm", ["--filter", "@task-weaver/api", "exec", "tsx", "--test", "src/mcp-server.postgres-e2e.test.ts"], {
     encoding: "utf8", timeout: 150_000, maxBuffer: 4 * 1024 * 1024,
-    env: { ...process.env, PGOPTIONS: "-c client_min_messages=warning", TW_MCP_E2E_DATABASE_URL: `postgres://fixture:fixture-only@127.0.0.1:${port}/tw_mcp_e2e` },
+    env: { ...process.env, PGOPTIONS: "-c client_min_messages=warning", TW_SKILL_RUNTIME_TEST_IMAGE: runtimeImage, TW_MCP_E2E_DATABASE_URL: `postgres://fixture:fixture-only@127.0.0.1:${port}/tw_mcp_e2e` },
   });
   process.stdout.write(`${result.stdout ?? ""}${result.stderr ?? ""}`);
   assert.equal(result.status, 0, "MCP PostgreSQL verification failed");
