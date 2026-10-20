@@ -430,12 +430,17 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   let externalCalls = 0;
   let schemaDelay = false;
   let schemaRequested = () => {};
+  let schemaChanged = false;
+  let flakyDown = false;
+  let flakyRequests = 0;
+  let sensitiveStarted = () => {};
   const externalHttp = serve({ hostname: "127.0.0.1", port: 0, fetch: async req => {
     if (req.method !== "POST") return new Response(null, { status: 405 });
+    if (new URL(req.url).pathname === "/flaky") { flakyRequests++; if (flakyDown) return new Response("Unavailable", { status: 503 }); }
     assert.equal(req.headers.get("x-task-weaver-mcp-hop"), "1");
     const server = new ProtocolServer({ name: "external-fixture", version: "1" }, { capabilities: { tools: {} } });
-    server.setRequestHandler(ListToolsRequestSchema, async () => { if (schemaDelay) { schemaRequested(); await new Promise(resolve => setTimeout(resolve, 1500)); } return { tools: [{ name: "fixture_echo", description: "Echo a reviewed message", inputSchema: { type: "object", properties: { message: { type: "string" } }, required: ["message"] } }] }; });
-    server.setRequestHandler(CallToolRequestSchema, async request => { externalCalls++; if (request.params.arguments?.message === "slow") await new Promise(resolve => setTimeout(resolve, 1000)); return { content: [{ type: "text", text: String(request.params.arguments?.message) }] }; });
+    server.setRequestHandler(ListToolsRequestSchema, async () => { if (schemaDelay) { schemaRequested(); await new Promise(resolve => setTimeout(resolve, 1500)); } return { tools: [{ name: "fixture_echo", description: "Echo a reviewed message", inputSchema: { type: "object", properties: { message: { type: "string" }, ...(schemaChanged ? { optionalRevision: { type: "string" } } : {}) }, required: ["message"] } }] }; });
+    server.setRequestHandler(CallToolRequestSchema, async request => { externalCalls++; if (request.params.arguments?.message === "sensitive-slow") { sensitiveStarted(); await new Promise(resolve => setTimeout(resolve, 800)); return { content: [{ type: "text", text: "withheld-private-result" }] }; } if (request.params.arguments?.message === "large") return { content: [{ type: "text", text: "x".repeat(200000) }] }; if (request.params.arguments?.message === "slow") await new Promise(resolve => setTimeout(resolve, 1000)); return { content: [{ type: "text", text: String(request.params.arguments?.message) }] }; });
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
     await server.connect(transport);
     try { return await transport.handleRequest(req); } finally { await server.close(); }
@@ -516,6 +521,59 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   assert.equal((await registryCall("tw_mcp_call", invocation)).error.code, "busy");
   assert.ok((await Promise.all(concurrent)).every(result => result.ok));
   assert.equal((await registryCall("tw_mcp_call", invocation)).ok, true);
+  const directClient = new Client({ name: "direct-external-baseline", version: "1" });
+  const directColdStarted = performance.now();
+  await directClient.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${(externalHttp.address() as { port: number }).port}/mcp`), { requestInit: { headers: { "x-task-weaver-mcp-hop": "1" } } }));
+  await directClient.callTool({ name: "fixture_echo", arguments: { message: "direct-cold" } });
+  const directColdMs = performance.now() - directColdStarted;
+  t.after(() => directClient.close());
+  const directTimes: number[] = [], proxyTimes: number[] = [];
+  for (let i = 0; i < 8; i++) {
+    let started = performance.now();
+    await directClient.callTool({ name: "fixture_echo", arguments: { message: "timing" } });
+    directTimes.push(performance.now() - started);
+    started = performance.now();
+    assert.equal((await registryCall("tw_mcp_call", invocation)).ok, true);
+    proxyTimes.push(performance.now() - started);
+  }
+  const p95 = (values: number[]) => [...values].sort((a, b) => a - b)[Math.ceil(values.length * 0.95) - 1]!;
+  const directWarmP95Ms = p95(directTimes), proxyWarmP95Ms = p95(proxyTimes);
+  assert.ok(proxyWarmP95Ms - directWarmP95Ms < 1000, "Warm proxy overhead exceeds the local one-second budget");
+  t.diagnostic(JSON.stringify({ directColdMs: Math.round(directColdMs), directWarmP95Ms: Math.round(directWarmP95Ms), proxyWarmP95Ms: Math.round(proxyWarmP95Ms), warmProxyOverheadMs: Math.round(proxyWarmP95Ms - directWarmP95Ms) }));
+  const sensitiveBarrier = new Promise<void>(resolve => { sensitiveStarted = resolve; });
+  const sensitiveCall = registryCall("tw_mcp_call", { ...invocation, arguments: { message: "sensitive-slow" } });
+  await sensitiveBarrier;
+  await setMcpInvocationPolicy(db, f.owner.context, scope, externalTool.id, "deny");
+  await success("tw_memories_search", { projectId: f.project.id, query: "continuity" });
+  const withheld = await sensitiveCall;
+  assert.equal(withheld.ok, false);
+  assert.equal(JSON.stringify(withheld).includes("withheld-private-result"), false);
+  await setMcpInvocationPolicy(db, f.owner.context, scope, externalTool.id, "allow");
+  const large = await registryCall("tw_mcp_call", { ...invocation, arguments: { message: "large" } });
+  assert.equal(large.error.code, "result_too_large");
+  schemaChanged = true;
+  await registryService.syncTools(db, externalServer.id, mcpPool);
+  assert.equal((await registryCall("tw_mcp_call", invocation)).error.code, "version_conflict");
+  const refreshedTool = await registryCall("tw_mcp_tool", { toolId: externalTool.id });
+  assert.notEqual(refreshedTool.data.schemaHash, invocation.schemaHash);
+  invocation.schemaHash = refreshedTool.data.schemaHash;
+  assert.equal((await registryCall("tw_mcp_call", invocation)).ok, true);
+  const flakyServer = await registryService.registerServer(db, { name: "flaky-fixture", transport: "streamable-http", config: { url: `http://127.0.0.1:${(externalHttp.address() as { port: number }).port}/flaky` }, projectId: f.project.id, active: true, readOnly: false, tags: [] }, f.owner.context.actor);
+  t.after(() => mcpPool.disconnect(flakyServer.id));
+  const flakyTools = await registryService.syncTools(db, flakyServer.id, mcpPool);
+  const flakyDetail = await registryCall("tw_mcp_tool", { toolId: flakyTools[0]!.id });
+  const flakyInvocation = { ...invocation, toolId: flakyTools[0]!.id, schemaHash: flakyDetail.data.schemaHash };
+  flakyDown = true;
+  await mcpPool.disconnect(flakyServer.id);
+  const beforeFailureRequests = flakyRequests;
+  assert.equal((await registryCall("tw_mcp_call", flakyInvocation)).data.result.isError, true);
+  assert.ok(flakyRequests > beforeFailureRequests);
+  const failedRequestCount = flakyRequests;
+  assert.equal((await registryCall("tw_mcp_call", flakyInvocation)).data.result.isError, true);
+  assert.equal(flakyRequests, failedRequestCount, "Failed initialization must cool down without implicit retries");
+  assert.equal((await registryCall("tw_mcp_readiness", { serverId: flakyServer.id })).data.availability.state, "unavailable");
+  assert.equal((await registryCall("tw_mcp_call", invocation)).ok, true);
+  await success("tw_memories_search", { projectId: f.project.id, query: "continuity" });
   if (process.env.TW_SKILL_RUNTIME_TEST_IMAGE) {
     const previousHostMarker = process.env.TW_SKILL_HOST_SECRET;
     process.env.TW_SKILL_HOST_SECRET = "fixture-host-secret";
