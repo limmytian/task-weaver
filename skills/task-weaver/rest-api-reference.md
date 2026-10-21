@@ -2484,9 +2484,9 @@ This is separate from the outbound `/api/v1/mcp/*` Registry. See the
 [MCP Server guide](../../docs/mcp-server.md) for setup, errors, bounds and
 [the contract](../../docs/mcp-server-contract.md) for the catalog.
 
-## Backend Plugins
+## Isolated Plugins
 
-Backend-only plugins use `/api/v1/plugins`: `GET /` for explicitly scoped summaries,
+Isolated plugins use `/api/v1/plugins`: `GET /` for explicitly scoped summaries,
 `GET /:id` for the current manifest/revision, `GET /:id/generations` and
 `GET /:id/generations/:version` for bounded immutable recovery history, `POST /`
 to install, and
@@ -2495,7 +2495,9 @@ backend calls. Management requires scoped `resource.read`, `resource.write` and
 `mcp.manage`; activation also requires `mcp.invoke`. Requests use shared plugin
 schemas with explicit confirmation, immutable hashes, expected revisions and UUID
 idempotency keys. Status actions are `disable`, `uninstall` and explicit `purge`.
-Frontend manifests are rejected while dedicated-origin hosting is unavailable.
+Frontend manifests require a running dedicated artifact host and the restricted
+HTML format. `GET /:id/viewer` issues a short-lived code-artifact ticket;
+`tw plugin view <id>` prints the authenticated Web viewer URL.
 The server verifies publisher trust and immutable skill-package artifacts, runs a
 read-only preflight in its isolated worker and commits activation atomically.
 Backend results can patch only installation-owned storage, never Core SQL or
@@ -2503,4 +2505,5 @@ another namespace. `tw plugin` exposes list/get/generations/generation/diff/inst
 invoke using the same REST credentials; reviewed operation bodies are supplied
 with `--file`. No local plugin worker, skill or external MCP installation is
 required. See the canonical repository guide `docs/plugin-lifecycle.md` for the
-preflight protocol, permission-diff review and retention/recovery behavior.
+preflight protocol, permission-diff review and retention/recovery behavior, and
+`docs/plugin-frontends.md` for the constrained page protocol and origin setup.

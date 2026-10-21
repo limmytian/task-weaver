@@ -35,7 +35,13 @@ routes.get("/:id", async c => {
   const authority = await resourceAuthority(db, c.get("identity"));
   const [row] = await db.select().from(pluginInstallations).where(and(eq(pluginInstallations.id, id), resourcePredicate(authority, pluginInstallations)));
   if (!row) throw new NotFoundError("Resource not found");
-  return c.json(row);
+  return c.json({ ...row, viewerUrl: row.status === "active" && row.manifest.frontend ? c.get("pluginFrontendHost")?.viewerUrl(row.id) ?? null : null });
+});
+
+routes.get("/:id/viewer", async c => {
+  const id = idSchema.parse(c.req.param("id")), host = c.get("pluginFrontendHost");
+  if (!host) throw new ValidationError("The dedicated plugin artifact host is unavailable");
+  return c.json(await host.issue(c.get("identity"), id, AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(10000)])));
 });
 
 routes.get("/:id/generations", async c => {
@@ -61,7 +67,7 @@ routes.get("/:id/generations/:version", async c => {
 
 routes.post("/", async c => {
   const db = c.get("db"), identity = c.get("identity"), configuration = c.get("pluginWorkerConfiguration") ?? (() => configuredPluginWorker());
-  const storage = new skillPackageStorageService.LocalSkillPackageStorageAdapter(process.env.SKILL_PACKAGE_STORAGE_DIR ?? resolve(process.cwd(), "data", "skill-packages"));
+  const storage = new skillPackageStorageService.LocalSkillPackageStorageAdapter(c.get("pluginPackageStorageDirectory") ?? process.env.SKILL_PACKAGE_STORAGE_DIR ?? resolve(process.cwd(), "data", "skill-packages"));
   const lifecycle = createPluginLifecycle(db, identity, configuration, (manifest, signal) => preparePluginWorker(db, identity, manifest, storage, configuration, signal));
   return c.json(await lifecycle.install(await c.req.json(), AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(25000)])), 201);
 });
@@ -69,7 +75,7 @@ routes.post("/", async c => {
 routes.post("/:id/:operation", async c => {
   const id = idSchema.parse(c.req.param("id")), operation = z.enum(["upgrade", "recover", "status", "invoke"]).parse(c.req.param("operation"));
   const db = c.get("db"), identity = c.get("identity"), configuration = c.get("pluginWorkerConfiguration") ?? (() => configuredPluginWorker());
-  const storage = new skillPackageStorageService.LocalSkillPackageStorageAdapter(process.env.SKILL_PACKAGE_STORAGE_DIR ?? resolve(process.cwd(), "data", "skill-packages"));
+  const storage = new skillPackageStorageService.LocalSkillPackageStorageAdapter(c.get("pluginPackageStorageDirectory") ?? process.env.SKILL_PACKAGE_STORAGE_DIR ?? resolve(process.cwd(), "data", "skill-packages"));
   const prepare = (manifest: Parameters<typeof preparePluginWorker>[2], signal: AbortSignal) => preparePluginWorker(db, identity, manifest, storage, configuration, signal);
   const lifecycle = createPluginLifecycle(db, identity, configuration, prepare), input = await c.req.json();
   const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(25000)]);

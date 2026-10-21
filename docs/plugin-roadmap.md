@@ -3,8 +3,10 @@
 Status: shared contracts, publisher verification and the internal offline backend
 worker with durable installation-owned state are implemented and tested. The
 backend installation/lifecycle APIs and CLI are available for operator-configured
-backend-only plugins. The isolated application viewer, common MCP discovery and
-full real-application proof remain pending. See [plugin contracts](plugin-contracts.md).
+plugins with an optional restricted HTML page. The dedicated artifact host and
+actual application viewer have passed local counter/browser and authority checks.
+Common MCP discovery/broker integration and the full application acceptance matrix
+remain pending. See [plugin contracts](plugin-contracts.md).
 Use the linked project requirements and iteration documents for current priority
 and scope. One Task Weaver application
 hosts official and third-party extensions; there is no separate Pro

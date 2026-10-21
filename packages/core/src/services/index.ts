@@ -82,3 +82,5 @@ export { invokeInstalledPlugin, type PluginExecution } from "./plugin-broker";
 export { preparePluginWorker, configuredPluginWorker, type PluginWorkerConfiguration } from "./plugin-worker";
 
 export { createPluginLifecycle, pluginPermissionDiff } from "./plugin-lifecycle";
+
+export { compilePluginFrontend, renderPluginFrontend, renderPluginViewer, type PluginFrontend, type PluginFrameBinding } from "./plugin-frontend";

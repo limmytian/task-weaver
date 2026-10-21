@@ -37,7 +37,8 @@
     "test:human-delivery-postgres": "node scripts/verify-human-delivery-postgres.mjs",
     "test:mcp-postgres": "node scripts/verify-mcp-postgres.mjs",
     "test:workflow-postgres": "node scripts/verify-workflow-postgres.mjs",
-    "test:plugin-postgres": "node scripts/verify-plugin-postgres.mjs"
+    "test:plugin-postgres": "node scripts/verify-plugin-postgres.mjs",
+    "dev:plugin-browser-fixture": "node scripts/plugin-browser-fixture.mjs"
   },
   "devDependencies": {
     "dotenv-cli": "^11.0.0",

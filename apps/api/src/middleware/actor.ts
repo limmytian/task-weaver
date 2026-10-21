@@ -1,5 +1,6 @@
 import type { Context, Next } from "hono";
 import type { Database } from "@task-weaver/db";
+import type { PluginFrontendHost } from "../plugin-frontend-host.js";
 import type { Actor } from "@task-weaver/contracts";
 import type { VerifiedRequestContext } from "@task-weaver/contracts";
 import type { PluginWorkerConfiguration, AuthenticationRuntime } from "@task-weaver/core";
@@ -12,6 +13,8 @@ export type Env = {
     auth: AuthenticationRuntime;
     skillRuntimeProfiles?: string;
     mcpReadOnly?: boolean;
+    pluginPackageStorageDirectory?: string;
+    pluginFrontendHost?: PluginFrontendHost;
     pluginWorkerConfiguration?: () => PluginWorkerConfiguration;
   };
 };

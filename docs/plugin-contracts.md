@@ -1,9 +1,9 @@
 # Isolated plugin contracts
 
 The shared schemas in `@task-weaver/contracts/schemas/plugins` define the first
-plugin protocol. Backend-only installations use the broker and lifecycle APIs described below.
-Application-level plugin availability remains disabled until the isolated viewer
-and real-application acceptance exist. The protocol revision is independent of product
+plugin protocol. Installations use the broker and lifecycle APIs described below. Optional pages
+use the restricted HTML protocol and a separately configured artifact host.
+General plugin discovery and cross-capability broker integration remain pending. The protocol revision is independent of product
 release versions.
 
 ## Identity and immutable artifacts
@@ -116,9 +116,10 @@ embedded navigation. Specification review is not a substitute for browser tests.
 The internal `invokeInstalledPlugin` broker and `preparePluginWorker` now implement
 installation-scoped state and an offline backend worker. The
 [backend lifecycle APIs and CLI](plugin-lifecycle.md) install and manage these
-backend-only plugins. Installation/lifecycle UI, dedicated frontend hosting and
-the full browser acceptance matrix are still required before advertising complete
-application plugin availability.
+plugins. The [isolated page protocol](plugin-frontends.md) now provides a trusted
+application viewer and dedicated artifact listener. Installation-management UI,
+common MCP discovery/broker integration and the remaining acceptance matrix still
+limit the complete plugin experience.
 
 The worker uses operator-supplied digest-pinned profiles and publisher keys;
 request payloads cannot choose either configuration. It materializes a

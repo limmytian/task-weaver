@@ -1,9 +1,10 @@
 # Backend plugin lifecycle
 
-The REST API and `tw plugin` CLI support operator-configured backend-only plugins.
-Frontend manifests are rejected until the dedicated-origin viewer is implemented
-and tested. The application bootstrap therefore still reports the complete plugin
-experience as unavailable. See [plugin contracts](plugin-contracts.md) for the
+The REST API and `tw plugin` CLI support operator-configured backends with
+optional [restricted HTML pages](plugin-frontends.md). Frontend manifests are
+rejected unless the dedicated artifact listener has valid origin configuration
+and is running. General plugin discovery and cross-capability integration remain
+pending, so bootstrap does not yet advertise the complete plugin experience. See [plugin contracts](plugin-contracts.md) for the
 sandbox, owned-state protocol and remaining application/browser acceptance.
 
 ## Operator configuration
@@ -89,6 +90,7 @@ The CLI validates the same schemas before making requests:
 
 ```bash
 tw plugin list --project "$PROJECT_ID" --json
+tw plugin view "$INSTALLATION_ID" --json
 tw plugin get "$INSTALLATION_ID" --manifest > current-manifest.json
 tw plugin generations "$INSTALLATION_ID" --json
 tw plugin generation "$INSTALLATION_ID" "$PLUGIN_VERSION" --manifest > candidate-manifest.json

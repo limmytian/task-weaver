@@ -13,13 +13,13 @@ type ResourceFixture = { auth: Authentication; identity: ReturnType<typeof creat
   app: ReturnType<typeof createApiApplication>["app"] };
 
 /** Fixture credentials and state exist only in the caller's disposable test database. */
-export async function resourcePostgresFixture(db: Database, databaseUrl: string): Promise<ResourceFixture> {
+export async function resourcePostgresFixture(db: Database, databaseUrl: string, options: { password?: string; webOrigin?: string; apiOrigin?: string } = {}): Promise<ResourceFixture> {
   await db.update(authInstanceState).set({ initializedByUserId: null, initializedAt: null });
   const config = { secret: randomBytes(32).toString("hex"), bootstrapSecret: randomBytes(32).toString("hex"),
-    baseURL: "http://127.0.0.1:3001", trustedOrigins: ["http://127.0.0.1:3000"] };
+    baseURL: options.apiOrigin ?? "http://127.0.0.1:3001", trustedOrigins: [options.webOrigin ?? "http://127.0.0.1:3000"] };
   const auth = createAuthenticationService(db, config);
   const identity = createIdentityManagementService(db, auth);
-  const password = randomBytes(24).toString("hex");
+  const password = options.password ?? randomBytes(24).toString("hex");
   const client = () => {
     const csrf = auth.csrfChallenge();
     return new Headers({ origin: config.trustedOrigins[0]!, "x-csrf-token": csrf.csrfToken,

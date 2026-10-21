@@ -32,6 +32,13 @@ export function registerPlugins(program: Command): void {
     if (opts.json) return printJson(data)
     printKv(data as Record<string, unknown>)
   })
+  plugin.command('view <id>').description('print the authenticated application viewer URL').option('--json', 'output raw JSON')
+    .action(async (id, opts) => {
+      const data = await get<{ viewerUrl?: string | null }>(`/api/v1/plugins/${encodeURIComponent(id)}`)
+      if (!data.viewerUrl) throw new Error('This installation has no available application viewer')
+      if (opts.json) return printJson({ url: data.viewerUrl })
+      console.log(data.viewerUrl)
+    })
   plugin.command('generations <id>').description('list immutable generation hashes for reviewed recovery')
     .option('--limit <n>', 'maximum results (1-20)', '20').option('--offset <n>', 'pagination offset', '0').option('--json', 'output raw JSON')
     .action(async (id, opts) => {

@@ -94,3 +94,45 @@ export const recoverPluginSchema = z.object({
   confirmedManifestHash: hash, confirmedPermissionDiffHash: hash,
   confirmed: z.literal(true), idempotencyKey: z.string().uuid(),
 }).strict();
+
+const frameNonce = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+const exactOrigin = z.string().max(2048).refine(value => {
+  try { const url = new URL(value); return ["https:", "http:"].includes(url.protocol) && url.origin === value && !url.username && !url.password; } catch { return false; }
+}, "A canonical HTTP or HTTPS origin is required");
+export const pluginFrontendOriginsSchema = z.object({ webOrigin: exactOrigin, apiOrigin: exactOrigin, artifactOrigin: exactOrigin }).strict().superRefine((value, context) => {
+  let origins: URL[];
+  try { origins = [value.webOrigin, value.apiOrigin, value.artifactOrigin].map(value => new URL(value)); } catch { return; }
+  if (origins[2]!.hostname === origins[0]!.hostname || origins[2]!.hostname === origins[1]!.hostname) context.addIssue({ code: "custom", message: "Plugin artifact host must differ from both Web and API hosts; ports do not isolate cookies" });
+  if (origins.some(origin => origin.protocol !== "https:" && !["localhost", "127.0.0.1", "127.0.0.2", "[::1]"].includes(origin.hostname) && !origin.hostname.endsWith(".localhost"))) context.addIssue({ code: "custom", message: "Plugin frontend origins require HTTPS outside explicit loopback development hosts" });
+});
+export const pluginFrameBindingSchema = z.object({
+  installationId: z.string().uuid(), revision: z.number().int().positive().max(2147483647), manifestHash: hash,
+  bridgeNonce: frameNonce, webOrigin: exactOrigin, allowedMethods: z.array(method.shape.name).max(PLUGIN_LIMITS.methods),
+}).strict();
+export const pluginInvokeMessageSchema = z.object({
+  protocol: z.literal(PLUGIN_HOST_PROTOCOL), kind: z.literal("invoke"), installationId: z.string().uuid(),
+  revision: z.number().int().positive().max(2147483647), manifestHash: hash, nonce: frameNonce,
+  requestId: z.string().uuid(), method: method.shape.name, input: pluginJsonValueSchema,
+}).strict().refine(value => {
+  if (!pluginJsonValueSchema.safeParse(value.input).success) return false;
+  try { return new TextEncoder().encode(JSON.stringify(value)).byteLength <= 32768; } catch { return false; }
+}, "Plugin bridge request exceeds its byte limit");
+
+export const pluginViewerTicketSchema = pluginFrameBindingSchema.extend({
+  displayName: z.string().min(1).max(128), pluginId: z.string().regex(/^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/).max(100),
+  artifactUrl: z.string().max(4096).url(), expiresAt: z.string().datetime(), frontendFormat: z.literal("restricted_html_v1"),
+}).strict().refine(value => {
+  try { const url = new URL(value.artifactUrl); return url.href === value.artifactUrl && !url.username && !url.password && !url.search && !url.hash && /^\/artifacts\/[A-Za-z0-9_-]{43}$/.test(url.pathname); } catch { return false; }
+}, "Plugin artifact tickets require an exact bounded artifact URL");
+
+const pluginMessageBinding = pluginFrameBindingSchema.omit({ bridgeNonce: true, webOrigin: true, allowedMethods: true }).extend({ protocol: z.literal(PLUGIN_HOST_PROTOCOL), nonce: frameNonce });
+export const pluginInitializeMessageSchema = pluginMessageBinding.extend({ kind: z.literal("initialize") }).strict();
+export const pluginReadyMessageSchema = pluginMessageBinding.extend({
+  kind: z.literal("ready"),
+  isolation: z.object({ opaqueOrigin: z.boolean(), coreDomDenied: z.boolean(), cookiesDenied: z.boolean(), localStorageDenied: z.boolean() }).strict(),
+}).strict();
+export const pluginResultMessageSchema = pluginMessageBinding.extend({ kind: z.literal("result"), requestId: z.string().uuid(), ok: z.boolean(), result: pluginJsonValueSchema.optional() }).strict().refine(value => {
+  if (value.ok ? value.result === undefined : value.result !== undefined) return false;
+  if (value.result !== undefined && !pluginJsonValueSchema.safeParse(value.result).success) return false;
+  try { return new TextEncoder().encode(JSON.stringify(value)).byteLength <= 32768; } catch { return false; }
+}, "Plugin reply must agree with its success state and byte limit");

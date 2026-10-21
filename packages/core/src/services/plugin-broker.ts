@@ -4,12 +4,14 @@ import { invokePluginSchema, pluginManifestSchema, ConflictError, NotFoundError,
 import { resourceAuthority, resourcePredicate, requireScope } from "./resource-authorization";
 import { lockIdentityLifecycle, auditIdentity } from "./auth-security";
 import { capabilityDigest } from "./capability-digest";
+import type { PluginFrontend } from "./plugin-frontend";
 import { planPluginState } from "./plugin-state";
 
 export type PluginExecution = {
+  frontend?: PluginFrontend;
   /** A trusted host implementation, never an uploaded callback or Core API proxy. */
   execute(input: { method: string; input: unknown; state: Array<{ key: string; version: number; value: unknown; deleted: number }> }, signal: AbortSignal): Promise<unknown>;
-  revalidate(connection?: Database): Promise<void>;
+  revalidate(connection?: Database, signal?: AbortSignal): Promise<void>;
   dispose(): Promise<void>;
 };
 

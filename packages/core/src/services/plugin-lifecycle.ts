@@ -10,7 +10,7 @@ import { planPluginState } from "./plugin-state";
 import type { PluginExecution } from "./plugin-broker";
 
 type Installation = typeof pluginInstallations.$inferSelect;
-type Configuration = { keys: Readonly<Record<string, PluginTrustKey>>; allowUnverified?: boolean };
+type Configuration = { keys: Readonly<Record<string, PluginTrustKey>>; allowUnverified?: boolean; frontendAvailable?: boolean };
 type Preparation = (manifest: PluginManifest, signal: AbortSignal) => Promise<PluginExecution>;
 const scopeKey = (scope: ResourceScope) => scope.projectId ? `project:${scope.projectId}` : scope.personalOwnerId ? `personal:${scope.personalOwnerId}` : "global";
 
@@ -59,8 +59,8 @@ export function createPluginLifecycle(db: Database, identity: VerifiedRequestCon
     const config = configuration();
     const verified = verifyPluginManifest(manifest, config.keys, config.allowUnverified);
     if (verified.manifestHash !== confirmedHash) throw new ConflictError("Confirm the exact plugin manifest hash", 0);
-    // No same-origin fallback while the dedicated artifact gateway/viewer is not implemented.
-    if (manifest.frontend || !manifest.backend) throw new ValidationError("Plugin frontend hosting is not available; only backend-only installations are supported");
+    if (manifest.frontend && !config.frontendAvailable) throw new ValidationError("Plugin frontend hosting is not available");
+    if (!manifest.backend) throw new ValidationError("This plugin host requires a declared isolated backend");
     return verified;
   };
   const preflight = async <T>(manifest: PluginManifest, signal: AbortSignal, activate: (execution: PluginExecution) => Promise<T>) => {
