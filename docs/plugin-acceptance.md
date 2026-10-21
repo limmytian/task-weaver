@@ -74,3 +74,42 @@ publisher verification status, immutable artifact hashes, maintenance ownership,
 required grants, supported host protocol and actual availability. Entries are not
 automatically installed or granted. Distribution does not replace the runtime
 proof, and payments/ratings or another application variant remain out of scope.
+
+## Automated evidence and remaining observations
+
+Run `pnpm test:plugin-postgres` against its owned disposable database and pinned
+container image. The broker test uses signed artifact bytes and actual offline
+workers, not a mocked executor. Its hostile-result subtests cover malformed JSON,
+excessive nesting, duplicate writes, stale state versions, path traversal, forged
+installation ownership, a raw SQL field, oversized stdout and deadline expiry.
+Each rejection must leave both namespaces and the original receipt count intact.
+The test checks expected rejection reasons, so an unrelated worker startup failure
+cannot satisfy a protocol rejection. Two signed plugin identities using the same
+artifact receive independent storage. These broker fixtures seed installation
+records directly; the separate REST lifecycle test proves reviewed installation
+and preflight through the actual API.
+
+The same suite rejects cyclic, deeply nested and oversized caller values before
+worker preparation. Caller, installation and common MCP policy revocation are
+covered alongside dispatched-worker publisher/profile revocation. Existing
+lifecycle tests cover failed activation, concurrent receipt replay, permission
+review, recovery, retained uninstall and purge tombstones. The container fixture
+checks non-root execution, missing Core credentials/socket, read-only artifact
+files and lack of an external network interface.
+
+`packages/core/src/services/plugin-viewer-protocol.test.ts` executes the shipped
+trusted viewer script with controlled frame events. It checks wrong frame/source,
+origin, nonce, installation, generation, manifest, method, request ID, extra fields,
+oversized/cyclic messages and readiness failure before any host request. A valid
+control proves that the same script can invoke its bound installation, keeps the
+host CSRF token out of frame replies, and suppresses replies after frame navigation.
+This verifies message-handler behavior; it does not establish browser sandbox or
+CSP enforcement.
+
+Real application browser observations already cover the counter page, four
+isolation self-checks, retained state, reviewed upgrade/recovery, stale-viewer
+disable denial and directory installation. Complete acceptance still requires
+explicit browser observations of hostile navigation/network/nested-frame attempts
+and attacker-frame message provenance. Keep those observations separate from the
+compiler, handler and container tests; do not infer a completed matrix from policy
+strings or simulated frame events.

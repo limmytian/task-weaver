@@ -35,6 +35,17 @@ test -z "\${DATABASE_URL:-}"
 test ! -S /var/run/docker.sock
 if touch /work/root/changed 2>/dev/null; then exit 12; fi
 if grep -q eth0 /proc/net/dev; then exit 13; fi
+case "$payload" in
+  *'"attack":"malformed"'*) printf 'not JSON'; exit 0;;
+  *'"attack":"deep"'*) printf '{"result":'; i=0; while [ "$i" -lt 20 ]; do printf '['; i=$((i+1)); done; printf '0'; i=0; while [ "$i" -lt 20 ]; do printf ']'; i=$((i+1)); done; printf '}'; exit 0;;
+  *'"attack":"duplicate"'*) printf '{"result":0,"storageChanges":[{"key":"counter","expectedVersion":4,"operation":"put","value":99},{"key":"counter","expectedVersion":4,"operation":"put","value":100}]}'; exit 0;;
+  *'"attack":"version"'*) printf '{"result":0,"storageChanges":[{"key":"counter","expectedVersion":0,"operation":"put","value":99}]}'; exit 0;;
+  *'"attack":"traversal"'*) printf '{"result":0,"storageChanges":[{"key":"../counter","expectedVersion":0,"operation":"put","value":99}]}'; exit 0;;
+  *'"attack":"foreign"'*) printf '{"result":0,"storageChanges":[{"installationId":"11111111-1111-4111-8111-111111111111","key":"counter","expectedVersion":0,"operation":"put","value":99}]}'; exit 0;;
+  *'"attack":"sql"'*) printf '{"result":0,"sql":"DELETE FROM task_weaver.projects"}'; exit 0;;
+  *'"attack":"output"'*) head -c 140000 /dev/zero | tr '\\000' x; exit 0;;
+  *'"attack":"deadline"'*) sleep 30; printf '{"result":0}'; exit 0;;
+esac
 pair=$(printf '%s' "$payload" | sed -n 's/.*"key":"counter","version":\\([0-9]*\\),"value":\\([0-9]*\\).*/\\1 \\2/p')
 version=0; count=0
 if [ -n "$pair" ]; then set -- $pair; version=$1; count=$2; fi
@@ -110,7 +121,41 @@ printf '{"result":%s,"storageChanges":[{"key":"counter","expectedVersion":%s,"op
   await assert.rejects(invoke(first), /untrusted/);
   const receipts = await db.select().from(pluginInvocationReceipts).where(eq(pluginInvocationReceipts.installationId, installation!.id));
   assert.equal(receipts.length, 4);
-  t.diagnostic("Actual PostgreSQL migration, pinned artifact, signed publisher and fresh offline containers verified; browser/lifecycle acceptance remains pending.");
+  config = { ...config, keys: { "fixture-key": { publisher: "fixture", publicKey: key.publicKey.export({ type: "spki", format: "pem" }).toString() } } };
+  const otherUnsigned = pluginManifestSchema.parse({ ...unsigned, pluginId: "fixture/other-counter" });
+  const otherManifest = { ...otherUnsigned, signature: { algorithm: "ed25519" as const, keyId: "fixture-key", value: sign(null, Buffer.from(pluginSigningPayload(otherUnsigned)), key.privateKey).toString("base64") } };
+  const [other] = await db.insert(pluginInstallations).values({ projectId: f.project.id, scopeKey: `project:${f.project.id}`, createdBy: f.owner.context.actor.id, pluginId: otherManifest.pluginId, status: "active", manifest: otherManifest, manifestHash: capabilityDigest(otherManifest) }).returning();
+  assert.equal((await invokeInstalledPlugin(db, context, other!.id, request(), prepare, signal)).result, 1, "a second plugin receives only its empty namespace");
+  const rejectedOutputs: Record<string, RegExp> = { malformed: /one bounded JSON response/, deep: /bounded finite JSON/, duplicate: /only once per atomic invocation/, version: /storage version changed/, traversal: /Storage keys|Invalid/, foreign: /Unrecognized key/, sql: /Unrecognized key/, output: /runtime\/output budget/, deadline: /runtime\/output budget/ };
+  for (const [attack, expected] of Object.entries(rejectedOutputs)) {
+    await t.test(`real worker rejects ${attack} without committing state or a receipt`, async () => {
+      const attempt = { ...request(), input: { attack } };
+      await assert.rejects(invoke(attempt), expected);
+      assert.equal((await db.select().from(pluginStorage).where(eq(pluginStorage.installationId, installation!.id)))[0]?.value, 4);
+      assert.equal((await db.select().from(pluginStorage).where(eq(pluginStorage.installationId, other!.id)))[0]?.value, 1);
+      assert.equal((await db.select().from(pluginInvocationReceipts).where(eq(pluginInvocationReceipts.installationId, installation!.id))).length, 4);
+    });
+  }
+  for (const revoke of ["publisher", "profile"] as const) {
+    await t.test(`live ${revoke} revocation withholds a dispatched worker result`, async () => {
+      const previous = config;
+      const pending = invoke();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      config = revoke === "publisher" ? { ...config, keys: {} as typeof config.keys } : { ...config, profiles: "[]" };
+      try { await assert.rejects(pending, /untrusted|unavailable|abort/i); }
+      finally { config = previous; }
+      assert.equal((await db.select().from(pluginStorage).where(eq(pluginStorage.installationId, installation!.id)))[0]?.value, 4);
+      assert.equal((await db.select().from(pluginInvocationReceipts).where(eq(pluginInvocationReceipts.installationId, installation!.id))).length, 4);
+    });
+  }
+  let prepared = false;
+  const cyclic: Record<string, unknown> = {}; cyclic.self = cyclic;
+  const deep = Array.from({ length: 20 }).reduce<unknown>(value => [value], 0);
+  for (const input of [cyclic, deep, { value: "x".repeat(16385) }]) {
+    await assert.rejects(invokeInstalledPlugin(db, context, installation!.id, { ...request(), input }, async (value, workerSignal) => { prepared = true; return prepare(value, workerSignal); }, signal));
+  }
+  assert.equal(prepared, false, "invalid caller input is rejected before artifact preparation");
+  t.diagnostic("Actual signed pinned artifacts and offline containers verified namespace separation and rejected malformed/deep/duplicate/version/path/foreign-owner/SQL/oversized/deadline worker results without state or receipt commits. Invalid cyclic/deep/oversized caller inputs never prepare a worker; browser adversarial proof remains separate.");
 });
 
 test("plugin REST lifecycle preflights immutable generations and retains state across recovery", { skip: !databaseUrl, timeout: 120000 }, async t => {
