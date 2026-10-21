@@ -3,7 +3,7 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 import { createServer } from "node:net";
 import { once } from "node:events";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import type { Server } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { tmpdir } from "node:os";
@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { createDb, runMigrations } from "@task-weaver/db";
-import { createResourceServices, registerSkillPackageSchema, skillPackageStorageService, capabilityDigest, pluginManifestSchema, pluginSigningPayload } from "@task-weaver/core";
+import { createResourceServices, registerSkillPackageSchema, skillPackageStorageService, capabilityDigest, pluginManifestSchema, pluginSigningPayload, pluginDirectoryReviewHash } from "@task-weaver/core";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 import { createApiApplication } from "./application";
 
@@ -85,6 +85,14 @@ case "$payload" in *'"method":"read"'*) printf '{"result":%s}' "$count";; *) pri
   const manifestPath = join(directory, "manifest.json"), upgradePath = join(directory, "upgrade.json");
   const upgradeUnsigned = pluginManifestSchema.parse({ ...unsigned, version: "1.1.0", description: "A reviewed generation without storage read access.", permissions: ["ui.render", "backend.execute", "storage.write"] });
   const upgradeManifest = { ...upgradeUnsigned, signature: { algorithm: "ed25519" as const, keyId: "browser-publisher", value: sign(null, Buffer.from(pluginSigningPayload(upgradeUnsigned)), signer.privateKey).toString("base64") } };
+  const sourceRevision = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const restrictedUnsigned = pluginManifestSchema.parse({ ...upgradeUnsigned, pluginId: "fixture/restricted-counter", displayName: "Restricted counter" });
+  const restrictedManifest = { ...restrictedUnsigned, signature: { algorithm: "ed25519" as const, keyId: "browser-publisher", value: sign(null, Buffer.from(pluginSigningPayload(restrictedUnsigned)), signer.privateKey).toString("base64") } };
+  const directoryEntries = [manifest, restrictedManifest].map((candidate, index) => {
+    const entry = { id: index === 0 ? "persistent-counter" : "restricted-counter", maintainer: "Task Weaver fixture maintainers", sourceUrl: "https://github.com/limmytian/task-weaver", sourceRevision, reviewedAt: new Date().toISOString(), manifest: candidate };
+    return { ...entry, reviewHash: pluginDirectoryReviewHash(entry) };
+  });
+  env.TW_PLUGIN_DIRECTORY = JSON.stringify(directoryEntries);
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2), { mode: 0o600 });
   await writeFile(upgradePath, JSON.stringify(upgradeManifest, null, 2), { mode: 0o600 });
   const accessPath = join(directory, "access.json");

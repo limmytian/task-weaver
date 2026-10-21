@@ -5,7 +5,7 @@ import { bodyLimit } from "hono/body-limit";
 import { resolve } from "node:path";
 import { and, eq, isNull, desc } from "drizzle-orm";
 import { pluginGenerations, pluginInstallations } from "@task-weaver/db";
-import { createPluginLifecycle, preparePluginWorker, invokeInstalledPlugin, configuredPluginWorker, recoverPluginSchema, personalResourceOwnerId, skillPackageStorageService, ValidationError, NotFoundError, ConflictError, McpApprovalRequired, pluginListQuerySchema, pluginManifestSchema, canAccessResource } from "@task-weaver/core";
+import { createPluginDirectory, createPluginLifecycle, preparePluginWorker, invokeInstalledPlugin, configuredPluginWorker, recoverPluginSchema, personalResourceOwnerId, skillPackageStorageService, ValidationError, NotFoundError, ConflictError, McpApprovalRequired, pluginListQuerySchema, pluginManifestSchema, canAccessResource } from "@task-weaver/core";
 import { resourceAuthority, resourcePredicate } from "@task-weaver/core";
 import type { Env } from "../middleware/actor.js";
 
@@ -22,6 +22,13 @@ routes.onError((error, c) => {
   if (error instanceof ValidationError) return c.json({ error: error.message }, 400);
   if (error instanceof NotFoundError) return c.json({ error: "Resource not found" }, 404);
   throw error;
+});
+
+const directory = (c: import("hono").Context<Env>) => createPluginDirectory(c.get("db"), c.get("identity"), c.get("pluginWorkerConfiguration") ?? (() => configuredPluginWorker()), new skillPackageStorageService.LocalSkillPackageStorageAdapter(c.get("pluginPackageStorageDirectory") ?? process.env.SKILL_PACKAGE_STORAGE_DIR ?? resolve(process.cwd(), "data", "skill-packages")));
+routes.get("/directory", async c => c.json(await directory(c).list(c.req.query())));
+routes.get("/directory/:entryId", async c => {
+  const id = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).parse(c.req.param("entryId"));
+  return c.json(await directory(c).inspect(id, c.req.query(), AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(15000)])));
 });
 
 routes.get("/", async c => {

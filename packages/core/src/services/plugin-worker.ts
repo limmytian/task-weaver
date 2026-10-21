@@ -15,7 +15,7 @@ import { sha256Hex, type SkillPackageStorageAdapter } from "./skill-package-stor
 import { compilePluginFrontend } from "./plugin-frontend";
 import type { PluginExecution } from "./plugin-broker";
 
-export type PluginWorkerConfiguration = { profiles?: string; keys: Readonly<Record<string, PluginTrustKey>>; allowUnverified?: boolean; frontendAvailable?: boolean };
+export type PluginWorkerConfiguration = { profiles?: string; keys: Readonly<Record<string, PluginTrustKey>>; allowUnverified?: boolean; frontendAvailable?: boolean; directory?: string };
 const inventorySchema = z.object({ files: z.array(z.object({ path: skillPackagePathSchema, sha256: z.string().regex(/^[a-f0-9]{64}$/), sizeBytes: z.number().int().min(0) })).max(256) });
 let activeWorkers = 0;
 let preparedWorkers = 0;

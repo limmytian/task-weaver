@@ -1,3 +1,4 @@
+import { verifyPluginDirectorySelection } from "./plugin-directory";
 import { inspectPluginTools } from "./plugin-tools";
 import { resolvePluginSkills } from "./plugin-skills";
 import { randomUUID } from "node:crypto";
@@ -12,7 +13,7 @@ import { planPluginState } from "./plugin-state";
 import type { PluginExecution } from "./plugin-broker";
 
 type Installation = typeof pluginInstallations.$inferSelect;
-type Configuration = { keys: Readonly<Record<string, PluginTrustKey>>; allowUnverified?: boolean; frontendAvailable?: boolean };
+type Configuration = { keys: Readonly<Record<string, PluginTrustKey>>; allowUnverified?: boolean; frontendAvailable?: boolean; directory?: string };
 type Preparation = (manifest: PluginManifest, signal: AbortSignal) => Promise<PluginExecution>;
 const scopeKey = (scope: ResourceScope) => scope.projectId ? `project:${scope.projectId}` : scope.personalOwnerId ? `personal:${scope.personalOwnerId}` : "global";
 
@@ -107,6 +108,7 @@ export function createPluginLifecycle(db: Database, identity: VerifiedRequestCon
       const key = scopeKey(scope), payloadHash = capabilityDigest({ operation: "install", input });
       const check = async (tx: Database) => {
         await authorizeScope(tx, scope, true);
+        verifyPluginDirectorySelection(configuration().directory, input.directory, input.manifest);
         const record = await receipt(tx, key, input.idempotencyKey, payloadHash);
         if (record) {
           const row = await installation(tx, record.installationId, true);
@@ -119,10 +121,12 @@ export function createPluginLifecycle(db: Database, identity: VerifiedRequestCon
       const replay = await transaction(check);
       if (replay) return replay;
       verify(input.manifest, input.confirmedManifestHash);
+      verifyPluginDirectorySelection(configuration().directory, input.directory, input.manifest);
       return preflight(input.manifest, scope, signal, execution => transaction(async tx => {
         const replay = await check(tx);
         if (replay) return replay;
         const verified = verify(input.manifest, input.confirmedManifestHash);
+        verifyPluginDirectorySelection(configuration().directory, input.directory, input.manifest);
         await execution.revalidate(tx);
         await resolvePluginSkills(tx, identity, input.manifest, scope);
         await inspectPluginTools(tx, identity, input.manifest, scope);

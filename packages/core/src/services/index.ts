@@ -88,3 +88,4 @@ export { compilePluginFrontend, renderPluginFrontend, renderPluginViewer, type P
 export { resolvePluginSkills, type PluginSkillSnapshot } from "./plugin-skills";
 
 export { inspectPluginTools } from "./plugin-tools";
+export { createPluginDirectory, configuredPluginDirectory, pluginDirectoryReviewHash, verifyPluginDirectorySelection } from "./plugin-directory";

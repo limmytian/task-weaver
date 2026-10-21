@@ -13,6 +13,16 @@ async function readJson(path: string): Promise<unknown> {
 
 export function registerPlugins(program: Command): void {
   const plugin = program.command('plugin').description('manage isolated backend plugins and installation-owned state')
+  plugin.command('directory [entryId]').description('list reviewed directory entries or inspect live installation readiness')
+    .option('--scope <scope>', 'personal|global (use --project for project scope)', 'personal')
+    .option('--project <id>', 'prospective installation project')
+    .option('--json', 'output JSON')
+    .action(async (entryId, opts) => {
+      const query = new URLSearchParams({ scope: opts.project ? 'project' : opts.scope })
+      if (opts.project) query.set('projectId', opts.project)
+      const data = await get(`/api/v1/plugins/directory${entryId ? '/' + encodeURIComponent(entryId) : ''}?${query}`)
+      printJson(data)
+    })
   plugin.command('list')
     .option('--scope <scope>', 'personal|global (use --project for project scope)', 'personal')
     .option('--project <id>', 'list plugins in one project')

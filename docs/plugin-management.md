@@ -75,5 +75,42 @@ status refresh, disable/stale-viewer rejection, and recovery to the original
 version with a persisted counter value. Install-review and failed duplicate
 installation keep their confirmation/retry state. Automated PostgreSQL tests
 cover uninstall/purge/anti-resurrection; browser verification does not claim an
-irreversible purge was manually submitted. A reviewed distribution directory and
-the complete application acceptance matrix are separate remaining work.
+irreversible purge was manually submitted. The fixture also provides two reviewed directory entries: the installed counter
+and a restricted counter with a separate plugin identity. Directory inspection
+can distinguish an existing installation from an available candidate; a confirmed
+candidate uses the same lifecycle and revision checks. The complete application
+acceptance matrix remains tracked separately.
+
+## Reviewed directory
+
+The directory above installed plugins is a bounded, operator-curated discovery
+surface. The default is empty. Listing an entry does not install it, fetch its
+source URL, grant permissions or run its backend. Entries whose artifact packages
+are invisible to the caller are omitted before pagination.
+
+Each entry identifies its maintainer, HTTPS source repository and exact source
+commit, review time, normalized manifest hash, immutable artifact hash, host
+protocol and requested permissions. **Publisher verified** means its manifest
+signature passes the instance's current publisher policy; it does not certify
+all plugin behavior. Select **Inspect availability** for current scope grants,
+already-installed state, publisher/profile trust, trusted runtime readiness,
+artifact integrity and declared skill/MCP dependencies. A successful check still
+requires manifest review, explicit confirmation and isolated backend preflight.
+Failures explain the unavailable stage without exposing private host diagnostics.
+
+Directory installation binds both the complete manifest and its reviewed
+provenance. Changed or withdrawn reviews reject old requests, including receipt
+retries. Existing installations keep their normal lifecycle; removing a directory
+entry does not silently uninstall them. Manual manifest review remains available.
+Upgrades and recovery use the installed generation workflow.
+
+Operators supply `TW_PLUGIN_DIRECTORY` as a JSON array of at most 20 records
+(512 KiB total). Each record has `id` (lowercase slug), `maintainer`, `sourceUrl`
+(HTTPS without credentials/query/fragment), `sourceRevision` (40 hex characters),
+`reviewedAt` (ISO datetime), `manifest` and `reviewHash`. Normalize the manifest
+with `pluginManifestSchema` and compute `pluginDirectoryReviewHash` over the
+record without `reviewHash`, using the exported Core helper. Configuration is
+validated on reads and installation; clients cannot select another directory
+source. Packages, publisher keys, runtime profiles and dedicated frontend hosting
+must be configured separately. No production directory or third-party artifact
+is automatically published or installed by this feature.

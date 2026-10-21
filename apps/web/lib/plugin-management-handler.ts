@@ -47,6 +47,12 @@ export function createPluginManagementHandler(getRuntime: typeof getWebAuthentic
         const previous = current ? pluginManifestSchema.parse(current.manifest) : { ...input.manifest, permissions: [], skillBindings: undefined, toolBindings: undefined };
         return json({ manifest: input.manifest, manifestHash: capabilityDigest(input.manifest), currentRevision: current?.revision ?? null, permissionDiff: pluginPermissionDiff(previous, input.manifest) });
       }
+      if (request.method === "GET" && path[0] === "directory" && path.length <= 2) {
+        const query = pluginListQuerySchema.parse(Object.fromEntries(new URL(request.url).searchParams));
+        const id = path[1] ? "/" + z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).parse(path[1]) : "";
+        const params = new URLSearchParams(Object.entries(query).map(([key, value]) => [key, String(value)]));
+        return json(await upstream(`/directory${id}?${params}`));
+      }
       let suffix = "";
       if (path.length) {
         const id = z.string().uuid().parse(path[0]); suffix = `/${id}`;

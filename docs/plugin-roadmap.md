@@ -10,8 +10,9 @@ MCP facade using the same broker as REST. Signed, scoped skill bindings hydrate
 pinned hosted instructions into isolated backends; declared read-only MCP bindings
 use the host broker without worker networking or credentials. The Web management
 page supports reviewed installation, upgrade, disable, recovery and retention.
-The reviewed directory and the full
-application acceptance matrix remain pending. See [plugin contracts](plugin-contracts.md).
+A bounded operator-reviewed directory provides provenance and live readiness
+inspection through Web, REST and CLI, with explicit reviewed installation. The
+full application acceptance matrix remains pending. See [plugin contracts](plugin-contracts.md).
 Use the linked project requirements and iteration documents for current priority
 and scope. One Task Weaver application
 hosts official and third-party extensions; there is no separate Pro

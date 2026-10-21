@@ -18,7 +18,7 @@ export function createPluginFrontendHost(db: Database, env: NodeJS.ProcessEnv) {
   const tickets = new Map<string, Ticket>();
   let server: Server | undefined;
   let ready = false;
-  const configuration = () => ({ ...configuredPluginWorker(env.TW_PLUGIN_RUNTIME_PROFILES, env.TW_PLUGIN_PUBLISHER_KEYS, env.TW_PLUGIN_ALLOW_UNVERIFIED === "true"), frontendAvailable: ready });
+  const configuration = () => ({ ...configuredPluginWorker(env.TW_PLUGIN_RUNTIME_PROFILES, env.TW_PLUGIN_PUBLISHER_KEYS, env.TW_PLUGIN_ALLOW_UNVERIFIED === "true"), frontendAvailable: ready, directory: env.TW_PLUGIN_DIRECTORY });
   const artifactApp = new Hono();
   artifactApp.all("*", async c => {
     c.header("cache-control", "no-store");

@@ -53,3 +53,19 @@ test("management rejects API-key identities, CSRF failures and hides upstream fa
   const text = await (await detail(new Request("https://app.example.test/api/plugin-management"), [id])).text();
   assert.equal(text.includes("private-internal"), false); assert.equal(JSON.parse(text).viewerAvailable, true);
 });
+
+test("directory inspection uses only fixed read paths and validated scope without installing", async () => {
+  const seen: string[] = [];
+  const handler = createPluginManagementHandler(runtime, env, async (url, init) => {
+    assert.equal(init?.method, "GET"); seen.push(String(url));
+    assert.equal(new Headers(init?.headers).get("authorization"), null);
+    return Response.json({ items: [] });
+  });
+  const request = () => new Request(`https://app.example.test/api/plugin-management/directory?scope=project&projectId=${id}`);
+  assert.equal((await handler(request(), ["directory"])).status, 200);
+  assert.equal((await handler(request(), ["directory", "counter"])).status, 200);
+  assert.ok(seen[1]!.startsWith(`${env.TW_API_URL}/api/v1/plugins/directory/counter?`));
+  for (const path of [["directory", ".."], ["directory", "counter", "invoke"], ["directory", "https://evil.test"]]) assert.ok((await handler(request(), path)).status >= 400);
+  assert.ok((await handler(mutation({}), ["directory", "counter"])).status >= 400);
+  assert.equal(seen.length, 2);
+});

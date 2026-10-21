@@ -83,11 +83,21 @@ export const pluginManifestSchema = z.object({
   if (value.methods.some(item => item.access === "write") && !value.permissions.includes("storage.write")) issue("Write methods require storage.write");
 });
 
+export const pluginDirectoryReferenceSchema = z.object({ entryId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/), reviewHash: hash }).strict();
+export const pluginDirectoryEntrySchema = z.object({
+  id: pluginDirectoryReferenceSchema.shape.entryId,
+  maintainer: z.string().trim().min(1).max(128),
+  sourceUrl: z.string().max(2048).refine(value => { try { const url = new URL(value); return url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash; } catch { return false; } }, "Directory source must be an HTTPS URL without credentials or query parameters"),
+  sourceRevision: z.string().regex(/^[a-f0-9]{40}$/),
+  reviewedAt: z.string().datetime(), manifest: pluginManifestSchema, reviewHash: hash,
+}).strict();
+
 export const installPluginSchema = z.object({
   scope: capabilityScopeSchema, manifest: pluginManifestSchema,
+  directory: pluginDirectoryReferenceSchema.optional(),
   confirmedManifestHash: hash, confirmed: z.literal(true), idempotencyKey: z.string().uuid(),
 }).strict();
-export const upgradePluginSchema = installPluginSchema.omit({ scope: true }).extend({
+export const upgradePluginSchema = installPluginSchema.omit({ scope: true, directory: true }).extend({
   expectedRevision: z.number().int().min(1).max(2147483647), confirmedPermissionDiffHash: hash,
 }).strict();
 

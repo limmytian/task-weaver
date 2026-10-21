@@ -1,5 +1,6 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
+  ["GET", /^\/api\/v1\/plugins\/directory(?:\/[a-z][a-z0-9-]{0,63})?\/?$/],
   ["GET", /^\/api\/v1\/plugins(?:\/[0-9a-fA-F-]{36}(?:\/viewer|\/generations(?:\/[^/]+)?)?)?\/?$/],
   ["POST", /^\/api\/v1\/plugins(?:\/[0-9a-fA-F-]{36}\/(?:upgrade|recover|status|invoke))?\/?$/],
   ["GET", /^\/api\/v1\/mcp\/(?:audit|approvals\/[0-9a-f-]{36})\/?$/],

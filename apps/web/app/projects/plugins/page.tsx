@@ -1,5 +1,6 @@
 "use client";
 
+import { PluginDirectory } from "./plugin-directory";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { trpc } from "@/trpc/client";
@@ -44,12 +45,12 @@ export default function PluginsPage() {
   const row = detail.data;
   const permissions = installations.data?.permissions;
   const openEditor = (operation: "install" | "upgrade") => { setError(""); setManifestText(""); setEditor(operation); };
-  const reviewManifest = async (manifest: unknown, operation: "install" | "upgrade" | "recover") => {
+  const reviewManifest = async (manifest: unknown, operation: "install" | "upgrade" | "recover", directory?: { entryId: string; reviewHash: string }) => {
     setBusy(true); setError("");
     try {
       const review = await request<Review>("/review", { manifest, ...(operation !== "install" ? { installationId: selected } : {}) });
       const body: Record<string, unknown> = { confirmed: true, confirmedManifestHash: review.manifestHash, idempotencyKey: crypto.randomUUID() };
-      if (operation === "install") { body.scope = scopeValue; body.manifest = review.manifest; }
+      if (operation === "install") { body.scope = scopeValue; body.manifest = review.manifest; if (directory) body.directory = directory; }
       else { body.expectedRevision = review.currentRevision; body.confirmedPermissionDiffHash = review.permissionDiff.hash; if (operation === "recover") body.version = review.manifest.version; else body.manifest = review.manifest; }
       setEditor(null);
       setPending({ title: operation === "install" ? "Install plugin" : operation === "upgrade" ? "Upgrade plugin" : "Recover generation", description: operation === "recover" ? "Reactivate this immutable generation with retained data. Current trust and dependency checks still apply." : "Review the publisher, artifact and requested access before confirming. Runtime preflight may reject an unavailable or untrusted package.", path: operation === "install" ? "" : `/${selected}/${operation}`, body, review, scopeLabel });
@@ -71,7 +72,7 @@ export default function PluginsPage() {
     try {
       await request(pending.path, pending.body);
       setPending(null); setNotice("Plugin operation completed. The current installation state is shown below.");
-      await Promise.all([cache.invalidateQueries({ queryKey: ["plugins"] }), cache.invalidateQueries({ queryKey: ["plugin-detail"] }), cache.invalidateQueries({ queryKey: ["plugin-history"] })]);
+      await Promise.all([cache.invalidateQueries({ queryKey: ["plugins"] }), cache.invalidateQueries({ queryKey: ["plugin-detail"] }), cache.invalidateQueries({ queryKey: ["plugin-history"] }), cache.invalidateQueries({ queryKey: ["plugin-directory"] }), cache.invalidateQueries({ queryKey: ["plugin-directory-entry"] })]);
     } catch (failure) { setError(message(failure) + " Refresh to inspect current state, or retry this same request if the result was ambiguous."); } finally { setBusy(false); }
   };
   return <div className="flex flex-1 flex-col min-w-0">
@@ -79,6 +80,7 @@ export default function PluginsPage() {
     <main className="mx-auto w-full max-w-6xl space-y-6 p-6">
       <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-2xl font-semibold tracking-tight">Installed plugins</h2><p className="mt-1 max-w-2xl text-sm text-muted-foreground">Manage isolated extensions and their retained data. Review every installation and permission change.</p></div><Button onClick={() => openEditor("install")} disabled={busy || !permissions?.activate}><Plus className="h-4 w-4" />Install plugin</Button></div>
       <div className="flex flex-wrap items-center gap-3"><label className="text-sm font-medium" htmlFor="plugin-scope">Space</label><select id="plugin-scope" className={selectClass} value={scope} disabled={busy || Boolean(pending)} onChange={event => { setScope(event.target.value); setOffset(0); setSelected(null); setHistoryOffset(0); setNotice(""); setError(""); }}><option value="personal">Personal space</option><option value="global">Global space</option>{projects.data?.map(project => <option key={project.id} value={`project:${project.id}`}>{project.name}</option>)}</select><Button variant="outline" size="sm" disabled={busy} onClick={() => { void installations.refetch(); if (selected) { void detail.refetch(); void history.refetch(); } }}><RefreshCw className="h-4 w-4" />Refresh</Button>{permissions && !permissions.manage && <span className="text-sm text-muted-foreground">Read-only access</span>}{permissions?.manage && !permissions.activate && <span className="text-sm text-muted-foreground">Installation and recovery require execution access in this space.</span>}</div>
+      <PluginDirectory key={scope} scope={scope} busy={busy || Boolean(pending) || Boolean(editor)} canInstall={Boolean(permissions?.activate)} onReview={(manifest, directory) => reviewManifest(manifest, "install", directory)} />
       {notice && <p role="status" className="rounded-md border p-3 text-sm">{notice}</p>}
       {error && !editor && !pending && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {installations.error && <p role="alert" className="rounded-md border p-4">{message(installations.error)}</p>}
