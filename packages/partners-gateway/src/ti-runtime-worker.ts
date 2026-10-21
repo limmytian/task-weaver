@@ -54,7 +54,7 @@ export class TiRuntimeWorker {
       assignedAgentId: this.options.assignedAgentId, activeRunId: this.activeRunId, lastError: this.lastError,
       startedAt: this.startedAt, lastPollAt: this.lastPollAt, lastCompletedAt: this.lastCompletedAt };
   }
-  async cleanupMetrics() { return this.cleanup.metrics(); }
+  async cleanupMetrics(ownerId: string) { return this.cleanup.metrics(ownerId); }
   async runOnce(signal: AbortSignal) {
     const identity = await this.identity();
     const supervisor = createTiExecutionService(identity);

@@ -91,9 +91,9 @@ export function createTiSandboxCleanup(db: Database, resolveBinding: (id: string
       }
       return true;
     },
-    async metrics() {
-      return db.select({ state: w.state, count: count(), oldestCreatedAt: sql<Date>`min(${w.createdAt})`,
-        retries: sql<number>`coalesce(sum(${w.cleanupAttempts}), 0)::int` }).from(w).where(ne(w.state, "deleted")).groupBy(w.state);
+    async metrics(ownerId?: string) {
+      return db.select({ state: w.state, lastErrorCode: w.lastErrorCode, count: count(), oldestCreatedAt: sql<Date>`min(${w.createdAt})`,
+        retries: sql<number>`coalesce(sum(${w.cleanupAttempts}), 0)::int` }).from(w).where(and(ne(w.state, "deleted"), ownerId ? eq(w.ownerId, ownerId) : undefined)).groupBy(w.state, w.lastErrorCode);
     },
   };
 }

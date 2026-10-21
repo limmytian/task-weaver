@@ -1,6 +1,7 @@
 import { TiRuntimeWorker } from "./ti-runtime-worker.js";
 import { Hono } from "hono";
 import { z } from "zod";
+import { resourceAuthority, type VerifiedRequestContext } from "@task-weaver/core";
 import type { Database } from "@task-weaver/db";
 import {
   getPartnersGatewayConfig,
@@ -36,8 +37,13 @@ export function createPartnersGatewayRuntime(db: Database, env: NodeJS.ProcessEn
   const config: PartnersGatewayConfig = gatewayConfigurationSchema.parse(defaultConfig);
   let worker: TiAgentGatewayWorker | TiRuntimeWorker | null = null;
 
-  const routes = new Hono();
+  const routes = new Hono<{ Variables: { identity: VerifiedRequestContext } }>();
   routes.get("/status", (context) => context.json(worker?.getStatus() ?? getTiAgentGatewayWorkerStatus(config, null)));
+  routes.get("/cleanup", async context => {
+    const live = await resourceAuthority(db, context.get("identity"));
+    const ownerId = live.actor.type === "human" ? live.actor.id : live.actor.managedByActorId;
+    return context.json(worker instanceof TiRuntimeWorker ? await worker.cleanupMetrics(ownerId) : []);
+  });
   routes.get("/health", async (context) => {
     const health = await checkTiAgentGatewayHealth(config);
     return context.json(health, health.ok ? 200 : 503);

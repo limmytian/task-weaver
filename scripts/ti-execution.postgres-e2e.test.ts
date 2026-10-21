@@ -10,7 +10,7 @@ const { eq, like } = apiRequire("drizzle-orm");
 const { createGatewayTwAuthority } = apiRequire("../../packages/partners-gateway/src/tw-authority.ts");
 const databaseUrl = process.env.TW_AUTH_E2E_DATABASE_URL;
 
-test("Ti runs preserve initiator ceilings and fence separate executor capabilities", { skip: !databaseUrl, timeout: 150_000 }, async t => {
+test("Ti runs preserve initiator ceilings and fence separate executor capabilities", { skip: !databaseUrl, timeout: 420_000 }, async t => {
   const url = new URL(databaseUrl!);
   assert.equal(url.hostname, "127.0.0.1");
   assert.equal(url.pathname, "/tw_auth_e2e");
@@ -147,7 +147,7 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     await assert.rejects(() => supervisor.renewDelegation(db, run.id, capability.delegation.id, fence()));
     assert.equal(await db.query.requirementClaims.findFirst({ where: eq(requirementClaims.requirementId, requirement.id) }), undefined);
   });
-  await t.test("actual model executes the shared manual-task supervisor", { skip: !process.env.TW_TI_REAL_MODEL_URL, timeout: 180_000 }, async () => {
+  await t.test("actual model executes chat, manual tasks and existing schedules", { skip: !process.env.TW_TI_REAL_MODEL_URL, timeout: 360_000 }, async () => {
     const { encryptChatKey, chatKeyBinding } = await import("../packages/core/src/services/chat-credentials");
     const { executeTiTaskAttempt } = await import("../packages/core/src/services/ti-task-runtime");
     const { createPartnersMcpAdapter } = await import("../packages/core/src/services/partners-mcp");
@@ -174,6 +174,31 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     const detail = await owner.service.taskService.getTaskDetail(db, task.id);
     assert.equal(detail.comments.filter((comment: any) => comment.content === marker).length, 1);
     await supervisor.invoke(db, "completeRun", [held.id, { ...result, ...currentFence }]);
+    const { createAssistantService, sendAssistantMessageSchema } = apiRequire("@task-weaver/core");
+    await db.update(tiAgentPolicies).set({ assistantAutoEnabled: true, assistantAutoMode: "live", assistantActionAllowlist: ["platform_operation"], updatedAt: new Date() }).where(eq(tiAgentPolicies.ownerId, owner.actor.id));
+    const chatMarker = `real-chat-${randomUUID()}`;
+    const chat = await createAssistantService(owner.context).sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({
+      requestId: randomUUID(), requestedProvider: provider, requestedModel: model,
+      context: { contextKind: "task", projectId: project.id, requirementId: requirement.id, taskId: task.id },
+      message: `Use get_task to read task ${task.id}, then add exactly one comment to it with content ${chatMarker}. Return that marker after the operation succeeds.`,
+    }));
+    assert.ok(chat.actions.some((action: any) => action.status === "succeeded"));
+    assert.equal((await owner.service.taskService.getTaskDetail(db, task.id)).comments.filter((comment: any) => comment.content === chatMarker).length, 1);
+    const scheduleMarker = `real-schedule-${randomUUID()}`;
+    const schedule = await owner.service.scheduleService.createSchedule(db, createScheduleSchema.parse({ projectId: project.id, requirementId: requirement.id,
+      targetScope: "project", kind: "one_off", title: "Real-model schedule", startsAt: new Date(),
+      taskTemplate: { title: "Scheduled model check", description: `Use get_task to read your assigned task and add exactly one comment to it with content ${scheduleMarker}. Return that marker after the tool succeeds.` },
+      autoRun: true, assignedExecutor: agent.id, assignedExecutorType: "agent" }), owner.actor);
+    const occurrence = await owner.service.scheduleService.runScheduleNow(db, schedule.id, owner.actor);
+    const scheduledRun = await executor.service.tiAgentService.acquireRun(db, worker, executor.actor);
+    assert.equal(scheduledRun.scheduleRunId, occurrence.id);
+    const scheduledFence = { workerId: worker.workerId, leaseGeneration: scheduledRun.leaseGeneration };
+    const scheduledResult = await executeTiTaskAttempt(db, executor.context, scheduledRun.id, scheduledFence, {
+      id: "unused-sandbox", tenantId: "unused", projectId: "unused", adapter: createPartnersMcpAdapter(async () => { throw new Error("Focused platform model check"); }),
+    }, new AbortController().signal);
+    assert.equal(scheduledResult.status, "succeeded");
+    assert.equal((await owner.service.taskService.getTaskDetail(db, occurrence.generatedTaskId)).comments.filter((comment: any) => comment.content === scheduleMarker).length, 1);
+    await supervisor.invoke(db, "completeRun", [scheduledRun.id, { ...scheduledResult, ...scheduledFence }]);
   });
   await t.test("expired Ti leases and retries exchange fresh fences without restoring old child authority", async () => {
     const queued = await owner.service.tiAgentService.createRun(db, { taskId: task.id, assignedAgentId: agent.id, assignedAgentType: "agent", maxRetries: 1 }, owner.actor);
@@ -212,6 +237,7 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     await assert.rejects(() => runtime.verify(new Headers({ authorization: `Bearer ${child.token}` })));
   });
   await t.test("assistant approval uses the real owner and current payload targets", async () => {
+    await db.update(tiAgentPolicies).set({ assistantAutoEnabled: false, assistantAutoMode: "disabled", updatedAt: new Date() }).where(eq(tiAgentPolicies.ownerId, owner.actor.id));
     const [conversation] = await db.insert(assistantConversations).values({ projectId: project.id, createdBy: owner.actor.id, createdByType: "human" }).returning();
     const [action] = await db.insert(assistantActions).values({ conversationId: conversation.id, actionType: "add_comment", payload: { taskId: task.id, content: "Approved work" } }).returning();
     await assert.rejects(() => assistantService.executeApprovedAction(db, action.id, owner.actor));

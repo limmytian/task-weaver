@@ -7,7 +7,7 @@ import { createTiSandboxService } from "../packages/core/src/services/ti-sandbox
 import { createTiSandboxCleanup } from "../packages/core/src/services/ti-sandbox-cleanup";
 import type { TiSandboxScope } from "../packages/core/src/services/ti-sandbox-authorization";
 const require = createRequire(new URL("../packages/db/package.json", import.meta.url));
-const { createDb, runMigrations, tiSandboxWorkspaces: w, tiSandboxOperations: o } = require("./src/index.ts");
+const { createDb, runMigrations, tiSandboxWorkspaces: w, tiSandboxOperations: o, assistantConversations } = require("./src/index.ts");
 const { eq } = require("drizzle-orm");
 const url = process.env.TW_TI_SANDBOX_E2E_DATABASE_URL;
 
@@ -88,5 +88,14 @@ test("durable sandbox ownership, uncertain submission, cleanup retry and isolati
   await uncertain.requestCleanup(true);
   await cleaner.runOnce();
   assert.equal(calls.filter(c => c.name === "bash_exec").length, submits, "Cleanup must not start an uncertain command");
+  await db.insert(assistantConversations).values({ id: bScope.conversationId!, projectId: null, createdBy: bScope.ownerId, createdByType: bScope.ownerType });
+  const [orphan] = await db.insert(w).values({ ownerId: randomUUID(), ownerType: "human", runId: randomUUID(), attempt: 1,
+    bindingId: binding.id, tenantId: binding.tenantId, providerProjectId: binding.projectId, sessionId: `orphan-${randomUUID()}`, state: "active", expiresAt: new Date(Date.now() + 1800_000) }).returning();
+  await cleaner.reconcileOrphans();
+  assert.equal((await db.query.tiSandboxWorkspaces.findFirst({ where: eq(w.id, orphan.id) }))!.state, "cleanup_pending");
+  await cleaner.runOnce();
+  assert.equal((await db.query.tiSandboxWorkspaces.findFirst({ where: eq(w.id, orphan.id) }))!.state, "deleted");
+  assert.equal((await db.query.tiSandboxWorkspaces.findFirst({ where: eq(w.id, bRow.id) }))!.state, "active");
+  assert.ok(!calls.some(call => call.name.includes("list")), "No provider-wide resource sweep");
   assert.ok((await cleaner.metrics()).length > 0);
 });

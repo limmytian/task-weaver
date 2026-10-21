@@ -25,7 +25,13 @@ const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(valu
 /** Only an authenticated supervisor can construct this service. Public methods never accept provider resource IDs. */
 export function createTiSandboxService(db: Database, authorize: () => Promise<TiSandboxScope>, binding: TiSandboxBinding) {
   async function owned(row: Workspace, active = true) {
-    const scope = await authorize();
+    let scope: TiSandboxScope;
+    try { scope = await authorize(); }
+    catch (error) {
+      await db.update(w).set({ state: "cleanup_pending", cancelRequestedAt: new Date(), cleanupRequestedAt: new Date(), nextCleanupAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(w.id, row.id), eq(w.ownerId, row.ownerId), eq(w.bindingId, binding.id), ne(w.state, "deleted")));
+      throw error;
+    }
     const current = await db.query.tiSandboxWorkspaces.findFirst({ where: and(eq(w.id, row.id), scopePredicate(scope)) });
     if (!current || !sameScope(current, scope) || current.bindingId !== binding.id || current.tenantId !== binding.tenantId
       || current.providerProjectId !== binding.projectId) throw new AuthorizationError();
