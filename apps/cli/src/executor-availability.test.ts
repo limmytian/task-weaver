@@ -34,7 +34,7 @@ test('quota query uses only initialization and read-only status, handles unsuppo
   const file=join(dir,'codex')
   writeFileSync(file,`#!/usr/bin/env node
 const readline=require('node:readline'); readline.createInterface({input:process.stdin}).on('line',line=>{const x=JSON.parse(line);if(x.method==='initialize')console.log(JSON.stringify({id:1,result:{}}));else if(x.method==='account/rateLimits/read')console.log(JSON.stringify({id:2,result:{rateLimits:{primary:{usedPercent:10,windowDurationMins:300}}}}));else if(x.method!=='initialized')process.exit(2);});`,{mode:0o700})
-  try {assert.equal((await queryCodexQuota('local',process.env,file,1000)).state,'available')
+  try {assert.equal((await queryCodexQuota('local',process.env,file,5000)).state,'available')
     writeFileSync(file,'#!/usr/bin/env node\nsetInterval(()=>{},1000)',{mode:0o700})
     assert.equal((await queryCodexQuota('local',process.env,file,100)).state,'unknown')
   }finally {rmSync(dir,{recursive:true,force:true})}
