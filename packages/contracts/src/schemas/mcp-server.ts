@@ -59,6 +59,7 @@ export const mcpServerReadTools = [
   "tw_skill_packages_resolve",
   "tw_skill_runtimes_list",
   "tw_mcp_search", "tw_mcp_tool", "tw_mcp_readiness",
+  "tw_plugins_list", "tw_plugins_get",
 ] as const;
 
 export const mcpServerWriteTools = [
@@ -71,7 +72,7 @@ export const mcpServerWriteTools = [
   "tw_document_task_links_add", "tw_document_requirement_links_add",
   "tw_execution_slices_create", "tw_execution_slices_update", "tw_plan_apply",
   "tw_memories_record", "tw_memories_update", "tw_memories_forget",
-  "tw_skills_run", "tw_mcp_call",
+  "tw_skills_run", "tw_mcp_call", "tw_plugins_call",
 ] as const;
 
 export type McpServerToolName =

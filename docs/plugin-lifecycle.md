@@ -3,9 +3,11 @@
 The REST API and `tw plugin` CLI support operator-configured backends with
 optional [restricted HTML pages](plugin-frontends.md). Frontend manifests are
 rejected unless the dedicated artifact listener has valid origin configuration
-and is running. General plugin discovery and cross-capability integration remain
-pending, so bootstrap does not yet advertise the complete plugin experience. See [plugin contracts](plugin-contracts.md) for the
-sandbox, owned-state protocol and remaining application/browser acceptance.
+and is running. Installed-plugin discovery and invocation use the common MCP
+facade described below. Typed dependencies inside plugin code and the full
+acceptance matrix remain pending, so bootstrap does not advertise blanket plugin
+execution readiness. See [plugin contracts](plugin-contracts.md) for the sandbox
+and owned-state protocol.
 
 ## Operator configuration
 
@@ -131,5 +133,34 @@ Old install, activation and invocation requests cannot recreate the purged data.
 An old status retry reports current metadata without repeating a transition.
 
 Run `pnpm test:plugin-postgres` for actual PostgreSQL/container/REST/CLI coverage.
-This proof does not replace the pending frontend isolation and complete installed
-application acceptance.
+The dedicated viewer also has local browser isolation proof. The complete installed
+application acceptance matrix remains pending.
+
+
+## Common MCP access
+
+`tw_plugins_list` lists one explicit project/personal/global scope with at most 20
+summaries and a 16 KiB response budget. Personal ownership comes from the verified
+credential. `tw_plugins_get` loads one authorized manifest, installation status
+and revision on demand. Neither discovery operation starts a worker or guarantees
+that its operator profile, publisher key or artifact is currently available.
+
+`tw_plugins_call` accepts `installationId` plus the same confirmed method/input,
+`expectedRevision` and `idempotencyKey` as REST invocation. It uses the same
+isolated worker, owned-state CAS and actor-bound receipt. An identical retry can
+cross REST, HTTP MCP and CLI stdio without executing a second write. Changed
+payloads or revisions conflict. Output and manifest text remain untrusted data.
+
+All MCP calls require live resource read access; this initial facade also requires
+`resource.write` and `mcp.invoke` for every plugin call, including a declared read
+method. Read-only MCP mode omits and rejects the call tool. Installation management
+is still through REST/CLI. MCP deny/approval policy applies independently of
+explicit request confirmation, and policy or grant changes during execution block
+late storage commits and cached-result disclosure. Runtime preparation/execution
+occurs outside the identity lifecycle lock.
+
+No local plugin worker, plugin package, extra skill or external MCP server is
+required on the client. The API host must have the approved plugin runtime and
+publisher configuration. Uploaded plugin code cannot use these tools to acquire
+Core authority or invoke arbitrary skills/external tools; typed cross-capability
+dependencies remain a separate implementation step.

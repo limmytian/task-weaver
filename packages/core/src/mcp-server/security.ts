@@ -1,3 +1,4 @@
+import { readPluginTarget } from "./plugins";
 import { requireRepository } from "../services/repository-authorization";
 import { requireMcpServer, requireMcpToolTarget } from "../services/mcp-authorization";
 import { lockIdentityLifecycle } from "../services/auth-security";
@@ -20,7 +21,13 @@ async function target(db: Database, identity: VerifiedRequestContext, name: McpS
   const projectId = raw.projectId ?? (raw.plan as { projectId?: string } | undefined)?.projectId;
   let scope: ResourceScope = {};
   let revision: unknown = null;
-  if (name === "tw_repository_readiness") {
+  if (name === "tw_plugins_get" || name === "tw_plugins_call") {
+    const installation = await readPluginTarget(db, identity, raw.installationId as string);
+    scope = installation;
+    requireScope(authority, scope, permission);
+    if (name === "tw_plugins_call") requireScope(authority, scope, "mcp.invoke");
+    revision = { id: installation.id, revision: installation.revision, status: installation.status, manifestHash: installation.manifestHash };
+  } else if (name === "tw_repository_readiness") {
     const repository = await requireRepository(db, authority, raw.id as string);
     scope = repository.visibility === "instance" ? {} : { personalOwnerId: repository.ownerId, personalOwnerType: "human" };
   } else if (name === "tw_dependencies_graph") {

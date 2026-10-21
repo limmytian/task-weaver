@@ -200,7 +200,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const remote = new Client({ name: "real-http-sdk", version: "1.31.0" });
   await remote.connect(new StreamableHTTPClientTransport(new URL(`http://${host}/api/v1/mcp-server`), { requestInit: { headers: headers() } }));
   t.after(() => remote.close());
-  assert.equal((await remote.listTools()).tools.length, mcpServerCatalog.length - 8);
+  assert.equal((await remote.listTools()).tools.length, mcpServerCatalog.length - 9);
   assert.equal((await remote.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   const directory = await mkdtemp(join(tmpdir(), "tw-mcp-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -236,6 +236,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   assert.equal(restBootstrapResponse.status, 200);
   assert.deepEqual((await restBootstrapResponse.json() as any).capabilityBootstrap, localBootstrap);
   assert.equal((await local.listTools()).tools.length, mcpServerReadTools.length - 6);
+  assert.equal((await local.listTools()).tools.some(tool => tool.name === "tw_plugins_call"), false);
   assert.equal((await local.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   assert.equal((await local.callTool({ name: "tw_tasks_status", arguments: { id: task.id, status: "done" } })).isError, true);
   // 0.3.11 planning and context use the same authenticated executor on both transports.
@@ -822,7 +823,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
       const initialization = await inspector(transportName, "initialize");
       assert.equal(initialization.protocolVersion, "2025-11-25");
       const tools = await inspector(transportName, "tools/list");
-      assert.equal(tools.tools.length, mcpServerCatalog.length - 8);
+      assert.equal(tools.tools.length, mcpServerCatalog.length - 9);
       const invoke = async (name: string, args: unknown) => {
         const result = await inspector(transportName, "tools/call", name, args);
         assert.equal(result.structuredContent.ok, true, JSON.stringify(result));

@@ -2507,3 +2507,16 @@ with `--file`. No local plugin worker, skill or external MCP installation is
 required. See the canonical repository guide `docs/plugin-lifecycle.md` for the
 preflight protocol, permission-diff review and retention/recovery behavior, and
 `docs/plugin-frontends.md` for the constrained page protocol and origin setup.
+
+
+Installed plugins are also available through the common inbound MCP catalog:
+`tw_plugins_list` (scope/projectId, limit/offset), `tw_plugins_get`
+(installationId), and `tw_plugins_call` (installationId plus the same confirmed
+revision/method/input/idempotencyKey as REST invocation). List results contain
+metadata only; manifests load on demand. Calls require resource.read,
+resource.write and mcp.invoke, remain subject to MCP approval policy, and run on
+the API host without client-side plugin installations. REST and both MCP
+transports share invocation receipts. See the
+[plugin lifecycle](../../docs/plugin-lifecycle.md#common-mcp-access) for exact
+retry and revocation behavior. Plugin code cannot invoke arbitrary Core APIs or
+external capabilities through this interface.

@@ -92,6 +92,20 @@ printf '{"result":%s,"storageChanges":[{"key":"counter","expectedVersion":%s,"op
     return execution;
   }, signal), /denied/, "cached results must recheck authority after asynchronous preparation");
   await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: "member", explicitPermissions: ["mcp.invoke"] });
+  const { createAuthorizedMcpExecutor } = await import("@task-weaver/core/mcp-server/executor");
+  const { setMcpInvocationPolicy } = await import("@task-weaver/core");
+  let markStarted!: () => void;
+  const started = new Promise<void>(resolve => { markStarted = resolve; });
+  const executor = createAuthorizedMcpExecutor(db, context, storage, undefined, false, undefined, { prepare: async (value, workerSignal) => {
+    const execution = await prepare(value, workerSignal);
+    return { ...execution, execute: async (input, runningSignal) => { markStarted(); return execution.execute(input, runningSignal); } };
+  } });
+  const deniedRun = assert.rejects(executor("tw_plugins_call", { installationId: installation!.id, ...request() }, signal), /denied|abort/i);
+  await started;
+  await setMcpInvocationPolicy(db, f.owner.context, { projectId: f.project.id }, "tw_plugins_call", "deny");
+  await deniedRun;
+  assert.equal((await db.select().from(pluginStorage).where(eq(pluginStorage.installationId, installation!.id)))[0]?.value, 4, "policy revocation cannot commit a late worker patch");
+  await setMcpInvocationPolicy(db, f.owner.context, { projectId: f.project.id }, "tw_plugins_call", "allow");
   config = { ...config, keys: {} as typeof config.keys };
   await assert.rejects(invoke(first), /untrusted/);
   const receipts = await db.select().from(pluginInvocationReceipts).where(eq(pluginInvocationReceipts.installationId, installation!.id));
@@ -114,13 +128,19 @@ test("plugin REST lifecycle preflights immutable generations and retains state a
   await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: "maintainer", explicitPermissions: ["mcp.invoke"] });
   const credential = await f.identity.issueKey(f.owner.headers, agent.id, { name: "Plugin management", expiresAt: null, grants: [{ scope: "project", projectId: f.project.id, permissions: ["resource.read", "resource.write", "mcp.manage", "mcp.invoke"] }] });
   const readCredential = await f.identity.issueKey(f.owner.headers, agent.id, { name: "Plugin read only", expiresAt: null, grants: [{ scope: "project", projectId: f.project.id, permissions: ["resource.read"] }] });
+  const outsiderKey = await f.identity.issueKey(f.outsider.headers, f.outsider.context.actor.id, { name: "Unrelated plugin reader", expiresAt: null, grants: [{ scope: "personal", actorId: f.outsider.context.actor.id, permissions: ["resource.read"] }] });
   const signer = generateKeyPairSync("ed25519");
   const profile = { id: "lifecycle-shell", image: process.env.TW_SKILL_RUNTIME_TEST_IMAGE!, interpreter: "shell", timeoutMs: 5000 };
-  const env: Record<string, string> = { TW_AUTH_SECRET: f.configuration.secret, TW_AUTH_BASE_URL: f.configuration.baseURL, TW_AUTH_TRUSTED_ORIGINS: f.configuration.trustedOrigins[0]!, TW_PRESET_SKILLS_SYNC: "disabled", TW_PLUGIN_RUNTIME_PROFILES: JSON.stringify([profile]), TW_PLUGIN_PUBLISHER_KEYS: JSON.stringify({ "lifecycle-key": { publisher: "fixture", publicKey: signer.publicKey.export({ type: "spki", format: "pem" }).toString() } }) };
+  const env: Record<string, string> = { TW_AUTH_SECRET: f.configuration.secret, TW_AUTH_BASE_URL: f.configuration.baseURL, TW_AUTH_TRUSTED_ORIGINS: f.configuration.trustedOrigins[0]!, TW_PRESET_SKILLS_SYNC: "disabled", TW_MCP_ALLOWED_HOSTS: "127.0.0.1:3001", TW_PLUGIN_RUNTIME_PROFILES: JSON.stringify([profile]), TW_PLUGIN_PUBLISHER_KEYS: JSON.stringify({ "lifecycle-key": { publisher: "fixture", publicKey: signer.publicKey.export({ type: "spki", format: "pem" }).toString() } }) };
   const app = createApiApplication({ db, databaseUrl: databaseUrl!, env }).app;
   const call = async (path: string, body?: unknown, rawKey = credential.rawKey) => {
     const response = await app.request(`http://127.0.0.1:3001/api/v1/plugins${path}`, { method: body === undefined ? "GET" : "POST", headers: { authorization: `Bearer ${rawKey}`, "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: response.status, data: await response.json() as any };
+  };
+  const mcpCall = async (name: string, input: unknown, rawKey = credential.rawKey) => {
+    const response = await app.request(`http://127.0.0.1:3001/api/v1/mcp-server/tools/${name}`, { method: "POST", headers: { authorization: `Bearer ${rawKey}`, "content-type": "application/json" }, body: JSON.stringify(input) });
+    const result = await response.json() as any;
+    return result.structuredContent ?? result;
   };
   const storage = new skillPackageStorageService.LocalSkillPackageStorageAdapter(directory);
   const script = `set -eu
@@ -146,7 +166,28 @@ printf '{"result":7,"storageChanges":[{"key":"counter","expectedVersion":0,"oper
   assert.equal((await call(`?scope=project&projectId=${f.project.id}`)).data.items.length, 1);
   assert.equal((await call(`/${id}`)).data.manifestHash, install.confirmedManifestHash);
   const invocation = { expectedRevision: 1, method: "increment", input: {}, confirmed: true, idempotencyKey: randomUUID() };
-  assert.equal((await call(`/${id}/invoke`, invocation)).data.result, 7);
+  const summaries = await mcpCall("tw_plugins_list", { scope: "project", projectId: f.project.id });
+  assert.equal(summaries.data.items[0].id, id);
+  assert.equal(summaries.data.items[0].manifest, undefined);
+  assert.ok(Buffer.byteLength(JSON.stringify(summaries.data)) <= 16384);
+  assert.equal((await mcpCall("tw_plugins_get", { installationId: id })).data.manifestHash, install.confirmedManifestHash);
+  assert.equal((await mcpCall("tw_plugins_list", { scope: "personal" })).ok, false);
+  assert.equal((await mcpCall("tw_plugins_get", { installationId: id }, outsiderKey.rawKey)).ok, false);
+  assert.equal((await mcpCall("tw_plugins_call", { installationId: id, ...invocation }, readCredential.rawKey)).ok, false);
+  assert.equal((await mcpCall("tw_plugins_call", { installationId: id, ...invocation, expectedRevision: 2 })).ok, false);
+  const executed = await mcpCall("tw_plugins_call", { installationId: id, ...invocation });
+  assert.equal(executed.ok, true, JSON.stringify(executed));
+  assert.equal(executed.data.result, 7);
+  assert.equal(executed.data.untrustedOutput, true);
+  assert.equal((await call(`/${id}/invoke`, invocation)).data.replayed, true, "REST and MCP share the same receipt");
+  assert.equal((await mcpCall("tw_plugins_call", { installationId: id, ...invocation })).data.replayed, true);
+  assert.equal((await mcpCall("tw_plugins_call", { installationId: id, ...invocation, input: { changed: true } })).ok, false);
+  const { setMcpInvocationPolicy } = await import("@task-weaver/core");
+  await setMcpInvocationPolicy(db, f.owner.context, { projectId: f.project.id }, "tw_plugins_call", "deny");
+  assert.equal((await mcpCall("tw_plugins_call", { installationId: id, ...invocation })).ok, false);
+  await setMcpInvocationPolicy(db, f.owner.context, { projectId: f.project.id }, "tw_plugins_call", "approval");
+  assert.equal((await mcpCall("tw_plugins_call", { installationId: id, ...invocation })).error.code, "approval_required");
+  await setMcpInvocationPolicy(db, f.owner.context, { projectId: f.project.id }, "tw_plugins_call", "allow");
   const resign = (overrides: Record<string, unknown>) => {
     const unsigned = pluginManifestSchema.parse({ ...manifest, ...overrides, signature: undefined });
     return { ...unsigned, signature: { algorithm: "ed25519" as const, keyId: "lifecycle-key", value: sign(null, Buffer.from(pluginSigningPayload(unsigned)), signer.privateKey).toString("base64") } };
@@ -181,6 +222,7 @@ printf '{"result":7,"storageChanges":[{"key":"counter","expectedVersion":0,"oper
   env.TW_PLUGIN_PUBLISHER_KEYS = "{}";
   assert.equal((await call(`/${id}/status`, disabled)).status, 200);
   assert.equal((await call(`/${id}/status`, disabled)).data.replayed, true);
+  assert.equal((await mcpCall("tw_plugins_call", { installationId: id, ...invocation })).ok, false);
   env.TW_PLUGIN_PUBLISHER_KEYS = publisherKeys;
   assert.equal((await call(`/${id}/invoke`, { ...invocation, expectedRevision: 3, idempotencyKey: randomUUID() })).status, 409);
   const recovered = await call(`/${id}/recover`, { version: manifest.version, expectedRevision: 3, confirmedManifestHash: capabilityDigest(manifest), confirmedPermissionDiffHash: pluginPermissionDiff(next, manifest).hash, confirmed: true, idempotencyKey: randomUUID() });
@@ -204,17 +246,38 @@ printf '{"result":7,"storageChanges":[{"key":"counter","expectedVersion":0,"oper
   const { promisify } = await import("node:util");
   const { fileURLToPath } = await import("node:url");
   const { writeFile } = await import("node:fs/promises");
-  const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 0 }) as import("node:http").Server;
+  let networkApp = app;
+  const server = serve({ fetch: request => networkApp.fetch(request), hostname: "127.0.0.1", port: 0 }) as import("node:http").Server;
   await once(server, "listening");
   t.after(() => new Promise<void>((resolve, reject) => { server.closeIdleConnections(); server.close(error => error ? reject(error) : resolve()); }));
   const address = server.address(); assert.ok(address && typeof address !== "string");
+  networkApp = createApiApplication({ db, databaseUrl: databaseUrl!, env: { ...env, TW_MCP_ALLOWED_HOSTS: `127.0.0.1:${address.port}` } }).app;
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+  const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
+  const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
+  const httpClient = new Client({ name: "plugin-http", version: "1" });
+  await httpClient.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/api/v1/mcp-server`), { requestInit: { headers: { authorization: `Bearer ${credential.rawKey}` } } }));
+  t.after(() => httpClient.close());
+  const localClient = new Client({ name: "plugin-stdio", version: "1" });
+  await localClient.connect(new StdioClientTransport({ command: process.execPath, args: ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url)), "mcp", "serve"], env: { PATH: "/no-local-tools", TW_CONFIG_DIR: directory, TW_API_URL: `http://127.0.0.1:${address.port}`, TW_API_KEY: credential.rawKey }, stderr: "pipe" }));
+  t.after(() => localClient.close());
+  const commonRequest = { installationId: fresh.data.installationId, ...invocation, idempotencyKey: randomUUID() };
+  for (const [index, client] of [httpClient, localClient].entries()) {
+    assert.ok((await client.listTools()).tools.some(tool => tool.name === "tw_plugins_call"));
+    const summary = (await client.callTool({ name: "tw_plugins_list", arguments: { scope: "project", projectId: f.project.id } })).structuredContent as any;
+    assert.equal(summary.data.items.length, 2);
+    const result = (await client.callTool({ name: "tw_plugins_call", arguments: commonRequest })).structuredContent as any;
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.result, 7);
+    assert.equal(result.data.replayed, index === 1);
+  }
   const cli = async (...args: string[]) => JSON.parse((await promisify(execFile)(process.execPath, ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url)), "plugin", ...args, "--json"], { timeout: 15000, env: { ...process.env, PATH: "/no-local-tools", TW_CONFIG_DIR: directory, TW_API_URL: `http://127.0.0.1:${address.port}`, TW_API_KEY: credential.rawKey } })).stdout);
   assert.equal((await cli("list", "--project", f.project.id)).items.length, 2);
   assert.equal((await cli("get", fresh.data.installationId)).revision, 1);
   assert.equal((await cli("generations", fresh.data.installationId)).items.length, 1);
   assert.equal((await cli("generation", fresh.data.installationId, manifest.version)).manifestHash, capabilityDigest(manifest));
   const invocationFile = join(directory, "invoke.json");
-  await writeFile(invocationFile, JSON.stringify({ ...invocation, idempotencyKey: randomUUID() }));
+  await writeFile(invocationFile, JSON.stringify({ ...invocation, idempotencyKey: commonRequest.idempotencyKey }));
   assert.equal((await cli("invoke", fresh.data.installationId, "--file", invocationFile)).result, 7);
   assert.equal((await cli("invoke", fresh.data.installationId, "--file", invocationFile)).replayed, true);
   const oversized = await app.request("http://127.0.0.1:3001/api/v1/plugins", { method: "POST", headers: { authorization: `Bearer ${credential.rawKey}`, "content-type": "application/json" }, body: "x".repeat(131073) });

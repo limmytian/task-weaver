@@ -118,7 +118,7 @@ installation-scoped state and an offline backend worker. The
 [backend lifecycle APIs and CLI](plugin-lifecycle.md) install and manage these
 plugins. The [isolated page protocol](plugin-frontends.md) now provides a trusted
 application viewer and dedicated artifact listener. Installation-management UI,
-common MCP discovery/broker integration and the remaining acceptance matrix still
+typed cross-capability dependencies inside plugin code and the remaining acceptance matrix still
 limit the complete plugin experience.
 
 The worker uses operator-supplied digest-pinned profiles and publisher keys;

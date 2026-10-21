@@ -5,8 +5,10 @@ worker with durable installation-owned state are implemented and tested. The
 backend installation/lifecycle APIs and CLI are available for operator-configured
 plugins with an optional restricted HTML page. The dedicated artifact host and
 actual application viewer have passed local counter/browser and authority checks.
-Common MCP discovery/broker integration and the full application acceptance matrix
-remain pending. See [plugin contracts](plugin-contracts.md).
+Installed plugins can be discovered, inspected and called through the common
+MCP facade using the same broker as REST. Typed skill/external-tool dependencies
+inside plugin code, owner management UI, the reviewed directory and the full
+application acceptance matrix remain pending. See [plugin contracts](plugin-contracts.md).
 Use the linked project requirements and iteration documents for current priority
 and scope. One Task Weaver application
 hosts official and third-party extensions; there is no separate Pro
