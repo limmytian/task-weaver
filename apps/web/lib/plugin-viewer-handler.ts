@@ -14,11 +14,11 @@ function viewerUnavailable(status: number) {
 export function createPluginViewerHandler(getRuntime: typeof getWebAuthenticationRuntime, env: Readonly<Record<string, string | undefined>> = process.env, fetchImpl: typeof fetch = fetch) {
   return async (request: Request, id: string, operation: "viewer" | "invoke") => {
     try {
-      stableActorReferenceSchema.parse({ id, type: "human" });
       const { auth } = getRuntime();
       auth.assertOrigin(request.headers);
       const identity = await auth.verify(request.headers);
       if (identity.credential.kind !== "session" || identity.actor.type !== "human") throw new AuthenticationError();
+      stableActorReferenceSchema.parse({ id, type: "human" });
       if (operation === "invoke") auth.authentication.assertMutation(request.headers);
       let body: string | undefined;
       if (operation === "invoke") {

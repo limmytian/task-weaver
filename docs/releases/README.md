@@ -6,6 +6,7 @@ Use the notes for your installed and target versions when planning an upgrade.
 
 | Version | Summary | Notes |
 | --- | --- | --- |
+| 0.3.12 (source candidate) | Hosted capabilities, scoped memory, unified MCP and isolated plugins. | [English](0.3.12.md) · [简体中文](0.3.12.zh-CN.md) |
 | 0.3.11 | MCP skills, atomic plans, execution slices and bounded context. | [English](0.3.11.md) · [简体中文](0.3.11.zh-CN.md) |
 | 0.3.10 | Inbound MCP Server with authenticated stdio/HTTP collaboration tools. | [English](0.3.10.md) · [简体中文](0.3.10.zh-CN.md) |
 | 0.3.9 | Verified human direct integration without a PR. | [English](0.3.9.md) · [简体中文](0.3.9.zh-CN.md) |
