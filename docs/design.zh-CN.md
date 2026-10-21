@@ -106,7 +106,7 @@ Partners Gateway 保留状态/健康接口、worker 生命周期、幂等重试�
 `pnpm test:gateway-postgres` 验证一次性 PostgreSQL 与 Gateway HTTP/SSE 通信；
 `pnpm test:gateway-live` 需要显式提供测试地址和凭据。默认 worker 不自动调用 AI 模型。
 
-外部集成使用事件/webhook、REST 与 MCP。定时工作复用 schedule；后续执行方案由 Task Weaver 管理 Ti 模型与工具循环，通过 Partners MCP 执行沙箱操作；当前 Gateway worker 仍只打印提示词。参见[运行时接入评估](agent-runtime.zh-CN.md)。独立插件生态不在产品范围内。
+外部集成使用事件/webhook、REST 与 MCP。定时工作复用 schedule；后续执行方案由 Task Weaver 管理 Ti 模型与工具循环，通过 Partners MCP 执行沙箱操作；当前 Gateway worker 仍只打印提示词。参见[运行时接入评估](agent-runtime.zh-CN.md)。
 
 参见[架构调整](architecture-transition.md)与[版本化包](ce-packages.md)。
 

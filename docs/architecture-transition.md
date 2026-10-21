@@ -24,4 +24,4 @@ multiple product editions. The old Pro mainline-canary workflow is removed;
 the retired in-process SDK is not a supported extension surface. Public export still uses
 `open-source.manifest.json`; private `.env` tracking remains unchanged.
 
-External integrations use events/webhooks, REST and MCP. The planned agent runtime will reuse schedules and keep model/tool orchestration in Task Weaver. A separate plugin ecosystem is outside product scope.
+External integrations use events/webhooks, REST and MCP. The planned agent runtime will reuse schedules and keep model/tool orchestration in Task Weaver.
