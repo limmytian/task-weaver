@@ -3,7 +3,9 @@
 The shared schemas in `@task-weaver/contracts/schemas/plugins` define the first
 plugin protocol. Installations use the broker and lifecycle APIs described below. Optional pages
 use the restricted HTML protocol and a separately configured artifact host.
-General plugin discovery and cross-capability broker integration remain pending. The protocol revision is independent of product
+The common MCP facade discovers and invokes installed plugins. Pinned hosted
+skill instructions can be declared as read-only inputs; external tool execution
+from plugin code remains pending. The protocol revision is independent of product
 release versions.
 
 ## Identity and immutable artifacts
@@ -30,14 +32,15 @@ modules are not a third-party sandbox.
 
 ## Grants and host-owned state
 
-Initial manifest permissions are `ui.render`, `backend.execute`, `storage.read`
-and `storage.write`. Requested permissions are unique and reviewed with the
+Manifest permissions are `ui.render`, `backend.execute`, `storage.read`,
+`storage.write` and `skills.read`. Requested permissions are unique and reviewed with the
 manifest hash. Method names are unique and declare read/write access. A read
 method cannot persist a storage patch, even when another method has write grants.
 The host must check both the current installation grant and caller authority on
 every operation; permission declarations do not enforce isolation by themselves.
 
-The initial broker supports plugin-owned state only. Core SQL, arbitrary Core
+The broker accepts plugin-owned storage patches and supplies explicitly pinned
+read-only skill inputs. Core SQL, arbitrary Core
 operations, filesystem paths, another installation ID and another namespace are
 not valid backend response fields. Core integration is a future typed broker
 surface, with the same caller and scope checks; it is not an escape through an
@@ -118,7 +121,7 @@ installation-scoped state and an offline backend worker. The
 [backend lifecycle APIs and CLI](plugin-lifecycle.md) install and manage these
 plugins. The [isolated page protocol](plugin-frontends.md) now provides a trusted
 application viewer and dedicated artifact listener. Installation-management UI,
-typed cross-capability dependencies inside plugin code and the remaining acceptance matrix still
+external MCP dependencies inside plugin code and the remaining acceptance matrix still
 limit the complete plugin experience.
 
 The worker uses operator-supplied digest-pinned profiles and publisher keys;
@@ -157,3 +160,40 @@ fresh containers, CAS conflicts, identical retries, read-method write rejection,
 installation disable during execution, live caller and publisher revocation, and
 physical user/filesystem/network/credential isolation. It does not stand in for
 the pending application/browser acceptance.
+
+
+## Pinned hosted skill inputs
+
+Optional `skillBindings` (one to eight) require a backend and the `skills.read`
+manifest permission. Each binding has a unique `name`, unique skill `documentId`,
+positive integer `version` and `contentHash` (the common capability digest of
+`{ content }`). Bindings are covered by the publisher signature and confirmed
+manifest hash. `tw plugin skill-binding <documentId> --name <name>` reads the
+canonical hosted skill facade and prints a candidate pin for manifest review; it
+does not install, sign or approve anything. Existing manifests omit the optional field and retain their exact
+canonical digest. A new or changed binding appears in `tw plugin diff` as
+`skill.read:<name>:<documentId>@<version>#<contentHash>`; confirming only the
+unchanged permission names cannot approve a different document or content pin.
+
+The host uses the common live-authorized skill reader, including package/version
+quarantine checks. A dependency must belong to the installation's own project or
+personal owner, or be globally readable with an explicit caller grant. A caller's
+broader grants cannot copy a project/personal skill into a different or global
+installation. Loading any dependency fails the entire operation if the caller
+cannot read it, its revision/hash changed, or the serialized snapshots exceed
+32 KiB in aggregate. The hash also protects Markdown content changes that do not
+advance the document row's revision field.
+
+For preflight and each method, the isolated backend receives a host-provided
+optional `skills` array beside `method`, `input` and `state`. Each item contains
+`name`, `documentId`, `version`, `contentHash`, `content` and `untrusted: true`.
+User `input` cannot replace this field. Instructions are data; no script is
+executed and no local skill installation, credential, network access or Core
+operation is granted. The existing total worker-input budget still applies.
+
+Authorization and pins are checked before worker execution, during normal calls,
+and again in the atomic activation/state/receipt transaction. Old receipt retries
+also recheck the dependencies. A changed skill cannot silently refresh into a
+worker or return a cached result: review a new signed plugin generation and its
+binding diff. Backend code cannot write the source skill or request another
+binding. External MCP calls and executable skill dependencies remain unavailable.

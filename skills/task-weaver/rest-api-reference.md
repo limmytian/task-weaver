@@ -2520,3 +2520,15 @@ transports share invocation receipts. See the
 [plugin lifecycle](../../docs/plugin-lifecycle.md#common-mcp-access) for exact
 retry and revocation behavior. Plugin code cannot invoke arbitrary Core APIs or
 external capabilities through this interface.
+
+
+Plugins may declare `skills.read` and up to eight unique signed `skillBindings`
+(name, documentId, exact row version, contentHash). `tw plugin skill-binding <id>
+--name <name>` reads the common hosted skill facade and prints a candidate binding
+for review. Bindings contribute to the confirmed permission diff. The host passes
+bounded untrusted instruction snapshots to the backend after checking caller
+read grants, exact content pins, package quarantine and installation scope.
+Project/personal instructions cannot enter another project's or a global plugin's
+storage/execution namespace. Changes block activation, normal calls and cached
+receipt replay. See [pinned skill inputs](../../docs/plugin-contracts.md#pinned-hosted-skill-inputs).
+This does not enable executable skills or external tool invocation from plugins.

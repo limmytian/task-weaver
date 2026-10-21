@@ -25,3 +25,12 @@ test("plugin JSON limits reject cycles, sparse expansion, accessors and oversize
   assert.equal(getterExecuted, false);
   assert.ok(pluginJsonValueSchema.safeParse({ safe: [1, true, null, "text"] }).success);
 });
+
+
+test("plugin skill bindings require explicit permission, exact revisions and unique names/documents", () => {
+  const binding = { name: "guidance", documentId: manifest.artifact.packageId, version: 1, contentHash: "a".repeat(64) };
+  const pinned = { ...manifest, permissions: [...manifest.permissions, "skills.read"], skillBindings: [binding] };
+  assert.ok(pluginManifestSchema.safeParse(pinned).success);
+  for (const patch of [{ permissions: manifest.permissions }, { skillBindings: [] }, { skillBindings: [binding, binding] }, { skillBindings: [{ ...binding, version: "latest" }] }, { skillBindings: [{ ...binding, contentHash: undefined }] }, { skillBindings: [{ ...binding, personalOwnerId: binding.documentId }] }]) assert.equal(pluginManifestSchema.safeParse({ ...pinned, ...patch }).success, false);
+  assert.equal(Object.hasOwn(pluginManifestSchema.parse(manifest), "skillBindings"), false, "existing manifests retain their signed canonical representation");
+});

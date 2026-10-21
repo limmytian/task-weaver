@@ -1,3 +1,4 @@
+import { resolvePluginSkills, type PluginSkillSnapshot } from "./plugin-skills";
 import { and, eq } from "drizzle-orm";
 import { type Database, pluginInstallations, pluginStorage, pluginInvocationReceipts } from "@task-weaver/db";
 import { invokePluginSchema, pluginManifestSchema, ConflictError, NotFoundError, ValidationError, stableActorReferenceSchema, type VerifiedRequestContext } from "@task-weaver/contracts";
@@ -10,7 +11,7 @@ import { planPluginState } from "./plugin-state";
 export type PluginExecution = {
   frontend?: PluginFrontend;
   /** A trusted host implementation, never an uploaded callback or Core API proxy. */
-  execute(input: { method: string; input: unknown; state: Array<{ key: string; version: number; value: unknown; deleted: number }> }, signal: AbortSignal): Promise<unknown>;
+  execute(input: { method: string; input: unknown; state: Array<{ key: string; version: number; value: unknown; deleted: number }>; skills?: PluginSkillSnapshot[] }, signal: AbortSignal): Promise<unknown>;
   revalidate(connection?: Database, signal?: AbortSignal): Promise<void>;
   dispose(): Promise<void>;
 };
@@ -38,7 +39,8 @@ export async function invokeInstalledPlugin(db: Database, identity: VerifiedRequ
     const state = await tx.select({ key: pluginStorage.key, version: pluginStorage.version, value: pluginStorage.value, deleted: pluginStorage.deleted }).from(pluginStorage).where(eq(pluginStorage.installationId, row.id)).limit(33);
     // Verify persisted quotas before exposing any data to an untrusted worker.
     planPluginState(state, { result: null }, false);
-    return { row, manifest, writable, receipt, state: manifest.permissions.includes("storage.read") ? state : [] };
+    const skills = await resolvePluginSkills(tx, identity, manifest, row);
+    return { row, manifest, writable, receipt, skills, state: manifest.permissions.includes("storage.read") ? state : [] };
   };
   const transaction = <T>(operation: (tx: Database) => Promise<T>) => db.transaction(async tx => {
     const connection = tx as unknown as Database;
@@ -50,6 +52,7 @@ export async function invokeInstalledPlugin(db: Database, identity: VerifiedRequ
   const execution = await prepare(initial.manifest, signal);
   try {
     await execution.revalidate();
+    await transaction(guarded);
     if (initial.receipt) return transaction(async tx => {
       const current = await guarded(tx);
       await execution.revalidate(tx);
@@ -67,7 +70,7 @@ export async function invokeInstalledPlugin(db: Database, identity: VerifiedRequ
     timer.unref();
     let result: unknown;
     try {
-      result = await execution.execute({ method: input.method, input: input.input, state: initial.state }, runningSignal);
+      result = await execution.execute({ method: input.method, input: input.input, state: initial.state, ...(initial.skills.length ? { skills: initial.skills } : {}) }, runningSignal);
       runningSignal.throwIfAborted();
     } finally { clearInterval(timer); await checkFlight; }
     await execution.revalidate();

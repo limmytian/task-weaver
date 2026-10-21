@@ -6,11 +6,17 @@ export const PLUGIN_HOST_PROTOCOL = 1 as const;
 export const PLUGIN_LIMITS = Object.freeze({ methods: 16, keys: 32, storageBytes: 65536, valueBytes: 16384, inputBytes: 16384, resultBytes: 65536, frontendBytes: 131072 });
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const exactVersion = z.string().trim().min(1).max(100).refine(value => !/^(latest|next|stable|head|main|master)$/i.test(value) && !/[\s*^~<>=|]/.test(value), "Plugin artifacts require an exact immutable version");
-export const pluginPermissionSchema = z.enum(["ui.render", "backend.execute", "storage.read", "storage.write"]);
+export const pluginPermissionSchema = z.enum(["ui.render", "backend.execute", "storage.read", "storage.write", "skills.read"]);
 export const pluginStorageKeySchema = z.string().min(1).max(100).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/).refine(value => !value.includes(".."), "Storage keys cannot address another namespace");
 const pluginVersion = z.string().max(100).regex(/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/);
 const method = z.object({ name: z.string().regex(/^[a-z][a-z0-9_.-]{0,63}$/), access: z.enum(["read", "write"]) }).strict();
 const runtime = z.object({ profileId: z.string().min(1).max(100).regex(/^[A-Za-z0-9_-]+$/), profileHash: hash, entryPath: skillPackagePathSchema }).strict();
+
+export const pluginSkillBindingSchema = z.object({
+  name: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/),
+  documentId: z.string().uuid(), version: z.number().int().min(1).max(2147483647),
+  contentHash: hash,
+}).strict();
 
 export const pluginManifestSchema = z.object({
   schemaVersion: z.literal(PLUGIN_HOST_PROTOCOL),
@@ -18,13 +24,18 @@ export const pluginManifestSchema = z.object({
   version: pluginVersion,
   displayName: z.string().min(1).max(128), description: z.string().max(1000).default(""),
   artifact: z.object({ packageId: z.string().uuid(), version: exactVersion, manifestHash: hash }).strict(),
-  permissions: z.array(pluginPermissionSchema).max(4),
+  permissions: z.array(pluginPermissionSchema).max(5),
+  skillBindings: z.array(pluginSkillBindingSchema).min(1).max(8).optional(),
   frontend: z.object({ entryPath: skillPackagePathSchema.refine(path => path.endsWith(".html"), "Frontend entry must be an HTML artifact") }).strict().optional(),
   backend: runtime.optional(), methods: z.array(method).max(PLUGIN_LIMITS.methods).default([]),
   signature: z.object({ algorithm: z.literal("ed25519"), keyId: z.string().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/), value: z.string().regex(/^[A-Za-z0-9+/]{86}==$/) }).strict().optional(),
   storageSchemaVersion: z.number().int().min(1).max(2147483647).default(1),
 }).strict().superRefine((value, context) => {
   const issue = (message: string) => context.addIssue({ code: "custom", message });
+  if (value.skillBindings && (!value.backend || !value.permissions.includes("skills.read"))) issue("Skill bindings require a backend and skills.read");
+  if (value.permissions.includes("skills.read") && !value.skillBindings) issue("skills.read requires explicit pinned skill bindings");
+  if (new Set(value.skillBindings?.map(binding => binding.name)).size !== (value.skillBindings?.length ?? 0)) issue("Skill binding names must be unique");
+  if (new Set(value.skillBindings?.map(binding => binding.documentId.toLowerCase())).size !== (value.skillBindings?.length ?? 0)) issue("Skill binding documents must be unique");
   if (!value.frontend && !value.backend) issue("A plugin must provide an isolated frontend or backend");
   if (new Set(value.permissions).size !== value.permissions.length) issue("Plugin permissions must be unique");
   if (new Set(value.methods.map(item => item.name)).size !== value.methods.length) issue("Plugin method names must be unique");

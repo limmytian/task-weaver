@@ -4,7 +4,7 @@ The REST API and `tw plugin` CLI support operator-configured backends with
 optional [restricted HTML pages](plugin-frontends.md). Frontend manifests are
 rejected unless the dedicated artifact listener has valid origin configuration
 and is running. Installed-plugin discovery and invocation use the common MCP
-facade described below. Typed dependencies inside plugin code and the full
+facade described below. External MCP dependencies inside plugin code and the full
 acceptance matrix remain pending, so bootstrap does not advertise blanket plugin
 execution readiness. See [plugin contracts](plugin-contracts.md) for the sandbox
 and owned-state protocol.
@@ -58,9 +58,11 @@ The installation namespace derives from verified scope and actor ownership.
 There is at most one installed instance of a plugin identity in each scope.
 Self-contained artifacts reuse the immutable skill-package store and resolver;
 implicit dependency execution and storage-schema migrations are rejected. Backend
-callbacks can request only installation-owned storage patches. General Core,
-skill and external MCP invocation from plugin code remain unavailable until a
-typed, scoped common-broker surface is implemented and accepted.
+callbacks can request only installation-owned storage patches. Explicit
+`skills.read` bindings supply pinned instruction snapshots through the common
+skill reader; see [skill input contracts](plugin-contracts.md#pinned-hosted-skill-inputs).
+General Core operations, executable skills and external MCP invocation from plugin
+code remain unavailable.
 
 ## REST and CLI
 
@@ -162,5 +164,5 @@ occurs outside the identity lifecycle lock.
 No local plugin worker, plugin package, extra skill or external MCP server is
 required on the client. The API host must have the approved plugin runtime and
 publisher configuration. Uploaded plugin code cannot use these tools to acquire
-Core authority or invoke arbitrary skills/external tools; typed cross-capability
-dependencies remain a separate implementation step.
+Core authority or invoke arbitrary skills/external tools. Pinned read-only hosted
+skill inputs are supported; external MCP execution remains a separate step.

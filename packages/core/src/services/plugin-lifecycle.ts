@@ -1,3 +1,4 @@
+import { resolvePluginSkills } from "./plugin-skills";
 import { randomUUID } from "node:crypto";
 import { and, eq, ne } from "drizzle-orm";
 import { type Database, pluginInstallations, pluginGenerations, pluginLifecycleReceipts, pluginStorage, pluginInvocationReceipts } from "@task-weaver/db";
@@ -16,8 +17,10 @@ const scopeKey = (scope: ResourceScope) => scope.projectId ? `project:${scope.pr
 
 /** The exact ordered permission delta is a review binding, independent of product versions. */
 export function pluginPermissionDiff(current: PluginManifest, next: PluginManifest) {
-  const added = next.permissions.filter(value => !current.permissions.includes(value)).sort();
-  const removed = current.permissions.filter(value => !next.permissions.includes(value)).sort();
+  const grants = (manifest: PluginManifest): string[] => [...manifest.permissions, ...(manifest.skillBindings ?? []).map(binding => `skill.read:${binding.name}:${binding.documentId}@${binding.version}#${binding.contentHash}`)];
+  const currentGrants = grants(current), nextGrants = grants(next);
+  const added = nextGrants.filter(value => !currentGrants.includes(value)).sort();
+  const removed = currentGrants.filter(value => !nextGrants.includes(value)).sort();
   return { added, removed, hash: capabilityDigest({ added, removed }) };
 }
 
@@ -63,11 +66,13 @@ export function createPluginLifecycle(db: Database, identity: VerifiedRequestCon
     if (!manifest.backend) throw new ValidationError("This plugin host requires a declared isolated backend");
     return verified;
   };
-  const preflight = async <T>(manifest: PluginManifest, signal: AbortSignal, activate: (execution: PluginExecution) => Promise<T>) => {
+  const preflight = async <T>(manifest: PluginManifest, scope: ResourceScope, signal: AbortSignal, activate: (execution: PluginExecution) => Promise<T>) => {
+    const skills = await transaction(tx => resolvePluginSkills(tx, identity, manifest, scope));
     const execution = await prepare(manifest, signal);
     try {
       await execution.revalidate();
-      const result = await execution.execute({ method: "__tw_preflight", input: { hostProtocol: 1 }, state: [] }, signal);
+      await transaction(tx => resolvePluginSkills(tx, identity, manifest, scope));
+      const result = await execution.execute({ method: "__tw_preflight", input: { hostProtocol: 1 }, state: [], ...(skills.length ? { skills } : {}) }, signal);
       planPluginState([], result, false);
       await execution.revalidate();
       signal.throwIfAborted();
@@ -110,11 +115,12 @@ export function createPluginLifecycle(db: Database, identity: VerifiedRequestCon
       const replay = await transaction(check);
       if (replay) return replay;
       verify(input.manifest, input.confirmedManifestHash);
-      return preflight(input.manifest, signal, execution => transaction(async tx => {
+      return preflight(input.manifest, scope, signal, execution => transaction(async tx => {
         const replay = await check(tx);
         if (replay) return replay;
         const verified = verify(input.manifest, input.confirmedManifestHash);
         await execution.revalidate(tx);
+        await resolvePluginSkills(tx, identity, input.manifest, scope);
         signal.throwIfAborted();
         const [row] = await tx.insert(pluginInstallations).values({ id: randomUUID(), ...scope, scopeKey: key, createdBy: identity.actor.id, pluginId: input.manifest.pluginId, manifest: input.manifest, manifestHash: verified.manifestHash, status: "active" }).returning();
         await generation(tx, row!, input.manifest, verified.manifestHash, verified.trust);
@@ -145,7 +151,7 @@ export function createPluginLifecycle(db: Database, identity: VerifiedRequestCon
       if (initial.replay) return initial.replay;
       const next = initial.next!;
       verify(next, input.confirmedManifestHash);
-      return preflight(next, signal, execution => transaction(async tx => {
+      return preflight(next, initial.row!, signal, execution => transaction(async tx => {
         const row = await installation(tx, id, true);
         const record = await receipt(tx, row.scopeKey, input.idempotencyKey, payloadHash);
         if (record) {
@@ -156,6 +162,7 @@ export function createPluginLifecycle(db: Database, identity: VerifiedRequestCon
         compatible(row, next, input.confirmedPermissionDiffHash);
         const verified = verify(next, input.confirmedManifestHash);
         await execution.revalidate(tx);
+        await resolvePluginSkills(tx, identity, next, row);
         await generation(tx, row, next, verified.manifestHash, verified.trust);
         signal.throwIfAborted();
         const [updated] = await tx.update(pluginInstallations).set({ manifest: next, manifestHash: verified.manifestHash, revision: row.revision + 1, status: "active", updatedAt: new Date() }).where(eq(pluginInstallations.id, id)).returning();

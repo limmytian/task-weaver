@@ -6,7 +6,8 @@ backend installation/lifecycle APIs and CLI are available for operator-configure
 plugins with an optional restricted HTML page. The dedicated artifact host and
 actual application viewer have passed local counter/browser and authority checks.
 Installed plugins can be discovered, inspected and called through the common
-MCP facade using the same broker as REST. Typed skill/external-tool dependencies
+MCP facade using the same broker as REST. Signed, scoped skill bindings hydrate
+pinned hosted instructions into isolated backends. External-tool dependencies
 inside plugin code, owner management UI, the reviewed directory and the full
 application acceptance matrix remain pending. See [plugin contracts](plugin-contracts.md).
 Use the linked project requirements and iteration documents for current priority

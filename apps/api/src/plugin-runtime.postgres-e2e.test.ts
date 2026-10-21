@@ -272,6 +272,10 @@ printf '{"result":7,"storageChanges":[{"key":"counter","expectedVersion":0,"oper
     assert.equal(result.data.replayed, index === 1);
   }
   const cli = async (...args: string[]) => JSON.parse((await promisify(execFile)(process.execPath, ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url)), "plugin", ...args, "--json"], { timeout: 15000, env: { ...process.env, PATH: "/no-local-tools", TW_CONFIG_DIR: directory, TW_API_URL: `http://127.0.0.1:${address.port}`, TW_API_KEY: credential.rawKey } })).stdout);
+  const { createDocumentSchema } = await import("@task-weaver/core");
+  const bindingDocument = await createResourceServices(f.owner.context).documentService.createDocument(db, createDocumentSchema.parse({ projectId: f.project.id, title: "CLI skill binding", docType: "skill", content: "Hosted CLI guidance" }), f.owner.context.actor);
+  const binding = await cli("skill-binding", bindingDocument.id, "--name", "guidance");
+  assert.deepEqual(binding, { name: "guidance", documentId: bindingDocument.id, version: bindingDocument.version, contentHash: capabilityDigest({ content: bindingDocument.content }) });
   assert.equal((await cli("list", "--project", f.project.id)).items.length, 2);
   assert.equal((await cli("get", fresh.data.installationId)).revision, 1);
   assert.equal((await cli("generations", fresh.data.installationId)).items.length, 1);
@@ -339,4 +343,79 @@ test("dedicated plugin artifact host binds tickets to live scoped installations 
   const hidden = await app.request(`http://127.0.0.1:3001/api/v1/plugins/${id}/viewer`, { headers });
   assert.equal(hidden.status, 404);
   t.diagnostic("Actual dedicated artifact listener serves only trusted-rendered pinned markup, strips credential exposure, rejects Core paths/capability-as-key and withholds revoked tickets. Real browser proof remains separate.");
+});
+
+test("plugin skill bindings hydrate scoped pinned instructions and recheck revisions before replay/commit", { skip: !databaseUrl, timeout: 120000 }, async t => {
+  const { createPluginLifecycle, createDocumentSchema, pluginPermissionDiff } = await import("@task-weaver/core");
+  const { resolvePluginSkills } = await import("@task-weaver/core");
+  await runMigrations(databaseUrl!);
+  const db = createDb(databaseUrl!); t.after(() => db.$client.end());
+  const f = await resourcePostgresFixture(db, databaseUrl!);
+  const agent = await f.identity.createAgent(f.owner.headers, { displayName: "Plugin skill consumer" });
+  await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: "maintainer", explicitPermissions: ["mcp.invoke"] });
+  const key = await f.identity.issueKey(f.owner.headers, agent.id, { name: "Pinned plugin skills", expiresAt: null, grants: [{ scope: "project", projectId: f.project.id, permissions: ["resource.read", "resource.write", "mcp.manage", "mcp.invoke"] }] });
+  const context = await f.auth.resolve(new Headers({ authorization: `Bearer ${key.rawKey}` }));
+  const directory = await mkdtemp(join(tmpdir(), "tw-plugin-skills-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const storage = new skillPackageStorageService.LocalSkillPackageStorageAdapter(directory);
+  const documents = createResourceServices(f.owner.context).documentService;
+  const content = "Hosted guidance";
+  const skill = await documents.createDocument(db, createDocumentSchema.parse({ projectId: f.project.id, title: "Pinned plugin guidance", content, docType: "skill" }), f.owner.context.actor);
+  const profile = { id: "skill-consumer", image: process.env.TW_SKILL_RUNTIME_TEST_IMAGE!, interpreter: "shell", timeoutMs: 5000 };
+  const script = `set -eu
+payload=$(cat)
+case "$payload" in *'"untrusted":true'*Hosted*guidance*|*Hosted*guidance*'"untrusted":true'*) ;; *) exit 17;; esac
+sleep 1
+printf '{"result":"skill-used"}'
+`;
+  const pkg = await createResourceServices(f.owner.context).skillPackageService.registerPackage(db, registerSkillPackageSchema.parse({ projectId: f.project.id, name: "Skill consumer", version: "1.0", files: [{ path: "SKILL.md", contentBase64: Buffer.from("Plugin fixture").toString("base64") }, { path: "backend.sh", contentBase64: Buffer.from(script).toString("base64") }] }), f.owner.context.actor, storage);
+  const resolved = await f.app.request("http://127.0.0.1:3001/api/v1/mcp-server/tools/tw_skill_packages_resolve", { method: "POST", headers: { authorization: `Bearer ${key.rawKey}`, "content-type": "application/json" }, body: JSON.stringify({ packageId: pkg.id, version: "1.0" }) });
+  const artifactHash = (await resolved.json() as any).structuredContent.data.manifestHash;
+  const signer = generateKeyPairSync("ed25519");
+  const configuration = () => ({ profiles: JSON.stringify([profile]), keys: { "skills-key": { publisher: "fixture", publicKey: signer.publicKey.export({ type: "spki", format: "pem" }).toString() } } });
+  const signManifest = (raw: unknown) => {
+    const value = pluginManifestSchema.parse(raw);
+    return { ...value, signature: { algorithm: "ed25519" as const, keyId: "skills-key", value: sign(null, Buffer.from(pluginSigningPayload(value)), signer.privateKey).toString("base64") } };
+  };
+  const manifest = signManifest({ schemaVersion: 1, pluginId: "fixture/skills", version: "1.0.0", displayName: "Skill consumer", artifact: { packageId: pkg.id, version: "1.0", manifestHash: artifactHash }, backend: { profileId: profile.id, profileHash: capabilityDigest(profile), entryPath: "backend.sh" }, permissions: ["backend.execute", "skills.read"], methods: [{ name: "read", access: "read" }], skillBindings: [{ name: "guidance", documentId: skill.id, version: skill.version, contentHash: capabilityDigest({ content }) }] });
+  const scope = { projectId: f.project.id };
+  const signal = AbortSignal.timeout(100000);
+  await assert.rejects(resolvePluginSkills(db, context, manifest, {}), /denied/, "project instructions cannot enter a global installation even with caller read access");
+  await assert.rejects(resolvePluginSkills(db, context, manifest, { personalOwnerId: context.actor.id, personalOwnerType: "human" }), /denied/);
+  await assert.rejects(resolvePluginSkills(db, context, manifest, { projectId: randomUUID() }), /denied/);
+  await assert.rejects(resolvePluginSkills(db, f.outsider.context, manifest, scope), /denied|not found/i);
+  const prepare = (value: PluginManifest, workerSignal: AbortSignal) => preparePluginWorker(db, context, value, storage, configuration, workerSignal);
+  const lifecycle = createPluginLifecycle(db, context, configuration, prepare);
+  const wrongHash = signManifest({ ...manifest, signature: undefined, skillBindings: [{ ...manifest.skillBindings![0], contentHash: "f".repeat(64) }] });
+  await assert.rejects(lifecycle.install({ scope: { kind: "project", ...scope }, manifest: wrongHash, confirmedManifestHash: capabilityDigest(wrongHash), confirmed: true, idempotencyKey: randomUUID() }, signal), /content changed/);
+  const largeContent = "x".repeat(32700);
+  const largeSkill = await documents.createDocument(db, createDocumentSchema.parse({ projectId: f.project.id, title: "Bounded plugin input", content: largeContent, docType: "skill" }), f.owner.context.actor);
+  const largeManifest = signManifest({ ...manifest, signature: undefined, skillBindings: [{ name: "large", documentId: largeSkill.id, version: largeSkill.version, contentHash: capabilityDigest({ content: largeContent }) }] });
+  await assert.rejects(resolvePluginSkills(db, context, largeManifest, scope), /aggregate budget/);
+  const installed = await lifecycle.install({ scope: { kind: "project", ...scope }, manifest, confirmedManifestHash: capabilityDigest(manifest), confirmed: true, idempotencyKey: randomUUID() }, signal);
+  const request = { method: "read", input: {}, expectedRevision: 1, confirmed: true, idempotencyKey: randomUUID() };
+  const invoke = (input = request) => invokeInstalledPlugin(db, context, installed.installationId, input, prepare, signal);
+  assert.equal((await invoke()).result, "skill-used");
+  assert.equal((await invoke()).replayed, true);
+  const revisedContent = "Hosted guidance revised";
+  const revised = await documents.updateDocument(db, skill.id, { expectedVersion: skill.version, content: revisedContent }, f.owner.context.actor);
+  await assert.rejects(invoke(), /Skill changed|content changed/, "a cached result cannot bypass the dependency revision guard");
+  const next = signManifest({ ...manifest, signature: undefined, version: "1.1.0", skillBindings: [{ ...manifest.skillBindings![0], version: revised.version, contentHash: capabilityDigest({ content: revisedContent }) }] });
+  const diff = pluginPermissionDiff(manifest, next);
+  assert.equal(diff.added.length, 1);
+  assert.equal(diff.removed.length, 1);
+  const upgrade = { manifest: next, expectedRevision: 1, confirmedManifestHash: capabilityDigest(next), confirmedPermissionDiffHash: pluginPermissionDiff(manifest, manifest).hash, confirmed: true, idempotencyKey: randomUUID() };
+  await assert.rejects(lifecycle.activate(installed.installationId, "upgrade", upgrade, signal), /permission diff/);
+  await lifecycle.activate(installed.installationId, "upgrade", { ...upgrade, confirmedPermissionDiffHash: diff.hash }, signal);
+  let started!: () => void;
+  const running = new Promise<void>(resolve => { started = resolve; });
+  const revokedInvocation = assert.rejects(invokeInstalledPlugin(db, context, installed.installationId, { ...request, expectedRevision: 2, idempotencyKey: randomUUID() }, async (value, workerSignal) => {
+    const worker = await prepare(value, workerSignal);
+    return { ...worker, execute: async (input, executionSignal) => { started(); return worker.execute(input, executionSignal); } };
+  }, signal), /Skill changed|content changed|abort/i);
+  await running;
+  await documents.updateDocument(db, skill.id, { expectedVersion: revised.version, content: "Revoked hosted guidance" }, f.owner.context.actor);
+  await revokedInvocation;
+  assert.equal((await db.select().from(pluginInvocationReceipts).where(eq(pluginInvocationReceipts.installationId, installed.installationId))).length, 1, "stale dependency results never commit a receipt");
+  t.diagnostic("Actual signed installation/preflight and offline containers consumed pinned hosted skill instructions; cross-scope, changed-revision replay, dependency-diff and in-flight commit guards passed.");
 });

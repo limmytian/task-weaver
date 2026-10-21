@@ -1,7 +1,7 @@
 import { Command } from 'commander'
 import { readFile } from 'node:fs/promises'
-import { installPluginSchema, upgradePluginSchema, recoverPluginSchema, changePluginStatusSchema, invokePluginSchema, pluginManifestSchema } from '@task-weaver/contracts'
-import { pluginPermissionDiff } from '@task-weaver/core'
+import { installPluginSchema, upgradePluginSchema, recoverPluginSchema, changePluginStatusSchema, invokePluginSchema, pluginManifestSchema, pluginSkillBindingSchema } from '@task-weaver/contracts'
+import { pluginPermissionDiff, capabilityDigest } from '@task-weaver/core'
 import { get, post } from '../client.js'
 import { printJson, printKv, printTable } from '../output.js'
 
@@ -54,6 +54,15 @@ export function registerPlugins(program: Command): void {
       if (opts.manifest) return printJson(data.manifest)
       if (opts.json) return printJson(data)
       printKv(data)
+    })
+  plugin.command('skill-binding <id>').description('read hosted skill instructions and print an exact binding for manifest review')
+    .requiredOption('--name <name>', 'unique binding name inside the plugin')
+    .option('--json', 'output the binding as JSON')
+    .action(async (id, opts) => {
+      const response = await post<{ structuredContent?: { ok: boolean; data?: { id: string; version: number; content: string } } }>('/api/v1/mcp-server/tools/tw_context_get', { id })
+      const skill = response.structuredContent?.ok ? response.structuredContent.data : undefined
+      if (!skill) throw new Error('The hosted skill is unavailable or cannot be read')
+      printJson(pluginSkillBindingSchema.parse({ name: opts.name, documentId: skill.id, version: skill.version, contentHash: capabilityDigest({ content: skill.content }) }))
     })
   plugin.command('diff').description('review the exact permissions added or removed between manifests')
     .requiredOption('--current <file>', 'current manifest JSON')
