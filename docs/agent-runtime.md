@@ -66,6 +66,35 @@ Schedules produce ordinary owned runs through this same execution path. Do not
 add a separate MCP change-detection scheduler. A scheduled task can query an
 authorized MCP tool and act on the result through the normal agent tools.
 
+## Shared kernel and sandbox ownership
+
+Chat and tasks should share the model/tool kernel, context loading, usage
+accounting and sandbox adapter. Their supervisors preserve different policies:
+
+| Mode | Authority and execution | Workspace lifetime |
+| --- | --- | --- |
+| Chat | Current human/session grants, explicit operation confirmation and streaming | One owned conversation workspace, reused only under an explicit retention policy |
+| Task | Bounded task delegation, durable attempt state, lease fencing and execution limits | One owned attempt workspace, cleaned after completion/cancellation |
+| Schedule | Starts the ordinary task runtime with its configured owner and policy | Same as a task; no separate sandbox lifecycle |
+
+Partners `session_delete` resolves the stored resource and checks the caller's
+`sessions:delete` permission and allowed tenant/project. These checks do not
+distinguish different TW users, conversations or runs inside that scope. A broad
+service credential can therefore affect another workspace in the same permitted
+scope if supplied its ID. TW must own the resource mapping and derive all
+session/job IDs server-side. Caller/model-supplied IDs, display names and shared
+tenant/project membership are not ownership proof. Use dedicated, restricted
+infrastructure credentials and verify both operation authority and ownership.
+
+Partners' assessed defaults reclaim idle MCP workspaces after 30 minutes, limit
+absolute lifetime to 8 hours, and sweep every 5 seconds. The reaper is a fallback:
+provider/network failures can delay deletion. The existing TW REST adapter tries
+deletion in `finally` but only logs failures; it does not establish durable cleanup
+or restart reconciliation. The new adapter needs persisted cleanup intent,
+bounded retries, confirmed deletion, quotas and recovery of its own resources.
+Chat retention must be explicit and bounded; task completion should promptly
+release its attempt workspace. Never sweep unrelated workspaces to meet a quota.
+
 ## Required execution semantics
 
 - Persist the run, attempt, workspace, jobs and logical operation request IDs.
