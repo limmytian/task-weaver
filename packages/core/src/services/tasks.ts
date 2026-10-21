@@ -15,7 +15,7 @@ import {
   requirements,
   repositories,
 } from "@task-weaver/db";
-import { emit } from "@task-weaver/realtime";
+import { emitDurable } from "./durable-events";
 import type { Actor } from "@task-weaver/contracts";
 import type {
   CreateTaskInput,
@@ -133,7 +133,7 @@ export async function createTask(
     return created!;
   });
 
-  emit({ type: "task_created", projectId: input.projectId ?? null, taskId: task!.id, title: input.title });
+  await emitDurable(db, { type: "task_created", projectId: input.projectId ?? null, taskId: task!.id, title: input.title });
 
   return task;
 }
@@ -483,7 +483,7 @@ export async function updateTask(
     metadata: { changes: fields },
   });
 
-  emit({ type: "task_updated", projectId: updated!.projectId, taskId: id });
+  await emitDurable(db, { type: "task_updated", projectId: updated!.projectId, taskId: id });
 
   return updated!;
 }
@@ -603,7 +603,7 @@ export async function updateTaskStatus(
     });
   }
 
-  emit({ type: "task_status_changed", projectId: task.projectId, taskId: id, from: task.status, to: newStatus });
+  await emitDurable(db, { type: "task_status_changed", projectId: task.projectId, taskId: id, from: task.status, to: newStatus });
 
   return updated!;
 }
@@ -635,7 +635,7 @@ export async function addTaskComment(
   });
 
   const taskForEvent = await getTask(db, taskId);
-  emit({ type: "task_commented", projectId: taskForEvent.projectId, taskId });
+  await emitDurable(db, { type: "task_commented", projectId: taskForEvent.projectId, taskId });
 
   return comment!;
 }
@@ -783,7 +783,7 @@ export async function deleteTask(
     actorType: actor.type,
   });
 
-  emit({ type: "task_deleted", projectId: task.projectId, taskId: id });
+  await emitDurable(db, { type: "task_deleted", projectId: task.projectId, taskId: id });
 
   return updated!;
 }
@@ -869,7 +869,7 @@ export async function batchCreateTasks(
   });
 
   for (const task of results) {
-    emit({ type: "task_created", projectId: task.projectId, taskId: task.id, title: task.title });
+    await emitDurable(db, { type: "task_created", projectId: task.projectId, taskId: task.id, title: task.title });
   }
 
   return results;
@@ -955,7 +955,7 @@ export async function batchUpdateTasks(
   });
 
   for (const task of results) {
-    emit({ type: "task_updated", projectId: task.projectId, taskId: task.id });
+    await emitDurable(db, { type: "task_updated", projectId: task.projectId, taskId: task.id });
   }
 
   return results;

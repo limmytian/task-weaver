@@ -1,3 +1,4 @@
+import { withEventActor } from "./durable-events";
 import { synchronizeAuthorizedMcpTools } from "./mcp-sync";
 import { getArchivedResourceReadAuthority } from "./api-keys";
 import { requireDaemonLease } from './daemon-lease-authorization';
@@ -180,7 +181,7 @@ function bindServices(context?: VerifiedRequestContext) {
               result.push(status === undefined ? await taskImplementation.getTask(txDb, id) : await taskImplementation.updateTaskStatus(txDb, id, status, actor, reason));
             }
           } else {
-            result = await implementation(...call);
+            result = await withEventActor(actor, () => implementation(...call));
             if (name === "recordMemory") {
               await requireResource(txDb, authority, "memory", result.id, "resource.write");
               await checkMemoryEntity(txDb, authority, result);

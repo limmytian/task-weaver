@@ -1,10 +1,11 @@
+import http from "node:http";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { createApiApplication } from "../apps/api/src/application";
 const apiRequire = createRequire(new URL("../apps/api/package.json", import.meta.url));
-const { createDb, runMigrations, authInstanceState, authSessions, authActors, authRateLimits, webhooks, webhookDeliveries } = apiRequire("@task-weaver/db");
+const { createDb, runMigrations, authInstanceState, authSessions, authActors, authRateLimits, webhooks, webhookDeliveries, webhookEvents } = apiRequire("@task-weaver/db");
 const { createAuthenticationRuntime, createResourceServices, createWebhookService, webhookService, createWebhookSchema, updateWebhookSchema } = apiRequire("@task-weaver/core");
 const { eq, like } = apiRequire("drizzle-orm");
 const databaseUrl = process.env.TW_AUTH_E2E_DATABASE_URL;
@@ -178,6 +179,56 @@ test("webhook authorization binds ownership, scope, credentials and outbound ret
     assert.deepEqual(await services(owner).listWebhookDeliveries(db, hook.id), []);
     await assert.rejects(services(owner).retryWebhookDelivery(db, hook.id, attempt.id));
     fail = false;
+  });
+  await t.test("transactional outbox, HTTP retries, stable signatures, deduplication and replay survive worker replacement", async () => {
+    const received: { body: string; headers: http.IncomingHttpHeaders }[] = [];
+    const receiver = http.createServer(async (request, response) => {
+      const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      received.push({ body: Buffer.concat(chunks).toString("utf8"), headers: request.headers });
+      response.writeHead(received.length === 1 ? 503 : 200); response.end("Receiver private body");
+    });
+    await new Promise<void>(resolve => receiver.listen(0, "127.0.0.1", resolve));
+    const address = receiver.address() as import("node:net").AddressInfo;
+    const managed = await services(owner).createWebhook(db, { projectId: project.id, url: `http://127.0.0.1:${address.port}/events`, events: ["task.commented"], active: true });
+    const mockedFetch = globalThis.fetch;
+    globalThis.fetch = previousFetch;
+    try {
+      await owner.service.taskService.addTaskComment(db, task.id, "Durable event evidence", owner.actor);
+      const events = await db.query.webhookEvents.findMany({ where: eq(webhookEvents.eventType, "task_commented"), orderBy: (row: any, helpers: any) => helpers.desc(row.occurredAt) });
+      const event = events.find((event: any) => event.actorId === owner.actor.id && event.event.taskId === task.id)!;
+      assert.ok(event); assert.equal(event.expandedAt, null);
+      await webhookService.expandWebhookEvent(db, event.id);
+      await webhookService.expandWebhookEvent(db, event.id);
+      const deliveries = await services(owner).listWebhookDeliveries(db, managed.id);
+      assert.equal(deliveries.length, 1);
+      await webhookService.runWebhookDeliveryOnce(db, deliveries[0].id);
+      const first = (await services(owner).listWebhookDeliveries(db, managed.id))[0];
+      assert.equal(first.status, "failed"); assert.ok(first.nextRetryAt);
+      await db.update(webhookDeliveries).set({ nextRetryAt: new Date(0) }).where(eq(webhookDeliveries.id, first.id));
+      // No in-memory queue is reused: a fresh invocation leases only persisted work.
+      await webhookService.runWebhookDeliveryOnce(db, first.id);
+      assert.equal((await services(owner).listWebhookDeliveries(db, managed.id))[0].status, "success");
+      assert.equal(received.length, 2); assert.equal(received[0].body, received[1].body);
+      assert.equal(received[0].headers["x-taskweaver-delivery"], received[1].headers["x-taskweaver-delivery"]);
+      for (const record of received) {
+        const timestamp = record.headers["x-taskweaver-timestamp"];
+        assert.equal(record.headers["x-taskweaver-signature-v1"], `t=${timestamp},v1=${createHmac("sha256", managed.secret).update(`${timestamp}.${record.body}`).digest("hex")}`);
+      }
+      const history = await services(owner).getWebhookDeliveryAttempts(db, managed.id, first.id);
+      assert.deepEqual(history.map((attempt: any) => attempt.outcome), ["success", "failed"]);
+      const replayed = await services(owner).retryWebhookDelivery(db, managed.id, first.id);
+      assert.equal(replayed.eventId, first.eventId); assert.notEqual(replayed.id, first.id); assert.equal(replayed.replayOf, first.id);
+      const before = await db.select().from(webhookEvents);
+      await assert.rejects(db.transaction(async (tx: any) => {
+        await owner.service.taskService.addTaskComment(tx, task.id, "Rolled-back outbox", owner.actor);
+        throw new Error("Rollback fixture");
+      }));
+      assert.equal((await db.select().from(webhookEvents)).length, before.length);
+    } finally {
+      globalThis.fetch = mockedFetch;
+      await services(owner).deleteWebhook(db, managed.id);
+      await new Promise<void>(resolve => receiver.close(() => resolve()));
+    }
   });
   await t.test("membership reductions and disabled subjects stop existing bindings", async () => {
     await runtime.identity.setMembership(owner.headers, project.id, member.actor.id, { role: "maintainer" });

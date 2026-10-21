@@ -115,6 +115,7 @@ const consoleLogger: ApplicationLogger = {
 function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
   let webhookQueue = Promise.resolve();
   let pendingWebhooks = 0;
+  let webhookBackground: Promise<void> | undefined;
   return {
     apiRoutes: [
       {
@@ -247,6 +248,21 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
       },
     ],
     workers: [
+      {
+        id: "durable-webhook-delivery",
+        start(context: ApiRuntimeContext) {
+          webhookBackground = (async () => {
+            while (!context.signal.aborted) {
+              try {
+                for (let i = 0; i < 50 && !context.signal.aborted && await webhookService.expandWebhookEvent(context.db); i++) { /* Bounded durable fanout. */ }
+                for (let i = 0; i < 20 && !context.signal.aborted && await webhookService.runWebhookDeliveryOnce(context.db); i++) { /* Leased delivery batch. */ }
+              } catch { context.logger.error("Durable webhook worker will retry after an internal failure"); }
+              if (!context.signal.aborted) await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          })();
+        },
+        async stop() { await webhookBackground; },
+      },
       {
         id: "skill-preset-sync",
         start: async (context: ApiRuntimeContext) => {

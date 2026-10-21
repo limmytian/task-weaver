@@ -159,4 +159,11 @@ webhooksRouter.post("/:id/deliveries/:deliveryId/retry", async (c) => {
   return c.json(await createWebhookService(c.get("identity")).retryWebhookDelivery(c.get("db"), c.req.param("id"), c.req.param("deliveryId")));
 });
 
+webhooksRouter.get("/:id/deliveries/:deliveryId/attempts", async c => {
+  return c.json(await createWebhookService(c.get("identity")).getWebhookDeliveryAttempts(c.get("db"), c.req.param("id"), c.req.param("deliveryId")));
+});
+webhooksRouter.post("/:id/deliveries/:deliveryId/replay", async c => {
+  return c.json(await createWebhookService(c.get("identity")).retryWebhookDelivery(c.get("db"), c.req.param("id"), c.req.param("deliveryId")));
+});
+
 export default webhooksRouter;

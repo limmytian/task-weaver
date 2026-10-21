@@ -26,7 +26,7 @@ import type {
   CompareDocumentVersionsInput,
   RevertDocumentInput,
 } from "@task-weaver/contracts";
-import { emit } from "@task-weaver/realtime";
+import { emitDurable } from "./durable-events";
 import { NotFoundError, ConflictError, ValidationError } from "@task-weaver/contracts";
 import {
   profileDocumentsCondition,
@@ -248,7 +248,7 @@ export async function createDocument(
     reconcileDocumentEmbeddingCoverage(db, doc!, actor)
   ));
 
-  emit({ type: "document_created", projectId: doc!.projectId, documentId: doc!.id, title: doc!.title });
+  await emitDurable(db, { type: "document_created", projectId: doc!.projectId, documentId: doc!.id, title: doc!.title });
 
   return doc!;
 }
@@ -445,7 +445,7 @@ export async function updateDocument(
     ));
   }
 
-  emit({ type: "document_updated", documentId: id });
+  await emitDurable(db, { type: "document_updated", documentId: id });
 
   return updated!;
 }
@@ -470,7 +470,7 @@ export async function deleteDocument(db: Database, id: string, actor: Actor) {
     actorType: actor.type,
   });
 
-  emit({ type: "document_deleted", documentId: id });
+  await emitDurable(db, { type: "document_deleted", documentId: id });
 }
 
 // -- Links --
@@ -500,7 +500,7 @@ export async function linkDocuments(
     metadata: { targetDocId, linkType },
   });
 
-  emit({ type: "document_linked", sourceDocId, targetDocId });
+  await emitDurable(db, { type: "document_linked", sourceDocId, targetDocId });
 
   return link!;
 }
@@ -526,7 +526,7 @@ export async function linkDocumentToTask(
     metadata: { taskId, linkType },
   });
 
-  emit({ type: "document_task_linked", documentId, taskId });
+  await emitDurable(db, { type: "document_task_linked", documentId, taskId });
 
   return link!;
 }
@@ -537,7 +537,7 @@ export async function unlinkDocuments(db: Database, linkId: string, _expectedPar
     .where(eq(documentLinks.id, linkId))
     .returning();
   if (!deleted) throw new NotFoundError("Document link not found");
-  emit({ type: "document_unlinked", linkId, sourceDocId: deleted.sourceDocId, targetDocId: deleted.targetDocId });
+  await emitDurable(db, { type: "document_unlinked", linkId, sourceDocId: deleted.sourceDocId, targetDocId: deleted.targetDocId });
   return deleted;
 }
 
@@ -547,7 +547,7 @@ export async function unlinkDocumentFromTask(db: Database, linkId: string, _expe
     .where(eq(documentTaskLinks.id, linkId))
     .returning();
   if (!deleted) throw new NotFoundError("Document-task link not found");
-  emit({ type: "document_task_unlinked", linkId, documentId: deleted.documentId, taskId: deleted.taskId });
+  await emitDurable(db, { type: "document_task_unlinked", linkId, documentId: deleted.documentId, taskId: deleted.taskId });
   return deleted;
 }
 
@@ -819,7 +819,7 @@ export async function revertDocument(
 
   await reconcileDocumentEmbeddingCoverage(db, updated!, actor);
 
-  emit({ type: "document_updated", documentId });
+  await emitDurable(db, { type: "document_updated", documentId });
 
   return updated!;
 }

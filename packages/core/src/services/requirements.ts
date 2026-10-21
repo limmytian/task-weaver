@@ -29,7 +29,7 @@ import type {
   CreateExecutionSliceInput,
   UpdateExecutionSliceInput,
 } from "@task-weaver/contracts";
-import { emit } from "@task-weaver/realtime";
+import { emitDurable } from "./durable-events";
 import { assertRequirementLease } from "./claims";
 import {
   assertRequirementStatusTransition,
@@ -84,7 +84,7 @@ export async function createRequirement(
     actorType: actor.type,
   });
 
-  emit({ type: "requirement_created", projectId: input.projectId, requirementId: requirement!.id, title: input.title });
+  await emitDurable(db, { type: "requirement_created", projectId: input.projectId, requirementId: requirement!.id, title: input.title });
 
   return requirement!;
 }
@@ -167,7 +167,7 @@ export async function addWorkflowInput(db: Database, requirementId: string, inpu
   }
   const [registered] = await db.insert(workflowInputs).values({ requirementId, outputId: input.outputId, taskId: input.taskId, executionSliceId: input.executionSliceId, createdBy: actor.id }).returning();
   await db.insert(activityLog).values({ entityType: "requirement", entityId: requirementId, action: "workflow_input_registered", actorId: actor.id, actorType: actor.type, metadata: { outputId: input.outputId, taskId: input.taskId ?? null, executionSliceId: input.executionSliceId ?? null } });
-  emit({ type: "requirement_updated", projectId: requirement.projectId, requirementId });
+  await emitDurable(db, { type: "requirement_updated", projectId: requirement.projectId, requirementId });
   return registered!;
 }
 
@@ -248,7 +248,7 @@ export async function registerWorkflowOutput(
     actorId: actor.id, actorType: actor.type,
     metadata: { outputId: output!.id, type: input.type, nodeId: input.nodeId ?? null },
   });
-  emit({ type: "requirement_updated", projectId: requirement.projectId, requirementId });
+  await emitDurable(db, { type: "requirement_updated", projectId: requirement.projectId, requirementId });
   return output!;
 }
 
@@ -354,7 +354,7 @@ export async function advanceWorkflowStage(
     actorId: actor.id, actorType: actor.type,
     metadata: { stage: input.stage, decision: input.decision, reason: input.reason, checks: input.checks, workflowRevision: requirement.workflowRevision, from: requirement.workflowState, to: state, status: nextStatus },
   });
-  emit({ type: "requirement_updated", projectId: requirement.projectId, requirementId });
+  await emitDurable(db, { type: "requirement_updated", projectId: requirement.projectId, requirementId });
   return updated;
 }
 
@@ -603,7 +603,7 @@ export async function updateRequirement(
       .where(eq(requirementClaims.requirementId, id));
   }
 
-  emit({ type: "requirement_updated", projectId: updated!.projectId, requirementId: id });
+  await emitDurable(db, { type: "requirement_updated", projectId: updated!.projectId, requirementId: id });
 
   return updated!;
 }
@@ -634,7 +634,7 @@ export async function deleteRequirement(
     .delete(requirementClaims)
     .where(eq(requirementClaims.requirementId, id));
 
-  emit({ type: "requirement_deleted", projectId: updated!.projectId, requirementId: id });
+  await emitDurable(db, { type: "requirement_deleted", projectId: updated!.projectId, requirementId: id });
 
   return updated!;
 }
@@ -743,7 +743,7 @@ export async function createExecutionSlice(
     },
   });
 
-  emit({ type: "requirement_updated", projectId: requirement.projectId, requirementId });
+  await emitDurable(db, { type: "requirement_updated", projectId: requirement.projectId, requirementId });
 
   return getExecutionSlice(db, slice!.id, compact);
 }
@@ -805,7 +805,7 @@ export async function updateExecutionSlice(
     metadata: { sliceId, changes: fields },
   });
 
-  emit({ type: "requirement_updated", projectId: existing.requirement.projectId, requirementId: existing.requirementId });
+  await emitDurable(db, { type: "requirement_updated", projectId: existing.requirement.projectId, requirementId: existing.requirementId });
 
   return getExecutionSlice(db, updated!.id, compact);
 }
@@ -832,7 +832,7 @@ export async function deleteExecutionSlice(db: Database, sliceId: string, actor:
     metadata: { sliceId, title: existing.title },
   });
 
-  emit({ type: "requirement_updated", projectId: existing.requirement.projectId, requirementId: existing.requirementId });
+  await emitDurable(db, { type: "requirement_updated", projectId: existing.requirement.projectId, requirementId: existing.requirementId });
 
   return deleted!;
 }
@@ -936,7 +936,7 @@ export async function addRequirementDependency(
     metadata: { dependsOnRequirementId, type, description },
   });
 
-  emit({ type: "requirement_updated", projectId: requirement.projectId, requirementId });
+  await emitDurable(db, { type: "requirement_updated", projectId: requirement.projectId, requirementId });
 
   return dep!;
 }

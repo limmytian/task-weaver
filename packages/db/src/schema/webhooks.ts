@@ -9,6 +9,7 @@ import {
   text,
   timestamp,
   uuid,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { projects } from "./projects";
 import { authActors } from "./auth";
@@ -62,6 +63,11 @@ export const webhookDeliveries = pgTable(
       .references(() => webhooks.id, { onDelete: "cascade" })
       .notNull(),
     bindingId: uuid("binding_id"),
+    eventId: uuid("event_id"),
+    replayOf: uuid("replay_of"),
+    leaseId: uuid("lease_id"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     eventType: text("event_type").notNull(),
     payload: jsonb("payload").notNull(),
     status: webhookStatusEnum("status").notNull().default("pending"),
@@ -75,8 +81,35 @@ export const webhookDeliveries = pgTable(
       .notNull(),
   },
   (table) => [
+    uniqueIndex("webhook_delivery_logical_event").on(table.webhookId, table.bindingId, table.eventId).where(sql`${table.replayOf} IS NULL`),
     index("idx_webhook_deliveries_webhook").on(table.webhookId),
     index("idx_webhook_deliveries_status").on(table.status),
     index("idx_webhook_deliveries_created").on(table.createdAt),
   ],
 );
+
+/** The business transaction owns this event; fanout may be resumed after any process restart. */
+export const webhookEvents = pgTable("webhook_events", {
+  id: uuid("id").primaryKey(),
+  version: integer("version").notNull().default(1),
+  eventType: text("event_type").notNull(),
+  projectId: uuid("project_id"),
+  actorId: text("actor_id"),
+  actorType: text("actor_type"),
+  causationId: uuid("causation_id"),
+  correlationId: uuid("correlation_id").notNull(),
+  event: jsonb("event").$type<Record<string, unknown>>().notNull(),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+  expandedAt: timestamp("expanded_at", { withTimezone: true }),
+}, table => [index("webhook_events_pending").on(table.expandedAt, table.occurredAt)]);
+
+export const webhookDeliveryAttempts = pgTable("webhook_delivery_attempts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  deliveryId: uuid("delivery_id").notNull().references(() => webhookDeliveries.id, { onDelete: "cascade" }),
+  attempt: integer("attempt").notNull(),
+  outcome: text("outcome", { enum: ["pending", "success", "failed", "unknown", "revoked"] }).notNull(),
+  httpStatus: integer("http_status"),
+  errorCode: text("error_code"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+}, table => [uniqueIndex("webhook_attempt_identity").on(table.deliveryId, table.attempt)]);

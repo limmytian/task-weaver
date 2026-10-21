@@ -1,5 +1,5 @@
-import { eq, and, or, desc, inArray, isNull, type SQL } from "drizzle-orm";
-import { type Database, webhooks, webhookDeliveries } from "@task-weaver/db";
+import { eq, and, or, desc, inArray, isNull, isNotNull, lte, asc, type SQL } from "drizzle-orm";
+import { type Database, webhooks, webhookDeliveries, webhookEvents, webhookDeliveryAttempts } from "@task-weaver/db";
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { AuthenticationError, AuthorizationError, NotFoundError, ValidationError, stableActorReferenceSchema, credentialGrantsSchema, type AuthorizationGrant, type VerifiedRequestContext, type CreateWebhookInput, type RealtimeEvent, type UpdateWebhookInput } from "@task-weaver/contracts";
 import { lockIdentityLifecycle, auditIdentity } from "./auth-security";
@@ -20,7 +20,7 @@ function dto(row: Webhook) {
   return { id: row.id, projectId: row.projectId, ownerActorId: row.ownerActorId, url: row.url, events: row.events, active: row.active, description: row.description, createdAt: row.createdAt, updatedAt: row.updatedAt };
 }
 function deliveryDto(row: Delivery) {
-  return { id: row.id, webhookId: row.webhookId, eventType: row.eventType, status: row.status, httpStatus: row.httpStatus, retryCount: row.retryCount, createdAt: row.createdAt };
+  return { id: row.id, webhookId: row.webhookId, eventType: row.eventType, status: row.status, httpStatus: row.httpStatus, retryCount: row.retryCount, eventId: row.eventId, replayOf: row.replayOf, nextRetryAt: row.nextRetryAt, deliveredAt: row.deliveredAt, errorCode: row.errorMessage, createdAt: row.createdAt };
 }
 function manage(authority: ResourceAuthority, row: { projectId?: string | null }) {
   requireScope(authority, row, "resource.read");
@@ -54,7 +54,7 @@ async function payloadFor(db: Database, row: Webhook, event: RealtimeEvent) {
   // The stored ceiling contains only the configured project or global scope, never private spaces.
   const data = await authorizedRealtimeEvent(db, authority, event);
   if (!data || (data.projectId ?? null) !== row.projectId) return null;
-  return { event: eventMap[event.type]!, timestamp: new Date().toISOString(), data };
+  return { event: eventMap[event.type]!, timestamp: event.serverTime ?? new Date().toISOString(), data };
 }
 
 /** All management requires a verified context; no legacy namespace can authorize requests. */
@@ -127,9 +127,19 @@ export function createWebhookService(context: VerifiedRequestContext) {
         return attempts.map(deliveryDto);
       });
     },
+    async getWebhookDeliveryAttempts(db: Database, id: string, deliveryId: string) {
+      return operation(db, async (tx, authority) => {
+        const hook = await get(tx, authority, id);
+        const delivery = await tx.query.webhookDeliveries.findFirst({ where: and(eq(webhookDeliveries.id, deliveryId), eq(webhookDeliveries.webhookId, id), eq(webhookDeliveries.bindingId, hook.bindingId!)) });
+        if (!delivery) throw new NotFoundError("Delivery not found");
+        return tx.select().from(webhookDeliveryAttempts).where(eq(webhookDeliveryAttempts.deliveryId, deliveryId)).orderBy(desc(webhookDeliveryAttempts.attempt)).limit(100);
+      });
+    },
     async sendTestEvent(db: Database, id: string) {
       const row = await operation(db, (tx, authority) => get(tx, authority, id));
-      return dispatch(db, row.id, row.bindingId, null, true);
+      const delivery = await enqueueDelivery(db, row, null, true);
+      await runWebhookDeliveryOnce(db, delivery.id);
+      return deliveryDto((await db.query.webhookDeliveries.findFirst({ where: eq(webhookDeliveries.id, delivery.id) }))!);
     },
     async retryWebhookDelivery(db: Database, id: string, deliveryId: string) {
       if (!stableActorReferenceSchema.safeParse({ id: deliveryId, type: "human" }).success) throw new ValidationError("Invalid delivery ID");
@@ -137,62 +147,139 @@ export function createWebhookService(context: VerifiedRequestContext) {
         const row = await get(tx, authority, id);
         if (!row.bindingId) throw new NotFoundError("Delivery not found");
         const attempt = await tx.query.webhookDeliveries.findFirst({ where: and(eq(webhookDeliveries.id, deliveryId), eq(webhookDeliveries.webhookId, id), eq(webhookDeliveries.bindingId, row.bindingId)) });
-        if (!attempt || attempt.status !== "failed") throw new NotFoundError("Delivery not found");
+        if (!attempt || !["failed", "success"].includes(attempt.status)) throw new NotFoundError("Delivery not found");
         return { row, attempt };
       });
       const payload = attempt.attempt.payload as { data: RealtimeEvent };
-      return dispatch(db, id, attempt.row.bindingId, payload.data, attempt.attempt.eventType === "webhook.test", attempt.attempt.retryCount + 1);
+      await liveBinding(db, attempt.row);
+      if (attempt.attempt.eventType !== "webhook.test" && !await payloadFor(db, attempt.row, payload.data)) throw new AuthorizationError();
+      const replay = await enqueueDelivery(db, attempt.row, payload.data, attempt.attempt.eventType === "webhook.test", attempt.attempt);
+      await runWebhookDeliveryOnce(db, replay.id);
+      return deliveryDto((await db.query.webhookDeliveries.findFirst({ where: eq(webhookDeliveries.id, replay.id) }))!);
     },
   };
 }
 
-/** Recheck persisted owner, credential, ceiling, configuration generation and resources at dispatch. */
-async function dispatch(db: Database, id: string, bindingId: string | null, event: RealtimeEvent | null, test = false, retryCount = 0) {
-  let responsePromise: Promise<Response> | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+async function enqueueDelivery(db: Database, row: Webhook, event: RealtimeEvent | null, test = false, replay?: Delivery) {
+  return db.transaction(async tx => {
+    await lockIdentityLifecycle(tx);
+    const current = await tx.query.webhooks.findFirst({ where: eq(webhooks.id, row.id) });
+    if (!current || current.bindingId !== row.bindingId || !current.active) throw new AuthorizationError();
+    await liveBinding(tx as unknown as Database, current);
+    const id = replay?.eventId ?? event?.eventId ?? randomUUID();
+    const payload = test ? { event: "webhook.test", timestamp: new Date().toISOString(), data: { webhookId: row.id, message: "This is a test event from Task Weaver" } }
+      : event ? await payloadFor(tx as unknown as Database, current, event) : null;
+    if (!payload) throw new AuthorizationError();
+    const [delivery] = await tx.insert(webhookDeliveries).values({ webhookId: row.id, bindingId: row.bindingId, eventId: id,
+      eventType: payload.event, payload: { version: 1, id, ...payload }, replayOf: replay?.id,
+      retryCount: replay ? replay.retryCount + 1 : 0, status: "pending" }).onConflictDoNothing().returning();
+    if (delivery) return delivery;
+    const existing = await tx.query.webhookDeliveries.findFirst({ where: and(eq(webhookDeliveries.webhookId, row.id), eq(webhookDeliveries.bindingId, row.bindingId!), eq(webhookDeliveries.eventId, id), isNull(webhookDeliveries.replayOf)) });
+    if (!existing) throw new NotFoundError("Delivery not found");
+    return existing;
+  });
+}
+
+/** Durable fanout is atomic with marking an event expanded; duplicate notifications cannot multiply deliveries. */
+export async function expandWebhookEvent(db: Database, eventId?: string) {
+  return db.transaction(async tx => {
+    await lockIdentityLifecycle(tx);
+    const [event] = await tx.select().from(webhookEvents).where(and(isNull(webhookEvents.expandedAt), eventId ? eq(webhookEvents.id, eventId) : undefined)).orderBy(asc(webhookEvents.occurredAt)).limit(1).for("update", { skipLocked: true });
+    if (!event) return false;
+    const source = event.event as RealtimeEvent;
+    if (eventMap[source.type]) {
+      const hooks = await tx.select().from(webhooks).where(and(eq(webhooks.active, true), lte(webhooks.createdAt, event.occurredAt)));
+      for (const hook of hooks) {
+        try {
+          const payload = await payloadFor(tx as unknown as Database, hook, source);
+          if (!payload) continue;
+          await tx.insert(webhookDeliveries).values({ webhookId: hook.id, bindingId: hook.bindingId, eventId: event.id,
+            eventType: payload.event, payload: { version: event.version, id: event.id, ...payload, actor: event.actorId ? { id: event.actorId, type: event.actorType } : null,
+              causationId: event.causationId, correlationId: event.correlationId }, status: "pending" }).onConflictDoNothing();
+        } catch (error) { if (!(error instanceof AuthenticationError || error instanceof AuthorizationError || error instanceof NotFoundError)) throw error; }
+      }
+    }
+    await tx.update(webhookEvents).set({ expandedAt: new Date() }).where(eq(webhookEvents.id, event.id));
+    return true;
+  });
+}
+
+/** One leased attempt, with bounded retries and a stable delivery/event identity for receiver deduplication. */
+export async function runWebhookDeliveryOnce(db: Database, deliveryId?: string) {
+  const now = new Date(), leaseId = randomUUID();
+  const delivery = await db.transaction(async tx => {
+    const [row] = await tx.select().from(webhookDeliveries).where(and(isNotNull(webhookDeliveries.eventId),
+      deliveryId ? eq(webhookDeliveries.id, deliveryId) : undefined,
+      or(eq(webhookDeliveries.status, "pending"), and(eq(webhookDeliveries.status, "failed"), isNotNull(webhookDeliveries.nextRetryAt), lte(webhookDeliveries.nextRetryAt, now))),
+      or(isNull(webhookDeliveries.leaseExpiresAt), lte(webhookDeliveries.leaseExpiresAt, now))))
+      .orderBy(asc(webhookDeliveries.createdAt)).limit(1).for("update", { skipLocked: true });
+    if (!row) return null;
+    const [claimed] = await tx.update(webhookDeliveries).set({ leaseId, leaseExpiresAt: new Date(Date.now() + 30_000) }).where(eq(webhookDeliveries.id, row.id)).returning();
+    return claimed!;
+  });
+  if (!delivery) return false;
+  const fence = and(eq(webhookDeliveries.id, delivery.id), eq(webhookDeliveries.leaseId, leaseId));
+  const prior = await db.select().from(webhookDeliveryAttempts).where(eq(webhookDeliveryAttempts.deliveryId, delivery.id)).orderBy(desc(webhookDeliveryAttempts.attempt)).limit(1);
+  const attempt = (prior[0]?.attempt ?? -1) + 1;
+  await db.update(webhookDeliveryAttempts).set({ outcome: "unknown", errorCode: "WORKER_INTERRUPTED", endedAt: new Date() })
+    .where(and(eq(webhookDeliveryAttempts.deliveryId, delivery.id), eq(webhookDeliveryAttempts.outcome, "pending")));
+  const [receipt] = await db.insert(webhookDeliveryAttempts).values({ deliveryId: delivery.id, attempt, outcome: "pending" }).returning();
   const controller = new AbortController();
-  let delivery: Delivery | undefined;
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  let status: number | null = null, errorCode: string | null = null, retryable = false;
   try {
+    let responsePromise: Promise<Response> | undefined;
     await db.transaction(async tx => {
       await lockIdentityLifecycle(tx);
-      const txDb = tx as unknown as Database;
-      const row = await tx.query.webhooks.findFirst({ where: eq(webhooks.id, id) });
-      if (!row || row.bindingId !== bindingId || !row.active) throw new AuthorizationError();
-      await liveBinding(txDb, row);
-      const payload = test ? { event: "webhook.test", timestamp: new Date().toISOString(), data: { webhookId: id, message: "This is a test event from Task Weaver" } } : event ? await payloadFor(txDb, row, event) : null;
-      if (!payload) throw new AuthorizationError();
-      const body = JSON.stringify(payload);
-      [delivery] = await tx.insert(webhookDeliveries).values({ webhookId: id, bindingId, eventType: payload.event, payload, status: "pending", retryCount }).returning();
-      const signature = createHmac("sha256", row.secret).update(body).digest("hex");
-      timer = setTimeout(() => controller.abort(), 10_000);
-      // Start dispatch while authority is locked. Revocation cannot restore queued/retry eligibility.
-      responsePromise = fetch(row.url, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/json", "X-TaskWeaver-Event": payload.event, "X-TaskWeaver-Signature": `sha256=${signature}`, "X-TaskWeaver-Delivery": delivery!.id }, body, signal: controller.signal });
+      const hook = await tx.query.webhooks.findFirst({ where: eq(webhooks.id, delivery.webhookId) });
+      if (!hook || hook.bindingId !== delivery.bindingId || !hook.active) throw new AuthorizationError();
+      await liveBinding(tx as unknown as Database, hook);
+      const payload = delivery.payload as { data: RealtimeEvent };
+      if (delivery.eventType !== "webhook.test" && !await payloadFor(tx as unknown as Database, hook, payload.data)) throw new AuthorizationError();
+      const current = await tx.query.webhookDeliveries.findFirst({ where: fence });
+      if (!current || !current.leaseExpiresAt || current.leaseExpiresAt <= new Date()) throw new AuthorizationError();
+      const body = JSON.stringify(delivery.payload), timestamp = Math.floor(Date.now() / 1000).toString();
+      const signature = createHmac("sha256", hook.secret).update(body).digest("hex");
+      const signed = createHmac("sha256", hook.secret).update(`${timestamp}.${body}`).digest("hex");
+      responsePromise = fetch(hook.url, { method: "POST", redirect: "manual", signal: controller.signal, body, headers: {
+        "Content-Type": "application/json", "X-TaskWeaver-Event": delivery.eventType, "X-TaskWeaver-Event-Id": delivery.eventId!,
+        "X-TaskWeaver-Delivery": delivery.id, "X-TaskWeaver-Timestamp": timestamp,
+        "X-TaskWeaver-Signature": `sha256=${signature}`, "X-TaskWeaver-Signature-V1": `t=${timestamp},v1=${signed}`,
+      } });
       responsePromise.catch(() => {});
     });
     const response = await responsePromise!;
-    const [updated] = await db.update(webhookDeliveries).set({ status: response.ok ? "success" : "failed", httpStatus: response.status, errorMessage: response.ok ? null : `HTTP ${response.status}` }).where(eq(webhookDeliveries.id, delivery!.id)).returning();
+    status = response.status;
+    if (!response.ok) { errorCode = `HTTP_${status}`; retryable = [408, 425, 429].includes(status) || status >= 500; }
     await response.body?.cancel();
-    return deliveryDto(updated!);
   } catch (error) {
-    if (!delivery) throw error;
     controller.abort();
-    const [updated] = await db.update(webhookDeliveries).set({ status: "failed", errorMessage: "Webhook delivery failed" }).where(eq(webhookDeliveries.id, delivery.id)).returning();
-    if (!updated) throw new NotFoundError("Delivery not found");
-    return deliveryDto(updated);
+    const revoked = error instanceof AuthorizationError || error instanceof AuthenticationError || error instanceof NotFoundError;
+    errorCode = revoked ? "AUTHORITY_REVOKED" : "TRANSPORT_FAILED"; retryable = !revoked;
   } finally { clearTimeout(timer); }
+  const succeeded = errorCode === null;
+  const retryCount = Math.max(delivery.retryCount, attempt);
+  await db.transaction(async tx => {
+    const held = await tx.query.webhookDeliveries.findFirst({ where: fence });
+    if (!held) return;
+    await tx.update(webhookDeliveryAttempts).set({ outcome: succeeded ? "success" : errorCode === "AUTHORITY_REVOKED" ? "revoked" : "failed",
+      httpStatus: status, errorCode, endedAt: new Date() }).where(eq(webhookDeliveryAttempts.id, receipt!.id));
+    await tx.update(webhookDeliveries).set({ status: succeeded ? "success" : "failed", httpStatus: status, errorMessage: errorCode,
+      retryCount, nextRetryAt: !succeeded && retryable && attempt < 5 ? new Date(Date.now() + Math.min(3600_000, 1000 * 2 ** attempt)) : null,
+      deliveredAt: succeeded ? new Date() : null, leaseId: null, leaseExpiresAt: null }).where(fence);
+  });
+  return true;
 }
 
-/** Background fanout can use only persisted, revocable bindings established by verified management. */
+/** Compatibility notifications enqueue durable identity first; periodic workers recover without any notification. */
 export async function deliverEvent(db: Database, event: RealtimeEvent) {
   if (!eventMap[event.type]) return;
-  const rows = await db.select({ id: webhooks.id, bindingId: webhooks.bindingId }).from(webhooks).where(eq(webhooks.active, true));
-  // Sequential bounded dispatch avoids an unbounded burst of external requests and database locks.
-  for (const row of rows) {
-    try { await dispatch(db, row.id, row.bindingId, event); }
-    catch (error) {
-      if (!(error instanceof AuthenticationError || error instanceof AuthorizationError || error instanceof NotFoundError)) throw error;
-    }
-  }
+  const id = event.eventId ?? randomUUID(), occurredAt = new Date(event.serverTime ?? Date.now());
+  await db.insert(webhookEvents).values({ id, eventType: event.type, projectId: "projectId" in event ? event.projectId : null,
+    correlationId: id, event: { ...event, eventId: id, serverTime: occurredAt.toISOString() }, occurredAt }).onConflictDoNothing();
+  await expandWebhookEvent(db, id);
+  const deliveries = await db.select({ id: webhookDeliveries.id }).from(webhookDeliveries).where(eq(webhookDeliveries.eventId, id)).limit(100);
+  for (const delivery of deliveries) await runWebhookDeliveryOnce(db, delivery.id);
 }
 
 /** Unbound compatibility exports stay closed. */

@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { subscribe } from "@task-weaver/realtime";
 import {
   executorAvailability,
+  webhookEvents,
   activityLog,
   daemonWorkerProgress,
   daemonWorkerProgressHistory,
@@ -136,6 +137,7 @@ class FakeDb {
   taskDependencies: Row[] = [];
   taskStatusLog: Row[] = [];
   activityLog: Row[] = [];
+  webhookEvents: Row[] = [];
   daemonWorkerProgress = new Map<string, Row>();
   daemonWorkerProgressHistory: Row[] = [];
   executedSqlTexts: string[] = [];
@@ -356,6 +358,7 @@ class FakeDb {
         }
         const inserted = this.insertRow(table, values);
         return {
+          onConflictDoNothing: async () => inserted,
           returning: async () => [inserted],
           then: (resolve: (value: Row) => unknown) => Promise.resolve(resolve(inserted)),
         };
@@ -470,6 +473,7 @@ class FakeDb {
     else if (table === requirementDependencies) this.requirementDependencies.push(row);
     else if (table === taskStatusLog) this.taskStatusLog.push(row);
     else if (table === activityLog) this.activityLog.push(row);
+    else if (table === webhookEvents) this.webhookEvents.push(row);
     else if (table === taskDependencies) this.taskDependencies.push(row);
     else if (table === daemons) this.daemons.set(row.id, row);
     else if (table === daemonWorkerProgressHistory) this.daemonWorkerProgressHistory.push(row);
