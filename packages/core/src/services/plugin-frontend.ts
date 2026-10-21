@@ -115,7 +115,7 @@ export function renderPluginViewer(raw: unknown) {
   const nonce = randomBytes(24).toString("base64");
   const script = `"use strict";(()=>{
 const config=${jsonForScript(ticket)},frame=document.getElementById("tw-plugin-frame"),status=document.getElementById("tw-viewer-status");
-let epoch=0,busy=false,frameReady=false;frame.addEventListener("load",()=>{epoch++;frameReady=false;frame.contentWindow.postMessage({protocol:1,kind:"initialize",installationId:config.installationId,revision:config.revision,manifestHash:config.manifestHash,nonce:config.bridgeNonce},"*");});
+let epoch=0,busy=false,frameReady=false;frame.addEventListener("load",()=>{epoch++;frameReady=false;status.textContent="Plugin frame changed. Waiting for isolation verification.";delete status.dataset.isolation;frame.contentWindow.postMessage({protocol:1,kind:"initialize",installationId:config.installationId,revision:config.revision,manifestHash:config.manifestHash,nonce:config.bridgeNonce},"*");});
 window.addEventListener("message",async event=>{
 if(event.source!==frame.contentWindow||event.origin!=="null")return;const message=event.data;
 if(!message||typeof message!=="object"||message.protocol!==1||message.installationId!==config.installationId||message.revision!==config.revision||message.manifestHash!==config.manifestHash||message.nonce!==config.bridgeNonce)return;
@@ -129,8 +129,8 @@ status.textContent="Running plugin method…";
 try{
 const challenge=await fetch("/api/auth/csrf",{credentials:"same-origin",cache:"no-store"});if(!challenge.ok)throw Error();const csrf=await challenge.json();
 const response=await fetch("/api/plugins/"+encodeURIComponent(config.installationId)+"/invoke",{method:"POST",credentials:"same-origin",cache:"no-store",headers:{"content-type":"application/json","x-csrf-token":csrf.csrfToken},body:JSON.stringify({method:message.method,input:message.input,expectedRevision:config.revision,idempotencyKey:message.requestId,confirmed:true})});
-if(!response.ok)throw Error();const result=await response.json();if(new TextEncoder().encode(JSON.stringify(result)).length>32768)throw Error();reply={...reply,ok:true,result:result.result};status.textContent="Updated";
-}catch{status.textContent="Request failed. Check your session, project permissions or installation status before retrying.";}
+if(!response.ok)throw Error();const result=await response.json();if(new TextEncoder().encode(JSON.stringify(result)).length>32768)throw Error();reply={...reply,ok:true,result:result.result};if(epoch===requestEpoch)status.textContent="Updated";
+}catch{if(epoch===requestEpoch)status.textContent="Request failed. Check your session, project permissions or installation status before retrying.";}
 finally{busy=false;}
 // Opaque sandbox origins require '*'; send only to the pinned frame and suppress results after a navigation.
 if(frame.contentWindow===source&&epoch===requestEpoch)source.postMessage(reply,"*");

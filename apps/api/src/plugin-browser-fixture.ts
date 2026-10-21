@@ -10,7 +10,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
-import { createDb, runMigrations } from "@task-weaver/db";
+import { eq } from "drizzle-orm";
+import { startPluginBrowserProbeProxy } from "./plugin-browser-probes";
+import { createDb, runMigrations, pluginStorage, pluginInvocationReceipts } from "@task-weaver/db";
 import { createResourceServices, registerSkillPackageSchema, skillPackageStorageService, capabilityDigest, pluginManifestSchema, pluginSigningPayload, pluginDirectoryReviewHash } from "@task-weaver/core";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 import { createApiApplication } from "./application";
@@ -30,6 +32,10 @@ async function main() {
     await new Promise<void>(resolve => probe.close(() => resolve())); return address.port;
   };
   const apiPort = await freePort(), webPort = await freePort(), artifactPort = await freePort();
+  const probes = process.env.TW_PLUGIN_BROWSER_PROBES === "true";
+  const nextPort = probes ? await freePort() : webPort, artifactBindPort = probes ? await freePort() : artifactPort;
+  const probeServers: Array<Awaited<ReturnType<typeof startPluginBrowserProbeProxy>>> = [];
+  let invokeRequests = 0, apiSinkRequests = 0;
   const apiOrigin = `http://127.0.0.1:${apiPort}`, webOrigin = `http://127.0.0.1:${webPort}`;
   const directory = await mkdtemp(join(tmpdir(), "tw-plugin-browser-")), packageDirectory = join(directory, "packages");
   const db = createDb(databaseUrl), password = randomBytes(24).toString("base64url");
@@ -38,11 +44,11 @@ async function main() {
   const fixture = await resourcePostgresFixture(db, databaseUrl, { password, apiOrigin, webOrigin });
   await fixture.identity.setMembership(fixture.owner.headers, fixture.project.id, fixture.admin.context.actor.id, { role: "maintainer", explicitPermissions: ["mcp.invoke"] });
   const signer = generateKeyPairSync("ed25519"), profile = { id: "browser-counter", image, interpreter: "shell", timeoutMs: 5000 };
-  const env: NodeJS.ProcessEnv = { ...process.env, DATABASE_URL: databaseUrl, SKILL_PACKAGE_STORAGE_DIR: packageDirectory, TW_AUTH_SECRET: fixture.configuration.secret, TW_AUTH_BASE_URL: apiOrigin, TW_AUTH_TRUSTED_ORIGINS: webOrigin, TW_API_URL: apiOrigin, TW_PRESET_SKILLS_SYNC: "disabled", TW_PLUGIN_WEB_ORIGIN: webOrigin, TW_PLUGIN_ARTIFACT_ORIGIN: `http://localhost:${artifactPort}`, TW_PLUGIN_ARTIFACT_PORT: String(artifactPort), TW_PLUGIN_RUNTIME_PROFILES: JSON.stringify([profile]), TW_PLUGIN_PUBLISHER_KEYS: JSON.stringify({ "browser-publisher": { publisher: "fixture", publicKey: signer.publicKey.export({ type: "spki", format: "pem" }).toString() } }) };
+  const env: NodeJS.ProcessEnv = { ...process.env, DATABASE_URL: databaseUrl, SKILL_PACKAGE_STORAGE_DIR: packageDirectory, TW_AUTH_SECRET: fixture.configuration.secret, TW_AUTH_BASE_URL: apiOrigin, TW_AUTH_TRUSTED_ORIGINS: webOrigin, TW_API_URL: apiOrigin, TW_PRESET_SKILLS_SYNC: "disabled", TW_PLUGIN_WEB_ORIGIN: webOrigin, TW_PLUGIN_ARTIFACT_ORIGIN: `http://localhost:${artifactPort}`, TW_PLUGIN_ARTIFACT_PORT: String(artifactBindPort), TW_PLUGIN_RUNTIME_PROFILES: JSON.stringify([profile]), TW_PLUGIN_PUBLISHER_KEYS: JSON.stringify({ "browser-publisher": { publisher: "fixture", publicKey: signer.publicKey.export({ type: "spki", format: "pem" }).toString() } }) };
   const application = createApiApplication({ db, databaseUrl, env });
   stopFixture = async () => { await application.stop(); await db.$client.end(); await rm(directory, { recursive: true, force: true }); };
   await application.start();
-  const apiServer = serve({ fetch: application.app.fetch, hostname: "127.0.0.1", port: apiPort }) as Server;
+  const apiServer = serve({ fetch: (request) => { const path = new URL(request.url).pathname; if (/^\/api\/v1\/plugins\/[^/]+\/invoke$/.test(path)) invokeRequests++; if (path.startsWith("/fixture-probe-sink")) apiSinkRequests++; return application.app.fetch(request); }, hostname: "127.0.0.1", port: apiPort }) as Server;
   await once(apiServer, "listening");
   stopFixture = async () => { apiServer.closeAllConnections(); await new Promise<void>(resolve => apiServer.close(() => resolve())); await application.stop(); await db.$client.end(); await rm(directory, { recursive: true, force: true }); };
   const storage = new skillPackageStorageService.LocalSkillPackageStorageAdapter(packageDirectory);
@@ -65,11 +71,16 @@ case "$payload" in *'"method":"read"'*) printf '{"result":%s}' "$count";; *) pri
   const installation = await application.app.request(`${apiOrigin}/api/v1/plugins`, { method: "POST", headers, body: JSON.stringify({ scope: { kind: "project", projectId: fixture.project.id }, manifest, confirmedManifestHash: capabilityDigest(manifest), confirmed: true, idempotencyKey: randomUUID() }) });
   if (installation.status !== 201) throw new Error("Browser fixture plugin installation failed: " + await installation.text());
   const installed = await installation.json() as { installationId: string };
-  const next = spawn(process.execPath, [fileURLToPath(new URL("../../web/node_modules/next/dist/bin/next", import.meta.url)), "start", "-H", "127.0.0.1", "-p", String(webPort)], { cwd: fileURLToPath(new URL("../../web/", import.meta.url)), env, stdio: ["ignore", "pipe", "pipe"] });
+  if (probes) {
+    const report = async () => ({ invokeRequests, apiSinkRequests, sinkRequests: probeServers.reduce((sum, proxy) => sum + proxy.sinkRequests(), 0), state: await db.select({ key: pluginStorage.key, value: pluginStorage.value }).from(pluginStorage).where(eq(pluginStorage.installationId, installed.installationId)), receipts: (await db.select({ id: pluginInvocationReceipts.key }).from(pluginInvocationReceipts).where(eq(pluginInvocationReceipts.installationId, installed.installationId))).length });
+    for (const [role, port, upstreamPort] of [["web", webPort, nextPort], ["artifact", artifactPort, artifactBindPort]] as const) probeServers.push(await startPluginBrowserProbeProxy({ role, port, upstreamPort, webOrigin, apiOrigin, sinkOrigin: env.TW_PLUGIN_ARTIFACT_ORIGIN!, report }));
+  }
+  const next = spawn(process.execPath, [fileURLToPath(new URL("../../web/node_modules/next/dist/bin/next", import.meta.url)), "start", "-H", "127.0.0.1", "-p", String(nextPort)], { cwd: fileURLToPath(new URL("../../web/", import.meta.url)), env, stdio: ["ignore", "pipe", "pipe"] });
   const log = createWriteStream(join(directory, "web.log"), { mode: 0o600 }); next.stdout.pipe(log); next.stderr.pipe(log);
   let closing = false;
   const stop = async () => {
     if (closing) return; closing = true;
+    for (const proxy of probeServers) await proxy.stop();
     next.kill("SIGTERM"); await Promise.race([once(next, "exit"), delay(3000)]); if (next.exitCode === null) next.kill("SIGKILL"); log.end();
     apiServer.closeAllConnections(); await new Promise<void>(resolve => apiServer.close(() => resolve()));
     await application.stop(); await db.$client.end(); await rm(directory, { recursive: true, force: true });
@@ -96,7 +107,7 @@ case "$payload" in *'"method":"read"'*) printf '{"result":%s}' "$count";; *) pri
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2), { mode: 0o600 });
   await writeFile(upgradePath, JSON.stringify(upgradeManifest, null, 2), { mode: 0o600 });
   const accessPath = join(directory, "access.json");
-  await writeFile(accessPath, JSON.stringify({ manifestPath, upgradePath, managementUrl: `${webOrigin}/projects/plugins`, webOrigin, loginUrl: webOrigin + "/login", viewerUrl: `${webOrigin}/plugins/${installed.installationId}`, email: fixture.admin.account.email, password, installationId: installed.installationId, projectId: fixture.project.id, manifestHash: capabilityDigest(manifest), image, artifactOrigin: env.TW_PLUGIN_ARTIFACT_ORIGIN }), { mode: 0o600 });
+  await writeFile(accessPath, JSON.stringify({ probes, manifestPath, upgradePath, managementUrl: `${webOrigin}/projects/plugins`, webOrigin, loginUrl: webOrigin + "/login", viewerUrl: `${webOrigin}/plugins/${installed.installationId}`, email: fixture.admin.account.email, password, installationId: installed.installationId, projectId: fixture.project.id, manifestHash: capabilityDigest(manifest), image, artifactOrigin: env.TW_PLUGIN_ARTIFACT_ORIGIN }), { mode: 0o600 });
   console.log("PLUGIN_BROWSER_FIXTURE_READY " + accessPath);
 }
 main().catch(async error => { console.error(error instanceof Error ? error.message : "Browser fixture failed"); try { await stopFixture(); } finally { process.exit(1); } });

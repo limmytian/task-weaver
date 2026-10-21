@@ -78,8 +78,8 @@ cover uninstall/purge/anti-resurrection; browser verification does not claim an
 irreversible purge was manually submitted. The fixture also provides two reviewed directory entries: the installed counter
 and a restricted counter with a separate plugin identity. Directory inspection
 can distinguish an existing installation from an available candidate; a confirmed
-candidate uses the same lifecycle and revision checks. The complete application
-acceptance matrix remains tracked separately.
+candidate uses the same lifecycle and revision checks. The local acceptance matrix and explicit browser attack-probe workflow are
+documented in [plugin acceptance](plugin-acceptance.md).
 
 ## Reviewed directory
 

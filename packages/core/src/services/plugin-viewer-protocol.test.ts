@@ -17,7 +17,7 @@ function viewer() {
   const source = { postMessage(message: unknown) { replies.push(message); } };
   let load!: () => void, message!: (event: unknown) => Promise<void>;
   const frame = { contentWindow: source, addEventListener(_name: string, listener: () => void) { load = listener; } };
-  const status = { textContent: "", dataset: {} };
+  const status = { textContent: "", dataset: {} as Record<string, string> };
   const script = renderPluginViewer(ticket).html.match(/<script nonce="[^"]+">([\s\S]*)<\/script>/)![1]!;
   runInNewContext(script, {
     document: { getElementById: (id: string) => id === "tw-plugin-frame" ? frame : status },
@@ -61,6 +61,8 @@ test("shipped viewer drops stale replies and requires fresh readiness after fram
   const pending = v.send(v.invoke);
   v.load();
   await pending;
+  assert.equal(v.status.textContent, "Plugin frame changed. Waiting for isolation verification.", "a stale request cannot overwrite the navigation state");
+  assert.equal(v.status.dataset.isolation, undefined, "navigation clears the old isolation evidence");
   assert.equal(v.replies.some(reply => Boolean(reply && typeof reply === "object" && "kind" in reply && reply.kind === "result")), false, "a pending result cannot cross the frame load epoch");
   const count = v.requests.length;
   await v.send(v.invoke);

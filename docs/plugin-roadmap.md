@@ -12,7 +12,8 @@ use the host broker without worker networking or credentials. The Web management
 page supports reviewed installation, upgrade, disable, recovery and retention.
 A bounded operator-reviewed directory provides provenance and live readiness
 inspection through Web, REST and CLI, with explicit reviewed installation. The
-full application acceptance matrix remains pending. See [plugin contracts](plugin-contracts.md).
+initial contract has local application, hostile-worker and real-browser boundary
+evidence; deployment and owner acceptance remain separate delivery steps. See [plugin contracts](plugin-contracts.md).
 Use the linked project requirements and iteration documents for current priority
 and scope. One Task Weaver application
 hosts official and third-party extensions; there is no separate Pro

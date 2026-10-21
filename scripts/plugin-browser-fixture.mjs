@@ -30,7 +30,7 @@ try {
   const image = JSON.parse(docker("image", "inspect", "pgvector/pgvector:0.8.6-pg16-bookworm"))[0].RepoDigests?.[0];
   assert.match(image ?? "", /@sha256:[a-f0-9]{64}$/);
   fixture = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../apps/api/src/plugin-browser-fixture.ts", import.meta.url))], {
-    env: { ...process.env, PGOPTIONS: "-c client_min_messages=warning", TW_PLUGIN_BROWSER_DATABASE_URL: `postgres://fixture:fixture-only@127.0.0.1:${port}/tw_plugin_browser`, TW_SKILL_RUNTIME_TEST_IMAGE: image }, stdio: ["ignore", "inherit", "inherit"],
+    env: { ...process.env, PGOPTIONS: "-c client_min_messages=warning", TW_PLUGIN_BROWSER_PROBES: process.argv.includes("--probes") ? "true" : "false", TW_PLUGIN_BROWSER_DATABASE_URL: `postgres://fixture:fixture-only@127.0.0.1:${port}/tw_plugin_browser`, TW_SKILL_RUNTIME_TEST_IMAGE: image }, stdio: ["ignore", "inherit", "inherit"],
   });
   const [code] = await once(fixture, "exit");
   if (!stopping) { await stop(); process.exitCode = typeof code === "number" ? code : 1; }
