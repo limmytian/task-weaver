@@ -1,4 +1,6 @@
 import { loadConfig } from './config.js'
+import { ApiTransportError, transportError } from './transport-error.js'
+export { ApiTransportError } from './transport-error.js'
 
 export class ApiError extends Error {
   constructor(
@@ -29,16 +31,19 @@ export async function request<T>(
   }
 
   const url = `${credential.apiUrl}${path}`
-  const res = await fetch(url, {
+  const serialized = body !== undefined ? JSON.stringify(body) : undefined
+  let res: Response
+  try { res = await fetch(url, {
     method,
     headers,
     signal: opts?.signal,
     redirect: 'error',
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
+    body: serialized,
+  }) } catch (error) { throw transportError(error, method, opts?.signal) }
 
   if (!res.ok) {
-    const text = await res.text()
+    let text: string
+    try { text = await res.text() } catch (error) { throw transportError(error, method, opts?.signal) }
     let errBody: unknown
     try { errBody = JSON.parse(text) } catch { errBody = text }
     const msg = typeof errBody === 'object' && errBody !== null && 'error' in errBody
@@ -48,7 +53,10 @@ export async function request<T>(
   }
 
   if (res.status === 204) return undefined as T
-  return res.json() as Promise<T>
+  try { return await res.json() as T } catch (error) {
+    if (error instanceof SyntaxError) throw new ApiTransportError('invalid_response', method)
+    throw transportError(error, method, opts?.signal)
+  }
 }
 
 export const get = <T>(path: string) => request<T>('GET', path)

@@ -749,11 +749,44 @@ test("MCP transports use live scoped authority and preserve collaboration guards
     assert.equal(executed.remoteToolsInvoked, false);
     assert.equal((await runtimeClient.callTool({ name: "tw_skills_run", arguments: { ...run, approvalId: runApproval } })).isError, true);
     await setMcpInvocationPolicy(db, f.owner.context, scope, "tw_skills_run", "allow");
+    const cleanDirectory = await mkdtemp(join(tmpdir(), "tw-clean-client-"));
+    t.after(() => rm(cleanDirectory, { recursive: true, force: true }));
     const runtimeLocal = new Client({ name: "isolated-runtime-stdio", version: "1" });
-    await runtimeLocal.connect(new StdioClientTransport({ command: process.execPath, args: ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url)), "mcp", "serve"], env: { ...env, PATH: "/no-local-tools", TW_CONFIG_DIR: directory, TW_API_URL: `http://${host}`, TW_API_KEY: runtimeKey.rawKey }, stderr: "pipe" }));
+    await runtimeLocal.connect(new StdioClientTransport({ command: process.execPath, args: ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url)), "mcp", "serve"], env: { PATH: "/no-local-tools", HOME: cleanDirectory, USERPROFILE: cleanDirectory, XDG_CONFIG_HOME: cleanDirectory, TW_CONFIG_DIR: cleanDirectory, TW_API_URL: `http://${host}`, TW_API_KEY: runtimeKey.rawKey }, stderr: "pipe" }));
     t.after(() => runtimeLocal.close());
     const withoutLocalTools = await runtimeLocal.callTool({ name: "tw_skills_run", arguments: run });
     assert.equal((withoutLocalTools.structuredContent as any).data.status, "succeeded", JSON.stringify(withoutLocalTools));
+    // One TW connection drives a complete hosted workflow with no local skill or external MCP installation.
+    process.env.TW_MCP_RUNTIME_PROFILES = JSON.stringify([hostedProfile]);
+    await registryService.syncTools(db, hostedServer.id, mcpPool);
+    const seedHandoff = await invokeRuntime("tw_memories_record", { projectId: f.project.id, title: "Clean-client starting handoff", content: "Use pinned guidance, run the approved hosted echo and save verified evidence.", confirmed: true, idempotencyKey: randomUUID() });
+    for (const [transportName, client, reader] of [["http", runtimeClient, runtimeLocal], ["stdio", runtimeLocal, runtimeClient]] as const) {
+      const started = performance.now();
+      const invoke = async (name: string, args: Record<string, unknown>) => { const result = await client.callTool({ name, arguments: args }); assert.notEqual(result.isError, true, JSON.stringify(result)); return (result.structuredContent as any).data; };
+      const boot = await invoke("tw_context_bootstrap", {});
+      assert.ok(Buffer.byteLength(JSON.stringify(boot)) <= CAPABILITY_LIMITS.bootstrapBytes);
+      assert.ok((await invoke("tw_context_search", { projectId: f.project.id, intent: "planning" })).items.some((item: any) => item.id === skill.id));
+      const graph = await invoke("tw_skill_packages_resolve", { packageId: resolvedPackage.id, version: "2.0" });
+      assert.deepEqual(graph.nodes, resolved.nodes);
+      assert.equal((await invoke("tw_skill_package_read", { packageId: dependency.id, version: "1.0", path: "SKILL.md" })).content, "Immutable dependency guidance");
+      assert.ok((await invoke("tw_memories_search", { projectId: f.project.id, query: "Clean-client starting handoff" })).items.some((item: any) => item.id === seedHandoff.id));
+      assert.equal((await invoke("tw_memories_get", { id: seedHandoff.id })).content, seedHandoff.content);
+      const tools = await invoke("tw_mcp_search", { projectId: f.project.id, intent: "hosted_echo" });
+      assert.ok(tools.items.some((item: any) => item.reference.id === hostedTools[0]!.id));
+      const schema = await invoke("tw_mcp_tool", { toolId: hostedTools[0]!.id });
+      const hosted = await invoke("tw_mcp_call", { toolId: hostedTools[0]!.id, schemaHash: schema.schemaHash, arguments: {}, confirmed: true });
+      assert.ok(JSON.stringify(hosted).includes("isolated-mcp-ok"));
+      assert.equal(JSON.stringify(hosted).includes("fixture-private-token"), false);
+      assert.equal((await invoke("tw_skills_run", run)).status, "succeeded");
+      const input = { projectId: f.project.id, title: `Clean-client ${transportName} verified handoff`, content: "Pinned dependencies, hosted tool and isolated skill verified through one TW connection.", confirmed: true, idempotencyKey: randomUUID() };
+      const saved = await invoke("tw_memories_record", input);
+      assert.equal((await invoke("tw_memories_record", input)).id, saved.id);
+      const resumed = await reader.callTool({ name: "tw_memories_get", arguments: { id: saved.id } });
+      assert.equal((resumed.structuredContent as any).data.content, input.content);
+      t.diagnostic(JSON.stringify({ cleanClient: transportName, workflowMs: Math.round(performance.now() - started), bootstrapBytes: Buffer.byteLength(JSON.stringify(boot)), localToolsInstalled: false, nativeVendorUiVerified: false }));
+    }
+    await mcpPool.disconnect(hostedServer.id);
+    process.env.TW_MCP_RUNTIME_PROFILES = "[]";
     const runtimeReadOnly = new Client({ name: "runtime-read-only-stdio", version: "1" });
     await runtimeReadOnly.connect(new StdioClientTransport({ command: process.execPath, args: ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url)), "mcp", "serve", "--read-only"], env: { ...env, PATH: "/no-local-tools", TW_CONFIG_DIR: directory, TW_API_URL: `http://${host}`, TW_API_KEY: runtimeKey.rawKey }, stderr: "pipe" }));
     t.after(() => runtimeReadOnly.close());
