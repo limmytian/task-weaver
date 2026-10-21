@@ -2,7 +2,7 @@ import type { Context, Next } from "hono";
 import type { Database } from "@task-weaver/db";
 import type { Actor } from "@task-weaver/contracts";
 import type { VerifiedRequestContext } from "@task-weaver/contracts";
-import type { AuthenticationRuntime } from "@task-weaver/core";
+import type { PluginWorkerConfiguration, AuthenticationRuntime } from "@task-weaver/core";
 
 export type Env = {
   Variables: {
@@ -12,6 +12,7 @@ export type Env = {
     auth: AuthenticationRuntime;
     skillRuntimeProfiles?: string;
     mcpReadOnly?: boolean;
+    pluginWorkerConfiguration?: () => PluginWorkerConfiguration;
   };
 };
 

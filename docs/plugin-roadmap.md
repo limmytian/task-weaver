@@ -1,9 +1,10 @@
 # Plugin Ecosystem Roadmap
 
 Status: shared contracts, publisher verification and the internal offline backend
-worker with durable installation-owned state are implemented and tested. Public
-installation/lifecycle APIs, the isolated application viewer and full
-real-application proof remain pending. See [plugin contracts](plugin-contracts.md).
+worker with durable installation-owned state are implemented and tested. The
+backend installation/lifecycle APIs and CLI are available for operator-configured
+backend-only plugins. The isolated application viewer, common MCP discovery and
+full real-application proof remain pending. See [plugin contracts](plugin-contracts.md).
 Use the linked project requirements and iteration documents for current priority
 and scope. One Task Weaver application
 hosts official and third-party extensions; there is no separate Pro

@@ -9,7 +9,7 @@ import { planPluginState } from "./plugin-state";
 export type PluginExecution = {
   /** A trusted host implementation, never an uploaded callback or Core API proxy. */
   execute(input: { method: string; input: unknown; state: Array<{ key: string; version: number; value: unknown; deleted: number }> }, signal: AbortSignal): Promise<unknown>;
-  revalidate(): Promise<void>;
+  revalidate(connection?: Database): Promise<void>;
   dispose(): Promise<void>;
 };
 
@@ -50,6 +50,7 @@ export async function invokeInstalledPlugin(db: Database, identity: VerifiedRequ
     await execution.revalidate();
     if (initial.receipt) return transaction(async tx => {
       const current = await guarded(tx);
+      await execution.revalidate(tx);
       if (!current.receipt) throw new ConflictError("Plugin receipt is no longer available", current.row.revision);
       signal.throwIfAborted();
       return { result: current.receipt.result, replayed: true, revision: current.row.revision };
@@ -70,6 +71,7 @@ export async function invokeInstalledPlugin(db: Database, identity: VerifiedRequ
     await execution.revalidate();
     return await transaction(async tx => {
       const current = await guarded(tx);
+      await execution.revalidate(tx);
       if (current.row.manifestHash !== initial.row.manifestHash) throw new ConflictError("Plugin generation changed during execution", current.row.revision);
       if (current.receipt) return { result: current.receipt.result, replayed: true, revision: current.row.revision };
       // Always plan against all current rows, even if the worker cannot read storage.

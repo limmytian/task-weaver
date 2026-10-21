@@ -8,13 +8,14 @@ const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const exactVersion = z.string().trim().min(1).max(100).refine(value => !/^(latest|next|stable|head|main|master)$/i.test(value) && !/[\s*^~<>=|]/.test(value), "Plugin artifacts require an exact immutable version");
 export const pluginPermissionSchema = z.enum(["ui.render", "backend.execute", "storage.read", "storage.write"]);
 export const pluginStorageKeySchema = z.string().min(1).max(100).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/).refine(value => !value.includes(".."), "Storage keys cannot address another namespace");
+const pluginVersion = z.string().max(100).regex(/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/);
 const method = z.object({ name: z.string().regex(/^[a-z][a-z0-9_.-]{0,63}$/), access: z.enum(["read", "write"]) }).strict();
 const runtime = z.object({ profileId: z.string().min(1).max(100).regex(/^[A-Za-z0-9_-]+$/), profileHash: hash, entryPath: skillPackagePathSchema }).strict();
 
 export const pluginManifestSchema = z.object({
   schemaVersion: z.literal(PLUGIN_HOST_PROTOCOL),
   pluginId: z.string().min(3).max(100).regex(/^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/),
-  version: z.string().max(100).regex(/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/),
+  version: pluginVersion,
   displayName: z.string().min(1).max(128), description: z.string().max(1000).default(""),
   artifact: z.object({ packageId: z.string().uuid(), version: exactVersion, manifestHash: hash }).strict(),
   permissions: z.array(pluginPermissionSchema).max(4),
@@ -81,3 +82,15 @@ export const pluginBackendResultSchema = z.object({
     try { return new TextEncoder().encode(JSON.stringify(value)).byteLength <= PLUGIN_LIMITS.resultBytes; } catch { return false; }
   }, "Plugin responses exceed the host byte limit");
 export type PluginManifest = z.infer<typeof pluginManifestSchema>;
+
+export const changePluginStatusSchema = z.object({
+  expectedRevision: z.number().int().min(1).max(2147483646),
+  action: z.enum(["disable", "uninstall", "purge"]),
+  confirmed: z.literal(true), idempotencyKey: z.string().uuid(),
+}).strict();
+export const recoverPluginSchema = z.object({
+  expectedRevision: z.number().int().min(1).max(2147483646),
+  version: pluginVersion,
+  confirmedManifestHash: hash, confirmedPermissionDiffHash: hash,
+  confirmed: z.literal(true), idempotencyKey: z.string().uuid(),
+}).strict();

@@ -2483,3 +2483,24 @@ arguments return HTTP 400; business errors return isError=true in the tool resul
 This is separate from the outbound `/api/v1/mcp/*` Registry. See the
 [MCP Server guide](../../docs/mcp-server.md) for setup, errors, bounds and
 [the contract](../../docs/mcp-server-contract.md) for the catalog.
+
+## Backend Plugins
+
+Backend-only plugins use `/api/v1/plugins`: `GET /` for explicitly scoped summaries,
+`GET /:id` for the current manifest/revision, `GET /:id/generations` and
+`GET /:id/generations/:version` for bounded immutable recovery history, `POST /`
+to install, and
+`POST /:id/upgrade`, `/recover`, `/status`, `/invoke` for reviewed lifecycle and
+backend calls. Management requires scoped `resource.read`, `resource.write` and
+`mcp.manage`; activation also requires `mcp.invoke`. Requests use shared plugin
+schemas with explicit confirmation, immutable hashes, expected revisions and UUID
+idempotency keys. Status actions are `disable`, `uninstall` and explicit `purge`.
+Frontend manifests are rejected while dedicated-origin hosting is unavailable.
+The server verifies publisher trust and immutable skill-package artifacts, runs a
+read-only preflight in its isolated worker and commits activation atomically.
+Backend results can patch only installation-owned storage, never Core SQL or
+another namespace. `tw plugin` exposes list/get/generations/generation/diff/install/upgrade/recover/status/
+invoke using the same REST credentials; reviewed operation bodies are supplied
+with `--file`. No local plugin worker, skill or external MCP installation is
+required. See the canonical repository guide `docs/plugin-lifecycle.md` for the
+preflight protocol, permission-diff review and retention/recovery behavior.

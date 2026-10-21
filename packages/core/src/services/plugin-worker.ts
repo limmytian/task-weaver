@@ -23,14 +23,14 @@ let preparedWorkers = 0;
 export async function preparePluginWorker(db: Database, identity: VerifiedRequestContext, manifest: PluginManifest, storage: SkillPackageStorageAdapter,
   configuration: () => PluginWorkerConfiguration, signal: AbortSignal): Promise<PluginExecution> {
   const expectedHash = capabilityDigest(manifest);
-  const revalidate = async () => {
+  const revalidate = async (connection: Database = db) => {
     signal.throwIfAborted();
     const config = configuration();
     verifyPluginManifest(manifest, config.keys, config.allowUnverified);
     const profile = configuredSkillRuntimes(config.profiles).find(item => item.id === manifest.backend?.profileId);
     if (!profile || capabilityDigest(profile) !== manifest.backend?.profileHash) throw new ValidationError("The approved plugin runtime profile is unavailable or changed");
-    await requirePackage(db, await resourceAuthority(db, identity), manifest.artifact.packageId);
-    const resolved = await resolveMcpSkill(db, identity, { packageId: manifest.artifact.packageId, version: manifest.artifact.version }, signal);
+    await requirePackage(connection, await resourceAuthority(connection, identity), manifest.artifact.packageId);
+    const resolved = await resolveMcpSkill(connection, identity, { packageId: manifest.artifact.packageId, version: manifest.artifact.version }, signal);
     if (resolved.manifestHash !== manifest.artifact.manifestHash) throw new ConflictError("Plugin artifact changed or is no longer available", 0);
     // Initial plugin workers do not implicitly execute or materialize dependency graphs.
     if (resolved.nodes.length !== 1) throw new ValidationError("Plugin artifacts must be self-contained");
@@ -82,7 +82,7 @@ export async function preparePluginWorker(db: Database, identity: VerifiedReques
     await revalidate();
     return {
       dispose,
-      revalidate: async () => { await revalidate(); },
+      revalidate: async connection => { await revalidate(connection); },
       execute: async (input, runningSignal) => {
         if (activeWorkers >= 4) throw new ValidationError("Plugin worker capacity is busy; retry explicitly later");
         activeWorkers++;
@@ -98,4 +98,14 @@ export async function preparePluginWorker(db: Database, identity: VerifiedReques
       },
     };
   } catch (error) { await dispose(); throw error; }
+}
+
+/** Operator configuration only; never accept profiles, publisher keys or unsigned policy from clients. */
+export function configuredPluginWorker(profiles?: string, publisherKeys?: string, allowUnverified = false): PluginWorkerConfiguration {
+  if ((publisherKeys?.length ?? 0) > 131072) throw new ValidationError("Plugin publisher configuration exceeds its byte limit");
+  let raw: unknown;
+  try { raw = JSON.parse(publisherKeys ?? "{}"); } catch { throw new ValidationError("Plugin publisher configuration is invalid"); }
+  const parsed = z.record(z.string().regex(/^[A-Za-z0-9_.-]{1,100}$/), z.object({ publisher: z.string().regex(/^[a-z0-9][a-z0-9-]*$/).max(100), publicKey: z.string().min(1).max(4096) }).strict()).safeParse(raw);
+  if (!parsed.success || Object.keys(parsed.data).length > 32) throw new ValidationError("Plugin publisher configuration is invalid");
+  return { profiles, keys: parsed.data, allowUnverified };
 }

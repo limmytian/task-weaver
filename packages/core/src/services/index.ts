@@ -79,4 +79,6 @@ export { getMcpServerReadiness } from "./mcp-readiness";
 export { pluginSigningPayload, verifyPluginManifest, type PluginTrustKey } from "./plugin-trust";
 
 export { invokeInstalledPlugin, type PluginExecution } from "./plugin-broker";
-export { preparePluginWorker, type PluginWorkerConfiguration } from "./plugin-worker";
+export { preparePluginWorker, configuredPluginWorker, type PluginWorkerConfiguration } from "./plugin-worker";
+
+export { createPluginLifecycle, pluginPermissionDiff } from "./plugin-lifecycle";
