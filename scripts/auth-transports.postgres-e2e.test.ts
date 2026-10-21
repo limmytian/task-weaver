@@ -17,9 +17,6 @@ import { GET as nextTRPC } from "../apps/web/app/api/trpc/[trpc]/route";
 import { POST as nextAttachmentUpload } from "../apps/web/app/api/attachments/route";
 import { GET as nextAttachmentDownload, PUT as nextAttachmentReplace } from "../apps/web/app/api/attachments/[id]/route";
 import { GET as nextAttachmentHistory } from "../apps/web/app/api/attachments/[id]/files/route";
-import { GET as nextPluginManagementGet, POST as nextPluginManagementPost } from "../apps/web/app/api/plugin-management/[[...path]]/route";
-import { POST as nextPluginInvoke } from "../apps/web/app/api/plugins/[id]/invoke/route";
-import { GET as nextPluginViewer } from "../apps/web/app/plugins/[id]/route";
 
 const apiRequire = createRequire(
   new URL("../apps/api/package.json", import.meta.url),
@@ -146,7 +143,7 @@ test(
         readdirSync(new URL("../apps/web/app/api/", import.meta.url), { recursive: true })
           .filter(path => typeof path === "string" && path.endsWith("route.ts"))
           .sort(),
-        ["assistant/stream/route.ts", "attachments/[id]/files/route.ts", "attachments/[id]/route.ts", "attachments/route.ts", "auth/csrf/route.ts", "events/route.ts", "plugin-management/[[...path]]/route.ts", "plugins/[id]/invoke/route.ts", "trpc/[trpc]/route.ts"],
+        ["assistant/stream/route.ts", "attachments/[id]/files/route.ts", "attachments/[id]/route.ts", "attachments/route.ts", "auth/csrf/route.ts", "events/route.ts", "trpc/[trpc]/route.ts"],
         "Classify and exercise any new Next API entry point in the authorization inventory",
       );
       const publicRoutes = new Set([
@@ -191,13 +188,6 @@ test(
         assert.equal(response.status, 401);
         const stream = await nextAssistantStream(new Request(`${origin}/api/assistant/stream`, { method: "POST", headers, body: "{" }));
         assert.equal(stream.status, 401, "Chat stream authenticates before parsing resource input");
-        for (const [method, handler] of [["GET", nextPluginManagementGet], ["POST", nextPluginManagementPost]] as const) {
-          const response = await handler(new Request(`${origin}/api/plugin-management/invalid-operation`, { method, headers, ...(method === "POST" ? { body: "{" } : {}) }), { params: Promise.resolve({ path: ["invalid-operation"] }) });
-          assert.equal(response.status, 401, "Plugin management authenticates before path and body validation");
-        }
-        const pluginContext = { params: Promise.resolve({ id: "invalid-resource-id" }) };
-        assert.equal((await nextPluginInvoke(new Request(`${origin}/api/plugins/invalid-resource-id/invoke`, { method: "POST", headers, body: "{" }), pluginContext)).status, 401);
-        assert.equal((await nextPluginViewer(new Request(`${origin}/plugins/invalid-resource-id`, { headers }), pluginContext)).status, 401);
         const context = { params: Promise.resolve({ id: "invalid-resource-id" }) };
         for (const [method, path, handler] of [
           ["POST", "attachments", nextAttachmentUpload],

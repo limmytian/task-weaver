@@ -29,7 +29,6 @@ export function buildCapabilityBootstrap(visibleTools: readonly string[], hosted
         : { state: "unavailable", reason: "not_configured", remediation: "Use tools/list to inspect memory read grants and policy." },
       externalTools: visibleTools.includes("tw_mcp_search") && visibleTools.includes("tw_mcp_tool") ? { state: "available", executionMode: "remote" } : unavailable("Inspect tools/list for registry invocation grants; external schemas are loaded on demand."),
       hostedExecution: hostedExecution ?? { state: "unavailable", reason: "not_configured", remediation: "Inspect tw_skill_runtimes_list and request the required resource.write/mcp.invoke grants before using an isolated skill." },
-      plugins: { state: "unavailable", reason: "not_configured", remediation: "Use tw_plugins_list and tw_plugins_get for installed metadata. tw_plugins_call checks each installation, approved runtime, publisher and package live; discovery alone does not guarantee execution readiness." },
     },
     loading: {
       strategy: "on_demand", maxSummaryResults: CAPABILITY_LIMITS.results,

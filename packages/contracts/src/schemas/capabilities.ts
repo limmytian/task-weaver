@@ -10,7 +10,7 @@ export const CAPABILITY_LIMITS = Object.freeze({
   summaryBytes: 16384,
 });
 
-export const capabilityKindSchema = z.enum(["skill", "skill_package", "memory", "mcp_tool", "plugin"]);
+export const capabilityKindSchema = z.enum(["skill", "skill_package", "memory", "mcp_tool"]);
 export const capabilityReferenceSchema = z.object({
   kind: capabilityKindSchema,
   id: z.string().uuid(),
@@ -33,7 +33,7 @@ export const discoverCapabilitiesSchema = z.object({
   intent: z.string().trim().min(1).max(500),
   scope: capabilityScopeSchema,
   includeGlobal: z.boolean().default(true),
-  kinds: z.array(capabilityKindSchema).min(1).max(5).default(["skill", "skill_package", "memory", "mcp_tool"]),
+  kinds: z.array(capabilityKindSchema).min(1).max(4).default(["skill", "skill_package", "memory", "mcp_tool"]),
   limit: z.number().int().min(1).max(CAPABILITY_LIMITS.results).default(5),
 }).strict().superRefine((value, ctx) => {
   if (new Set(value.kinds).size !== value.kinds.length) {
@@ -86,8 +86,8 @@ export const capabilityManifestSchema = z.object({
       ctx.addIssue({ code: "custom", path: ["dependencies", index], message: "Dependencies must be unique and cannot reference the capability itself" });
     }
     references.add(key);
-    if (["skill_package", "plugin"].includes(dependency.reference.kind) && !dependency.version) {
-      ctx.addIssue({ code: "custom", path: ["dependencies", index, "version"], message: "Package and plugin dependencies require an exact version" });
+    if (dependency.reference.kind === "skill_package" && !dependency.version) {
+      ctx.addIssue({ code: "custom", path: ["dependencies", index, "version"], message: "Package dependencies require an exact version" });
     }
   }
 });
@@ -109,7 +109,6 @@ export const capabilityBootstrapSchema = z.object({
     memories: capabilityAvailabilitySchema,
     externalTools: capabilityAvailabilitySchema,
     hostedExecution: capabilityAvailabilitySchema,
-    plugins: capabilityAvailabilitySchema,
   }).strict(),
   loading: z.object({
     strategy: z.literal("on_demand"),

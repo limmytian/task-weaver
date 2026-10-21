@@ -9,7 +9,7 @@ tool discovery and calls; vendor-specific interfaces require separate verificati
 ## Identity, scope and immutable execution inputs
 
 The shared schemas live in `@task-weaver/contracts/schemas/capabilities`.
-References pair a kind (`skill`, `skill_package`, `memory`, `mcp_tool`, `plugin`)
+References pair a kind (`skill`, `skill_package`, `memory`, `mcp_tool`)
 with the resource UUID. Their stable address is `tw:KIND:UUID`. An address never
 grants access. An external MCP tool uses its registry UUID rather than a possibly
 colliding server/tool display name.
@@ -21,7 +21,7 @@ schemas describe data contracts; they do not create a new permission system or
 imply that every capability kind already has an endpoint.
 
 Execution manifests pin an immutable version and SHA-256. Each has at most 32
-dependencies; package/plugin dependencies require exact versions. Floating
+dependencies; package dependencies require exact versions. Floating
 selectors, duplicate dependencies and self-references are rejected. The resolver
 must additionally reject transitive cycles, conflicting versions, missing
 dependencies and graphs exceeding 100 nodes. Freeze the resolved hashes and
@@ -42,7 +42,7 @@ Availability states refer to the actual operation, not just a registered name:
 
 Unavailable results include a reason and remediation. Missing credentials,
 dependencies, unhealthy servers, approvals or unsupported clients must not be
-reported as ready. Plugin code and executable skills never run in API/Web
+reported as ready. Executable skills never run in API/Web
 processes. Ordinary instruction reads remain useful without an execution runtime.
 
 ## Minimal bootstrap and budgets
@@ -85,6 +85,5 @@ Skill text, package reads and memory lifecycle operations have scoped inbound
 tools. Memory previews require explicit review before saving and detect changed
 source evidence; see [memory continuity](memories.md). External MCP registry discovery, schema reads and confirmed calls share
 the inbound connection; see [MCP bridge](mcp-bridge.md). Eligible executable skills have an opt-in isolated runtime with real
-HTTP, stdio and CLI acceptance; see [skill runtimes](skill-runtimes.md). Plugin
-execution uses its own isolated broker and reviewed lifecycle; see [plugin acceptance](plugin-acceptance.md). Runtime discovery is the source of availability; release notes record
+HTTP, stdio and CLI acceptance; see [skill runtimes](skill-runtimes.md). Runtime discovery is the source of availability; release notes record
 historical feature boundaries.

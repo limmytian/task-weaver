@@ -380,16 +380,3 @@ category. They contain no parameters, result bodies, secrets or upstream errors.
 Operator cleanup through `tw mcp audit-cleanup --project PROJECT_ID --json`
 removes audit entries older than 30 days and expired approvals in that scope;
 schedule this command externally when automatic retention is required.
-
-
-## Installed plugins
-
-Use `tw_plugins_list` with an explicit scope (`personal` by default; `project`
-requires `projectId`), then `tw_plugins_get` with the selected `installationId`.
-Summaries omit manifests and runtime configuration. Inspect the current manifest,
-method and revision before `tw_plugins_call`; include `confirmed: true`,
-`expectedRevision`, bounded JSON `input` and a UUID `idempotencyKey`. Preserve the
-identical key/payload after an ambiguous response. Readiness is checked on each
-call, including retries. The API runs the isolated worker; the MCP client needs
-no local plugin installation. See [plugin lifecycle](plugin-lifecycle.md#common-mcp-access)
-for grants, approval policy, revocation and retry boundaries.

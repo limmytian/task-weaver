@@ -1,8 +1,7 @@
 # Operate hosted capabilities
 
 Use this guide with [deployment](deployment.md), [authentication](authenticated-access.md),
-[skill runtimes](skill-runtimes.md), [MCP hosting](mcp-hosted-runtimes.md) and
-[plugin frontends](plugin-frontends.md). Store actual hostnames, deployment commands,
+[skill runtimes](skill-runtimes.md) and [MCP hosting](mcp-hosted-runtimes.md). Store actual hostnames, deployment commands,
 resource allocations and acceptance records in project documents. Store secret values
 in the deployment Secret facility, never in source, manifests or user instructions.
 
@@ -14,7 +13,7 @@ in the deployment Secret facility, never in source, manifests or user instructio
   with digest-pinned, pre-provisioned images. The trusted launcher needs an explicitly
   approved Linux container host; the default deployment does not enable it.
   Protect launcher/daemon access as privileged host control. Do not expose a Docker
-  socket to plugins, skills, public endpoints or untrusted workloads.
+  socket to skills, public endpoints or untrusted workloads.
 - Skill workers require materialized artifacts on a filesystem visible to the
   trusted Docker daemon. Hosted MCP containers have no host mounts or network.
   Tools requiring external network access use approved remote endpoints; machine
@@ -23,14 +22,6 @@ in the deployment Secret facility, never in source, manifests or user instructio
   trusted launcher. Never put values in profile args, registration data, tool output,
   logs or client configuration. Rotate references and review the new profile hash;
   old connection fingerprints must not retain access.
-- Configure plugin profiles and publisher keys using `TW_PLUGIN_RUNTIME_PROFILES`
-  and `TW_PLUGIN_PUBLISHER_KEYS`. Keep publisher private signing keys outside the
-  application. Use `TW_PLUGIN_DIRECTORY` only for bounded reviewed records.
-- Plugin Web/API/artifact origins must satisfy the separate-host contract. Route the
-  artifact origin only to its dedicated listener; never proxy Core routes there.
-  Preserve CSP, sandbox, no-store and referrer policies. Follow the documented
-  external origin/bind/port configuration; do not enable browser fixture probes on
-  an operator instance.
 
 After setup, explicitly synchronize approved MCP servers. Restoring a missing
 Secret or profile alone does not establish healthy registration: inspect readiness,
@@ -41,20 +32,17 @@ old successful call are not current health guarantees.
 
 Take a coordinated, restorable backup of PostgreSQL, skill-package object storage
 (`SKILL_PACKAGE_STORAGE_DIR` for the local adapter), authentication/Secret facilities,
-runtime profile configuration, publisher public-key policy and the exact image
+runtime profile configuration and the exact image
 inventory. Do not copy secrets into the database backup notes. Immutable manifest
 hashes do not substitute for the original artifact bytes or approved runtime image.
 
 The database backup must include memory content/provenance/revisions and
-`memory_receipts`; package versions/file inventories/storage references; plugin
-installations, storage/tombstones, generations, invocation receipts and lifecycle
-receipts; registry/policy/approval/audit records and authentication grants. Back up
+`memory_receipts`; package versions/file inventories/storage references;
+registry/policy/approval/audit records and authentication grants. Back up
 related records consistently rather than exporting only active content rows.
 
 Forgetting memory hides/deletes its content while retaining retry protection.
-Disabling a plugin retains its state. Uninstall retires the instance; a new install
-has a new namespace. Purge removes retained storage and cached result payloads but
-keeps audit/receipt tombstones. Do not sweep receipts or tombstones because a page
+ Do not sweep receipts or tombstones because a page
 looks empty: old requests must not resurrect forgotten or purged data. Database
 backups have their own access, retention and deletion policy; a live purge does not
 erase historical backups. Test restores in a separate environment.
@@ -80,8 +68,7 @@ and exact images; never retag a previous public artifact.
 
 Use bootstrap for capability hints, `tw_mcp_readiness` / `tw mcp readiness` for
 registration/configuration state, `tw_skill_runtimes_list` for trusted image and
-interpreter readiness, and plugin directory inspection for scoped installation
-readiness. Readiness timestamps describe observations, not permanent permission or
+interpreter readiness. Readiness timestamps describe observations, not permanent permission or
 remote credential validity. Use live audit IDs and scoped activity for investigation.
 
 Observe API failures/latency, unavailable reasons, connection cooldown/admission,
@@ -93,7 +80,7 @@ Calls have bounded admission, output and deadlines. Failed initialization cools
 down before explicit reconnect; a disconnected write may already have committed.
 Inspect external state before retrying. Do not automatically replay external MCP
 calls or skill execution. Use identical payload/key retries only for documented
-receipt-backed operations. Revoked grants, runtime profiles, publisher trust or
+receipt-backed operations. Revoked grants, runtime profiles or
 Secret references must deny cached and new operations.
 
 After a launcher crash, reconcile only owned worker containers using the documented

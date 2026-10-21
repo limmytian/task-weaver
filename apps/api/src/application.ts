@@ -23,8 +23,6 @@ import activityRoutes from "./routes/activity.js";
 import apiKeyRoutes from "./routes/api-keys.js";
 import assistantRoutes from "./routes/assistant.js";
 import contextRoutes from "./routes/context.js";
-import pluginRoutes from "./routes/plugins.js";
-import { createPluginFrontendHost } from "./plugin-frontend-host.js";
 import daemonRoutes from "./routes/daemons.js";
 import documentRoutes from "./routes/documents.js";
 import embeddingRoutes from "./routes/embeddings.js";
@@ -187,7 +185,6 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
         path: "/api/v1/context",
         route: contextRoutes,
       },
-      { id: "plugins", method: "GET", path: "/api/v1/plugins", route: pluginRoutes },
       { id: "mcp", method: "GET", path: "/api/v1/mcp", route: mcpRoutes },
       {
         id: "memories",
@@ -314,8 +311,6 @@ export function createApiApplication(
   );
   const services = applicationServices(env);
   const gateway = createPartnersGatewayRuntime(options.db, env);
-  const pluginFrontend = createPluginFrontendHost(options.db, env);
-  services.workers.push({ id: "plugin-artifact-host", start: () => pluginFrontend.start(), stop: () => pluginFrontend.stop() });
   services.apiRoutes.push(...gateway.apiRoutes);
   // C2 must bind persisted Gateway work to live execution authority before it can start.
   // Mounting its routes does not enable workers or outbound event delivery during A4 staging.
@@ -336,9 +331,6 @@ export function createApiApplication(
     requestContext.set("db", options.db);
     requestContext.set("auth", auth);
     requestContext.set("skillRuntimeProfiles", env.TW_SKILL_RUNTIME_PROFILES);
-    requestContext.set("pluginWorkerConfiguration", pluginFrontend.configuration);
-    requestContext.set("pluginFrontendHost", pluginFrontend);
-    requestContext.set("pluginPackageStorageDirectory", env.SKILL_PACKAGE_STORAGE_DIR);
     requestContext.set("mcpReadOnly", env.TW_MCP_READ_ONLY === "true");
     await next();
   });

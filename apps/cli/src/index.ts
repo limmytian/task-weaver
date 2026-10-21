@@ -13,7 +13,6 @@ import { registerActivity } from './commands/activity.js'
 import { registerContext } from './commands/context.js'
 import { registerMcp } from './commands/mcp.js'
 import { registerMemory } from './commands/memory.js'
-import { registerPlugins } from './commands/plugins.js'
 import { registerDaemon } from './commands/daemon.js'
 import { registerSchedules } from './commands/schedules.js'
 import { registerTiAgent } from './commands/ti.js'
@@ -38,7 +37,6 @@ registerActivity(program)
 registerContext(program)
 registerMcp(program)
 registerMemory(program)
-registerPlugins(program)
 registerDaemon(program)
 registerSchedules(program)
 registerTiAgent(program)

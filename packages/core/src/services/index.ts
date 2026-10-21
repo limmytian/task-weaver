@@ -75,17 +75,3 @@ export { capabilityDigest } from "./capability-digest";
 export { McpInvocationBusy } from "./mcp-invocation-budget";
 
 export { getMcpServerReadiness } from "./mcp-readiness";
-
-export { pluginSigningPayload, verifyPluginManifest, type PluginTrustKey } from "./plugin-trust";
-
-export { invokeInstalledPlugin, type PluginExecution } from "./plugin-broker";
-export { preparePluginWorker, configuredPluginWorker, type PluginWorkerConfiguration } from "./plugin-worker";
-
-export { createPluginLifecycle, pluginPermissionDiff } from "./plugin-lifecycle";
-
-export { compilePluginFrontend, renderPluginFrontend, renderPluginViewer, type PluginFrontend, type PluginFrameBinding } from "./plugin-frontend";
-
-export { resolvePluginSkills, type PluginSkillSnapshot } from "./plugin-skills";
-
-export { inspectPluginTools } from "./plugin-tools";
-export { createPluginDirectory, configuredPluginDirectory, pluginDirectoryReviewHash, verifyPluginDirectorySelection } from "./plugin-directory";

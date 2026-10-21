@@ -94,7 +94,7 @@ task-weaver/
 
 ---
 
-### 2.4 单一主应用与延期插件规划
+### 2.4 单一主应用与外部集成
 
 Task Weaver 采用单一主应用，不再维护独立的 CE/Pro 产品架构。
 共享 Contracts、Core、数据库、Realtime 与 Partners Gateway 包仍服务于现有功能。
@@ -106,14 +106,9 @@ Partners Gateway 保留状态/健康接口、worker 生命周期、幂等重试�
 `pnpm test:gateway-postgres` 验证一次性 PostgreSQL 与 Gateway HTTP/SSE 通信；
 `pnpm test:gateway-live` 需要显式提供测试地址和凭据。默认 worker 不自动调用 AI 模型。
 
-插件生态仅列入低优先级草案，当前不实施，也不规划基础功能扩展。
-未来第三方插件必须在独立进程或容器中隔离运行，不能获得宿主数据库连接、任意 SQL
-或其他插件数据权限；通过宿主受控接口和专属存储服务访问数据，权限取插件授权与
-用户/项目授权的交集。前端采用隔离容器与受限桥接，不暴露宿主令牌。
-权限声明本身不是隔离措施，不能把旧的可信官方代码模型当作第三方安全模型。
+外部集成使用事件/webhook、REST 与 MCP。定时工作复用 schedule；后续执行方案由 Task Weaver 管理 Ti 模型与工具循环，通过 Partners MCP 执行沙箱操作；当前 Gateway worker 仍只打印提示词。参见[运行时接入评估](agent-runtime.zh-CN.md)。独立插件生态不在产品范围内。
 
-参见[架构调整](architecture-transition.md)、[延期插件路线](plugin-roadmap.md)
-与[版本化包](ce-packages.md)。
+参见[架构调整](architecture-transition.md)与[版本化包](ce-packages.md)。
 
 ## 3. 数据模型
 

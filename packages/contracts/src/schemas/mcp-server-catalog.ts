@@ -1,4 +1,3 @@
-import { invokePluginSchema } from "./plugins";
 import { repositoryReadinessInputSchema } from "./repositories";
 import { mcpRegistrySearchSchema, mcpRegistryToolSchema, mcpRegistryCallSchema, mcpRegistryReadinessSchema } from "./mcp-bridge";
 import { mcpRetrievalScopeSchema, mcpPackageFilesSchema, mcpPackageReadSchema, mcpSliceCreateSchema, mcpSliceUpdateSchema, mcpPlanValidateSchema, mcpPlanApplySchema, mcpAggregateContextSchema, mcpDependencyGraphSchema, mcpDocumentHistorySchema, mcpDocumentVersionSchema, mcpRepositoryListSchema, mcpScheduleListSchema, mcpUsageSummarySchema } from "./mcp-server-planning";
@@ -25,9 +24,6 @@ function tool(name: McpServerToolName, description: string, schema: z.AnyZodObje
 
 /** One catalog for both transports. Business refinements are applied again before dispatch. */
 export const mcpServerCatalog = [
-  tool("tw_plugins_list", "Discover bounded installed plugin summaries in one scope; no worker is launched. Read details before calling.", z.object({ scope: z.enum(["project", "personal", "global"]).default("personal"), projectId: id.optional(), limit: z.number().int().min(1).max(20).default(5), offset: z.number().int().min(0).max(10000).default(0) }).strict()),
-  tool("tw_plugins_get", "Read an installed plugin manifest and revision on demand; installation status does not guarantee runtime readiness.", z.object({ installationId: id }).strict()),
-  tool("tw_plugins_call", "Call a confirmed installed plugin method at its exact revision in an isolated worker. Reuse the same key and identical payload after an ambiguous result. Requires resource.write and mcp.invoke even for read methods.", invokePluginSchema.extend({ installationId: id }).strict()),
   tool("tw_repositories_list", "List bounded visible repository catalog summaries; project membership alone does not grant private catalog visibility.", mcpRepositoryListSchema),
   tool("tw_repository_readiness", "Read repository policy readiness without cloning or exposing credential/checkout configuration; unknown is not execution-ready.", repositoryReadinessInputSchema.extend({ id }).strict()),
   tool("tw_schedules_list", "List bounded authorized schedule summaries without task prompts, execution or schedule changes.", mcpScheduleListSchema),
@@ -113,6 +109,5 @@ export function parseMcpServerArguments(name: McpServerToolName, value: unknown)
       throw new z.ZodError([{ code: "custom", path: ["scope"], message: "Personal scope cannot select a project or requirement" }]);
     }
   }
-  if (name === "tw_plugins_list" && (input.scope === "project" ? !input.projectId : !!input.projectId)) throw new z.ZodError([{ code: "custom", path: ["scope"], message: "Plugin scope conflicts with projectId" }]);
   return input;
 }

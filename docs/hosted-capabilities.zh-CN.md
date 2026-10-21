@@ -23,7 +23,6 @@
 
 以连接返回的实际工具 schema 为准。每一步都会检查当前凭据、工具策略、包可见性和运行
 配置；已缓存的清单不能绕过撤权。只读连接不能调用外部工具或执行 skill。
-已安装插件也使用统一代理入口，安装与权限变更另行审核。
 
 ## 可用性与本地能力
 
@@ -49,5 +48,5 @@ CLI 对 DNS、TLS、超时、取消、连接和无效 JSON 响应提供稳定错
 请求体和键重试。外部工具和 skill 执行不会自动重放；重新连接服务也不会重试之前的调用。
 
 详细边界见[记忆](memories.md)、[skill 运行环境](skill-runtimes.md)、
-[MCP 托管](mcp-hosted-runtimes.md)、[插件管理](plugin-management.md)及
+[MCP 托管](mcp-hosted-runtimes.md)及
 [运维指南](hosted-capability-operations.md)。

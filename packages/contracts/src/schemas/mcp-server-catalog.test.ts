@@ -29,12 +29,3 @@ test("MCP memory saves require explicit intent, retry keys and consistent scope"
   assert.throws(() => parseMcpServerArguments("tw_memories_update", { id, patch: { content: "Changed" } }));
   assert.throws(() => parseMcpServerArguments("tw_memories_forget", { id, confirmed: true }));
 });
-
-test("plugin calls pin revisions and explicit retry intent without accepting worker configuration", () => {
-  const request = { installationId: id, method: "increment", input: {}, expectedRevision: 1, idempotencyKey: id, confirmed: true };
-  assert.equal(parseMcpServerArguments("tw_plugins_call", request).expectedRevision, 1);
-  for (const patch of [{ confirmed: false }, { expectedRevision: undefined }, { idempotencyKey: undefined }, { profile: {} }, { personalOwnerId: id }, { method: "__tw_preflight" }, { input: "x".repeat(16385) }]) {
-    assert.throws(() => parseMcpServerArguments("tw_plugins_call", { ...request, ...patch }));
-  }
-  for (const invalid of [{ scope: "project" }, { scope: "personal", projectId: id }, { scope: "global", projectId: id }, { limit: 21 }]) assert.throws(() => parseMcpServerArguments("tw_plugins_list", invalid));
-});

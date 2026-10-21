@@ -1,6 +1,6 @@
 import { mcpPool } from "../mcp-pool";
 import { resolve } from "node:path";
-import { recordMcpInvocationAudit, personalResourceOwnerId, skillPackageStorageService, configuredPluginWorker, preparePluginWorker } from "@task-weaver/core";
+import { recordMcpInvocationAudit, personalResourceOwnerId, skillPackageStorageService } from "@task-weaver/core";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -42,9 +42,6 @@ export function createMcpServerRoutes(options: McpRouteOptions) {
       options.runtimeProfiles,
       options.readOnly,
       mcpPool,
-      { pool: mcpPool, prepare: (manifest, signal) => preparePluginWorker(context.db, context.identity, manifest,
-        new skillPackageStorageService.LocalSkillPackageStorageAdapter(context.pluginPackageStorageDirectory ?? options.packageStorageDir ?? process.env.SKILL_PACKAGE_STORAGE_DIR ?? resolve(process.cwd(), "data", "skill-packages")),
-        context.pluginWorkerConfiguration ?? (() => configuredPluginWorker()), signal) },
     ),
     { readOnly: options.readOnly, onRejected: options.executor ? undefined : async (name, code) => { await recordMcpInvocationAudit(context.db, context.identity, { personalOwnerId: personalResourceOwnerId(context.identity), personalOwnerType: "human" }, "task-weaver", name, Date.now(), code); }, budget, signal: options.signal ? AbortSignal.any([requestSignal, options.signal]) : requestSignal },
   );

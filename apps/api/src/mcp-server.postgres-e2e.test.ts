@@ -19,7 +19,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createDb, runMigrations, apiKeys, mcpInvocationApprovals, projectMemberships, mcpInvocationAudits, taskDependencies } from "@task-weaver/db";
 import { cleanupMcpInvocationHistory, setMcpInvocationPolicy, approveMcpInvocation, listMcpInvocationAudits, createResourceServices, skillPackageStorageService, registerSkillPackageSchema } from "@task-weaver/core";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
@@ -32,6 +32,8 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   assert.equal(url.hostname, "127.0.0.1"); assert.equal(url.pathname, "/tw_mcp_e2e");
   await runMigrations(databaseUrl!);
   const db = createDb(databaseUrl!); t.after(() => db.$client.end());
+  const retiredTables = await db.execute(sql`SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'task_weaver' AND left(tablename, 7) = 'plugin_'`);
+  assert.equal(retiredTables.length, 0, "Ordered migrations remove the abandoned plugin schema");
   const packageDirectory = await mkdtemp(join(tmpdir(), "tw-mcp-packages-"));
   const previousStorage = process.env.SKILL_PACKAGE_STORAGE_DIR;
   process.env.SKILL_PACKAGE_STORAGE_DIR = packageDirectory;
@@ -200,7 +202,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const remote = new Client({ name: "real-http-sdk", version: "1.31.0" });
   await remote.connect(new StreamableHTTPClientTransport(new URL(`http://${host}/api/v1/mcp-server`), { requestInit: { headers: headers() } }));
   t.after(() => remote.close());
-  assert.equal((await remote.listTools()).tools.length, mcpServerCatalog.length - 9);
+  assert.equal((await remote.listTools()).tools.length, mcpServerCatalog.length - 8);
   assert.equal((await remote.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   const directory = await mkdtemp(join(tmpdir(), "tw-mcp-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -236,7 +238,6 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   assert.equal(restBootstrapResponse.status, 200);
   assert.deepEqual((await restBootstrapResponse.json() as any).capabilityBootstrap, localBootstrap);
   assert.equal((await local.listTools()).tools.length, mcpServerReadTools.length - 6);
-  assert.equal((await local.listTools()).tools.some(tool => tool.name === "tw_plugins_call"), false);
   assert.equal((await local.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   assert.equal((await local.callTool({ name: "tw_tasks_status", arguments: { id: task.id, status: "done" } })).isError, true);
   // 0.3.11 planning and context use the same authenticated executor on both transports.

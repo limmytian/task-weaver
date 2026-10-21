@@ -25,8 +25,7 @@ A typical workflow is:
 Use the actual tool schemas returned by your connection. Caller grants, tool policy,
 package visibility and current runtime configuration apply at each step; discovery
 or a cached hash does not retain revoked access. A read-only connection cannot run
-external tools or executable skills. Installed plugins use the same brokered entry;
-installation and permission changes require their separate review workflow.
+external tools or executable skills.
 
 ## Availability and local access
 
@@ -59,5 +58,4 @@ operation explicitly supports idempotency. External tool calls and skill executi
 are not automatically retried; reconnecting a server does not replay an earlier call.
 
 See [memory continuity](memories.md), [skill runtimes](skill-runtimes.md),
-[MCP hosting](mcp-hosted-runtimes.md), [plugin management](plugin-management.md)
-and [operations](hosted-capability-operations.md) for the specific boundaries.
+[MCP hosting](mcp-hosted-runtimes.md) and [operations](hosted-capability-operations.md) for the specific boundaries.

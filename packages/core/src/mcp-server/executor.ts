@@ -1,4 +1,3 @@
-import { pluginOperation, type McpPluginRuntime } from "./plugins";
 import { readOperationalContext } from "./operational-context";
 import { readDocumentHistory } from "./document-history";
 import { readDependencyGraph } from "./dependency-graph";
@@ -33,7 +32,7 @@ function paged(value: unknown) {
 }
 
 /** Only the API constructs this executor, using server-verified request context. */
-export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequestContext, storage?: SkillPackageStorageAdapter, runtimeProfiles?: string, readOnly = false, registryPool?: McpPool, pluginRuntime?: McpPluginRuntime): McpExecutor {
+export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequestContext, storage?: SkillPackageStorageAdapter, runtimeProfiles?: string, readOnly = false, registryPool?: McpPool): McpExecutor {
   const liveDb = db;
   const services = createResourceServices(identity);
   const { projectService: projects, requirementService: requirements, taskService: tasks, documentService: documents, claimService: claims } = services;
@@ -48,9 +47,6 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
     const id = raw.id as string;
     const page = { page: raw.page as number, pageSize: raw.pageSize as number };
     switch (name) {
-      case "tw_plugins_list": return pluginOperation(db, liveDb, identity, "list", raw, pluginRuntime, signal);
-      case "tw_plugins_get": return pluginOperation(db, liveDb, identity, "get", raw, pluginRuntime, signal);
-      case "tw_plugins_call": return pluginOperation(db, liveDb, identity, "call", raw, pluginRuntime, signal);
       case "tw_repositories_list": return readOperationalContext(db, identity, "repositories", raw);
       case "tw_repository_readiness": return readOperationalContext(db, identity, "readiness", raw);
       case "tw_schedules_list": return readOperationalContext(db, identity, "schedules", raw);
@@ -157,7 +153,7 @@ export async function authorizedMcpToolNames(db: Database, identity: VerifiedReq
       if (grant.scope === "instance" || !grant.permissions.includes(permission)) continue;
       if (projectOnly && tool.name !== "tw_projects_discover" && grant.scope !== "project") continue;
       const scope = grant.scope === "project" ? { projectId: grant.projectId } : grant.scope === "personal" ? { personalOwnerId: grant.actorId } : {};
-      if (["tw_skills_run", "tw_skill_runtimes_list", "tw_plugins_call"].includes(tool.name) && !canAccessResource(authority, scope, "mcp.invoke")) continue;
+      if (["tw_skills_run", "tw_skill_runtimes_list"].includes(tool.name) && !canAccessResource(authority, scope, "mcp.invoke")) continue;
       if (!policies.some(policy => policy.scopeKey === mcpScopeKey(scope) && [tool.name, "*"].includes(policy.toolId) && policy.mode === "deny")) { names.push(tool.name); break; }
     }
   }
