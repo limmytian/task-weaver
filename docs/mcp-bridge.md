@@ -35,8 +35,9 @@ external service remains responsible for its own internal recursion controls.
 
 Server registration, synchronization, credential configuration and the explicit
 local bridge remain available through REST/CLI. Discoverability is subject to live
-server health and grants. This bridge does not provision server-side stdio
-workers, install dependencies, or claim that all configured services are ready.
+server health and grants. The bridge does not provision runtimes or install dependencies automatically.
+Approved server-side stdio profiles use [hosted MCP runtimes](mcp-hosted-runtimes.md);
+registration alone does not establish readiness.
 
 ## Readiness, deadlines and admission
 

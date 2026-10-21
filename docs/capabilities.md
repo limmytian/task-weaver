@@ -86,5 +86,5 @@ tools. Memory previews require explicit review before saving and detect changed
 source evidence; see [memory continuity](memories.md). External MCP registry discovery, schema reads and confirmed calls share
 the inbound connection; see [MCP bridge](mcp-bridge.md). Eligible executable skills have an opt-in isolated runtime with real
 HTTP, stdio and CLI acceptance; see [skill runtimes](skill-runtimes.md). Plugin
-execution still requires its own runtime proof. Runtime discovery is the source of availability; release notes record
+execution uses its own isolated broker and reviewed lifecycle; see [plugin acceptance](plugin-acceptance.md). Runtime discovery is the source of availability; release notes record
 historical feature boundaries.
