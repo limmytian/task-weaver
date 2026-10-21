@@ -16,7 +16,8 @@ export function chatEndpoint(baseUrl: string) {
 /** Pin the resolved address for each request; never follow redirects with credentials. */
 export type ChatTurn = { content: string | null; toolCalls: { id: string; name: string; arguments: string }[] };
 
-export async function requestChatTurn(baseUrl: string, apiKey: string, payload: unknown, deadline = performance.now() + 45_000, onText?: (text: string) => Promise<void>, connectionTest = false, proxy: ChatProxySettings = {}, usage?: { start(): Promise<void>; observe(value: unknown, model?: unknown): void }) {
+export async function requestChatTurn(baseUrl: string, apiKey: string, payload: unknown, deadline = performance.now() + 45_000, onText?: (text: string) => Promise<void>, connectionTest = false, proxy: ChatProxySettings = {}, usage?: { start(): Promise<void>; observe(value: unknown, model?: unknown): void }, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const endpoint = chatEndpoint(baseUrl);
   if (performance.now() >= deadline) throw new ChatConfigurationError("chat_connection_failed");
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -35,11 +36,12 @@ export async function requestChatTurn(baseUrl: string, apiKey: string, payload: 
   const agentOptions = { proxyEnv, keepAlive: false };
   const agent = proxyEnv.HTTPS_PROXY || proxyEnv.https_proxy || proxyEnv.HTTP_PROXY || proxyEnv.http_proxy
     ? new transport.Agent(agentOptions) : undefined;
+  signal?.throwIfAborted();
   await usage?.start();
   return new Promise<ChatTurn>((resolve, reject) => {
     const failure = (code: ConstructorParameters<typeof ChatConfigurationError>[0]) => reject(new ChatConfigurationError(code));
     const request = transport.request(endpoint, {
-      method: "POST", agent: agent ?? false, family: address.family, signal: AbortSignal.timeout(Math.max(1, Math.floor(deadline - performance.now()))),
+      method: "POST", agent: agent ?? false, family: address.family, signal: AbortSignal.any([AbortSignal.timeout(Math.max(1, Math.floor(deadline - performance.now()))), ...(signal ? [signal] : [])]),
       lookup: (_hostname, _options, callback) => callback(null, address.address, address.family),
       headers: { ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}), "content-type": "application/json", "content-length": Buffer.byteLength(body) },
     }, response => {
@@ -77,7 +79,10 @@ export async function requestChatTurn(baseUrl: string, apiKey: string, payload: 
         } catch { failure("chat_response_invalid"); }
       });
     });
-    request.on("error", () => failure("chat_connection_failed"));
+    request.on("error", () => {
+      if (signal?.aborted) reject(signal.reason);
+      else failure("chat_connection_failed");
+    });
     request.end(body);
   }).finally(() => agent?.destroy());
 }

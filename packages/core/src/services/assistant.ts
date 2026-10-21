@@ -5,7 +5,8 @@ import { assistantOperationTools, assistantOperations, parseAssistantOperation, 
 import { createChatModelService } from "./chat-models";
 import { assistantReadTools, runAssistantReadTool, authorizeAssistantReadReference, type AssistantReadReference } from "./assistant-read-tools";
 import { beginChatUsage, snapshotChatModel } from "./chat-usage";
-import { requestChatTurn } from "./chat-endpoint";
+import { requestTiModelTurn } from "./ti-model-turn";
+import { runTiRuntime } from "./ti-runtime";
 import { schedulePredicate } from "./metadata-authorization";
 import { mcpServerPredicate } from "./mcp-authorization";
 import { createResourceServices } from './resource-services';
@@ -114,47 +115,43 @@ async function generateModelResponse(
   const references: AssistantReadReference[] = [];
   contextSnapshot.toolReads = references;
   const emit = (event: import("@task-weaver/contracts").AssistantStreamEvent) => observer?.(event, { conversationId, snapshot: contextSnapshot, actions: performed }) ?? Promise.resolve();
-  for (let round = 0; round < 16; round++) {
-    if (observer) await emit({ type: "turn", turn: round });
-    let text = "", lastFlush = performance.now();
-    const flush = async () => {
-      while (text) { const delta = text.slice(0, 16_000); text = text.slice(delta.length); await emit({ type: "text", delta }); }
-      lastFlush = performance.now();
-    };
-    const currentScope = contextSnapshot.current as { project: { id: string } | null; requirement: { id: string } | null; task: { id: string; scope?: string } | null };
-    let collector: Awaited<ReturnType<typeof beginChatUsage>> | undefined;
-    let turn: Awaited<ReturnType<typeof requestChatTurn>>;
-    try {
-    turn = await requestChatTurn(model.config.baseUrl!, model.apiKey, {
-      model: model.config.model, messages, tools: allowed ? [...assistantReadTools, ...assistantOperationTools] : assistantReadTools, tool_choice: round === 15 ? "none" : "auto", temperature: 0.2,
-    }, deadline, observer ? async delta => {
-      text += delta;
-      if (text.length >= 64 || performance.now() - lastFlush >= 100) await flush();
-    } : undefined, false, model.config, {
-      async start() {
-        collector = await beginChatUsage(db, {
-          projectId: currentScope.project?.id ?? null, requirementId: currentScope.requirement?.id ?? null,
-          taskId: currentScope.project ? currentScope.task?.id ?? null : null, conversationId, messageId, actor,
-          operationIds: performed.map(action => action.id),
-          snapshot: snapshotChatModel(model.config, { temperature: 0.2 }, model.apiKey),
-        });
-      },
-      observe(value, actualModel) { collector?.observe(value, actualModel, model.apiKey); },
-    });
-    await collector?.finish("succeeded");
-    } catch (error) {
-      await collector?.finish(error instanceof Error && error.name === "AbortError" ? "cancelled" : "failed");
-      throw error;
-    }
-    if (observer) await flush();
-    if (!turn.toolCalls.length) {
-      if (!turn.content) throw new ValidationError("Assistant returned no answer");
-      if (turn.content.includes("<｜DSML｜")) throw new ValidationError("The model returned an invalid tool response");
-      return turn.content;
-    }
-    if (round === 15) throw new ValidationError("Assistant query limit reached; please narrow the request");
-    messages.push({ role: "assistant", content: turn.content, tool_calls: turn.toolCalls.map(call => ({ id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } })) });
-    for (const call of turn.toolCalls) {
+  return runTiRuntime({
+    messages, deadline,
+    async authorize() {
+      const live = await getLiveRequestAuthority(db, identity);
+      if (live.actor.id !== actor.id || live.actor.type !== actor.type) throw new AuthorizationError();
+    },
+    async requestTurn({ round, finalRound }) {
+      if (observer) await emit({ type: "turn", turn: round });
+      let text = "", lastFlush = performance.now();
+      const flush = async () => {
+        while (text) { const delta = text.slice(0, 16_000); text = text.slice(delta.length); await emit({ type: "text", delta }); }
+        lastFlush = performance.now();
+      };
+      const currentScope = contextSnapshot.current as { project: { id: string } | null; requirement: { id: string } | null; task: { id: string; scope?: string } | null };
+      const turn = await requestTiModelTurn({
+        baseUrl: model.config.baseUrl!, apiKey: model.apiKey, proxy: model.config, deadline,
+        payload: { model: model.config.model, messages,
+          tools: allowed ? [...assistantReadTools, ...assistantOperationTools] : assistantReadTools,
+          tool_choice: finalRound ? "none" : "auto", temperature: 0.2 },
+        onText: observer ? async delta => {
+          text += delta;
+          if (text.length >= 64 || performance.now() - lastFlush >= 100) await flush();
+        } : undefined,
+        async beginUsage() {
+          const collector = await beginChatUsage(db, {
+            projectId: currentScope.project?.id ?? null, requirementId: currentScope.requirement?.id ?? null,
+            taskId: currentScope.project ? currentScope.task?.id ?? null : null, conversationId, messageId, actor,
+            operationIds: performed.map(action => action.id),
+            snapshot: snapshotChatModel(model.config, { temperature: 0.2 }, model.apiKey),
+          });
+          return { ...collector, observe(value, actualModel) { collector.observe(value, actualModel, model.apiKey); } };
+        },
+      });
+      if (observer) await flush();
+      return turn;
+    },
+    async executeTool(call) {
       if (references.length > 200 || performance.now() >= deadline) throw new ValidationError("Assistant query limit reached; please narrow the request");
       let result: unknown;
       try {
@@ -181,8 +178,7 @@ async function generateModelResponse(
           const executed = performed.find(row => row.id === action.id)!;
           if (observer) await emit({ type: "tool", name: operationName, status: executed.status === "failed" ? "failed" : executed.status === "proposed" ? "proposed" : "completed" });
           result = { status: executed.status, actionId: executed.id, error: executed.errorMessage, ...getContextRecord(executed.executionResult) };
-          messages.push({ role: "tool", tool_call_id: call.id, content: (model.apiKey ? JSON.stringify(redactValue(result)).split(model.apiKey).join(REDACTED) : JSON.stringify(redactValue(result))) });
-          continue;
+          return model.apiKey ? JSON.stringify(redactValue(result)).split(model.apiKey).join(REDACTED) : JSON.stringify(redactValue(result));
         }
         if (observer && assistantReadTools.some(tool => tool.function.name === call.name)) await emit({ type: "tool", name: call.name, status: "reading" });
         const read = await runAssistantReadTool(db, identity, call.name, args);
@@ -194,12 +190,13 @@ async function generateModelResponse(
         if (error instanceof AuthorizationError) throw error;
         result = { error: error instanceof NotFoundError ? "Resource not found or inaccessible" : "Invalid or unavailable platform query or operation" };
       }
-      messages.push({ role: "tool", tool_call_id: call.id, content: (model.apiKey ? JSON.stringify(redactValue(result)).split(model.apiKey).join(REDACTED) : JSON.stringify(redactValue(result))) });
-    }
-    if (confirmationRequired && performed.some(action => action.status === "proposed"))
-      return "Review the proposed operations below. No platform changes have been made. Approve an operation to execute it; dependent steps can be planned after it succeeds.";
-  }
-  throw new ValidationError("Assistant query limit reached; please narrow the request");
+      return model.apiKey ? JSON.stringify(redactValue(result)).split(model.apiKey).join(REDACTED) : JSON.stringify(redactValue(result));
+    },
+    async afterTools() {
+      if (confirmationRequired && performed.some(action => action.status === "proposed"))
+        return "Review the proposed operations below. No platform changes have been made. Approve an operation to execute it; dependent steps can be planned after it succeeds.";
+    },
+  });
 }
 
 function redactValue(value: unknown): unknown {
