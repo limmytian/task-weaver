@@ -5,14 +5,14 @@ import { emit, serializeRealtimeEvent, type RealtimeEvent } from "@task-weaver/r
 import type { Actor } from "@task-weaver/contracts";
 
 const context = new AsyncLocalStorage<{ actor: Actor; causationId?: string; correlationId?: string }>();
-export const withEventActor = <T>(actor: Actor, work: () => Promise<T>, linkage?: { causationId: string; correlationId: string }) => context.run({ actor, ...linkage }, work);
+export const withEventActor = <T>(actor: Actor, work: () => Promise<T>, linkage?: { causationId: string; correlationId: string }) => context.run({ ...context.getStore(), actor, ...linkage }, work);
 
 /** Await inside the business transaction. Realtime notifications remain hints; the outbox is authoritative. */
 export async function emitDurable(db: Database, event: RealtimeEvent) {
   const id = event.eventId ?? randomUUID();
   const occurredAt = new Date(event.serverTime ?? Date.now());
   const scope = context.getStore();
-  const enriched = { ...event, eventId: id, serverTime: occurredAt.toISOString() } as RealtimeEvent;
+  const enriched = { ...event, eventId: id, serverTime: occurredAt.toISOString(), attributes: { ...event.attributes, durableOutbox: true } } as RealtimeEvent;
   await db.insert(webhookEvents).values({ id, eventType: event.type,
     projectId: "projectId" in event ? event.projectId : null,
     actorId: scope?.actor.id, actorType: scope?.actor.type, causationId: scope?.causationId,

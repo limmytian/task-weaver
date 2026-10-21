@@ -540,6 +540,13 @@
       "when": 1792520400000,
       "tag": "0076_webhook_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1792521000000,
+      "tag": "0077_verified_inbound_events",
+      "breakpoints": true
     }
   ]
 }

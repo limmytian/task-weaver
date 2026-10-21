@@ -79,3 +79,5 @@ export { getMcpServerReadiness } from "./mcp-readiness";
 export { executeTiTaskAttempt } from "./ti-task-runtime";
 export { connectPartnersMcp } from "./partners-mcp";
 export { createTiSandboxCleanup } from "./ti-sandbox-cleanup";
+
+export { createInboundSourceService, acceptInboundEvent, processInboundEventOnce, InboundRateLimitError } from "./inbound-events";

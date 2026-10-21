@@ -68,6 +68,10 @@ export async function authenticationMiddleware(c: Context<Env>, next: Next) {
     );
     return c.body(null, 204);
   }
+  // This exact endpoint authenticates the raw request with its own persisted source HMAC.
+  if (c.req.method === "POST" && /^\/api\/v1\/inbound\/events\/[0-9a-fA-F-]{36}$/.test(c.req.path)) {
+    await next(); return;
+  }
   if (publicRoutes.has(`${c.req.method} ${c.req.path}`)) {
     // Explicit public authentication endpoints may accept an expired browser cookie for a new login.
     // An Authorization header is never silently discarded, even on public routes.

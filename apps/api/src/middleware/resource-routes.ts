@@ -131,6 +131,10 @@ const ordinaryRoutes: Array<[string, RegExp]> = [
   ["GET", new RegExp("^/api/v1/memories/[0-9a-fA-F-]{36}/?$")],
 ];
 export function isOrdinaryResourceRoute(method: string, path: string) {
+  if (["GET", "POST"].includes(method) && /^\/api\/v1\/inbound\/sources$/.test(path)) return true;
+  if (["PATCH", "DELETE"].includes(method) && /^\/api\/v1\/inbound\/sources\/[0-9a-fA-F-]{36}$/.test(path)) return true;
+  if (method === "GET" && /^\/api\/v1\/inbound\/sources\/[0-9a-fA-F-]{36}\/events(?:\/[0-9a-fA-F-]{36}\/actions)?$/.test(path)) return true;
+  if (method === "POST" && /^\/api\/v1\/inbound\/sources\/[0-9a-fA-F-]{36}\/events\/[0-9a-fA-F-]{36}\/retry$/.test(path)) return true;
   if (method === "GET" && /^\/api\/v1\/webhooks\/[0-9a-fA-F-]{36}\/deliveries\/[0-9a-fA-F-]{36}\/attempts$/.test(path)) return true;
   if (method === "GET" && path === "/api/v1/ti/worker/cleanup") return true;
   if (method === "GET" && path === "/api/v1/daemons/events") return true;

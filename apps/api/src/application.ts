@@ -8,6 +8,7 @@ import {
 import type { RealtimeEvent } from "@task-weaver/realtime";
 import {
   webhookService,
+  processInboundEventOnce,
   skillPackageStorageService,
   skillPresetService,
   authenticationConfiguration,
@@ -41,6 +42,7 @@ import scheduleRoutes from "./routes/schedules.js";
 import searchRoutes from "./routes/search.js";
 import taskRoutes from "./routes/tasks.js";
 import versionRoutes from "./routes/version.js";
+import inboundRoutes from "./routes/inbound-events.js";
 import webhookRoutes from "./routes/webhooks.js";
 import { mcpPool } from "./mcp-pool.js";
 import { createPartnersGatewayRuntime } from "@task-weaver/partners-gateway/runtime";
@@ -200,6 +202,7 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
         mountPath: "/api/v1",
         route: scheduleRoutes,
       },
+      { id: "verified-inbound-events", method: "GET", path: "/api/v1/inbound", route: inboundRoutes },
       { id: "ti-agent", method: "GET", path: "/api/v1/ti", route: tiRoutes },
       {
         id: "assistant",
@@ -254,6 +257,7 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
           webhookBackground = (async () => {
             while (!context.signal.aborted) {
               try {
+                for (let i = 0; i < 20 && !context.signal.aborted && await processInboundEventOnce(context.db); i++) { /* Durable verified inbox. */ }
                 for (let i = 0; i < 50 && !context.signal.aborted && await webhookService.expandWebhookEvent(context.db); i++) { /* Bounded durable fanout. */ }
                 for (let i = 0; i < 20 && !context.signal.aborted && await webhookService.runWebhookDeliveryOnce(context.db); i++) { /* Leased delivery batch. */ }
               } catch { context.logger.error("Durable webhook worker will retry after an internal failure"); }
