@@ -4,8 +4,8 @@ The REST API and `tw plugin` CLI support operator-configured backends with
 optional [restricted HTML pages](plugin-frontends.md). Frontend manifests are
 rejected unless the dedicated artifact listener has valid origin configuration
 and is running. Installed-plugin discovery and invocation use the common MCP
-facade described below. Owner management UI, the reviewed directory and the full
-acceptance matrix remain pending, so bootstrap does not advertise blanket plugin
+facade described below. The [Web management page](plugin-management.md) provides reviewed lifecycle
+operations. The reviewed directory and full acceptance matrix remain pending, so bootstrap does not advertise blanket plugin
 execution readiness. See [plugin contracts](plugin-contracts.md) for the sandbox
 and owned-state protocol.
 

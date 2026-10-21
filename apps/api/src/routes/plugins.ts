@@ -5,14 +5,14 @@ import { bodyLimit } from "hono/body-limit";
 import { resolve } from "node:path";
 import { and, eq, isNull, desc } from "drizzle-orm";
 import { pluginGenerations, pluginInstallations } from "@task-weaver/db";
-import { createPluginLifecycle, preparePluginWorker, invokeInstalledPlugin, configuredPluginWorker, recoverPluginSchema, personalResourceOwnerId, skillPackageStorageService, ValidationError, NotFoundError, ConflictError, McpApprovalRequired } from "@task-weaver/core";
+import { createPluginLifecycle, preparePluginWorker, invokeInstalledPlugin, configuredPluginWorker, recoverPluginSchema, personalResourceOwnerId, skillPackageStorageService, ValidationError, NotFoundError, ConflictError, McpApprovalRequired, pluginListQuerySchema, pluginManifestSchema, canAccessResource } from "@task-weaver/core";
 import { resourceAuthority, resourcePredicate } from "@task-weaver/core";
 import type { Env } from "../middleware/actor.js";
 
 const routes = new Hono<Env>();
 routes.use("*", bodyLimit({ maxSize: 131072, onError: c => c.json({ error: "Plugin request exceeds the 131072-byte limit" }, 413) }));
 const idSchema = z.string().uuid();
-const querySchema = z.object({ projectId: z.string().uuid().optional(), scope: z.enum(["project", "personal", "global"]).default("personal"), limit: z.coerce.number().int().min(1).max(20).default(20), offset: z.coerce.number().int().min(0).max(10000).default(0) }).strict().refine(value => value.scope === "project" ? !!value.projectId : !value.projectId, "Project scope requires projectId");
+const querySchema = pluginListQuerySchema;
 
 routes.onError((error, c) => {
   if (error instanceof McpApprovalRequired) return c.json({ error: error.message, code: "approval_required", approvalId: error.approvalId }, 403);
@@ -28,8 +28,10 @@ routes.get("/", async c => {
   const query = querySchema.parse(c.req.query()), db = c.get("db"), identity = c.get("identity");
   const authority = await resourceAuthority(db, identity);
   const scope = query.scope === "project" ? eq(pluginInstallations.projectId, query.projectId!) : query.scope === "personal" ? and(isNull(pluginInstallations.projectId), eq(pluginInstallations.personalOwnerId, personalResourceOwnerId(identity))) : and(isNull(pluginInstallations.projectId), isNull(pluginInstallations.personalOwnerId));
-  const items = await db.select({ id: pluginInstallations.id, pluginId: pluginInstallations.pluginId, revision: pluginInstallations.revision, status: pluginInstallations.status, manifestHash: pluginInstallations.manifestHash }).from(pluginInstallations).where(and(resourcePredicate(authority, pluginInstallations), scope)).orderBy(desc(pluginInstallations.updatedAt), pluginInstallations.id).limit(query.limit).offset(query.offset);
-  return c.json({ items, limit: query.limit, offset: query.offset });
+  const items = await db.select({ id: pluginInstallations.id, pluginId: pluginInstallations.pluginId, revision: pluginInstallations.revision, status: pluginInstallations.status, manifestHash: pluginInstallations.manifestHash, manifest: pluginInstallations.manifest }).from(pluginInstallations).where(and(resourcePredicate(authority, pluginInstallations), scope)).orderBy(desc(pluginInstallations.updatedAt), pluginInstallations.id).limit(query.limit).offset(query.offset);
+  const target = query.scope === "project" ? { projectId: query.projectId } : query.scope === "personal" ? { personalOwnerId: personalResourceOwnerId(identity), personalOwnerType: "human" as const } : {};
+  const manage = canAccessResource(authority, target, "resource.read") && canAccessResource(authority, target, "resource.write") && canAccessResource(authority, target, "mcp.manage");
+  return c.json({ items: items.map(({ manifest, ...row }) => { const parsed = pluginManifestSchema.parse(manifest); return { ...row, displayName: parsed.displayName, version: parsed.version }; }), limit: query.limit, offset: query.offset, permissions: { manage, activate: manage && canAccessResource(authority, target, "mcp.invoke") } });
 });
 
 routes.get("/:id", async c => {

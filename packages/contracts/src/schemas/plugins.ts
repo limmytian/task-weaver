@@ -164,3 +164,10 @@ export const pluginResultMessageSchema = pluginMessageBinding.extend({ kind: z.l
   if (value.result !== undefined && !pluginJsonValueSchema.safeParse(value.result).success) return false;
   try { return new TextEncoder().encode(JSON.stringify(value)).byteLength <= 32768; } catch { return false; }
 }, "Plugin reply must agree with its success state and byte limit");
+
+
+export const pluginListQuerySchema = z.object({
+  scope: z.enum(["project", "personal", "global"]).default("personal"), projectId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(20).default(20), offset: z.coerce.number().int().min(0).max(10000).default(0),
+}).strict().refine(value => value.scope === "project" ? !!value.projectId : !value.projectId, "Project scope requires projectId; other scopes forbid it");
+export const pluginManifestReviewSchema = z.object({ manifest: pluginManifestSchema, installationId: z.string().uuid().optional() }).strict();

@@ -120,9 +120,9 @@ The internal `invokeInstalledPlugin` broker and `preparePluginWorker` now implem
 installation-scoped state and an offline backend worker. The
 [backend lifecycle APIs and CLI](plugin-lifecycle.md) install and manage these
 plugins. The [isolated page protocol](plugin-frontends.md) now provides a trusted
-application viewer and dedicated artifact listener. Installation-management UI,
-owner-facing management and the remaining acceptance matrix still
-limit the complete plugin experience.
+application viewer and dedicated artifact listener. The
+[management page](plugin-management.md) now provides reviewed lifecycle operations. The reviewed directory and remaining acceptance matrix still limit
+the complete plugin experience.
 
 The worker uses operator-supplied digest-pinned profiles and publisher keys;
 request payloads cannot choose either configuration. It materializes a

@@ -8,6 +8,7 @@ export const navigation: readonly NavigationItem[] = [
       { id: "search", label: "Search", href: "/projects/search", icon: "search" },
       { id: "memories", label: "Memories", href: "/projects/memories", icon: "brain" },
       { id: "skills", label: "Skills", href: "/projects/skills", icon: "puzzle" },
+      { id: "plugins", label: "Plugins", href: "/projects/plugins", icon: "puzzle" },
       { id: "mcp", label: "MCP Servers", href: "/projects/mcp", icon: "server" },
       { id: "daemons", label: "Daemons", href: "/projects/daemons", icon: "cpu" },
       { id: "usage", label: "Agent Usage", href: "/projects/usage", icon: "analytics" },

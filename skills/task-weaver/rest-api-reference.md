@@ -2547,3 +2547,12 @@ prints the pending approval JSON. Full successful receipts avoid another read;
 failed/ambiguous calls without a receipt may repeat a read on explicit retry.
 Results are bounded untrusted worker inputs, with no worker network or credentials.
 See [declared MCP reads](../../docs/plugin-contracts.md#declared-external-mcp-reads).
+
+
+The Web **Plugins** page (`/projects/plugins`) reviews manifests, access diffs and
+immutable generations before lifecycle operations. Installation-list responses
+also include displayName/version summaries and scoped `permissions.manage` /
+`permissions.activate` hints; API authorization remains live. The human-session
+BFF permits only fixed management paths and CSRF-protected mutations. It retains
+the same reviewed retry request after failure and never forwards credentials to
+artifact origins. See [Web plugin management](../../docs/plugin-management.md).

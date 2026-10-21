@@ -82,8 +82,13 @@ case "$payload" in *'"method":"read"'*) printf '{"result":%s}' "$count";; *) pri
     await delay(200);
   }
   if (!ready) { await stop(); throw new Error("Actual Next application did not become ready; build it before running the browser fixture"); }
+  const manifestPath = join(directory, "manifest.json"), upgradePath = join(directory, "upgrade.json");
+  const upgradeUnsigned = pluginManifestSchema.parse({ ...unsigned, version: "1.1.0", description: "A reviewed generation without storage read access.", permissions: ["ui.render", "backend.execute", "storage.write"] });
+  const upgradeManifest = { ...upgradeUnsigned, signature: { algorithm: "ed25519" as const, keyId: "browser-publisher", value: sign(null, Buffer.from(pluginSigningPayload(upgradeUnsigned)), signer.privateKey).toString("base64") } };
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2), { mode: 0o600 });
+  await writeFile(upgradePath, JSON.stringify(upgradeManifest, null, 2), { mode: 0o600 });
   const accessPath = join(directory, "access.json");
-  await writeFile(accessPath, JSON.stringify({ webOrigin, loginUrl: webOrigin + "/login", viewerUrl: `${webOrigin}/plugins/${installed.installationId}`, email: fixture.admin.account.email, password, installationId: installed.installationId, projectId: fixture.project.id, manifestHash: capabilityDigest(manifest), image, artifactOrigin: env.TW_PLUGIN_ARTIFACT_ORIGIN }), { mode: 0o600 });
+  await writeFile(accessPath, JSON.stringify({ manifestPath, upgradePath, managementUrl: `${webOrigin}/projects/plugins`, webOrigin, loginUrl: webOrigin + "/login", viewerUrl: `${webOrigin}/plugins/${installed.installationId}`, email: fixture.admin.account.email, password, installationId: installed.installationId, projectId: fixture.project.id, manifestHash: capabilityDigest(manifest), image, artifactOrigin: env.TW_PLUGIN_ARTIFACT_ORIGIN }), { mode: 0o600 });
   console.log("PLUGIN_BROWSER_FIXTURE_READY " + accessPath);
 }
 main().catch(async error => { console.error(error instanceof Error ? error.message : "Browser fixture failed"); try { await stopFixture(); } finally { process.exit(1); } });

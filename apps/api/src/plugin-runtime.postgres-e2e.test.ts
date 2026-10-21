@@ -163,7 +163,12 @@ printf '{"result":7,"storageChanges":[{"key":"counter","expectedVersion":0,"oper
   assert.equal(installed.filter(result => result.data.replayed).length, 1);
   const id = installed[0]!.data.installationId;
   assert.equal(installed[1]!.data.installationId, id);
-  assert.equal((await call(`?scope=project&projectId=${f.project.id}`)).data.items.length, 1);
+  const managementList = (await call(`?scope=project&projectId=${f.project.id}`)).data;
+  assert.equal(managementList.items.length, 1);
+  assert.equal(managementList.items[0].displayName, manifest.displayName);
+  assert.equal(managementList.items[0].manifest, undefined);
+  assert.deepEqual(managementList.permissions, { manage: true, activate: true });
+  assert.deepEqual((await call(`?scope=project&projectId=${f.project.id}`, undefined, readCredential.rawKey)).data.permissions, { manage: false, activate: false });
   assert.equal((await call(`/${id}`)).data.manifestHash, install.confirmedManifestHash);
   const invocation = { expectedRevision: 1, method: "increment", input: {}, confirmed: true, idempotencyKey: randomUUID() };
   const summaries = await mcpCall("tw_plugins_list", { scope: "project", projectId: f.project.id });
