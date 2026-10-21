@@ -292,6 +292,12 @@ function redactDelegatedInput(value: any): any {
 
 /** Task capabilities do not inherit the parent's project administration or unrelated write surfaces. */
 function authorizeDelegatedOperation(authority: ResourceAuthority, group: Group, name: string, call: any[]) {
+  const assetReads: Record<string, string[]> = {
+    memory: ["getMemory", "listMemories", "searchMemories"],
+    package: ["listPackages", "getPackage", "listPackageFiles", "readPackageTextFile"],
+    mcp: ["listServers", "searchTools", "getServer", "getToolDetail", "listServerTools"],
+  };
+  if (authority.bounds?.purpose === "automation" && assetReads[group]?.includes(name)) return;
   const reads = new Set(["getProject", "getRequirement", "getTask", "getTaskDetail", "listTasks", "listRequirements", "listProjects", "getDocument", "getDocumentDetail", "listDocuments", "getTaskClaim", "getRequirementClaim", "listExecutionSlices", "listTaskComments", "listTaskNotes", "listDocumentVersions", "getDocumentVersion", "getRequirementRepositories", "getTaskRepositories", "listRequirementRepositories", "listTaskRepositories", "getRepository", "listRepositories", "bootstrapContext", "getBootstrapContext", "searchTasks", "searchRequirements", "searchDocuments", "searchDocumentsFulltext", "searchAll", "resolveTitles", "listContextEntries", "searchContext", "getContextEntry"]);
   const writes = new Set(["updateTask", "updateTaskStatus", "addTaskComment", "addTaskNote", "claimTask", "releaseTask", "heartbeatClaim", "updateDocument"]);
   reads.add("listWorkflowOutputs");

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, count, eq, isNull, lte, ne, or, sql } from "drizzle-orm";
-import { tiSandboxOperations, tiSandboxWorkspaces, type Database } from "@task-weaver/db";
+import { tiSandboxOperations, tiSandboxWorkspaces, tiAgentRuns, assistantConversations, type Database } from "@task-weaver/db";
 import { PartnersMcpError } from "./partners-mcp";
 import type { TiSandboxBinding } from "./ti-sandboxes";
 
@@ -10,7 +10,24 @@ const terminal = new Set(["succeeded", "failed", "cancelled", "timed_out"]);
 
 /** Reconciliation starts exclusively from TW ownership tombstones, never from a provider-wide resource listing. */
 export function createTiSandboxCleanup(db: Database, resolveBinding: (id: string) => Promise<TiSandboxBinding>) {
+  let scanAfter: string | undefined;
+  async function reconcileOrphans() {
+    const rows = await db.select().from(w).where(and(ne(w.state, "deleted"), ne(w.state, "cleanup_pending"), scanAfter ? sql`${w.id} > ${scanAfter}` : undefined))
+      .orderBy(asc(w.id)).limit(100);
+    scanAfter = rows.length === 100 ? rows.at(-1)!.id : undefined;
+    for (const row of rows) {
+      const run = row.runId ? await db.query.tiAgentRuns.findFirst({ where: eq(tiAgentRuns.id, row.runId) }) : null;
+      const conversation = row.conversationId ? await db.query.assistantConversations.findFirst({ where: eq(assistantConversations.id, row.conversationId) }) : null;
+      const binding = run?.authorization as { ownerId?: string; leaseGeneration?: number } | null;
+      const orphan = row.runId ? !run || ["succeeded", "failed", "cancelled"].includes(run.status) || !run.leaseExpiresAt || run.leaseExpiresAt <= new Date()
+        || binding?.ownerId !== row.ownerId || binding?.leaseGeneration !== row.attempt
+        : !conversation || conversation.createdBy !== row.ownerId || conversation.createdByType !== row.ownerType;
+      if (orphan) await db.update(w).set({ state: "cleanup_pending", cleanupRequestedAt: new Date(), nextCleanupAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(w.id, row.id), eq(w.state, row.state)));
+    }
+  }
   return {
+    async reconcileOrphans() { await reconcileOrphans(); },
     async runOnce() {
       const now = new Date();
       const leaseId = randomUUID();

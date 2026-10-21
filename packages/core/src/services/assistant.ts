@@ -3,10 +3,11 @@ import { isDeepStrictEqual } from "node:util";
 import { createHash } from "node:crypto";
 import { assistantOperationTools, assistantOperations, parseAssistantOperation, executeAssistantOperation } from "./assistant-operations";
 import { createChatModelService } from "./chat-models";
-import { assistantReadTools, runAssistantReadTool, authorizeAssistantReadReference, type AssistantReadReference } from "./assistant-read-tools";
+import { assistantReadTools, authorizeAssistantReadReference, type AssistantReadReference } from "./assistant-read-tools";
 import { beginChatUsage, snapshotChatModel } from "./chat-usage";
 import { requestTiModelTurn } from "./ti-model-turn";
 import { runTiRuntime } from "./ti-runtime";
+import { createTiCapabilities } from "./ti-capabilities";
 import { schedulePredicate } from "./metadata-authorization";
 import { mcpServerPredicate } from "./mcp-authorization";
 import { createResourceServices } from './resource-services';
@@ -112,6 +113,7 @@ async function generateModelResponse(
   ];
   messages.push({ role: "system", content: `Account operation permission: ${allowed ? "allowed" : "not allowed"}. ${confirmationRequired ? "Confirmation is required. Operation tools only record proposals; they do not create resources or return newly created IDs. Do not plan dependent calls using invented IDs." : allowed ? "Requested operations execute immediately." : "Write operations are disabled."} Use get_project for exact task statistics. Create requirements before their tasks, and use returned identifiers for dependencies. Omit assignee and assigneeType for unassigned tasks. When independent operations are requested, submit their tool calls together in one turn to reduce latency. Do not repeat failed calls with unchanged arguments.` });
   const deadline = performance.now() + 300_000;
+  const capabilities = createTiCapabilities(db, async () => identity, "chat");
   const references: AssistantReadReference[] = [];
   contextSnapshot.toolReads = references;
   const emit = (event: import("@task-weaver/contracts").AssistantStreamEvent) => observer?.(event, { conversationId, snapshot: contextSnapshot, actions: performed }) ?? Promise.resolve();
@@ -159,7 +161,7 @@ async function generateModelResponse(
         if (Object.hasOwn(assistantOperations, call.name) && allowed) {
           const operationName = call.name;
           const parsed = parseAssistantOperation(operationName, args);
-          const duplicate = performed.find(action => action.payload.operation === operationName && (isDeepStrictEqual(action.payload.input, JSON.parse(JSON.stringify(parsed)))
+          const duplicate = performed.find(action => action.payload.operation === operationName && !(assistantOperations[operationName]?.repeatableRead && action.status === "succeeded") && (isDeepStrictEqual(action.payload.input, JSON.parse(JSON.stringify(parsed)))
             || (assistantOperations[operationName]?.external && ["failed", "executing"].includes(action.status)
               && ((action.payload.input as Record<string, unknown>)?.toolId ?? (action.payload.input as Record<string, unknown>)?.serverId) === (parsed.toolId ?? parsed.serverId))));
           const action = duplicate ?? await createProposedAction(db, conversationId, messageId, { actionType: "platform_operation", payload: { operation: operationName, input: parsed } }, actor);
@@ -181,7 +183,7 @@ async function generateModelResponse(
           return model.apiKey ? JSON.stringify(redactValue(result)).split(model.apiKey).join(REDACTED) : JSON.stringify(redactValue(result));
         }
         if (observer && assistantReadTools.some(tool => tool.function.name === call.name)) await emit({ type: "tool", name: call.name, status: "reading" });
-        const read = await runAssistantReadTool(db, identity, call.name, args);
+        const read = await capabilities.read(call.name, args);
         references.push(...read.references);
         if (observer) await emit({ type: "tool", name: call.name, status: "completed" });
         const serialized = JSON.stringify(redactValue(read.data));
@@ -1004,12 +1006,13 @@ async function executeActionPayload(
   action: AssistantActionRow,
   actor: Actor,
   services: ReturnType<typeof createResourceServices>,
+  identity: VerifiedRequestContext,
 ) {
   const proposal = proposalFromAction(action);
 
   switch (proposal.actionType) {
     case "platform_operation":
-      return executeAssistantOperation(db, services, proposal.payload.operation, proposal.payload.input, actor);
+      return executeAssistantOperation(db, services, proposal.payload.operation, proposal.payload.input, actor, { identity, conversationId: action.conversationId, actionId: action.id });
     case "create_task": {
       const result = await services.taskService.createTask(db, proposal.payload, actor);
       return { entityType: "task", entityId: result.id, result };
@@ -1089,14 +1092,14 @@ export async function executeApprovedAction(
     // Commit the reservation before any external wait. A retry cannot dispatch the action twice.
     if (proposal.actionType === "platform_operation" && assistantOperations[proposal.payload.operation]?.external)
       return { externalAction: action };
-    const execution = await executeActionPayload(tx as unknown as Database, action, actor, createResourceServices(context));
+    const execution = await executeActionPayload(tx as unknown as Database, action, actor, createResourceServices(context), context);
     return updateActionStatus(tx as unknown as Database, id, {
       status: "succeeded", executionResult: { entityType: execution.entityType, entityId: execution.entityId, result: execution.result },
     }, actor);
   });
   if (!("externalAction" in reserved)) return reserved;
   try {
-    const execution = await executeActionPayload(db, reserved.externalAction, actor, createResourceServices(context));
+    const execution = await executeActionPayload(db, reserved.externalAction, actor, createResourceServices(context), context);
     const completed = await updateActionStatus(db, id, { status: "succeeded", executionResult: { entityType: execution.entityType, entityId: execution.entityId, result: execution.result } }, actor);
     if (execution.entityType === "mcp" && execution.entityId) await authorizeAssistantReadReference(db, context, { kind: "mcp", id: execution.entityId });
     return completed;

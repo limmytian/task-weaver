@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises"
-import { saveChatModelSchema, updateAssistantPolicySchema } from "@task-weaver/contracts"
+import { saveChatModelSchema, updateAssistantPolicySchema, cancelTiAgentRunSchema } from "@task-weaver/contracts"
 import { Command } from 'commander'
 import { get, post, put, patch, del } from '../client.js'
 import { printJson, printKv, printTable } from '../output.js'
@@ -221,6 +221,14 @@ export function registerTiAgent(program: Command): void {
         actualModel: run.actualModel,
       }))
       printTable(rows, ['id', 'status', 'taskId', 'scheduleRunId', 'actualProvider', 'actualModel'])
+    })
+
+  runs.command('cancel <id>').description('persist cancellation and owned sandbox cleanup intent')
+    .option('--reason <text>', 'reason for cancellation').option('--json', 'output raw JSON')
+    .action(async (id, opts) => {
+      const data = await post(`/api/v1/ti/runs/${id}/cancel`, cancelTiAgentRunSchema.parse({ reason: opts.reason }))
+      if (opts.json) return printJson(data)
+      printKv(data as Record<string, unknown>)
     })
 
   runs

@@ -4,7 +4,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createApiApplication } from "../apps/api/src/application";
 import { createRequire } from "node:module";
 const apiRequire = createRequire(new URL("../apps/api/package.json", import.meta.url));
-const { createDb, runMigrations, authInstanceState, authRateLimits, tiAgentRuns, tiAgentModelConfigs, tiAgentPolicies, executionDelegations, requirementClaims, assistantConversations, assistantActions } = apiRequire("@task-weaver/db");
+const { createDb, runMigrations, authInstanceState, authRateLimits, tiAgentRuns, tiAgentModelConfigs, tiAgentPolicies, executionDelegations, requirementClaims, assistantConversations, assistantActions, memories, skillPackages, tiSandboxWorkspaces } = apiRequire("@task-weaver/db");
 const { createAuthenticationRuntime, createResourceServices, createTiExecutionService, apiKeyService, assistantService, createScheduleSchema } = apiRequire("@task-weaver/core");
 const { eq, like } = apiRequire("drizzle-orm");
 const { createGatewayTwAuthority } = apiRequire("../../packages/partners-gateway/src/tw-authority.ts");
@@ -113,6 +113,27 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     assert.deepEqual(renewed.delegation.taskIds, capability.delegation.taskIds);
     capability = renewed;
   });
+  await t.test("automation reads project assets while preserving task bounds and excluding personal and foreign assets", async () => {
+    const context = await runtime.verify(new Headers({ authorization: `Bearer ${capability.token}` }));
+    const child = createResourceServices(context);
+    const [memory] = await db.insert(memories).values({ projectId: project.id, title: "Run guidance", content: "Use current data", createdBy: owner.actor.id, createdByType: "human" }).returning();
+    const [foreignMemory] = await db.insert(memories).values({ projectId: other.id, title: "Private guidance", content: "Private", createdBy: outsider.actor.id, createdByType: "human" }).returning();
+    const [personalMemory] = await db.insert(memories).values({ personalOwnerId: owner.actor.id, personalOwnerType: "human", title: "Personal guidance", content: "Private", createdBy: owner.actor.id, createdByType: "human" }).returning();
+    const [skill] = await db.insert(skillPackages).values({ projectId: project.id, name: "Project instructions", createdBy: owner.actor.id }).returning();
+    assert.equal((await child.memoryService.getMemory(db, memory.id)).id, memory.id);
+    assert.equal((await child.skillPackageService.getPackage(db, skill.id)).id, skill.id);
+    await assert.rejects(() => child.memoryService.getMemory(db, foreignMemory.id));
+    await assert.rejects(() => child.memoryService.getMemory(db, personalMemory.id));
+    await assert.rejects(() => child.memoryService.forgetMemory(db, memory.id, executor.actor));
+    await assert.rejects(() => child.skillPackageService.updatePackageMetadata(db, { packageId: skill.id, description: "Forged edit" }, executor.actor));
+    await assert.rejects(() => child.taskService.getTask(db, sibling.id));
+    const { createTiCapabilities } = await import("../packages/core/src/services/ti-capabilities");
+    const tools = createTiCapabilities(db, async () => context, "task");
+    const result = await tools.read("list_memories", { projectId: project.id });
+    assert.ok(JSON.stringify(result).includes(memory.id));
+    assert.ok(!JSON.stringify(result).includes(personalMemory.id));
+    await assert.rejects(() => tools.operation("create_project", { name: "Escaped" }));
+  });
   await t.test("Ti usage shares the original executor key, attempt and lease fence", async () => {
     const input = { ...fence(), processId: randomUUID(), attempt: acquired.retryCount, startedAt: new Date().toISOString(), revision: 0, outcome: "running", endedAt: null, summary: { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, cacheSemantics: "unknown", provider: "fixture", model: "safe", completeness: "unknown" } };
     await assert.rejects(() => foreign.service.agentUsageService.reportTiUsage(db, run.id, input, foreign.actor));
@@ -125,6 +146,34 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     await assert.rejects(() => runtime.verify(new Headers({ authorization: `Bearer ${capability.token}` })));
     await assert.rejects(() => supervisor.renewDelegation(db, run.id, capability.delegation.id, fence()));
     assert.equal(await db.query.requirementClaims.findFirst({ where: eq(requirementClaims.requirementId, requirement.id) }), undefined);
+  });
+  await t.test("actual model executes the shared manual-task supervisor", { skip: !process.env.TW_TI_REAL_MODEL_URL, timeout: 180_000 }, async () => {
+    const { encryptChatKey, chatKeyBinding } = await import("../packages/core/src/services/chat-credentials");
+    const { executeTiTaskAttempt } = await import("../packages/core/src/services/ti-task-runtime");
+    const { createPartnersMcpAdapter } = await import("../packages/core/src/services/partners-mcp");
+    process.env.TW_CHAT_CREDENTIAL_MASTER_KEY = randomBytes(32).toString("base64");
+    const provider = "real-model-acceptance", model = process.env.TW_TI_REAL_MODEL_NAME!;
+    await db.update(tiAgentModelConfigs).set({ isDefaultAgent: false }).where(eq(tiAgentModelConfigs.ownerId, owner.actor.id));
+    await db.insert(tiAgentModelConfigs).values({ ownerId: owner.actor.id, ownerType: "human", provider, model,
+      baseUrl: process.env.TW_TI_REAL_MODEL_URL, proxyMode: "direct", encryptedApiKey: process.env.TW_TI_REAL_MODEL_KEY
+        ? encryptChatKey(process.env.TW_TI_REAL_MODEL_KEY, chatKeyBinding({ ownerId: owner.actor.id, provider, model })) : null,
+      enabled: true, isDefaultAgent: true, credentialStatus: "valid" });
+    await db.update(tiAgentPolicies).set({ executionMode: "live", allowNetwork: true, runTimeoutSeconds: 150,
+      allowedTools: ["get_task", "add_comment"], updatedAt: new Date() }).where(eq(tiAgentPolicies.ownerId, owner.actor.id));
+    const marker = `real-model-${randomUUID()}`;
+    await owner.service.taskService.updateTask(db, task.id, { description: `Use get_task to read this task, then add exactly one task comment with content ${marker}. Return the same marker after the tool succeeds.` }, owner.actor);
+    const queued = await create();
+    const held = await executor.service.tiAgentService.acquireRun(db, worker, executor.actor);
+    assert.equal(held.id, queued.id);
+    const currentFence = { workerId: worker.workerId, leaseGeneration: held.leaseGeneration };
+    const result = await executeTiTaskAttempt(db, executor.context, held.id, currentFence, {
+      id: "unused-sandbox", tenantId: "unused", projectId: "unused",
+      adapter: createPartnersMcpAdapter(async () => { throw new Error("Sandbox is not part of this focused model check"); }),
+    }, new AbortController().signal);
+    assert.equal(result.status, "succeeded");
+    const detail = await owner.service.taskService.getTaskDetail(db, task.id);
+    assert.equal(detail.comments.filter((comment: any) => comment.content === marker).length, 1);
+    await supervisor.invoke(db, "completeRun", [held.id, { ...result, ...currentFence }]);
   });
   await t.test("expired Ti leases and retries exchange fresh fences without restoring old child authority", async () => {
     const queued = await owner.service.tiAgentService.createRun(db, { taskId: task.id, assignedAgentId: agent.id, assignedAgentType: "agent", maxRetries: 1 }, owner.actor);
@@ -148,6 +197,19 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     const third = await executor.service.tiAgentService.acquireRun(db, worker, executor.actor);
     assert.equal(third.id, first.id); assert.ok(third.leaseGeneration > second.leaseGeneration);
     await supervisor.invoke(db, "completeRun", [third.id, { workerId: worker.workerId, leaseGeneration: third.leaseGeneration, status: "succeeded" }]);
+  });
+  await t.test("authorized cancellation persists sandbox cleanup and revokes child capabilities", async () => {
+    const queued = await create();
+    const held = await executor.service.tiAgentService.acquireRun(db, worker, executor.actor);
+    assert.equal(held.id, queued.id);
+    const child = await supervisor.issueDelegation(db, held.id, { workerId: worker.workerId, leaseGeneration: held.leaseGeneration });
+    const [workspace] = await db.insert(tiSandboxWorkspaces).values({ ownerId: owner.actor.id, ownerType: "human", projectId: project.id,
+      runId: held.id, attempt: held.leaseGeneration, bindingId: "cancel-fixture", tenantId: "tenant", providerProjectId: "project", sessionId: randomUUID(), state: "active", expiresAt: new Date(Date.now() + 60_000) }).returning();
+    await assert.rejects(() => createTiExecutionService(foreign.context).invoke(db, "cancelRun", [held.id, {}]));
+    const result = await createTiExecutionService(owner.context).invoke(db, "cancelRun", [held.id, { reason: "Acceptance cancellation" }]);
+    assert.equal(result.status, "cancelled");
+    assert.equal((await db.query.tiSandboxWorkspaces.findFirst({ where: eq(tiSandboxWorkspaces.id, workspace.id) })).state, "cleanup_pending");
+    await assert.rejects(() => runtime.verify(new Headers({ authorization: `Bearer ${child.token}` })));
   });
   await t.test("assistant approval uses the real owner and current payload targets", async () => {
     const [conversation] = await db.insert(assistantConversations).values({ projectId: project.id, createdBy: owner.actor.id, createdByType: "human" }).returning();

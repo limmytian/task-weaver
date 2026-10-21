@@ -1,3 +1,4 @@
+import { executeChatSandboxTool, tiSandboxToolSchemas, tiSandboxTools } from "./ti-sandbox-tools";
 import { assistantSkillStorage, cleanAssistantToolData, redactAssistantValues } from "./assistant-assets";
 import { mcpPool } from "./mcp-pool";
 import { z } from "zod";
@@ -10,10 +11,11 @@ type Services = ReturnType<typeof createResourceServices>;
 type Operation = {
     schema: z.ZodTypeAny;
     description: string;
-    kind: "project" | "requirement" | "task" | "document" | "schedule" | "ti_agent_run" | "memory" | "package" | "mcp";
+    kind: "project" | "requirement" | "task" | "document" | "schedule" | "ti_agent_run" | "memory" | "package" | "mcp" | "sandbox";
     target?: string;
     external?: boolean;
-    run: (db: Database, services: Services, input: any, actor: Actor) => Promise<any>;
+    repeatableRead?: boolean;
+    run: (db: Database, services: Services, input: any, actor: Actor, supervisor?: { identity: schemas.VerifiedRequestContext; conversationId: string; actionId: string }) => Promise<any>;
 };
 const uuid = z.string().uuid();
 const id = (key: string) => z.object({ [key]: uuid }).strict();
@@ -78,6 +80,13 @@ export const assistantOperations: Record<string, Operation> = {
     run_schedule: operation(id("scheduleId"), "Run a schedule now, subject to project execution policies.", "schedule", (db, s, p, a) => s.scheduleService.runScheduleNow(db, p.scheduleId, a), "scheduleId"),
     queue_ti_run: operation(schemas.createTiAgentRunSchema, "Queue a Ti task run subject to independent executor and project policies.", "ti_agent_run", (db, s, p, a) => s.tiAgentService.createRun(db, p, a)),
 };
+for (const [name, schema] of Object.entries(tiSandboxToolSchemas)) {
+  assistantOperations[name] = { ...operation(schema, tiSandboxTools.find(tool => tool.function.name === name)!.function.description, "sandbox",
+    async (db, _services, input, _actor, supervisor) => {
+      if (!supervisor) throw new schemas.AuthorizationError();
+      return executeChatSandboxTool(db, supervisor.identity, supervisor.conversationId, supervisor.actionId, name as keyof typeof tiSandboxToolSchemas, input);
+    }), external: true, repeatableRead: ["sandbox_job", "sandbox_read"].includes(name) };
+}
 export function parseAssistantOperation(operationName: string, input: unknown) {
     const operation = assistantOperations[operationName];
     if (!operation || !Object.hasOwn(assistantOperations, operationName))
@@ -89,10 +98,10 @@ export const assistantOperationTools = Object.entries(assistantOperations).map((
     delete parameters.$schema;
     return { type: "function", function: { name, description: operation.description, parameters } };
 });
-export async function executeAssistantOperation(db: Database, services: Services, operationName: string, input: unknown, actor: Actor) {
+export async function executeAssistantOperation(db: Database, services: Services, operationName: string, input: unknown, actor: Actor, supervisor?: { identity: schemas.VerifiedRequestContext; conversationId: string; actionId: string }) {
     const operation = assistantOperations[operationName];
     const parsed = parseAssistantOperation(operationName, input);
-    const result = await operation!.run(db, services, parsed, actor);
+    const result = await operation!.run(db, services, parsed, actor, supervisor);
     const entityId = operation!.target ? parsed[operation!.target] : result?.id;
     return { entityType: operation!.kind, entityId, result: cleanAssistantToolData(result, operationName === "call_mcp_tool") };
 }

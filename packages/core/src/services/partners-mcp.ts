@@ -30,7 +30,7 @@ export const partnersMcpInputs = {
 };
 const session = z.object({ sessionId: id, state: z.string().min(1).max(64), expiresAt: z.number().nullable(), quarantined: z.boolean(),
   capabilities: z.object({ bash_exec: z.boolean(), file_ops: z.boolean() }), limits: z.record(z.number()) });
-const job = z.object({ jobId: id, sessionId: id, state: z.enum(["queued", "accepted", "running", "succeeded", "failed", "timed_out", "cancelled"]),
+const job = z.object({ jobId: id, sessionId: id, state: z.enum(["queued", "accepted", "preparing", "running", "cancel_requested", "succeeded", "failed", "timed_out", "cancelled"]),
   exitCode: z.number().int().nullable(), terminalReason: z.string().max(256).nullable(), outputTruncated: z.boolean() });
 const page = job.extend({ stdout: z.string(), stderr: z.string(), nextCursor: z.string().regex(/^\d+:\d+$/).max(100), truncated: z.boolean(),
   artifactRefs: z.array(z.object({ artifactId: id, kind: z.string(), name: z.string(), downloadPath: z.string() })).max(1000) });

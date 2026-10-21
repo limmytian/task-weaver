@@ -1,4 +1,4 @@
-import { createTiExecutionService, tiWorkerFenceSchema, tiHeartbeatSchema, tiProgressSchema, tiRetrySchema } from '@task-weaver/core';
+import { createTiExecutionService, tiWorkerFenceSchema, tiHeartbeatSchema, tiProgressSchema, tiRetrySchema, cancelTiAgentRunSchema } from '@task-weaver/core';
 import { Hono } from "hono";
 import { z } from "zod";
 import {
@@ -142,6 +142,12 @@ tiRoutes.post("/runs", async (c) => {
     if (err instanceof ValidationError) return c.json({ error: err.message }, 400);
     throw err;
   }
+});
+
+tiRoutes.post("/runs/:id/cancel", async c => {
+  const input = cancelTiAgentRunSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!input.success) return c.json({ error: "Validation error", details: input.error.flatten() }, 400);
+  return c.json(await createTiExecutionService(c.get("identity")).invoke(c.get("db"), "cancelRun", [c.req.param("id"), input.data]));
 });
 
 tiRoutes.post("/runs/acquire", async (c) => {

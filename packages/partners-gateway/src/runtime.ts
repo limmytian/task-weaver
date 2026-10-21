@@ -1,3 +1,4 @@
+import { TiRuntimeWorker } from "./ti-runtime-worker.js";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Database } from "@task-weaver/db";
@@ -33,10 +34,10 @@ export function createPartnersGatewayRuntime(db: Database, env: NodeJS.ProcessEn
   const defaultConfig = getPartnersGatewayConfig(env);
   const workerConfig = defaultConfig.enabled ? getPartnersGatewayWorkerConfig(env) : null;
   const config: PartnersGatewayConfig = gatewayConfigurationSchema.parse(defaultConfig);
-  let worker: TiAgentGatewayWorker | null = null;
+  let worker: TiAgentGatewayWorker | TiRuntimeWorker | null = null;
 
   const routes = new Hono();
-  routes.get("/status", (context) => context.json(getTiAgentGatewayWorkerStatus(config, worker)));
+  routes.get("/status", (context) => context.json(worker?.getStatus() ?? getTiAgentGatewayWorkerStatus(config, null)));
   routes.get("/health", async (context) => {
     const health = await checkTiAgentGatewayHealth(config);
     return context.json(health, health.ok ? 200 : 503);
@@ -55,7 +56,9 @@ export function createPartnersGatewayRuntime(db: Database, env: NodeJS.ProcessEn
       id: "partners-gateway-runner",
       start: () => {
         const resolvedWorkerConfig = workerConfig ?? getPartnersGatewayWorkerConfig(env);
-        worker = createTiAgentGatewayWorker(db, config, resolvedWorkerConfig, () => env.TW_PARTNERS_GATEWAY_API_KEY);
+        worker = env.TW_TI_RUNTIME_MODE === "shared" && config.enabled
+          ? new TiRuntimeWorker(db, config, resolvedWorkerConfig, env)
+          : createTiAgentGatewayWorker(db, config, resolvedWorkerConfig, () => env.TW_PARTNERS_GATEWAY_API_KEY);
         worker?.start();
       },
       stop: async () => {

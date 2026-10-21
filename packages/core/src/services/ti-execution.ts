@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
-import { tiAgentRuns, tasks, requirementClaims, executionDelegations, documentTaskLinks, documentRequirementLinks, requirementRepositories, taskRepositories, type Database } from '@task-weaver/db';
-import { AuthorizationError, AuthenticationError, NotFoundError, ValidationError, type VerifiedRequestContext, type AuthorizationGrant, createTiAgentRunSchema, acquireTiAgentRunSchema, tiWorkerFenceSchema, tiHeartbeatSchema, tiProgressSchema, tiRetrySchema, completeTiAgentRunSchema } from '@task-weaver/contracts';
+import { tiAgentRuns, tasks, requirementClaims, executionDelegations, documentTaskLinks, documentRequirementLinks, requirementRepositories, taskRepositories, tiSandboxWorkspaces, activityLog, type Database } from '@task-weaver/db';
+import { AuthorizationError, AuthenticationError, NotFoundError, ValidationError, type VerifiedRequestContext, type AuthorizationGrant, createTiAgentRunSchema, acquireTiAgentRunSchema, tiWorkerFenceSchema, tiHeartbeatSchema, tiProgressSchema, tiRetrySchema, completeTiAgentRunSchema, cancelTiAgentRunSchema } from '@task-weaver/contracts';
 import { getLiveRequestAuthority } from './api-keys';
 import { loadActivePrincipal, loadPrincipalGrants, intersectGrants, grantsAreCovered } from './auth-principals';
 import { lockIdentityLifecycle } from './auth-security';
@@ -42,6 +42,26 @@ export function createTiExecutionService(context: VerifiedRequestContext) {
       return transaction(db, async tx => {
         const authority = await getLiveRequestAuthority(tx, context);
         const actor = { id: authority.actor.id, type: authority.actor.type };
+        if (name === 'cancelRun') {
+          const [id, raw] = args;
+          const input = cancelTiAgentRunSchema.parse(raw ?? {});
+          const run = await tx.query.tiAgentRuns.findFirst({ where: eq(tiAgentRuns.id, id) });
+          if (!run?.taskId) throw new NotFoundError('Run not found');
+          const scope = await requireResource(tx, authority, 'task', run.taskId, 'execution.run');
+          await requireResource(tx, authority, 'task', run.taskId, 'resource.write');
+          const binding = tiRunAuthorizationSchema.parse(run.authorization);
+          if (actor.id !== binding.initiatorActorId && actor.id !== binding.ownerId) requireScope(authority, scope, 'project.manage');
+          if (['succeeded', 'failed', 'cancelled'].includes(run.status)) return redact(run);
+          const now = new Date();
+          const [cancelled] = await tx.update(tiAgentRuns).set({ status: 'cancelled', completedAt: now, updatedAt: now, leaseExpiresAt: now,
+            errorMessage: safeText(input.reason ?? 'Cancelled by an authorized owner') }).where(eq(tiAgentRuns.id, id)).returning();
+          await tx.update(executionDelegations).set({ revokedAt: now }).where(and(eq(executionDelegations.tiRunId, id), isNull(executionDelegations.revokedAt)));
+          await tx.update(tiSandboxWorkspaces).set({ state: 'cleanup_pending', cancelRequestedAt: now, cleanupRequestedAt: now, nextCleanupAt: now, updatedAt: now })
+            .where(and(eq(tiSandboxWorkspaces.runId, id), eq(tiSandboxWorkspaces.ownerId, binding.ownerId), sql`${tiSandboxWorkspaces.state} <> 'deleted'`));
+          if (binding.claimId) await tx.delete(requirementClaims).where(and(eq(requirementClaims.id, binding.claimId), eq(requirementClaims.generation, binding.leaseGeneration ?? 0)));
+          await tx.insert(activityLog).values({ entityType: 'ti_agent_run', entityId: id, action: 'cancelled', actorId: actor.id, actorType: actor.type });
+          return redact(cancelled);
+        }
         if (name === 'createRun') {
           const input = createTiAgentRunSchema.parse(args[0]);
           if (!input.taskId && input.scheduleRunId) {
@@ -150,7 +170,10 @@ export function createTiExecutionService(context: VerifiedRequestContext) {
         const taskRepos = await tx.select({ id: taskRepositories.repositoryId }).from(taskRepositories).where(eq(taskRepositories.taskId, live.task.id));
         const repositoryIds = [...new Set([...reqRepos, ...taskRepos].map(row => row.id))];
         for (const repositoryId of repositoryIds) { await requireRepository(tx, live.executor!, repositoryId); await requireRepository(tx, live.initiator, repositoryId); }
-        const grants: AuthorizationGrant[] = [{ scope: 'project', projectId: live.task.projectId!, permissions: ['resource.read', 'resource.write', 'execution.run'] }];
+        const ceiling = intersectGrants(live.executor!.grants, live.initiator.grants);
+        const mcpGrant: AuthorizationGrant = { scope: 'project', projectId: live.task.projectId!, permissions: ['mcp.invoke'] };
+        const grants: AuthorizationGrant[] = [{ scope: 'project', projectId: live.task.projectId!,
+          permissions: ['resource.read', 'resource.write', 'execution.run', ...(grantsAreCovered([mcpGrant], ceiling) ? ['mcp.invoke' as const] : [])] }];
         if (!grantsAreCovered(grants, intersectGrants(live.executor!.grants, live.initiator.grants))) throw new AuthorizationError();
         await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(eq(executionDelegations.tiRunId, id), isNull(executionDelegations.revokedAt)));
         return insertCapability(tx, { parentCredentialId: context.credential.id, actorId: live.binding.executorActorId, initiatorActorId: live.binding.initiatorActorId,

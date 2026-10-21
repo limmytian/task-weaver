@@ -71,6 +71,9 @@ export function resourcePredicate(
   const tableName = columns.resourceTable ?? (projectColumn.table ? getTableName(projectColumn.table) : undefined);
   const table = projectColumn.table as unknown as { id?: AnyColumn } | undefined;
   const id = columns.resourceId ?? (table?.id ? sql`${table.id}` : undefined);
+  if (authority.bounds.purpose === "automation" && ["memories", "skill_packages", "mcp_servers"].includes(tableName ?? "")
+    && ["resource.read", "mcp.invoke"].includes(permission))
+    return and(scoped, eq(sql`${columns.projectId}`, authority.bounds.projectId), unowned)!;
   const ids = tableName === "tasks" ? authority.bounds.taskIds : tableName === "documents" ? authority.bounds.documentIds : tableName === "requirements" ? [authority.bounds.requirementId] : [];
   return id && ids.length ? and(scoped, inArray(id, ids))! : sql`false`;
 
@@ -103,11 +106,13 @@ export function projectPredicate(authority: ResourceAuthority, permission: Autho
 
 export async function requireResource(db: Database, authority: ResourceAuthority, kind: ResourceKind, id: string, permission: AuthorizationPermission = "resource.read") {
   if (!stableActorReferenceSchema.safeParse({ id, type: "human" }).success) throw new ValidationError("Invalid resource ID");
+  const delegatedAsset = authority.bounds?.purpose === "automation" && ["memory", "package", "mcp"].includes(kind)
+    && ["resource.read", "mcp.invoke"].includes(permission);
   if (authority.bounds) {
     const bounds = authority.bounds;
     const allowed = kind === "task" ? bounds.taskIds.includes(id) : kind === "document" ? bounds.documentIds.includes(id)
       : kind === "requirement" ? id === bounds.requirementId : kind === "project" ? id === bounds.projectId : kind === "slice" ? bounds.sliceIds.includes(id) : false;
-    if (!allowed) throw new NotFoundError("Resource not found");
+    if (!allowed && !delegatedAsset) throw new NotFoundError("Resource not found");
   }
   let scope: ResourceScope | undefined;
   if (kind === "project") {
@@ -150,6 +155,7 @@ export async function requireResource(db: Database, authority: ResourceAuthority
       }
     }
   }
+  if (delegatedAsset && scope?.projectId !== authority.bounds!.projectId) throw new NotFoundError("Resource not found");
   if (!scope || !canAccessResource(authority, scope)) throw new NotFoundError("Resource not found");
   requireScope(authority, scope, permission);
   return scope;
