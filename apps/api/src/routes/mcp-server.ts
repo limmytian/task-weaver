@@ -42,7 +42,7 @@ export function createMcpServerRoutes(options: McpRouteOptions) {
       options.runtimeProfiles,
       options.readOnly,
       mcpPool,
-      { prepare: (manifest, signal) => preparePluginWorker(context.db, context.identity, manifest,
+      { pool: mcpPool, prepare: (manifest, signal) => preparePluginWorker(context.db, context.identity, manifest,
         new skillPackageStorageService.LocalSkillPackageStorageAdapter(context.pluginPackageStorageDirectory ?? options.packageStorageDir ?? process.env.SKILL_PACKAGE_STORAGE_DIR ?? resolve(process.cwd(), "data", "skill-packages")),
         context.pluginWorkerConfiguration ?? (() => configuredPluginWorker()), signal) },
     ),

@@ -1,10 +1,11 @@
+import { mcpPool } from "../mcp-pool";
 import { Hono } from "hono";
 import { z } from "zod";
 import { bodyLimit } from "hono/body-limit";
 import { resolve } from "node:path";
 import { and, eq, isNull, desc } from "drizzle-orm";
 import { pluginGenerations, pluginInstallations } from "@task-weaver/db";
-import { createPluginLifecycle, preparePluginWorker, invokeInstalledPlugin, configuredPluginWorker, recoverPluginSchema, personalResourceOwnerId, skillPackageStorageService, ValidationError, NotFoundError, ConflictError } from "@task-weaver/core";
+import { createPluginLifecycle, preparePluginWorker, invokeInstalledPlugin, configuredPluginWorker, recoverPluginSchema, personalResourceOwnerId, skillPackageStorageService, ValidationError, NotFoundError, ConflictError, McpApprovalRequired } from "@task-weaver/core";
 import { resourceAuthority, resourcePredicate } from "@task-weaver/core";
 import type { Env } from "../middleware/actor.js";
 
@@ -14,6 +15,7 @@ const idSchema = z.string().uuid();
 const querySchema = z.object({ projectId: z.string().uuid().optional(), scope: z.enum(["project", "personal", "global"]).default("personal"), limit: z.coerce.number().int().min(1).max(20).default(20), offset: z.coerce.number().int().min(0).max(10000).default(0) }).strict().refine(value => value.scope === "project" ? !!value.projectId : !value.projectId, "Project scope requires projectId");
 
 routes.onError((error, c) => {
+  if (error instanceof McpApprovalRequired) return c.json({ error: error.message, code: "approval_required", approvalId: error.approvalId }, 403);
   if (error instanceof SyntaxError) return c.json({ error: "Invalid JSON request" }, 400);
   if (error instanceof z.ZodError) return c.json({ error: "Invalid plugin request", details: error.flatten() }, 400);
   if (error instanceof ConflictError) return c.json({ error: error.message, currentVersion: error.currentVersion }, 409);
@@ -79,7 +81,7 @@ routes.post("/:id/:operation", async c => {
   const prepare = (manifest: Parameters<typeof preparePluginWorker>[2], signal: AbortSignal) => preparePluginWorker(db, identity, manifest, storage, configuration, signal);
   const lifecycle = createPluginLifecycle(db, identity, configuration, prepare), input = await c.req.json();
   const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(25000)]);
-  if (operation === "invoke") return c.json(await invokeInstalledPlugin(db, identity, id, input, prepare, signal));
+  if (operation === "invoke") return c.json(await invokeInstalledPlugin(db, identity, id, input, prepare, signal, mcpPool));
   if (operation === "status") return c.json(await lifecycle.changeStatus(id, input));
   return c.json(await lifecycle.activate(id, operation, input, signal));
 });

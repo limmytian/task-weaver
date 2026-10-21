@@ -7,8 +7,9 @@ plugins with an optional restricted HTML page. The dedicated artifact host and
 actual application viewer have passed local counter/browser and authority checks.
 Installed plugins can be discovered, inspected and called through the common
 MCP facade using the same broker as REST. Signed, scoped skill bindings hydrate
-pinned hosted instructions into isolated backends. External-tool dependencies
-inside plugin code, owner management UI, the reviewed directory and the full
+pinned hosted instructions into isolated backends; declared read-only MCP bindings
+use the host broker without worker networking or credentials. Owner management UI,
+the reviewed directory and the full
 application acceptance matrix remain pending. See [plugin contracts](plugin-contracts.md).
 Use the linked project requirements and iteration documents for current priority
 and scope. One Task Weaver application

@@ -1,3 +1,4 @@
+import { inspectPluginTools } from "./plugin-tools";
 import { resolvePluginSkills } from "./plugin-skills";
 import { randomUUID } from "node:crypto";
 import { and, eq, ne } from "drizzle-orm";
@@ -17,7 +18,7 @@ const scopeKey = (scope: ResourceScope) => scope.projectId ? `project:${scope.pr
 
 /** The exact ordered permission delta is a review binding, independent of product versions. */
 export function pluginPermissionDiff(current: PluginManifest, next: PluginManifest) {
-  const grants = (manifest: PluginManifest): string[] => [...manifest.permissions, ...(manifest.skillBindings ?? []).map(binding => `skill.read:${binding.name}:${binding.documentId}@${binding.version}#${binding.contentHash}`)];
+  const grants = (manifest: PluginManifest): string[] => [...manifest.permissions, ...(manifest.skillBindings ?? []).map(binding => `skill.read:${binding.name}:${binding.documentId}@${binding.version}#${binding.contentHash}`), ...(manifest.toolBindings ?? []).map(binding => `mcp.read:${binding.name}:${binding.toolId}#${capabilityDigest(binding)}`)];
   const currentGrants = grants(current), nextGrants = grants(next);
   const added = nextGrants.filter(value => !currentGrants.includes(value)).sort();
   const removed = currentGrants.filter(value => !nextGrants.includes(value)).sort();
@@ -67,11 +68,14 @@ export function createPluginLifecycle(db: Database, identity: VerifiedRequestCon
     return verified;
   };
   const preflight = async <T>(manifest: PluginManifest, scope: ResourceScope, signal: AbortSignal, activate: (execution: PluginExecution) => Promise<T>) => {
-    const skills = await transaction(tx => resolvePluginSkills(tx, identity, manifest, scope));
+    const skills = await transaction(async tx => {
+      await inspectPluginTools(tx, identity, manifest, scope);
+      return resolvePluginSkills(tx, identity, manifest, scope);
+    });
     const execution = await prepare(manifest, signal);
     try {
       await execution.revalidate();
-      await transaction(tx => resolvePluginSkills(tx, identity, manifest, scope));
+      await transaction(async tx => { await inspectPluginTools(tx, identity, manifest, scope); await resolvePluginSkills(tx, identity, manifest, scope); });
       const result = await execution.execute({ method: "__tw_preflight", input: { hostProtocol: 1 }, state: [], ...(skills.length ? { skills } : {}) }, signal);
       planPluginState([], result, false);
       await execution.revalidate();
@@ -121,6 +125,7 @@ export function createPluginLifecycle(db: Database, identity: VerifiedRequestCon
         const verified = verify(input.manifest, input.confirmedManifestHash);
         await execution.revalidate(tx);
         await resolvePluginSkills(tx, identity, input.manifest, scope);
+        await inspectPluginTools(tx, identity, input.manifest, scope);
         signal.throwIfAborted();
         const [row] = await tx.insert(pluginInstallations).values({ id: randomUUID(), ...scope, scopeKey: key, createdBy: identity.actor.id, pluginId: input.manifest.pluginId, manifest: input.manifest, manifestHash: verified.manifestHash, status: "active" }).returning();
         await generation(tx, row!, input.manifest, verified.manifestHash, verified.trust);
@@ -163,6 +168,7 @@ export function createPluginLifecycle(db: Database, identity: VerifiedRequestCon
         const verified = verify(next, input.confirmedManifestHash);
         await execution.revalidate(tx);
         await resolvePluginSkills(tx, identity, next, row);
+        await inspectPluginTools(tx, identity, next, row);
         await generation(tx, row, next, verified.manifestHash, verified.trust);
         signal.throwIfAborted();
         const [updated] = await tx.update(pluginInstallations).set({ manifest: next, manifestHash: verified.manifestHash, revision: row.revision + 1, status: "active", updatedAt: new Date() }).where(eq(pluginInstallations.id, id)).returning();

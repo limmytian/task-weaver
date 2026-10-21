@@ -4,8 +4,8 @@ The shared schemas in `@task-weaver/contracts/schemas/plugins` define the first
 plugin protocol. Installations use the broker and lifecycle APIs described below. Optional pages
 use the restricted HTML protocol and a separately configured artifact host.
 The common MCP facade discovers and invokes installed plugins. Pinned hosted
-skill instructions can be declared as read-only inputs; external tool execution
-from plugin code remains pending. The protocol revision is independent of product
+skill instructions can be declared as read-only inputs; declared read-only external MCP inputs are supported through the host broker.
+Worker-selected calls and external writes remain unavailable. The protocol revision is independent of product
 release versions.
 
 ## Identity and immutable artifacts
@@ -33,7 +33,7 @@ modules are not a third-party sandbox.
 ## Grants and host-owned state
 
 Manifest permissions are `ui.render`, `backend.execute`, `storage.read`,
-`storage.write` and `skills.read`. Requested permissions are unique and reviewed with the
+`storage.write`, `skills.read` and `mcp.read`. Requested permissions are unique and reviewed with the
 manifest hash. Method names are unique and declare read/write access. A read
 method cannot persist a storage patch, even when another method has write grants.
 The host must check both the current installation grant and caller authority on
@@ -121,7 +121,7 @@ installation-scoped state and an offline backend worker. The
 [backend lifecycle APIs and CLI](plugin-lifecycle.md) install and manage these
 plugins. The [isolated page protocol](plugin-frontends.md) now provides a trusted
 application viewer and dedicated artifact listener. Installation-management UI,
-external MCP dependencies inside plugin code and the remaining acceptance matrix still
+owner-facing management and the remaining acceptance matrix still
 limit the complete plugin experience.
 
 The worker uses operator-supplied digest-pinned profiles and publisher keys;
@@ -196,4 +196,63 @@ and again in the atomic activation/state/receipt transaction. Old receipt retrie
 also recheck the dependencies. A changed skill cannot silently refresh into a
 worker or return a cached result: review a new signed plugin generation and its
 binding diff. Backend code cannot write the source skill or request another
-binding. External MCP calls and executable skill dependencies remain unavailable.
+binding. Executable skill dependencies and worker-selected external MCP calls remain unavailable.
+
+
+## Declared external MCP reads
+
+Optional `toolBindings` (one to four) require a backend and the `mcp.read`
+manifest permission. Each unique binding names a declared plugin `method`, a
+registry `toolId`, exact `schemaHash`, a fixed JSON `arguments` object and optional
+unique `inputArguments` keys. Only the listed top-level keys are forwarded from
+user input; they cannot override fixed arguments. The host derives a configured
+target-project argument from the installation and forbids input overrides or a
+conflicting fixed project. Missing input keys fail before dispatch. Input and
+fixed arguments use the finite JSON and 16 KiB budget. Bindings are signed and
+contribute `mcp.read:<name>:<toolId>#<bindingDigest>` entries to permission diffs,
+covering method/schema/argument constraint changes as well as target changes.
+
+`tw plugin tool-binding <toolId> --name <name> --method <method>` prints a candidate
+binding from the authorized registry schema. Add `--arguments <file>` for fixed
+JSON arguments and `--input-arguments <keys...>` for selected input. This reads
+metadata only; it never invokes, approves, signs or installs the tool.
+
+Installation, upgrade and recovery validate metadata for every binding. Preflight
+never calls remote tools. Normal calls dispatch only bindings for the selected
+method, before worker execution, through the existing credential-bound registry
+broker and its audit, concurrency, secret-redaction and live authorization checks.
+The host accepts only operator-classified read-only tools. Client-hosted stdio
+is rejected; remote and operator-hosted transports can be used without local
+client MCP installations. Server and effective target scope must match the
+installation or be globally authorized; project/personal tools cannot be read
+into another or global installation using a broader caller grant.
+
+The host acquires all required target approvals before the first remote read.
+An approval-required REST response is `403` with `code: approval_required` and
+`approvalId`; the CLI preserves this JSON and exits unsuccessfully. Inspect and
+approve using the ordinary `tw mcp approval` / `tw mcp approve` flow, then include
+`toolApprovals: { <bindingName>: <approvalId> }` in the reviewed invocation.
+Target approvals are distinct from the common facade's `approvalId`. They bind
+the exact arguments, caller credential, live grants, target policy, tool and
+server configuration. No approval or permission is inferred from a plugin manifest
+or untrusted output. Unknown approval aliases are rejected.
+
+The backend receives optional `tools` snapshots beside `method/input/state/skills`:
+`{ name, toolId, schemaHash, result, untrusted: true }`. The API holds the registry
+credentials; the worker still has no network, inherited key or arbitrary Core
+operation. Each result must fit finite JSON/16 KiB and aggregate snapshots must
+fit 32 KiB, within the overall worker-input limit. Failed or oversized reads fail
+the whole plugin call without a state/receipt commit. External reads share a
+10-second deadline, may already have reached the remote service on cancellation,
+and are not an atomic transaction with plugin storage.
+
+Remote schema/server/security-policy bindings enter invocation receipt hashes.
+Reusing an identical successful request returns its receipt without another
+remote read, including across REST and common MCP. Cached results still require
+live dependency grants and any consumed approval's live approver authority.
+Schema/configuration/policy changes invalidate old receipts or deny access. During
+execution, installation, dependency, caller and approval checks run again; changes
+withhold late worker results and state commits. After an ambiguous failed call
+without a receipt, a read may run again on explicit retry; consumed approvals
+require a fresh approval. External writes and worker-selected targets remain
+outside this initial protocol rather than receiving misleading exactly-once claims.

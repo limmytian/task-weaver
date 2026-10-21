@@ -4,7 +4,7 @@ The REST API and `tw plugin` CLI support operator-configured backends with
 optional [restricted HTML pages](plugin-frontends.md). Frontend manifests are
 rejected unless the dedicated artifact listener has valid origin configuration
 and is running. Installed-plugin discovery and invocation use the common MCP
-facade described below. External MCP dependencies inside plugin code and the full
+facade described below. Owner management UI, the reviewed directory and the full
 acceptance matrix remain pending, so bootstrap does not advertise blanket plugin
 execution readiness. See [plugin contracts](plugin-contracts.md) for the sandbox
 and owned-state protocol.
@@ -61,8 +61,9 @@ implicit dependency execution and storage-schema migrations are rejected. Backen
 callbacks can request only installation-owned storage patches. Explicit
 `skills.read` bindings supply pinned instruction snapshots through the common
 skill reader; see [skill input contracts](plugin-contracts.md#pinned-hosted-skill-inputs).
-General Core operations, executable skills and external MCP invocation from plugin
-code remain unavailable.
+Signed `mcp.read` bindings also prefetch declared remote reads through the
+common live broker before backend methods; preflight checks metadata only.
+General Core operations, executable skills and external writes remain unavailable.
 
 ## REST and CLI
 
@@ -165,4 +166,5 @@ No local plugin worker, plugin package, extra skill or external MCP server is
 required on the client. The API host must have the approved plugin runtime and
 publisher configuration. Uploaded plugin code cannot use these tools to acquire
 Core authority or invoke arbitrary skills/external tools. Pinned read-only hosted
-skill inputs are supported; external MCP execution remains a separate step.
+skill inputs and declared read-only remote MCP inputs are supported. External
+writes and worker-selected calls remain unavailable.

@@ -34,3 +34,12 @@ test("plugin skill bindings require explicit permission, exact revisions and uni
   for (const patch of [{ permissions: manifest.permissions }, { skillBindings: [] }, { skillBindings: [binding, binding] }, { skillBindings: [{ ...binding, version: "latest" }] }, { skillBindings: [{ ...binding, contentHash: undefined }] }, { skillBindings: [{ ...binding, personalOwnerId: binding.documentId }] }]) assert.equal(pluginManifestSchema.safeParse({ ...pinned, ...patch }).success, false);
   assert.equal(Object.hasOwn(pluginManifestSchema.parse(manifest), "skillBindings"), false, "existing manifests retain their signed canonical representation");
 });
+
+
+test("plugin tool bindings pin methods/schemas and cannot override fixed arguments or invent grants", () => {
+  const binding = { name: "lookup", method: "increment", toolId: manifest.artifact.packageId, schemaHash: "d".repeat(64), arguments: { fixed: "reviewed" }, inputArguments: ["query"] };
+  const pinned = { ...manifest, permissions: [...manifest.permissions, "mcp.read"], toolBindings: [binding] };
+  assert.ok(pluginManifestSchema.safeParse(pinned).success);
+  for (const patch of [{ permissions: manifest.permissions }, { toolBindings: [] }, { toolBindings: [binding, binding] }, { toolBindings: [{ ...binding, schemaHash: undefined }] }, { toolBindings: [{ ...binding, method: "undeclared" }] }, { toolBindings: [{ ...binding, inputArguments: ["fixed"] }] }, { toolBindings: [{ ...binding, inputArguments: ["query", "query"] }] }, { toolBindings: [{ ...binding, arguments: { huge: "x".repeat(16385) } }] }, { toolBindings: [{ ...binding, readOnly: true }] }]) assert.equal(pluginManifestSchema.safeParse({ ...pinned, ...patch }).success, false);
+  assert.equal(Object.hasOwn(pluginManifestSchema.parse(manifest), "toolBindings"), false);
+});

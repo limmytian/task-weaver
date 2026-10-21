@@ -6,7 +6,7 @@ export const PLUGIN_HOST_PROTOCOL = 1 as const;
 export const PLUGIN_LIMITS = Object.freeze({ methods: 16, keys: 32, storageBytes: 65536, valueBytes: 16384, inputBytes: 16384, resultBytes: 65536, frontendBytes: 131072 });
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const exactVersion = z.string().trim().min(1).max(100).refine(value => !/^(latest|next|stable|head|main|master)$/i.test(value) && !/[\s*^~<>=|]/.test(value), "Plugin artifacts require an exact immutable version");
-export const pluginPermissionSchema = z.enum(["ui.render", "backend.execute", "storage.read", "storage.write", "skills.read"]);
+export const pluginPermissionSchema = z.enum(["ui.render", "backend.execute", "storage.read", "storage.write", "skills.read", "mcp.read"]);
 export const pluginStorageKeySchema = z.string().min(1).max(100).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/).refine(value => !value.includes(".."), "Storage keys cannot address another namespace");
 const pluginVersion = z.string().max(100).regex(/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/);
 const method = z.object({ name: z.string().regex(/^[a-z][a-z0-9_.-]{0,63}$/), access: z.enum(["read", "write"]) }).strict();
@@ -16,41 +16,6 @@ export const pluginSkillBindingSchema = z.object({
   name: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/),
   documentId: z.string().uuid(), version: z.number().int().min(1).max(2147483647),
   contentHash: hash,
-}).strict();
-
-export const pluginManifestSchema = z.object({
-  schemaVersion: z.literal(PLUGIN_HOST_PROTOCOL),
-  pluginId: z.string().min(3).max(100).regex(/^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/),
-  version: pluginVersion,
-  displayName: z.string().min(1).max(128), description: z.string().max(1000).default(""),
-  artifact: z.object({ packageId: z.string().uuid(), version: exactVersion, manifestHash: hash }).strict(),
-  permissions: z.array(pluginPermissionSchema).max(5),
-  skillBindings: z.array(pluginSkillBindingSchema).min(1).max(8).optional(),
-  frontend: z.object({ entryPath: skillPackagePathSchema.refine(path => path.endsWith(".html"), "Frontend entry must be an HTML artifact") }).strict().optional(),
-  backend: runtime.optional(), methods: z.array(method).max(PLUGIN_LIMITS.methods).default([]),
-  signature: z.object({ algorithm: z.literal("ed25519"), keyId: z.string().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/), value: z.string().regex(/^[A-Za-z0-9+/]{86}==$/) }).strict().optional(),
-  storageSchemaVersion: z.number().int().min(1).max(2147483647).default(1),
-}).strict().superRefine((value, context) => {
-  const issue = (message: string) => context.addIssue({ code: "custom", message });
-  if (value.skillBindings && (!value.backend || !value.permissions.includes("skills.read"))) issue("Skill bindings require a backend and skills.read");
-  if (value.permissions.includes("skills.read") && !value.skillBindings) issue("skills.read requires explicit pinned skill bindings");
-  if (new Set(value.skillBindings?.map(binding => binding.name)).size !== (value.skillBindings?.length ?? 0)) issue("Skill binding names must be unique");
-  if (new Set(value.skillBindings?.map(binding => binding.documentId.toLowerCase())).size !== (value.skillBindings?.length ?? 0)) issue("Skill binding documents must be unique");
-  if (!value.frontend && !value.backend) issue("A plugin must provide an isolated frontend or backend");
-  if (new Set(value.permissions).size !== value.permissions.length) issue("Plugin permissions must be unique");
-  if (new Set(value.methods.map(item => item.name)).size !== value.methods.length) issue("Plugin method names must be unique");
-  if (value.frontend && !value.permissions.includes("ui.render")) issue("Frontend rendering requires its declared permission");
-  if (value.backend && !value.permissions.includes("backend.execute")) issue("Backend execution requires its declared permission");
-  if (value.methods.length && !value.backend) issue("API methods require an isolated backend");
-  if (value.methods.some(item => item.access === "write") && !value.permissions.includes("storage.write")) issue("Write methods require storage.write");
-});
-
-export const installPluginSchema = z.object({
-  scope: capabilityScopeSchema, manifest: pluginManifestSchema,
-  confirmedManifestHash: hash, confirmed: z.literal(true), idempotencyKey: z.string().uuid(),
-}).strict();
-export const upgradePluginSchema = installPluginSchema.omit({ scope: true }).extend({
-  expectedRevision: z.number().int().min(1).max(2147483647), confirmedPermissionDiffHash: hash,
 }).strict();
 
 export const pluginJsonValueSchema = z.unknown().superRefine((value, context) => {
@@ -75,10 +40,62 @@ export const pluginJsonValueSchema = z.unknown().superRefine((value, context) =>
   try { valid = valid && new TextEncoder().encode(JSON.stringify(value)).byteLength <= PLUGIN_LIMITS.valueBytes; } catch { valid = false; }
   if (!valid) context.addIssue({ code: "custom", message: "Plugin values must be bounded finite JSON without cycles or executable objects" });
 });
+export const pluginToolBindingSchema = z.object({
+  name: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/),
+  method: method.shape.name, toolId: z.string().uuid(), schemaHash: hash,
+  arguments: z.record(z.unknown()).superRefine((value, context) => {
+    if (!pluginJsonValueSchema.safeParse(value).success) context.addIssue({ code: "custom", message: "Plugin tool arguments must be bounded finite JSON" });
+  }),
+  inputArguments: z.array(z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)).max(16).optional(),
+}).strict().superRefine((value, context) => {
+  if (new Set(value.inputArguments).size !== (value.inputArguments?.length ?? 0) || value.inputArguments?.some(key => Object.hasOwn(value.arguments, key))) context.addIssue({ code: "custom", message: "Tool input argument names must be unique and cannot override fixed arguments" });
+});
+
+export const pluginManifestSchema = z.object({
+  schemaVersion: z.literal(PLUGIN_HOST_PROTOCOL),
+  pluginId: z.string().min(3).max(100).regex(/^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/),
+  version: pluginVersion,
+  displayName: z.string().min(1).max(128), description: z.string().max(1000).default(""),
+  artifact: z.object({ packageId: z.string().uuid(), version: exactVersion, manifestHash: hash }).strict(),
+  permissions: z.array(pluginPermissionSchema).max(6),
+  toolBindings: z.array(pluginToolBindingSchema).min(1).max(4).optional(),
+  skillBindings: z.array(pluginSkillBindingSchema).min(1).max(8).optional(),
+  frontend: z.object({ entryPath: skillPackagePathSchema.refine(path => path.endsWith(".html"), "Frontend entry must be an HTML artifact") }).strict().optional(),
+  backend: runtime.optional(), methods: z.array(method).max(PLUGIN_LIMITS.methods).default([]),
+  signature: z.object({ algorithm: z.literal("ed25519"), keyId: z.string().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/), value: z.string().regex(/^[A-Za-z0-9+/]{86}==$/) }).strict().optional(),
+  storageSchemaVersion: z.number().int().min(1).max(2147483647).default(1),
+}).strict().superRefine((value, context) => {
+  const issue = (message: string) => context.addIssue({ code: "custom", message });
+  if (value.toolBindings && (!value.backend || !value.permissions.includes("mcp.read"))) issue("Tool bindings require a backend and mcp.read");
+  if (value.permissions.includes("mcp.read") && !value.toolBindings) issue("mcp.read requires explicit pinned tool bindings");
+  if (new Set(value.toolBindings?.map(binding => binding.name)).size !== (value.toolBindings?.length ?? 0)) issue("Tool binding names must be unique");
+  if (value.toolBindings?.some(binding => !value.methods.some(method => method.name === binding.method))) issue("Tool bindings require a declared plugin method");
+  if (value.skillBindings && (!value.backend || !value.permissions.includes("skills.read"))) issue("Skill bindings require a backend and skills.read");
+  if (value.permissions.includes("skills.read") && !value.skillBindings) issue("skills.read requires explicit pinned skill bindings");
+  if (new Set(value.skillBindings?.map(binding => binding.name)).size !== (value.skillBindings?.length ?? 0)) issue("Skill binding names must be unique");
+  if (new Set(value.skillBindings?.map(binding => binding.documentId.toLowerCase())).size !== (value.skillBindings?.length ?? 0)) issue("Skill binding documents must be unique");
+  if (!value.frontend && !value.backend) issue("A plugin must provide an isolated frontend or backend");
+  if (new Set(value.permissions).size !== value.permissions.length) issue("Plugin permissions must be unique");
+  if (new Set(value.methods.map(item => item.name)).size !== value.methods.length) issue("Plugin method names must be unique");
+  if (value.frontend && !value.permissions.includes("ui.render")) issue("Frontend rendering requires its declared permission");
+  if (value.backend && !value.permissions.includes("backend.execute")) issue("Backend execution requires its declared permission");
+  if (value.methods.length && !value.backend) issue("API methods require an isolated backend");
+  if (value.methods.some(item => item.access === "write") && !value.permissions.includes("storage.write")) issue("Write methods require storage.write");
+});
+
+export const installPluginSchema = z.object({
+  scope: capabilityScopeSchema, manifest: pluginManifestSchema,
+  confirmedManifestHash: hash, confirmed: z.literal(true), idempotencyKey: z.string().uuid(),
+}).strict();
+export const upgradePluginSchema = installPluginSchema.omit({ scope: true }).extend({
+  expectedRevision: z.number().int().min(1).max(2147483647), confirmedPermissionDiffHash: hash,
+}).strict();
+
 export const invokePluginSchema = z.object({
   method: method.shape.name, input: pluginJsonValueSchema,
   expectedRevision: z.number().int().min(1).max(2147483647),
   idempotencyKey: z.string().uuid(), confirmed: z.literal(true),
+  toolApprovals: z.record(z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/), z.string().uuid()).refine(value => Object.keys(value).length <= 4, "At most four tool approvals are allowed").optional(),
 }).strict();
 export const pluginStorageChangeSchema = z.object({
   key: pluginStorageKeySchema, expectedVersion: z.number().int().min(0).max(2147483647),

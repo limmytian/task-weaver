@@ -419,3 +419,126 @@ printf '{"result":"skill-used"}'
   assert.equal((await db.select().from(pluginInvocationReceipts).where(eq(pluginInvocationReceipts.installationId, installed.installationId))).length, 1, "stale dependency results never commit a receipt");
   t.diagnostic("Actual signed installation/preflight and offline containers consumed pinned hosted skill instructions; cross-scope, changed-revision replay, dependency-diff and in-flight commit guards passed.");
 });
+
+test("plugin declared MCP reads use the live broker without worker credentials or hidden preflight calls", { skip: !databaseUrl, timeout: 120000 }, async t => {
+  const { createApiApplication } = await import("./application");
+  const { mcpPool } = await import("./mcp-pool");
+  const { configureMcpToolAuthorization, inspectPluginTools, setMcpInvocationPolicy, approveMcpInvocation, pluginPermissionDiff } = await import("@task-weaver/core");
+  const { serve } = await import("@hono/node-server");
+  const { Server } = await import("@modelcontextprotocol/sdk/server/index.js");
+  const { WebStandardStreamableHTTPServerTransport } = await import("@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js");
+  const { ListToolsRequestSchema, CallToolRequestSchema } = await import("@modelcontextprotocol/sdk/types.js");
+  await runMigrations(databaseUrl!);
+  const db = createDb(databaseUrl!); t.after(() => db.$client.end());
+  const f = await resourcePostgresFixture(db, databaseUrl!);
+  const agent = await f.identity.createAgent(f.owner.headers, { displayName: "Plugin MCP reader" });
+  await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: "maintainer", explicitPermissions: ["mcp.invoke"] });
+  const key = await f.identity.issueKey(f.owner.headers, agent.id, { name: "Plugin external reads", expiresAt: null, grants: [{ scope: "project", projectId: f.project.id, permissions: ["resource.read", "resource.write", "mcp.manage", "mcp.invoke"] }] });
+  const context = await f.auth.resolve(new Headers({ authorization: `Bearer ${key.rawKey}` }));
+  let calls = 0;
+  let received: Record<string, unknown> = {};
+  let markStarted = () => {};
+  let releaseRemote = () => {};
+  const external = serve({ hostname: "127.0.0.1", port: 0, fetch: async request => {
+    if (request.method !== "POST") return new Response(null, { status: 405 });
+    assert.equal(request.headers.get("x-task-weaver-mcp-hop"), "1");
+    assert.equal(request.headers.get("x-private-key"), "fixture-plugin-secret");
+    const server = new Server({ name: "plugin-external", version: "1" }, { capabilities: { tools: {} } });
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{ name: "lookup", inputSchema: { type: "object", properties: { query: { type: "string" }, projectId: { type: "string" } }, required: ["query", "projectId"] } }] }));
+    server.setRequestHandler(CallToolRequestSchema, async call => {
+      calls++; received = call.params.arguments ?? {};
+      assert.equal(received.projectId, f.project.id);
+      if (received.query === "slow") { markStarted(); await new Promise<void>(resolve => { releaseRemote = resolve; }); }
+      return { content: [{ type: "text", text: received.query === "large" ? "x".repeat(20000) : `host-echo:${received.query}:fixture-plugin-secret` }] };
+    });
+    const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
+    await server.connect(transport);
+    try { return await transport.handleRequest(request); } finally { await server.close(); }
+  } });
+  await once(external, "listening");
+  t.after(async () => { releaseRemote(); if ("closeAllConnections" in external) external.closeAllConnections(); await new Promise<void>(resolve => external.close(() => resolve())); });
+  const registry = createResourceServices(f.owner.context).mcpRegistryService;
+  const registered = await registry.registerServer(db, { name: "Plugin declared reader", projectId: f.project.id, transport: "streamable-http", config: { url: `http://127.0.0.1:${(external.address() as { port: number }).port}/mcp`, headers: { "x-private-key": "fixture-plugin-secret" } }, active: true, readOnly: false, tags: [] }, f.owner.context.actor);
+  t.after(() => mcpPool.disconnect(registered.id));
+  const [tool] = await registry.syncTools(db, registered.id, mcpPool); assert.ok(tool);
+  await configureMcpToolAuthorization(db, f.owner.context, tool.id, { readOnly: true, targetProjectArgument: "projectId" });
+  const current = await createResourceServices(context).mcpRegistryService.getToolDetail(db, tool.id);
+  const schemaHash = capabilityDigest({ name: current.name, inputSchema: current.inputSchema, readOnly: current.readOnly, targetProjectArgument: current.targetProjectArgument });
+  const directory = await mkdtemp(join(tmpdir(), "tw-plugin-tools-")); t.after(() => rm(directory, { recursive: true, force: true }));
+  const storage = new skillPackageStorageService.LocalSkillPackageStorageAdapter(directory);
+  const profile = { id: "tool-reader", image: process.env.TW_SKILL_RUNTIME_TEST_IMAGE!, interpreter: "shell", timeoutMs: 5000 };
+  const script = `set -eu
+payload=$(cat)
+case "$payload" in *'"method":"__tw_preflight"'*) printf '{"result":{"ready":true}}'; exit 0;; esac
+test -z "\${TW_API_KEY:-}"
+if grep -q eth0 /proc/net/dev; then exit 13; fi
+case "$payload" in *fixture-plugin-secret*) exit 17;; esac
+case "$payload" in *host-echo*'"untrusted":true'*) printf '{"result":"mcp-used"}';; *) exit 18;; esac
+`;
+  const pkg = await createResourceServices(f.owner.context).skillPackageService.registerPackage(db, registerSkillPackageSchema.parse({ projectId: f.project.id, name: "MCP reader plugin", version: "1.0", files: [{ path: "SKILL.md", contentBase64: Buffer.from("Declared MCP reader").toString("base64") }, { path: "backend.sh", contentBase64: Buffer.from(script).toString("base64") }] }), f.owner.context.actor, storage);
+  const signer = generateKeyPairSync("ed25519");
+  const env = { TW_AUTH_SECRET: f.configuration.secret, TW_AUTH_BASE_URL: f.configuration.baseURL, TW_AUTH_TRUSTED_ORIGINS: f.configuration.trustedOrigins[0]!, TW_PRESET_SKILLS_SYNC: "disabled", TW_MCP_ALLOWED_HOSTS: "127.0.0.1:3001", SKILL_PACKAGE_STORAGE_DIR: directory, TW_PLUGIN_RUNTIME_PROFILES: JSON.stringify([profile]), TW_PLUGIN_PUBLISHER_KEYS: JSON.stringify({ "tools-key": { publisher: "fixture", publicKey: signer.publicKey.export({ type: "spki", format: "pem" }).toString() } }) };
+  const app = createApiApplication({ db, databaseUrl: databaseUrl!, env }).app;
+  const json = async (path: string, body: unknown) => {
+    const response = await app.request(`http://127.0.0.1:3001/api/v1/${path}`, { method: "POST", headers: { authorization: `Bearer ${key.rawKey}`, "content-type": "application/json" }, body: JSON.stringify(body) });
+    return { status: response.status, data: await response.json() as any };
+  };
+  const artifact = (await json("mcp-server/tools/tw_skill_packages_resolve", { packageId: pkg.id, version: "1.0" })).data.structuredContent.data;
+  const unsigned = pluginManifestSchema.parse({ schemaVersion: 1, pluginId: "fixture/tools", version: "1.0.0", displayName: "Declared MCP reader", artifact: { packageId: pkg.id, version: "1.0", manifestHash: artifact.manifestHash }, backend: { profileId: profile.id, profileHash: capabilityDigest(profile), entryPath: "backend.sh" }, permissions: ["backend.execute", "mcp.read"], methods: [{ name: "read", access: "read" }], toolBindings: [{ name: "constructor", method: "read", toolId: tool.id, schemaHash, arguments: {}, inputArguments: ["query"] }] });
+  const manifest = { ...unsigned, signature: { algorithm: "ed25519" as const, keyId: "tools-key", value: sign(null, Buffer.from(pluginSigningPayload(unsigned)), signer.privateKey).toString("base64") } };
+  const stale = pluginManifestSchema.parse({ ...manifest, toolBindings: [{ ...manifest.toolBindings![0], schemaHash: "f".repeat(64) }] });
+  await assert.rejects(inspectPluginTools(db, context, stale, { projectId: f.project.id }), /schema changed/);
+  await configureMcpToolAuthorization(db, f.owner.context, tool.id, { readOnly: false, targetProjectArgument: "projectId" });
+  await assert.rejects(inspectPluginTools(db, context, manifest, { projectId: f.project.id }), /denied/);
+  await configureMcpToolAuthorization(db, f.owner.context, tool.id, { readOnly: true, targetProjectArgument: "projectId" });
+  await assert.rejects(inspectPluginTools(db, context, manifest, {}), /denied/);
+  await assert.rejects(inspectPluginTools(db, context, manifest, { projectId: randomUUID() }), /denied/);
+  const retargeted = pluginManifestSchema.parse({ ...manifest, toolBindings: [{ ...manifest.toolBindings![0], inputArguments: ["projectId"] }] });
+  await assert.rejects(inspectPluginTools(db, context, retargeted, { projectId: f.project.id }), /denied/);
+  const modified = pluginManifestSchema.parse({ ...manifest, toolBindings: [{ ...manifest.toolBindings![0], inputArguments: ["other"] }] });
+  assert.equal(pluginPermissionDiff(manifest, modified).added.length, 1);
+  const installed = await json("plugins", { manifest, scope: { kind: "project", projectId: f.project.id }, confirmedManifestHash: capabilityDigest(manifest), confirmed: true, idempotencyKey: randomUUID() });
+  assert.equal(installed.status, 201, JSON.stringify(installed.data)); assert.equal(calls, 0, "preflight must not dispatch external tools");
+  const id = installed.data.installationId;
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { fileURLToPath } = await import("node:url");
+  let cliApp = app;
+  const apiServer = serve({ fetch: request => cliApp.fetch(request), hostname: "127.0.0.1", port: 0 }) as import("node:http").Server;
+  await once(apiServer, "listening");
+  t.after(async () => { apiServer.closeAllConnections(); await new Promise<void>(resolve => apiServer.close(() => resolve())); });
+  const address = apiServer.address(); assert.ok(address && typeof address !== "string");
+  cliApp = createApiApplication({ db, databaseUrl: databaseUrl!, env: { ...env, TW_MCP_ALLOWED_HOSTS: `127.0.0.1:${address.port}` } }).app;
+  const cliResult = await promisify(execFile)(process.execPath, ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url)), "plugin", "tool-binding", tool.id, "--name", "constructor", "--method", "read", "--input-arguments", "query", "--json"], { timeout: 15000, env: { ...process.env, PATH: "/no-local-tools", TW_CONFIG_DIR: directory, TW_API_URL: `http://127.0.0.1:${address.port}`, TW_API_KEY: key.rawKey } });
+  assert.deepEqual(JSON.parse(cliResult.stdout), manifest.toolBindings![0]);
+  const invocation = { method: "read", expectedRevision: 1, toolApprovals: {}, input: { query: "hello", ignored: "must-not-forward" }, confirmed: true, idempotencyKey: randomUUID() };
+  const invoke = (input: Record<string, unknown> = invocation) => json(`plugins/${id}/invoke`, input);
+  const first = await invoke(); assert.equal(first.status, 200, JSON.stringify(first.data)); assert.equal(first.data.result, "mcp-used");
+  assert.deepEqual(received, { query: "hello", projectId: f.project.id }); assert.equal(calls, 1);
+  assert.equal((await invoke()).data.replayed, true); assert.equal(calls, 1);
+  const shared = await json("mcp-server/tools/tw_plugins_call", { installationId: id, ...invocation });
+  assert.equal(shared.data.structuredContent.data.replayed, true); assert.equal(calls, 1);
+  assert.equal((await invoke({ ...invocation, idempotencyKey: randomUUID(), input: {} })).status, 400);
+  const large = await invoke({ ...invocation, idempotencyKey: randomUUID(), input: { query: "large" } }); assert.equal(large.status, 400);
+  await registry.updateServer(db, registered.id, { config: { url: `http://127.0.0.1:${(external.address() as { port: number }).port}/mcp`, headers: { "x-private-key": "rotated-fixture-secret" } } }, f.owner.context.actor);
+  assert.equal((await invoke()).status, 409, "cached results cannot survive a changed registry security binding");
+  await registry.updateServer(db, registered.id, { config: { url: `http://127.0.0.1:${(external.address() as { port: number }).port}/mcp`, headers: { "x-private-key": "fixture-plugin-secret" } } }, f.owner.context.actor);
+  const beforeApproval = calls;
+  await setMcpInvocationPolicy(db, f.owner.context, { projectId: f.project.id }, tool.id, "approval");
+  const reviewRequest = { ...invocation, idempotencyKey: randomUUID() };
+  const pending = await invoke(reviewRequest); assert.equal(pending.status, 403); assert.equal(pending.data.code, "approval_required"); assert.equal(calls, beforeApproval);
+  await approveMcpInvocation(db, f.owner.context, pending.data.approvalId);
+  const approved = { ...reviewRequest, toolApprovals: { constructor: pending.data.approvalId } };
+  assert.equal((await invoke(approved)).status, 200);
+  assert.equal((await invoke(approved)).data.replayed, true); assert.equal(calls, beforeApproval + 1);
+  await setMcpInvocationPolicy(db, f.owner.context, { projectId: f.project.id }, tool.id, "allow");
+  const started = new Promise<void>(resolve => { markStarted = resolve; });
+  const inFlight = invoke({ ...invocation, idempotencyKey: randomUUID(), input: { query: "slow" } });
+  await started;
+  await setMcpInvocationPolicy(db, f.owner.context, { projectId: f.project.id }, tool.id, "deny");
+  releaseRemote();
+  assert.notEqual((await inFlight).status, 200);
+  assert.notEqual((await invoke(approved)).status, 200);
+  assert.equal((await db.select().from(pluginInvocationReceipts).where(eq(pluginInvocationReceipts.installationId, id))).length, 2, "denied, oversized and in-flight results cannot create receipts");
+  t.diagnostic("Actual remote MCP transport, signed install without external preflight calls and offline worker verified; scoped input selection, secret redaction, shared receipt replay, target approval and in-flight deny passed.");
+});

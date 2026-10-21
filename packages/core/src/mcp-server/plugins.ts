@@ -1,3 +1,4 @@
+import type { McpPool } from "../services/mcp-registry";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { type Database, pluginInstallations } from "@task-weaver/db";
 import { AuthorizationError, CAPABILITY_LIMITS, NotFoundError, ValidationError, pluginManifestSchema, type PluginManifest, type VerifiedRequestContext } from "@task-weaver/contracts";
@@ -6,7 +7,7 @@ import { invokeInstalledPlugin, type PluginExecution } from "../services/plugin-
 import { mcpPolicy, mcpScopeKey } from "../services/mcp-security";
 import { DeferredMcpOperation } from "./security";
 
-export type McpPluginRuntime = { prepare(manifest: PluginManifest, signal: AbortSignal): Promise<PluginExecution> };
+export type McpPluginRuntime = { pool?: McpPool; prepare(manifest: PluginManifest, signal: AbortSignal): Promise<PluginExecution> };
 
 export async function readPluginTarget(db: Database, identity: VerifiedRequestContext, id: string) {
   const authority = await resourceAuthority(db, identity);
@@ -50,7 +51,7 @@ export async function pluginOperation(db: Database, liveDb: Database, identity: 
           await execution.revalidate(connection, checkSignal);
         },
       };
-    }, signal);
+    }, signal, runtime.pool);
     return { installationId, untrustedOutput: true, ...result };
   }, async () => {});
 }

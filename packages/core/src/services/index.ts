@@ -86,3 +86,5 @@ export { createPluginLifecycle, pluginPermissionDiff } from "./plugin-lifecycle"
 export { compilePluginFrontend, renderPluginFrontend, renderPluginViewer, type PluginFrontend, type PluginFrameBinding } from "./plugin-frontend";
 
 export { resolvePluginSkills, type PluginSkillSnapshot } from "./plugin-skills";
+
+export { inspectPluginTools } from "./plugin-tools";

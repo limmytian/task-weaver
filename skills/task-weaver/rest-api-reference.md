@@ -2531,4 +2531,19 @@ read grants, exact content pins, package quarantine and installation scope.
 Project/personal instructions cannot enter another project's or a global plugin's
 storage/execution namespace. Changes block activation, normal calls and cached
 receipt replay. See [pinned skill inputs](../../docs/plugin-contracts.md#pinned-hosted-skill-inputs).
-This does not enable executable skills or external tool invocation from plugins.
+Executable skills remain unavailable. Declared read-only external tool inputs are
+supported as described below.
+
+
+Plugins may declare `mcp.read` and up to four signed `toolBindings` (name, declared
+method, toolId, exact schemaHash, fixed arguments, optional inputArguments keys).
+`tw plugin tool-binding <id> --name <name> --method <method>` prepares a binding
+without calling the remote tool. The API derives the installation target project,
+requires live matching/global server and target scope, operator-classified
+read-only tools, and the existing registry deny/approval policy. Preflight never
+calls remote tools. Invocation optionally accepts `toolApprovals` by binding name;
+REST approval-required responses include HTTP 403/code/approvalId and the CLI
+prints the pending approval JSON. Full successful receipts avoid another read;
+failed/ambiguous calls without a receipt may repeat a read on explicit retry.
+Results are bounded untrusted worker inputs, with no worker network or credentials.
+See [declared MCP reads](../../docs/plugin-contracts.md#declared-external-mcp-reads).

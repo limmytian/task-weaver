@@ -1,8 +1,8 @@
 import { Command } from 'commander'
 import { readFile } from 'node:fs/promises'
-import { installPluginSchema, upgradePluginSchema, recoverPluginSchema, changePluginStatusSchema, invokePluginSchema, pluginManifestSchema, pluginSkillBindingSchema } from '@task-weaver/contracts'
+import { installPluginSchema, upgradePluginSchema, recoverPluginSchema, changePluginStatusSchema, invokePluginSchema, pluginManifestSchema, pluginSkillBindingSchema, pluginToolBindingSchema } from '@task-weaver/contracts'
 import { pluginPermissionDiff, capabilityDigest } from '@task-weaver/core'
-import { get, post } from '../client.js'
+import { ApiError, get, post } from '../client.js'
 import { printJson, printKv, printTable } from '../output.js'
 
 async function readJson(path: string): Promise<unknown> {
@@ -64,6 +64,18 @@ export function registerPlugins(program: Command): void {
       if (!skill) throw new Error('The hosted skill is unavailable or cannot be read')
       printJson(pluginSkillBindingSchema.parse({ name: opts.name, documentId: skill.id, version: skill.version, contentHash: capabilityDigest({ content: skill.content }) }))
     })
+  plugin.command('tool-binding <id>').description('print a pinned read-only MCP binding for manifest review')
+    .requiredOption('--name <name>', 'unique tool binding name')
+    .requiredOption('--method <method>', 'declared plugin method that uses this read')
+    .option('--arguments <file>', 'reviewed fixed JSON argument object')
+    .option('--input-arguments <names...>', 'explicit input keys to forward as tool arguments')
+    .option('--json', 'output the binding as JSON')
+    .action(async (id, opts) => {
+      const response = await post<{ structuredContent?: { ok: boolean; data?: { readOnly: boolean; schemaHash: string } } }>('/api/v1/mcp-server/tools/tw_mcp_tool', { toolId: id })
+      const tool = response.structuredContent?.ok ? response.structuredContent.data : undefined
+      if (!tool?.readOnly) throw new Error('The MCP tool is unavailable or is not approved as read-only')
+      printJson(pluginToolBindingSchema.parse({ name: opts.name, method: opts.method, toolId: id, schemaHash: tool.schemaHash, arguments: opts.arguments ? await readJson(opts.arguments) : {}, ...(opts.inputArguments ? { inputArguments: opts.inputArguments } : {}) }))
+    })
   plugin.command('diff').description('review the exact permissions added or removed between manifests')
     .requiredOption('--current <file>', 'current manifest JSON')
     .requiredOption('--next <file>', 'candidate manifest JSON')
@@ -81,7 +93,15 @@ export function registerPlugins(program: Command): void {
       .requiredOption('--file <file>', 'complete request JSON; retry the identical file after an ambiguous response')
       .option('--json', 'output raw JSON')
       .action(async (id, opts) => {
-        const data = await post(`/api/v1/plugins/${encodeURIComponent(id)}/${name}`, schema.parse(await readJson(opts.file)))
+        const data = await post(`/api/v1/plugins/${encodeURIComponent(id)}/${name}`, schema.parse(await readJson(opts.file))).catch(error => {
+          if (error instanceof ApiError && error.status === 403 && error.body && typeof error.body === 'object' && 'approvalId' in error.body) {
+            printJson(error.body)
+            process.exitCode = 1
+            return undefined
+          }
+          throw error
+        })
+        if (data === undefined) return
         if (opts.json) return printJson(data)
         printKv(data as Record<string, unknown>)
       })

@@ -1,3 +1,5 @@
+import { inspectPluginTools, checkPluginToolApprovals, runPluginTools, type PluginToolSnapshot } from "./plugin-tools";
+import type { McpPool } from "./mcp-registry";
 import { resolvePluginSkills, type PluginSkillSnapshot } from "./plugin-skills";
 import { and, eq } from "drizzle-orm";
 import { type Database, pluginInstallations, pluginStorage, pluginInvocationReceipts } from "@task-weaver/db";
@@ -11,17 +13,18 @@ import { planPluginState } from "./plugin-state";
 export type PluginExecution = {
   frontend?: PluginFrontend;
   /** A trusted host implementation, never an uploaded callback or Core API proxy. */
-  execute(input: { method: string; input: unknown; state: Array<{ key: string; version: number; value: unknown; deleted: number }>; skills?: PluginSkillSnapshot[] }, signal: AbortSignal): Promise<unknown>;
+  execute(input: { method: string; input: unknown; state: Array<{ key: string; version: number; value: unknown; deleted: number }>; skills?: PluginSkillSnapshot[]; tools?: PluginToolSnapshot[] }, signal: AbortSignal): Promise<unknown>;
   revalidate(connection?: Database, signal?: AbortSignal): Promise<void>;
   dispose(): Promise<void>;
 };
 
 /** No worker execution occurs while holding the identity lifecycle or installation lock. */
 export async function invokeInstalledPlugin(db: Database, identity: VerifiedRequestContext, installationId: string, raw: unknown,
-  prepare: (manifest: ReturnType<typeof pluginManifestSchema.parse>, signal: AbortSignal) => Promise<PluginExecution>, signal: AbortSignal) {
+  prepare: (manifest: ReturnType<typeof pluginManifestSchema.parse>, signal: AbortSignal) => Promise<PluginExecution>, signal: AbortSignal, toolPool?: McpPool) {
   stableActorReferenceSchema.parse({ id: installationId, type: "human" });
   const input = invokePluginSchema.parse(raw);
-  const payloadHash = capabilityDigest(input);
+  let expectedToolsHash: string | undefined;
+  const completedTools = new Set<string>();
   const guarded = async (tx: Database) => {
     const authority = await resourceAuthority(tx, identity);
     const [row] = await tx.select().from(pluginInstallations).where(and(eq(pluginInstallations.id, installationId), resourcePredicate(authority, pluginInstallations))).for("update");
@@ -34,13 +37,19 @@ export async function invokeInstalledPlugin(db: Database, identity: VerifiedRequ
     requireScope(authority, row, "mcp.invoke");
     if (method.access === "write") requireScope(authority, row, "resource.write");
     const writable = method.access === "write" && manifest.permissions.includes("storage.write");
+    const tools = await inspectPluginTools(tx, identity, manifest, row, input.method, input.input);
+    if (input.toolApprovals && Object.keys(input.toolApprovals).some(name => !tools.some(item => item.binding.name === name))) throw new ValidationError("Plugin tool approval does not match a selected binding");
+    const toolsHash = capabilityDigest(tools.map(item => item.fingerprint));
+    if (expectedToolsHash && expectedToolsHash !== toolsHash) throw new ConflictError("Plugin MCP dependencies changed during invocation", row.revision);
+    const payloadHash = capabilityDigest(tools.length ? { input, toolsHash } : input);
+    await checkPluginToolApprovals(tx, identity, tools, input.toolApprovals, true, completedTools);
     const [receipt] = await tx.select().from(pluginInvocationReceipts).where(and(eq(pluginInvocationReceipts.installationId, row.id), eq(pluginInvocationReceipts.actorId, identity.actor.id), eq(pluginInvocationReceipts.key, input.idempotencyKey)));
     if (receipt && (receipt.payloadHash !== payloadHash || receipt.revision !== row.revision)) throw new ConflictError("Plugin invocation key was already used for another payload or revision", row.revision);
     const state = await tx.select({ key: pluginStorage.key, version: pluginStorage.version, value: pluginStorage.value, deleted: pluginStorage.deleted }).from(pluginStorage).where(eq(pluginStorage.installationId, row.id)).limit(33);
     // Verify persisted quotas before exposing any data to an untrusted worker.
     planPluginState(state, { result: null }, false);
     const skills = await resolvePluginSkills(tx, identity, manifest, row);
-    return { row, manifest, writable, receipt, skills, state: manifest.permissions.includes("storage.read") ? state : [] };
+    return { row, manifest, writable, receipt, skills, tools, toolsHash, payloadHash, state: manifest.permissions.includes("storage.read") ? state : [] };
   };
   const transaction = <T>(operation: (tx: Database) => Promise<T>) => db.transaction(async tx => {
     const connection = tx as unknown as Database;
@@ -49,17 +58,21 @@ export async function invokeInstalledPlugin(db: Database, identity: VerifiedRequ
     return operation(connection);
   });
   const initial = await transaction(guarded);
+  expectedToolsHash = initial.toolsHash;
   const execution = await prepare(initial.manifest, signal);
   try {
     await execution.revalidate();
     await transaction(guarded);
-    if (initial.receipt) return transaction(async tx => {
-      const current = await guarded(tx);
-      await execution.revalidate(tx);
-      if (!current.receipt) throw new ConflictError("Plugin receipt is no longer available", current.row.revision);
-      signal.throwIfAborted();
-      return { result: current.receipt.result, replayed: true, revision: current.row.revision };
-    });
+    if (initial.receipt) {
+      for (const item of initial.tools) completedTools.add(item.binding.name);
+      return transaction(async tx => {
+        const current = await guarded(tx);
+        await execution.revalidate(tx);
+        if (!current.receipt) throw new ConflictError("Plugin receipt is no longer available", current.row.revision);
+        signal.throwIfAborted();
+        return { result: current.receipt.result, replayed: true, revision: current.row.revision };
+      });
+    }
     const revoked = new AbortController();
     const runningSignal = AbortSignal.any([signal, revoked.signal]);
     let checkFlight: Promise<void> | undefined;
@@ -70,7 +83,8 @@ export async function invokeInstalledPlugin(db: Database, identity: VerifiedRequ
     timer.unref();
     let result: unknown;
     try {
-      result = await execution.execute({ method: input.method, input: input.input, state: initial.state, ...(initial.skills.length ? { skills: initial.skills } : {}) }, runningSignal);
+      const tools = await runPluginTools(db, identity, initial.tools, input.toolApprovals, toolPool, runningSignal, completedTools, async () => { await transaction(guarded); await execution.revalidate(); });
+      result = await execution.execute({ method: input.method, input: input.input, state: initial.state, ...(initial.skills.length ? { skills: initial.skills } : {}), ...(tools.length ? { tools } : {}) }, runningSignal);
       runningSignal.throwIfAborted();
     } finally { clearInterval(timer); await checkFlight; }
     await execution.revalidate();
@@ -84,7 +98,7 @@ export async function invokeInstalledPlugin(db: Database, identity: VerifiedRequ
       const planned = planPluginState(state, result, current.writable);
       signal.throwIfAborted();
       for (const change of planned.changes) await tx.insert(pluginStorage).values({ installationId, ...change }).onConflictDoUpdate({ target: [pluginStorage.installationId, pluginStorage.key], set: change });
-      await tx.insert(pluginInvocationReceipts).values({ installationId, actorId: identity.actor.id, key: input.idempotencyKey, payloadHash, revision: current.row.revision, result: planned.result });
+      await tx.insert(pluginInvocationReceipts).values({ installationId, actorId: identity.actor.id, key: input.idempotencyKey, payloadHash: current.payloadHash, revision: current.row.revision, result: planned.result });
       await auditIdentity(tx, "plugin.invoke", identity.actor.id, identity.actor.id, installationId, { revision: current.row.revision, method: input.method, changedKeys: planned.changes.length });
       return { result: planned.result, replayed: false, revision: current.row.revision };
     });
