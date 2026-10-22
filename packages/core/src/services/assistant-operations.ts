@@ -37,11 +37,16 @@ export const assistantOperations: Record<string, Operation> = {
     update_mcp_server: operation(update("serverId", z.object({ name: z.string().min(1).max(255).optional(), description: z.string().max(1000).nullable().optional(), active: z.boolean().optional(), tags: z.array(z.string()).max(30).optional() }).strict()), "Rename, describe, enable or disable an accessible MCP server without changing credentials or ownership.", "mcp", (db, s, p, a) => s.mcpRegistryService.updateServer(db, p.serverId, p.changes, a), "serverId"),
     delete_mcp_server: operation(id("serverId"), "Remove an accessible MCP server registration and its tools.", "mcp", async (db, s, p, a) => { await s.mcpRegistryService.deleteServer(db, p.serverId, a); await mcpPool.disconnect(p.serverId); return { deleted: true }; }, "serverId"),
     sync_mcp_tools: { ...operation(id("serverId"), "Refresh a remote MCP server's tool schemas. Local stdio tools must be uploaded by their registered client.", "mcp", (db, s, p) => s.mcpRegistryService.syncTools(db, p.serverId, mcpPool), "serverId"), external: true },
-    call_mcp_tool: { ...operation(schemas.callMcpToolSchema.extend({ toolId: uuid }).strict(), "Invoke an accessible external MCP tool. Inspect get_mcp_tool first for its input schema. Put the exact tool input inside the arguments object, including all required fields. Calls can have external effects and always follow account confirmation/automatic operation mode. Never repeat a call whose outcome is unknown.", "mcp", async (db, s, p, a) => {
+    call_mcp_tool: { ...operation(schemas.callMcpToolSchema.extend({ toolId: uuid, argumentsJson: z.string().max(1_048_576).optional() }).strict(), "Invoke an accessible external MCP tool. Inspect get_mcp_tool first for its input schema. Provide argumentsJson as a JSON-encoded object containing the exact tool input and all required fields; use \"{}\" for no inputs. Calls can have external effects and always follow account confirmation/automatic operation mode. Never repeat a call whose outcome is unknown.", "mcp", async (db, s, p, a) => {
       const tool = await s.mcpRegistryService.getToolDetail(db, p.toolId);
       const server = await s.mcpRegistryService.getServer(db, tool.serverId);
       const headerValues = Object.values((server.config as { headers?: Record<string, string> }).headers ?? {});
-      const result = await s.mcpRegistryService.callTool(db, p.toolId, p.arguments, a, mcpPool);
+      let input = p.arguments;
+      if (p.argumentsJson !== undefined) {
+        try { input = schemas.callMcpToolSchema.shape.arguments.parse(JSON.parse(p.argumentsJson)); }
+        catch { throw new schemas.ValidationError("MCP argumentsJson must encode a valid input object; no external call was dispatched"); }
+      }
+      const result = await s.mcpRegistryService.callTool(db, p.toolId, input, a, mcpPool);
       if (result.isError) throw new schemas.ValidationError("External MCP call failed or its outcome is unknown; do not retry automatically");
       return { id: tool.serverId, toolId: p.toolId, output: cleanAssistantToolData(redactAssistantValues(result, headerValues), true) };
     }), external: true },
@@ -96,6 +101,7 @@ export function parseAssistantOperation(operationName: string, input: unknown) {
 export const assistantOperationTools = Object.entries(assistantOperations).map(([name, operation]) => {
     const parameters = zodToJsonSchema(operation.schema, { $refStrategy: "none" });
     delete parameters.$schema;
+    if (name === "call_mcp_tool") Object.assign(parameters, { required: ["toolId", "argumentsJson"] });
     return { type: "function", function: { name, description: operation.description, parameters } };
 });
 export async function executeAssistantOperation(db: Database, services: Services, operationName: string, input: unknown, actor: Actor, supervisor?: { identity: schemas.VerifiedRequestContext; conversationId: string; actionId: string }) {
