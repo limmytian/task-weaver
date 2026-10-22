@@ -1,5 +1,5 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { MCP_SERVER_LIMITS, mcpServerToolErrorSchema } from '@task-weaver/contracts'
+import { MCP_SERVER_LIMITS, mcpServerToolErrorSchema, capabilityBootstrapSchema } from '@task-weaver/contracts'
 import { createMcpToolCaller, createTaskWeaverMcpServer, McpToolFailure } from '@task-weaver/core/mcp-server'
 import { ApiError, request } from './client.js'
 import { loadConfig } from './config.js'
@@ -24,6 +24,14 @@ export async function serveMcp(options: { readOnly?: boolean } = {}): Promise<vo
       if (!value.ok) {
         const parsed = mcpServerToolErrorSchema.parse(value)
         throw new McpToolFailure(parsed.error.code, parsed.error.message, parsed.error.approvalId)
+      }
+      if (options.readOnly && name === 'tw_context_bootstrap') {
+        const bootstrap = capabilityBootstrapSchema.safeParse(value.data)
+        if (bootstrap.success && bootstrap.data.capabilities.hostedExecution.state === 'available') {
+          bootstrap.data.capabilities.hostedExecution = { state: 'unavailable', reason: 'unsupported_client', remediation: 'Writes are disabled by this stdio connection\'s read-only policy.' }
+          delete bootstrap.data.execution
+          return bootstrap.data
+        }
       }
       return value.data
     } catch (error) {

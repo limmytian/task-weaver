@@ -1,5 +1,6 @@
 "use client";
 
+import { mcpServerHostedConfigSchema, type McpTransport } from "@task-weaver/contracts";
 import { useState, useMemo } from "react";
 import { trpc } from "@/trpc/client";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -47,11 +48,12 @@ import {
 } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
-type TransportType = "stdio" | "sse" | "streamable-http";
+type TransportType = McpTransport;
 
 type StdioConfig = { command: string; args?: string[]; env?: Record<string, string> };
 type HttpConfig = { url: string; headers?: Record<string, string> };
-type McpServerConfig = StdioConfig | HttpConfig;
+type HostedConfig = { profileId: string; profileHash: string };
+type McpServerConfig = StdioConfig | HttpConfig | HostedConfig;
 
 export default function McpPage() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -80,6 +82,8 @@ export default function McpPage() {
   const [newEnvJson, setNewEnvJson] = useState("{}");
 
   // HTTP config fields
+  const [newProfileId, setNewProfileId] = useState("");
+  const [newProfileHash, setNewProfileHash] = useState("");
   const [newUrl, setNewUrl] = useState("");
   const [newHeadersJson, setNewHeadersJson] = useState("{}");
 
@@ -101,6 +105,8 @@ export default function McpPage() {
   const [editEnvJson, setEditEnvJson] = useState("{}");
 
   // HTTP edit config fields
+  const [editProfileId, setEditProfileId] = useState("");
+  const [editProfileHash, setEditProfileHash] = useState("");
   const [editUrl, setEditUrl] = useState("");
   const [editHeadersJson, setEditHeadersJson] = useState("{}");
 
@@ -126,10 +132,13 @@ export default function McpPage() {
     { enabled: !!detailServerId }
   );
 
+  const readiness = trpc.mcp.readiness.useQuery({ id: detailServerId ?? "" }, { enabled: !!detailServerId, refetchInterval: detailServerId ? 30000 : false });
+
   const createServerMutation = trpc.mcp.create.useMutation({
     onSuccess: () => {
       toast.success("MCP server registered successfully");
       utils.mcp.list.invalidate();
+      if (detailServerId) utils.mcp.readiness.invalidate({ id: detailServerId });
       setCreateOpen(false);
       resetCreateForm();
     },
@@ -142,6 +151,7 @@ export default function McpPage() {
     onSuccess: () => {
       toast.success("MCP server updated successfully");
       utils.mcp.list.invalidate();
+      if (detailServerId) utils.mcp.readiness.invalidate({ id: detailServerId });
       if (detailServerId) {
         utils.mcp.get.invalidate({ id: detailServerId });
       }
@@ -156,6 +166,7 @@ export default function McpPage() {
     onSuccess: () => {
       toast.success("MCP server deleted successfully");
       utils.mcp.list.invalidate();
+      if (detailServerId) utils.mcp.readiness.invalidate({ id: detailServerId });
       setDeleteConfirmOpen(false);
       setDetailServerId(null);
     },
@@ -171,6 +182,7 @@ export default function McpPage() {
     onSuccess: (data) => {
       toast.success(`Successfully synchronized ${data.count} tools`);
       utils.mcp.list.invalidate();
+      if (detailServerId) utils.mcp.readiness.invalidate({ id: detailServerId });
       if (detailServerId) {
         utils.mcp.get.invalidate({ id: detailServerId });
       }
@@ -195,6 +207,8 @@ export default function McpPage() {
     setNewCommand("");
     setNewArgs("");
     setNewEnvJson("{}");
+    setNewProfileId("");
+    setNewProfileHash("");
     setNewUrl("");
     setNewHeadersJson("{}");
   };
@@ -211,7 +225,11 @@ export default function McpPage() {
     setEditTtl(server.ttl);
     setEditClientId(server.clientId ?? "");
 
-    if (server.transport === "stdio") {
+    if (server.transport === "hosted-stdio") {
+      const config = server.config as HostedConfig;
+      setEditProfileId(config.profileId ?? "");
+      setEditProfileHash(config.profileHash ?? "");
+    } else if (server.transport === "stdio") {
       const config = server.config as { command: string; args?: string[]; env?: Record<string, string> };
       setEditCommand(config?.command ?? "");
       setEditArgs(config?.args?.join(", ") ?? "");
@@ -245,7 +263,11 @@ export default function McpPage() {
     }
 
     let config: McpServerConfig = {} as McpServerConfig;
-    if (newTransport === "stdio") {
+    if (newTransport === "hosted-stdio") {
+      const parsed = mcpServerHostedConfigSchema.safeParse({ profileId: newProfileId.trim(), profileHash: newProfileHash.trim() });
+      if (!parsed.success) { toast.error("Enter an approved profile ID and its exact SHA-256 fingerprint"); return; }
+      config = parsed.data;
+    } else if (newTransport === "stdio") {
       if (!newCommand.trim()) {
         toast.error("Stdio command is required");
         return;
@@ -287,7 +309,11 @@ export default function McpPage() {
     }
 
     let config: McpServerConfig = {} as McpServerConfig;
-    if (editTransport === "stdio") {
+    if (editTransport === "hosted-stdio") {
+      const parsed = mcpServerHostedConfigSchema.safeParse({ profileId: editProfileId.trim(), profileHash: editProfileHash.trim() });
+      if (!parsed.success) { toast.error("Enter an approved profile ID and its exact SHA-256 fingerprint"); return; }
+      config = parsed.data;
+    } else if (editTransport === "stdio") {
       if (!editCommand.trim()) {
         toast.error("Stdio command is required");
         return;
@@ -553,6 +579,21 @@ export default function McpPage() {
                 </div>
               </SheetHeader>
 
+              <div className="space-y-2 rounded-lg border p-3 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium">Runtime availability</span>
+                  <Button variant="outline" size="sm" onClick={() => readiness.refetch()} disabled={readiness.isFetching}>Refresh</Button>
+                </div>
+                {readiness.isLoading ? <p className="text-xs text-muted-foreground">Checking availability…</p> : readiness.isError ? <p className="text-xs text-destructive">Availability could not be checked. Refresh to retry.</p> : readiness.data && <>
+                  <Badge variant={readiness.data.availability.state === "available" ? "secondary" : "outline"}>{readiness.data.availability.state === "available" ? "Ready" : "Unavailable"}</Badge>
+                  <p className="text-xs text-muted-foreground">{readiness.data.availability.state === "unavailable" ? readiness.data.availability.remediation : readiness.data.guidance}</p>
+                  <p className="text-xs text-muted-foreground">Credentials: {readiness.data.credentials}. Checked {new Date(readiness.data.checkedAt).toLocaleTimeString()}.</p>
+                  {readiness.data.runtime && <p className="break-all font-mono text-xs">{readiness.data.runtime.profileId} · {readiness.data.runtime.image}</p>}
+                </>}
+              </div>
+
+              {serverDetail.toolsUnavailable && <p className="rounded-lg border p-3 text-xs text-muted-foreground">Tool schemas are unavailable. Check runtime readiness, invocation grants and synchronization.</p>}
+
               {serverDetail.server.statusMessage && (
                 <div className="flex gap-2.5 rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-xs text-red-600 dark:text-red-400">
                   <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -571,7 +612,13 @@ export default function McpPage() {
                   Registry Parameters
                 </h4>
                 <div className="rounded-lg border bg-muted/40 p-4 space-y-2 text-xs">
-                  {serverDetail.server.transport === "stdio" ? (
+                  {serverDetail.server.transport === "hosted-stdio" ? (
+                    <div className="space-y-2 break-all">
+                      <p>Profile: <code>{(serverDetail.server.config as HostedConfig).profileId}</code></p>
+                      <p>Fingerprint: <code>{(serverDetail.server.config as HostedConfig).profileHash}</code></p>
+                      <p className="text-muted-foreground">Server-hosted, isolated, no network access.</p>
+                    </div>
+                  ) : serverDetail.server.transport === "stdio" ? (
                     <>
                       {(() => {
                         const cfg = serverDetail.server.config as StdioConfig;
@@ -747,6 +794,7 @@ export default function McpPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="stdio">stdio (Local script/binary)</SelectItem>
+                      <SelectItem value="hosted-stdio">hosted-stdio (Approved server runtime)</SelectItem>
                       <SelectItem value="sse">sse (Server-sent events)</SelectItem>
                       <SelectItem value="streamable-http">streamable-http (HTTP stream)</SelectItem>
                     </SelectContent>
@@ -763,7 +811,16 @@ export default function McpPage() {
               </div>
 
               {/* Dynamic Transport Fields */}
-              {newTransport === "stdio" ? (
+              {newTransport === "hosted-stdio" ? (
+                <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+                  <p className="text-sm font-medium">Approved server runtime</p>
+                  <p className="text-xs text-muted-foreground">Use the profile and fingerprint provided by an administrator. Hosted tools run on the server without network access.</p>
+                  <label className="block text-xs font-medium" htmlFor="new-profile-id">Profile ID</label>
+                  <Input id="new-profile-id" value={newProfileId} onChange={e => setNewProfileId(e.target.value)} required />
+                  <label className="block text-xs font-medium" htmlFor="new-profile-hash">Profile fingerprint</label>
+                  <Input id="new-profile-hash" value={newProfileHash} onChange={e => setNewProfileHash(e.target.value)} pattern="[a-f0-9]{64}" required className="font-mono text-xs" />
+                </div>
+              ) : newTransport === "stdio" ? (
                 <div className="space-y-4 border rounded-lg p-3 bg-muted/20">
                   <div className="text-xs font-semibold text-muted-foreground border-b pb-1.5">Stdio Host Configuration</div>
                   <div>
@@ -937,6 +994,7 @@ export default function McpPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="stdio">stdio (Local script/binary)</SelectItem>
+                      <SelectItem value="hosted-stdio">hosted-stdio (Approved server runtime)</SelectItem>
                       <SelectItem value="sse">sse (Server-sent events)</SelectItem>
                       <SelectItem value="streamable-http">streamable-http (HTTP stream)</SelectItem>
                     </SelectContent>
@@ -953,7 +1011,16 @@ export default function McpPage() {
               </div>
 
               {/* Dynamic Transport Fields */}
-              {editTransport === "stdio" ? (
+              {editTransport === "hosted-stdio" ? (
+                <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+                  <p className="text-sm font-medium">Approved server runtime</p>
+                  <p className="text-xs text-muted-foreground">Use the profile and fingerprint provided by an administrator. Hosted tools run on the server without network access.</p>
+                  <label className="block text-xs font-medium" htmlFor="edit-profile-id">Profile ID</label>
+                  <Input id="edit-profile-id" value={editProfileId} onChange={e => setEditProfileId(e.target.value)} required />
+                  <label className="block text-xs font-medium" htmlFor="edit-profile-hash">Profile fingerprint</label>
+                  <Input id="edit-profile-hash" value={editProfileHash} onChange={e => setEditProfileHash(e.target.value)} pattern="[a-f0-9]{64}" required className="font-mono text-xs" />
+                </div>
+              ) : editTransport === "stdio" ? (
                 <div className="space-y-4 border rounded-lg p-3 bg-muted/20">
                   <div className="text-xs font-semibold text-muted-foreground border-b pb-1.5">Stdio Host Configuration</div>
                   <div>

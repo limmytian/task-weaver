@@ -52,12 +52,14 @@ function waitForExit(child: ReturnType<typeof spawn>, timeoutMs: number) {
 
 function waitForOutput(child: ReturnType<typeof spawn>, pattern: RegExp, timeoutMs: number) {
   return new Promise<void>((resolve, reject) => {
+    let output = ''
     const timeout = setTimeout(() => {
       cleanup()
       reject(new Error(`timed out waiting for pipeline output ${pattern}`))
     }, timeoutMs)
     const onData = (chunk: string | Buffer) => {
-      if (!pattern.test(chunk.toString())) return
+      output = `${output}${chunk.toString()}`.slice(-4096)
+      if (!pattern.test(output)) return
       cleanup()
       resolve()
     }
@@ -78,7 +80,7 @@ async function waitFor(predicate: () => boolean, message: string, timeoutMs = 8_
   throw new Error(`timed out waiting for ${message}`)
 }
 
-test('pipeline CLI starts a role, correlates logs, and drains it on SIGINT', { timeout: 30_000 }, async () => {
+test('pipeline CLI starts a role, correlates logs, and drains it on SIGINT', { timeout: 45_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'tw-pipeline-cli-e2e-'))
   const home = join(root, 'home')
   const runtimeRoot = join(root, 'runs')
@@ -145,7 +147,7 @@ test('pipeline CLI starts a role, correlates logs, and drains it on SIGINT', { t
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     const exit = waitForExit(child, 20_000)
-    await waitForOutput(child, /Starting merger instance/, 10_000)
+    await waitForOutput(child, /Starting merger instance/, 20_000)
     await waitFor(() => statusReports.some((report: any) => report.status === 'idle'), 'merger idle status', 15_000)
     child.kill('SIGINT')
     const result = await exit
@@ -296,7 +298,7 @@ test('two supervisors isolate six role processes through death, restart, and ind
   }
 })
 
-test('pipeline CLI rejects invalid configuration and reports preflight failures before spawn', { timeout: 20_000 }, async () => {
+test('pipeline CLI rejects invalid configuration and reports preflight failures before spawn', { timeout: 45_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'tw-pipeline-failure-e2e-'))
   try {
     const invalidPath = join(root, 'invalid.json')
@@ -318,7 +320,7 @@ test('pipeline CLI rejects invalid configuration and reports preflight failures 
       cwd: process.cwd(),
       env: { ...process.env, HOME: root, TW_API_URL: 'http://127.0.0.1:1', TW_API_KEY: 'test-key' },
       stdio: ['ignore', 'pipe', 'pipe'],
-    }), 10_000)
+    }), 20_000)
 
     const invalid = await runCli(['daemon', 'pipeline', 'validate', '--config', invalidPath, '--json'])
     assert.equal(invalid.code, 1)

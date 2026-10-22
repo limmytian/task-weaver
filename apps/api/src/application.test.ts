@@ -5,13 +5,14 @@ import type { Database } from "@task-weaver/db";
 import type { RealtimeEvent } from "@task-weaver/realtime";
 import { createApiApplication } from "./application";
 
-function fixture() {
+function fixture(env: NodeJS.ProcessEnv = {}) {
   const listeners: Array<(event: RealtimeEvent) => void> = [];
   let shutdowns = 0;
   const application = createApiApplication({
     db: {} as Database,
     databaseUrl: "postgresql://unused",
     env: {
+      ...env,
       TW_PRESET_SKILLS_SYNC: "disabled",
       TW_AUTH_SECRET: randomBytes(32).toString("hex"),
       TW_AUTH_BASE_URL: "http://localhost:3001",
@@ -124,4 +125,13 @@ test("first-party lifecycle starts once and releases realtime subscriptions", as
   assert.equal(f.listeners.length, 0);
   assert.equal(f.shutdowns(), 1);
   await assert.rejects(f.application.start(), /cannot restart/);
+});
+
+
+test("shared Ti mode registers its schedule wake subscriber and releases it on shutdown", async () => {
+  const f = fixture({ TW_TI_RUNTIME_MODE: "shared" });
+  await f.application.start();
+  assert.equal(f.listeners.length, 2);
+  await f.application.stop();
+  assert.equal(f.listeners.length, 0);
 });

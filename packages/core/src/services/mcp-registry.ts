@@ -6,11 +6,11 @@ import type {
   UpdateMcpServerInput,
   SearchMcpToolsInput,
 } from "@task-weaver/contracts";
-import { NotFoundError, ConflictError, ValidationError, mcpServerStdioConfigSchema, mcpServerHttpConfigSchema } from "@task-weaver/contracts";
+import { NotFoundError, ConflictError, ValidationError, mcpServerStdioConfigSchema, mcpServerHttpConfigSchema, mcpServerHostedConfigSchema } from "@task-weaver/contracts";
 
 export interface McpPoolClient {
   listTools(): Promise<{ tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }> }>;
-  callTool(params: { name: string; arguments?: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  callTool(params: { name: string; arguments?: Record<string, unknown> }, resultSchema?: undefined, options?: { signal?: AbortSignal; timeout?: number }): Promise<Record<string, unknown>>;
 }
 
 export interface McpPool {
@@ -20,9 +20,9 @@ export interface McpPool {
 }
 
 function validateConfig(transport: string, config: unknown) {
-  const schema = transport === "stdio" ? mcpServerStdioConfigSchema : mcpServerHttpConfigSchema;
+  const schema = transport === "hosted-stdio" ? mcpServerHostedConfigSchema : transport === "stdio" ? mcpServerStdioConfigSchema : mcpServerHttpConfigSchema;
   if (!schema.safeParse(config).success) throw new ValidationError("MCP config does not match its transport");
-  if (transport !== "stdio") {
+  if (transport === "sse" || transport === "streamable-http") {
     const url = new URL((config as { url: string }).url);
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new ValidationError("MCP endpoint must be HTTP(S) without URL credentials");
   }
@@ -466,6 +466,8 @@ export async function callTool(
   actor: Actor,
   pool: McpPool,
   _approvalId?: string,
+  _expectedSchemaHash?: string,
+  signal?: AbortSignal,
 ) {
   const tool = await db.query.mcpTools.findFirst({
     where: eq(mcpTools.id, toolId),
@@ -498,7 +500,9 @@ export async function callTool(
   }
 
   try {
-    const result = await client.callTool({ name: tool.name, arguments: args });
+    signal?.throwIfAborted();
+    const result = await client.callTool({ name: tool.name, arguments: args }, undefined, { signal, timeout: 25000 });
+    signal?.throwIfAborted();
     const durationMs = Date.now() - startTime;
     const isError = Boolean((result as { isError?: boolean }).isError);
 

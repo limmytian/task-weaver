@@ -193,6 +193,8 @@ checkout instructions above.
 
 - [Architecture](docs/design.md) ([简体中文](docs/design.zh-CN.md))
 - [MCP Server: local stdio and remote HTTP](docs/mcp-server.md) ([简体中文](docs/mcp-server.zh-CN.md))
+- [Hosted capabilities with one TW connection](docs/hosted-capabilities.md) ([简体中文](docs/hosted-capabilities.zh-CN.md))
+- [Hosted capability operations and retention](docs/hosted-capability-operations.md)
 - [Authenticated accounts, CLI access and offline upgrade](docs/authenticated-access.md)
 - [Deployment and rollback](docs/deployment.md)
 - [Local Compose trial](docs/local-quickstart.md)

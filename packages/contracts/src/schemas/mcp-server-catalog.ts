@@ -1,5 +1,9 @@
-import { mcpRetrievalScopeSchema, mcpPackageFilesSchema, mcpPackageReadSchema, mcpSliceCreateSchema, mcpSliceUpdateSchema, mcpPlanValidateSchema, mcpPlanApplySchema, mcpAggregateContextSchema } from "./mcp-server-planning";
+import { repositoryReadinessInputSchema } from "./repositories";
+import { mcpRegistrySearchSchema, mcpRegistryToolSchema, mcpRegistryCallSchema, mcpRegistryReadinessSchema } from "./mcp-bridge";
+import { mcpRetrievalScopeSchema, mcpPackageFilesSchema, mcpPackageReadSchema, mcpSliceCreateSchema, mcpSliceUpdateSchema, mcpPlanValidateSchema, mcpPlanApplySchema, mcpAggregateContextSchema, mcpDependencyGraphSchema, mcpDocumentHistorySchema, mcpDocumentVersionSchema, mcpRepositoryListSchema, mcpScheduleListSchema, mcpUsageSummarySchema } from "./mcp-server-planning";
 import { z } from "zod";
+import { resolveSkillCapabilitiesSchema, runSkillCapabilitySchema } from "./capabilities";
+import { mcpMemorySearchSchema, mcpMemoryGetSchema, mcpMemoryRecordSchema, mcpMemoryUpdateSchema, mcpMemoryForgetSchema, mcpMemoryPreviewSchema } from "./mcp-memory";
 import { listProjectsSchema } from "./projects";
 import { createRequirementSchema, updateRequirementSchema, listRequirementsSchema, createRequirementDependencySchema, linkDocumentToRequirementSchema } from "./requirements";
 import { createTaskSchema, createPersonalTaskSchema, updateTaskSchema, updateTaskStatusSchema, claimTaskSchema, releaseTaskSchema, createTaskCommentSchema, createTaskDependencySchema } from "./tasks";
@@ -20,6 +24,17 @@ function tool(name: McpServerToolName, description: string, schema: z.AnyZodObje
 
 /** One catalog for both transports. Business refinements are applied again before dispatch. */
 export const mcpServerCatalog = [
+  tool("tw_repositories_list", "List bounded visible repository catalog summaries; project membership alone does not grant private catalog visibility.", mcpRepositoryListSchema),
+  tool("tw_repository_readiness", "Read repository policy readiness without cloning or exposing credential/checkout configuration; unknown is not execution-ready.", repositoryReadinessInputSchema.extend({ id }).strict()),
+  tool("tw_schedules_list", "List bounded authorized schedule summaries without task prompts, execution or schedule changes.", mcpScheduleListSchema),
+  tool("tw_usage_summary", "Read scoped aggregate token reporting and coverage with audit.read permission; missing reports remain unknown.", mcpUsageSummarySchema),
+  tool("tw_document_history", "List bounded historical document revision metadata without loading snapshot bodies.", mcpDocumentHistorySchema),
+  tool("tw_document_version", "Read an authorized historical Markdown snapshot in bounded Unicode-character chunks.", mcpDocumentVersionSchema),
+  tool("tw_dependencies_graph", "Read a bounded authorized dependency graph in both directions with current claims; does not claim work or bypass dependency guards.", mcpDependencyGraphSchema),
+  tool("tw_mcp_readiness", "Inspect live scoped registry/runtime availability without exposing server credentials or launching a tool.", mcpRegistryReadinessSchema),
+  tool("tw_mcp_search", "Discover bounded authorized external tool summaries without loading schemas.", mcpRegistrySearchSchema),
+  tool("tw_mcp_tool", "Read one authorized external tool schema and its exact schema hash.", mcpRegistryToolSchema),
+  tool("tw_mcp_call", "Invoke a confirmed external tool with its exact schema hash; targetApprovalId is the registry target approval, approvalId is the optional facade approval. Never blindly retry a dispatched call.", mcpRegistryCallSchema),
   tool("tw_projects_discover", "Search bounded project directory metadata; does not grant project content access.", listProjectsSchema.omit({ view: true }).extend(page).strict()),
   tool("tw_projects_list", "List visible projects with compact pagination.", listProjectsSchema.extend(page).extend({ view: z.literal("summary").default("summary") }).strict()),
   tool("tw_projects_get", "Read one authorized project by id.", byId),
@@ -50,8 +65,17 @@ export const mcpServerCatalog = [
   tool("tw_document_task_links_add", "Link an authorized document to an authorized task.", linkDocumentToTaskSchema.extend({ id }).strict()),
   tool("tw_document_requirement_links_add", "Link an authorized document to an authorized requirement.", linkDocumentToRequirementSchema.extend({ id }).strict()),
   tool("tw_context_bootstrap", "Read Task Weaver MCP collaboration conventions and discovery guidance.", z.object({}).strict()),
+  tool("tw_memories_search", "Discover bounded memory summaries without renewing expiry; read full content separately.", mcpMemorySearchSchema),
+  tool("tw_memories_preview", "Preview a bounded source-derived memory candidate without writing; review and explicitly save it separately.", mcpMemoryPreviewSchema),
+  tool("tw_memories_get", "Read one authorized active memory and its revision/provenance.", mcpMemoryGetSchema),
+  tool("tw_memories_record", "Explicitly save a confirmed memory; reuse the same key and payload after an ambiguous response.", mcpMemoryRecordSchema),
+  tool("tw_memories_update", "Revise a memory using its exact current version.", mcpMemoryUpdateSchema),
+  tool("tw_memories_forget", "Explicitly forget a memory at its current version; old save retries cannot restore it.", mcpMemoryForgetSchema),
   tool("tw_context_search", "Discover authorized skill summaries by intent; read full text separately.", mcpRetrievalScopeSchema.extend({ intent: z.string().trim().min(1).max(500), limit: z.number().int().min(1).max(20).default(5) }).strict()),
-  tool("tw_context_get", "Read one authorized skill document.", byId),
+  tool("tw_context_get", "Read one authorized skill document; use expectedVersion for a pinned dependency.", byId.extend({ expectedVersion: z.number().int().min(1).optional() }).strict()),
+  tool("tw_skill_packages_resolve", "Resolve a bounded, permission-checked graph of exact skill and tool dependencies without loading their bodies or executing them.", resolveSkillCapabilitiesSchema),
+  tool("tw_skill_runtimes_list", "Inspect operator-configured digest-pinned isolated runtime profiles and readiness.", z.object({}).strict()),
+  tool("tw_skills_run", "Explicitly execute a pinned skill in a configured isolated container without network or inherited credentials; requires resource.write and mcp.invoke.", runSkillCapabilitySchema),
   tool("tw_skill_packages_list", "List authorized skill package summaries.", mcpRetrievalScopeSchema.extend({ query: z.string().trim().min(1).max(500).optional(), offset: z.number().int().min(0).max(100000).default(0), limit: z.number().int().min(1).max(50).default(20) }).strict()),
   tool("tw_skill_packages_get", "Read safe package metadata without storage locations or recursive files.", z.object({ packageId: id }).strict()),
   tool("tw_skill_package_files", "List a bounded page of package file metadata.", mcpPackageFilesSchema),
@@ -70,11 +94,12 @@ export function parseMcpServerArguments(name: McpServerToolName, value: unknown)
   const definition = mcpServerCatalog.find(tool => tool.name === name)!;
   const input = definition.schema.parse(value);
   if (name === "tw_tasks_create") return { ...createTaskSchema.parse(input), ...(input.approvalId ? { approvalId: input.approvalId } : {}) };
-  if (name === "tw_documents_create") {
+  if (name === "tw_documents_create" || name === "tw_memories_record" || name === "tw_memories_preview" || name === "tw_skills_run") {
     if ((input.scope === "project" && !input.projectId) || ((input.scope === "personal" || input.scope === "global") && input.projectId)) {
       throw new z.ZodError([{ code: "custom", path: ["scope"], message: "Document scope conflicts with projectId" }]);
     }
   }
+  if (name === "tw_schedules_list" && ((input.scope === "project" && !input.projectId) || (input.scope === "personal" && input.projectId))) throw new z.ZodError([{ code: "custom", path: ["scope"], message: "Schedule scope conflicts with projectId" }]);
   if (name === "tw_tasks_list" || name === "tw_search") {
     const scoped = input as z.infer<typeof taskList>;
     if (scoped.scope === "project" && !scoped.projectId && name === "tw_tasks_list") {

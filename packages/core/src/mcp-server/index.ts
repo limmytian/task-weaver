@@ -1,4 +1,6 @@
+import { McpInvocationBusy } from "../services/mcp-invocation-budget";
 import { McpApprovalRequired } from "../services/mcp-security";
+export { buildCapabilityBootstrap, readCapabilityBootstrap } from "./bootstrap";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, McpError, ErrorCode, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
@@ -31,6 +33,7 @@ function toolResult(value: Record<string, unknown>, isError = false): CallToolRe
   return { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value, ...(isError ? { isError: true } : {}) };
 }
 function publicFailure(error: unknown): McpServerToolError {
+  if (error instanceof McpInvocationBusy) return failure("busy", error.message);
   if (error instanceof McpApprovalRequired) return { ok: false, error: { code: "approval_required", message: error.message, approvalId: error.approvalId } };
   if (error instanceof McpToolFailure) return { ok: false, error: { code: error.code, message: error.message, ...(error.approvalId ? { approvalId: error.approvalId } : {}) } };
   if (error instanceof AuthenticationError) return failure("unauthenticated", "Authentication required.");
@@ -101,8 +104,8 @@ export function createTaskWeaverMcpServer(call: ReturnType<typeof createMcpToolC
     .filter(tool => isMcpServerToolAllowed(tool.name, options.readOnly ?? false) && (!visible || visible.includes(tool.name)))
     .map(tool => {
       const readOnly = (mcpServerReadTools as readonly string[]).includes(tool.name);
-      const destructive = /_(update|remove|status)$/.test(tool.name);
-      return { _meta: { available: true, stableId: tool.name, source: "task-weaver", requiredPermissions: [readOnly ? "resource.read" : "resource.write"], targetAuthorization: "Every target is checked against current credential scope on each call." }, name: tool.name, description: tool.description, inputSchema: zodToJsonSchema(tool.schema, { target: "jsonSchema7", $refStrategy: "none" }) as { type: "object" },
+      const destructive = /_(update|remove|status|forget)$/.test(tool.name);
+      return { _meta: { available: true, stableId: tool.name, source: "task-weaver", requiredPermissions: tool.name === "tw_usage_summary" ? ["resource.read", "audit.read"] : tool.name === "tw_skills_run" ? ["resource.read", "resource.write", "mcp.invoke"] : (tool.name === "tw_skill_runtimes_list" || tool.name.startsWith("tw_mcp_")) ? ["resource.read", "mcp.invoke"] : [readOnly ? "resource.read" : "resource.write"], targetAuthorization: "Every target is checked against current credential scope on each call." }, name: tool.name, description: tool.description, inputSchema: zodToJsonSchema(tool.schema, { target: "jsonSchema7", $refStrategy: "none" }) as { type: "object" },
         annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly && destructive, idempotentHint: readOnly, openWorldHint: true } };
     }) };
   });

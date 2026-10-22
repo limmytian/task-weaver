@@ -1,3 +1,4 @@
+import { executeChatSandboxTool, tiSandboxToolSchemas, tiSandboxTools } from "./ti-sandbox-tools";
 import { assistantSkillStorage, cleanAssistantToolData, redactAssistantValues } from "./assistant-assets";
 import { mcpPool } from "./mcp-pool";
 import { z } from "zod";
@@ -10,10 +11,11 @@ type Services = ReturnType<typeof createResourceServices>;
 type Operation = {
     schema: z.ZodTypeAny;
     description: string;
-    kind: "project" | "requirement" | "task" | "document" | "schedule" | "ti_agent_run" | "memory" | "package" | "mcp";
+    kind: "project" | "requirement" | "task" | "document" | "schedule" | "ti_agent_run" | "memory" | "package" | "mcp" | "sandbox";
     target?: string;
     external?: boolean;
-    run: (db: Database, services: Services, input: any, actor: Actor) => Promise<any>;
+    repeatableRead?: boolean;
+    run: (db: Database, services: Services, input: any, actor: Actor, supervisor?: { identity: schemas.VerifiedRequestContext; conversationId: string; actionId: string }) => Promise<any>;
 };
 const uuid = z.string().uuid();
 const id = (key: string) => z.object({ [key]: uuid }).strict();
@@ -35,11 +37,16 @@ export const assistantOperations: Record<string, Operation> = {
     update_mcp_server: operation(update("serverId", z.object({ name: z.string().min(1).max(255).optional(), description: z.string().max(1000).nullable().optional(), active: z.boolean().optional(), tags: z.array(z.string()).max(30).optional() }).strict()), "Rename, describe, enable or disable an accessible MCP server without changing credentials or ownership.", "mcp", (db, s, p, a) => s.mcpRegistryService.updateServer(db, p.serverId, p.changes, a), "serverId"),
     delete_mcp_server: operation(id("serverId"), "Remove an accessible MCP server registration and its tools.", "mcp", async (db, s, p, a) => { await s.mcpRegistryService.deleteServer(db, p.serverId, a); await mcpPool.disconnect(p.serverId); return { deleted: true }; }, "serverId"),
     sync_mcp_tools: { ...operation(id("serverId"), "Refresh a remote MCP server's tool schemas. Local stdio tools must be uploaded by their registered client.", "mcp", (db, s, p) => s.mcpRegistryService.syncTools(db, p.serverId, mcpPool), "serverId"), external: true },
-    call_mcp_tool: { ...operation(schemas.callMcpToolSchema.extend({ toolId: uuid }).strict(), "Invoke an accessible external MCP tool. Inspect get_mcp_tool first for its input schema. Calls can have external effects and always follow account confirmation/automatic operation mode. Never repeat a call whose outcome is unknown.", "mcp", async (db, s, p, a) => {
+    call_mcp_tool: { ...operation(schemas.callMcpToolSchema.extend({ toolId: uuid, argumentsJson: z.string().max(1_048_576).optional() }).strict(), "Invoke an accessible external MCP tool. Inspect get_mcp_tool first for its input schema. Provide argumentsJson as a JSON-encoded object containing the exact tool input and all required fields; use \"{}\" for no inputs. Calls can have external effects and always follow account confirmation/automatic operation mode. Never repeat a call whose outcome is unknown.", "mcp", async (db, s, p, a) => {
       const tool = await s.mcpRegistryService.getToolDetail(db, p.toolId);
       const server = await s.mcpRegistryService.getServer(db, tool.serverId);
       const headerValues = Object.values((server.config as { headers?: Record<string, string> }).headers ?? {});
-      const result = await s.mcpRegistryService.callTool(db, p.toolId, p.arguments, a, mcpPool);
+      let input = p.arguments;
+      if (p.argumentsJson !== undefined) {
+        try { input = schemas.callMcpToolSchema.shape.arguments.parse(JSON.parse(p.argumentsJson)); }
+        catch { throw new schemas.ValidationError("MCP argumentsJson must encode a valid input object; no external call was dispatched"); }
+      }
+      const result = await s.mcpRegistryService.callTool(db, p.toolId, input, a, mcpPool);
       if (result.isError) throw new schemas.ValidationError("External MCP call failed or its outcome is unknown; do not retry automatically");
       return { id: tool.serverId, toolId: p.toolId, output: cleanAssistantToolData(redactAssistantValues(result, headerValues), true) };
     }), external: true },
@@ -78,6 +85,13 @@ export const assistantOperations: Record<string, Operation> = {
     run_schedule: operation(id("scheduleId"), "Run a schedule now, subject to project execution policies.", "schedule", (db, s, p, a) => s.scheduleService.runScheduleNow(db, p.scheduleId, a), "scheduleId"),
     queue_ti_run: operation(schemas.createTiAgentRunSchema, "Queue a Ti task run subject to independent executor and project policies.", "ti_agent_run", (db, s, p, a) => s.tiAgentService.createRun(db, p, a)),
 };
+for (const [name, schema] of Object.entries(tiSandboxToolSchemas)) {
+  assistantOperations[name] = { ...operation(schema, tiSandboxTools.find(tool => tool.function.name === name)!.function.description, "sandbox",
+    async (db, _services, input, _actor, supervisor) => {
+      if (!supervisor) throw new schemas.AuthorizationError();
+      return executeChatSandboxTool(db, supervisor.identity, supervisor.conversationId, supervisor.actionId, name as keyof typeof tiSandboxToolSchemas, input);
+    }), external: true, repeatableRead: ["sandbox_job", "sandbox_read"].includes(name) };
+}
 export function parseAssistantOperation(operationName: string, input: unknown) {
     const operation = assistantOperations[operationName];
     if (!operation || !Object.hasOwn(assistantOperations, operationName))
@@ -87,12 +101,13 @@ export function parseAssistantOperation(operationName: string, input: unknown) {
 export const assistantOperationTools = Object.entries(assistantOperations).map(([name, operation]) => {
     const parameters = zodToJsonSchema(operation.schema, { $refStrategy: "none" });
     delete parameters.$schema;
+    if (name === "call_mcp_tool") Object.assign(parameters, { required: ["toolId", "argumentsJson"] });
     return { type: "function", function: { name, description: operation.description, parameters } };
 });
-export async function executeAssistantOperation(db: Database, services: Services, operationName: string, input: unknown, actor: Actor) {
+export async function executeAssistantOperation(db: Database, services: Services, operationName: string, input: unknown, actor: Actor, supervisor?: { identity: schemas.VerifiedRequestContext; conversationId: string; actionId: string }) {
     const operation = assistantOperations[operationName];
     const parsed = parseAssistantOperation(operationName, input);
-    const result = await operation!.run(db, services, parsed, actor);
+    const result = await operation!.run(db, services, parsed, actor, supervisor);
     const entityId = operation!.target ? parsed[operation!.target] : result?.id;
     return { entityType: operation!.kind, entityId, result: cleanAssistantToolData(result, operationName === "call_mcp_tool") };
 }

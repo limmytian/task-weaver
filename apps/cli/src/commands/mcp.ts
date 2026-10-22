@@ -32,6 +32,7 @@ async function confirmLocalScopeShare(serverId: string): Promise<void> {
 
 export function registerMcp(program: Command): void {
   const mcp = program.command('mcp').description('serve Task Weaver or discover external MCP registry tools')
+  mcp.command('readiness <serverId>').description('inspect scoped connection and hosted runtime readiness').option('--json', 'output JSON').action(async serverId => printJson(await get(`/api/v1/mcp/servers/${serverId}/readiness`)))
   mcp.command('audit').option('--limit <n>', 'page size', '20').option('--offset <n>', 'page offset', '0').option('--project <id>', 'project scope').option('--personal', 'personal scope').option('--json', 'output JSON')
     .action(async opts => {
       const query = new URLSearchParams({ limit: opts.limit, offset: opts.offset })

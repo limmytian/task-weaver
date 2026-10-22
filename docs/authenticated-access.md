@@ -1,7 +1,8 @@
-# Authenticated access in 0.3.3
+# Authenticated access
 
-This guide describes the `0.3.3` source behavior. Existing published image digests
-and tags are unchanged; source acceptance does not authorize a release or rollout.
+This guide describes authenticated access in the application. Select verified
+release artifacts using the deployment guide; source acceptance alone does not
+authorize a release or rollout.
 Use [authentication contracts](authentication-contract.md) for configuration and
 [resource authorization](resource-authorization.md) for the coverage boundary.
 

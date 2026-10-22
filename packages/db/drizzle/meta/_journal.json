@@ -519,6 +519,34 @@
       "when": 1792380001000,
       "tag": "0073_mcp_security",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1792472400000,
+      "tag": "0074_memory_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1792519200000,
+      "tag": "0075_ti_sandbox_ownership",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1792520400000,
+      "tag": "0076_webhook_outbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1792521000000,
+      "tag": "0077_verified_inbound_events",
+      "breakpoints": true
     }
   ]
 }

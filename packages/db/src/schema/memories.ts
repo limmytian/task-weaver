@@ -1,10 +1,12 @@
 import {
   index,
+  integer,
   jsonb,
   pgTable,
   text,
   timestamp,
   uuid,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { actorTypeEnum } from "./enums";
 import { projects } from "./projects";
@@ -27,6 +29,8 @@ export const memories = pgTable(
     title: text("title").notNull(),
     // Full memory content (Markdown)
     content: text("content").notNull(),
+    version: integer("version").default(1).notNull(),
+    provenance: jsonb("provenance").$type<Record<string, unknown>>(),
     // Structured metadata (flexible key-value)
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     // Tags for filtering
@@ -60,3 +64,15 @@ export const memories = pgTable(
     index("idx_memories_created").on(table.createdAt),
   ],
 );
+
+// Receipts outlive a forgotten memory so an ambiguous save cannot resurrect it.
+export const memoryReceipts = pgTable("memory_receipts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  actorId: text("actor_id").notNull(),
+  actorType: text("actor_type").notNull(),
+  scopeKey: text("scope_key").notNull(),
+  key: uuid("key").notNull(),
+  payloadHash: text("payload_hash").notNull(),
+  memoryId: uuid("memory_id").references(() => memories.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, table => [uniqueIndex("memory_receipts_identity").on(table.actorId, table.actorType, table.scopeKey, table.key)]);

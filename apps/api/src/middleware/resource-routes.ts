@@ -42,7 +42,7 @@ const ordinaryRoutes: Array<[string, RegExp]> = [
   ["DELETE", new RegExp("^/api/v1/(?:requirements|tasks)/[0-9a-fA-F-]{36}/repositories/[0-9a-fA-F-]{36}/?$")],
   ["GET", new RegExp("^/api/v1/repositories(?:/[0-9a-fA-F-]{36}(?:/readiness)?)?/?$")],
   ["GET", new RegExp("^/api/v1/(?:requirements|tasks)/[0-9a-fA-F-]{36}/repositories/?$")],
-  ["GET", new RegExp("^/api/v1/mcp/(?:servers(?:/[0-9a-fA-F-]{36})?|tools/(?:search|[0-9a-fA-F-]{36}))/?$")],
+  ["GET", new RegExp("^/api/v1/mcp/(?:servers(?:/[0-9a-fA-F-]{36}(?:/readiness)?)?|tools/(?:search|[0-9a-fA-F-]{36}))/?$")],
   ["POST", new RegExp("^/api/v1/mcp/(?:servers|servers/[0-9a-fA-F-]{36}/(?:sync|heartbeat|upload-tools|poll)|tools/[0-9a-fA-F-]{36}/call|requests/[0-9a-fA-F-]{36}/result)/?$")],
   ["PATCH", new RegExp("^/api/v1/mcp/servers/[0-9a-fA-F-]{36}/?$")],
   ["DELETE", new RegExp("^/api/v1/mcp/servers/[0-9a-fA-F-]{36}/?$")],
@@ -131,12 +131,18 @@ const ordinaryRoutes: Array<[string, RegExp]> = [
   ["GET", new RegExp("^/api/v1/memories/[0-9a-fA-F-]{36}/?$")],
 ];
 export function isOrdinaryResourceRoute(method: string, path: string) {
+  if (["GET", "POST"].includes(method) && /^\/api\/v1\/inbound\/sources$/.test(path)) return true;
+  if (["PATCH", "DELETE"].includes(method) && /^\/api\/v1\/inbound\/sources\/[0-9a-fA-F-]{36}$/.test(path)) return true;
+  if (method === "GET" && /^\/api\/v1\/inbound\/sources\/[0-9a-fA-F-]{36}\/events(?:\/[0-9a-fA-F-]{36}\/actions)?$/.test(path)) return true;
+  if (method === "POST" && /^\/api\/v1\/inbound\/sources\/[0-9a-fA-F-]{36}\/events\/[0-9a-fA-F-]{36}\/retry$/.test(path)) return true;
+  if (method === "GET" && /^\/api\/v1\/webhooks\/[0-9a-fA-F-]{36}\/deliveries\/[0-9a-fA-F-]{36}\/attempts$/.test(path)) return true;
+  if (method === "GET" && path === "/api/v1/ti/worker/cleanup") return true;
   if (method === "GET" && path === "/api/v1/daemons/events") return true;
   if (["GET", "POST"].includes(method) && /^\/api\/v1\/webhooks\/?$/.test(path)) return true;
   if (["GET", "PATCH", "DELETE"].includes(method) && /^\/api\/v1\/webhooks\/[0-9a-fA-F-]{36}$/.test(path)) return true;
   if (method === "GET" && /^\/api\/v1\/webhooks\/[0-9a-fA-F-]{36}\/deliveries$/.test(path)) return true;
-  if (method === "POST" && /^\/api\/v1\/webhooks\/[0-9a-fA-F-]{36}\/(?:test|deliveries\/[0-9a-fA-F-]{36}\/retry)$/.test(path)) return true;
-  if (method === "POST" && /^\/api\/v1\/ti\/runs(?:\/acquire|\/[0-9a-fA-F-]{36}\/(?:complete|heartbeat|progress|retry|delegations(?:\/[0-9a-fA-F-]{36}\/renew)?))?\/?$/.test(path)) return true;
+  if (method === "POST" && /^\/api\/v1\/webhooks\/[0-9a-fA-F-]{36}\/(?:test|deliveries\/[0-9a-fA-F-]{36}\/(?:retry|replay))$/.test(path)) return true;
+  if (method === "POST" && /^\/api\/v1\/ti\/runs(?:\/acquire|\/[0-9a-fA-F-]{36}\/(?:complete|heartbeat|progress|retry|cancel|delegations(?:\/[0-9a-fA-F-]{36}\/renew)?))?\/?$/.test(path)) return true;
   if (method === "POST" && /^\/api\/v1\/schedules\/[0-9a-fA-F-]{36}\/run-now$/.test(path)) return true;
   if (method === "POST" && /^\/api\/v1\/assistant\/actions\/[0-9a-fA-F-]{36}\/execute$/.test(path)) return true;
   if (method === "GET" && /^\/api\/v1\/assistant\/messages\/[0-9a-fA-F-]{36}\/result$/.test(path)) return true;

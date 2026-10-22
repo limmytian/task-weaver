@@ -30,8 +30,7 @@ maintenance requirements in the curated notes before approving the candidate.
    version, build, typecheck, test, and deployment checks.
 2. Compare the candidate with the preceding release's package exports and
    migration journal. Review explicit breaking removals for the 0.3 transition; the retired
-   in-process Pro SDK/canary is not a supported consumer. Future plugins must
-   validate the actual isolated host. Rehearse a previous-minor database upgrade
+   in-process Pro SDK/canary is not a supported consumer. Isolated skill execution must validate the actual host. Rehearse a previous-minor database upgrade
    and restore from a verified backup.
 3. Build API and Web images natively for Linux AMD64 and ARM64, scan the exact local candidates,
    and review native license evidence. A scan failure, missing advisory
@@ -122,7 +121,7 @@ For deployment recovery, stop writes and restore the pre-upgrade PostgreSQL
 database and matching skill-data snapshot before restarting the recorded old
 image digests. See [CE Install, Upgrade, and Recovery](ce-upgrades.md).
 
-## MCP acceptance for 0.3.10 and later
+## MCP acceptance
 
 Before promoting a candidate, run `pnpm test:mcp-postgres` and verify the actual
 Kubernetes API route with a scoped key. Record private candidate image digests,

@@ -22,6 +22,9 @@ import {
 import type { Env } from "../middleware/actor.js";
 import { z } from "zod";
 import { resolve } from "node:path";
+import { isMcpServerToolAllowed } from "@task-weaver/contracts";
+import { readCapabilityBootstrap } from "@task-weaver/core/mcp-server";
+import { authorizedMcpToolNames } from "@task-weaver/core/mcp-server/executor";
 
 const context = new Hono<Env>();
 
@@ -75,7 +78,9 @@ context.get("/search", async (c) => {
 // GET /bootstrap - Get bootstrap context (minimal starting info)
 context.get("/bootstrap", async (c) => {
   const bootstrap = await createResourceServices(c.get("identity")).contextService.getBootstrapContext(c.get("db"));
-  return c.json(bootstrap);
+  const visibleTools = (await authorizedMcpToolNames(c.get("db"), c.get("identity"))).filter(tool => isMcpServerToolAllowed(tool, c.get("mcpReadOnly") ?? false));
+  const capabilityBootstrap = await readCapabilityBootstrap(visibleTools, c.get("skillRuntimeProfiles"));
+  return c.json({ ...bootstrap, capabilityBootstrap });
 });
 
 // GET /list - List all available skills

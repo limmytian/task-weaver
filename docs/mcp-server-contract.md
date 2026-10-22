@@ -1,6 +1,6 @@
 # Inbound MCP server contract
 
-This document specifies the 0.3.11 inbound interface and its tested acceptance
+This document specifies the inbound interface and its tested acceptance
 boundaries. See the [usage guide](mcp-server.md) for setup and the verified client
 matrix. The outbound MCP Registry remains a separate feature.
 
@@ -156,11 +156,11 @@ References: [published transport specification](https://modelcontextprotocol.io/
 
 ## Dynamic authorization and audit
 
-The maximum catalog is 44 tools (24 read-only); effective catalogs are filtered
+The effective tool catalog is filtered
 by live credential scopes and deny policies. `/api/v1/mcp-server/catalog` returns
 the same effective names to the stdio adapter. `_meta` identifies stable tool ID,
 source and required permissions. Target IDs always undergo facade authorization.
 Write inputs optionally accept `approvalId`. Errors may include
 `approval_required` and a UUID `error.approvalId`; approval does not bypass target
-or business-rule validation. See the [authorization guide](mcp-server.md#authorization-aware-discovery-and-approvals-0311)
+or business-rule validation. See the [authorization guide](mcp-server.md#authorization-aware-discovery-and-approvals)
 for exact policy, expiration, audit and retention behavior.

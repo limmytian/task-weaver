@@ -4,7 +4,7 @@
 
 > 人机协作的项目管理工具 —— 让人类和 AI Agent 在同一个平台上协同工作。
 
-## 0.3.8 可配置的需求交付流程
+## 可配置的需求交付流程
 
 新建需求会解析出带版本的交付、验收、整合三个阶段配置。项目默认配置可由需求覆盖；若两者均未指定，采用无需产物、跳过验收与整合的基础流程。已有需求的 `workflow` 为空，继续按原有 Git 流程处理，直到在草稿或已批准且任务未启动时显式改为新流程。
 
@@ -94,7 +94,7 @@ task-weaver/
 
 ---
 
-### 2.4 单一主应用与延期插件规划
+### 2.4 单一主应用与外部集成
 
 Task Weaver 采用单一主应用，不再维护独立的 CE/Pro 产品架构。
 共享 Contracts、Core、数据库、Realtime 与 Partners Gateway 包仍服务于现有功能。
@@ -106,14 +106,9 @@ Partners Gateway 保留状态/健康接口、worker 生命周期、幂等重试�
 `pnpm test:gateway-postgres` 验证一次性 PostgreSQL 与 Gateway HTTP/SSE 通信；
 `pnpm test:gateway-live` 需要显式提供测试地址和凭据。默认 worker 不自动调用 AI 模型。
 
-插件生态仅列入低优先级草案，当前不实施，也不规划基础功能扩展。
-未来第三方插件必须在独立进程或容器中隔离运行，不能获得宿主数据库连接、任意 SQL
-或其他插件数据权限；通过宿主受控接口和专属存储服务访问数据，权限取插件授权与
-用户/项目授权的交集。前端采用隔离容器与受限桥接，不暴露宿主令牌。
-权限声明本身不是隔离措施，不能把旧的可信官方代码模型当作第三方安全模型。
+外部集成使用事件/webhook、REST 与 MCP。定时工作复用 schedule；后续执行方案由 Task Weaver 管理 Ti 模型与工具循环，通过 Partners MCP 执行沙箱操作；当前 Gateway worker 仍只打印提示词。参见[运行时接入评估](agent-runtime.zh-CN.md)。
 
-参见[架构调整](architecture-transition.md)、[延期插件路线](plugin-roadmap.md)
-与[版本化包](ce-packages.md)。
+参见[架构调整](architecture-transition.md)与[版本化包](ce-packages.md)。
 
 ## 3. 数据模型
 
@@ -596,7 +591,7 @@ PostgreSQL NOTIFY path:
 
 ## 12. 认证与权限
 
-0.3.3 使用封闭注册的本地账号、可撤销的数据库会话和绑定主体的 scoped API Key。
+应用使用封闭注册的本地账号、可撤销的数据库会话和绑定主体的 scoped API Key。
 人类 Key 保持人类身份；受管 Agent 有独立的稳定 actor 及管理人类。轮换只改变凭据，
 不改变 actor。REST、tRPC、GraphQL、SSR 与事件入口复用实时 core 授权。
 Actor header、个人 owner 字段、clientId 和 nodeId 都不能证明身份。

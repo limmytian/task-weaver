@@ -5,6 +5,16 @@ import { resolve, basename, relative, sep, dirname, join } from 'node:path'
 import { Command } from 'commander'
 import { get, post, patch } from '../client.js'
 import { printJson, printTable, printKv } from '../output.js'
+import { parseMcpServerArguments, type McpServerToolName } from '@task-weaver/contracts'
+
+async function contextTool<T>(name: McpServerToolName, input: Record<string, unknown>): Promise<T> {
+  const parsed = parseMcpServerArguments(name, input)
+  const response = await post<{ structuredContent?: { ok: boolean; data?: T; error?: { code: string; message: string; approvalId?: string } } }>(`/api/v1/mcp-server/tools/${name}`, parsed)
+  const result = response.structuredContent
+  if (!result || typeof result.ok !== 'boolean') throw new Error('The API does not support this capability tool contract.')
+  if (!result.ok) throw new Error(`${result.error?.code ?? 'operation_failed'}: ${result.error?.message ?? 'Capability operation failed.'}${result.error?.approvalId ? ` Approval: ${result.error.approvalId}` : ''}`)
+  return result.data as T
+}
 
 interface PackageFilePayload {
   path: string
@@ -128,6 +138,44 @@ function resolveMaterializedFile(rootDir: string, packagePath: string): string {
 export function registerContext(program: Command): void {
   const ctx = program.command('context').description('discover and retrieve context/skills on demand')
   const pkg = ctx.command('package').description('manage multi-file skill packages')
+
+  pkg.command('resolve <id>').description('resolve exact authorized skill dependencies without installing them')
+    .option('--version <version>', 'exact root version; defaults to the current active version')
+    .option('--json', 'output JSON')
+    .action(async (id, opts) => printJson(await contextTool('tw_skill_packages_resolve', { packageId: id, version: opts.version })))
+
+  ctx.command('runtimes').description('inspect configured server runtime profiles and interpreter readiness')
+    .option('--json', 'output JSON')
+    .action(async () => printJson(await contextTool('tw_skill_runtimes_list', {})))
+
+  ctx.command('run <id>').description('explicitly run a pinned skill on its configured isolated server runtime')
+    .requiredOption('--version <version>', 'exact package version')
+    .requiredOption('--manifest-hash <sha256>', 'graph hash from package resolve')
+    .requiredOption('--runtime-image <digest>', 'approved image reference from runtimes')
+    .requiredOption('--profile-hash <sha256>', 'profile hash from runtimes')
+    .requiredOption('--confirm', 'confirm this exact skill, profile and input')
+    .option('--scope <scope>', 'project|personal|global execution scope', 'project')
+    .option('--project <id>', 'project execution scope')
+    .option('--input-file <path>', 'JSON input object; at most 16 KiB')
+    .option('--approval <id>', 'one-time approval for this exact operation')
+    .option('--json', 'output JSON')
+    .action(async (id, opts) => {
+      let input: unknown = {}
+      if (opts.inputFile) {
+        const bytes = readFileSync(resolve(opts.inputFile))
+        if (bytes.length > 16384) throw new Error('Skill input file exceeds the 16384-byte limit.')
+        try { input = JSON.parse(bytes.toString('utf8')) } catch { throw new Error('Skill input file must contain a JSON object.') }
+      }
+      const result = await contextTool<{ status: string }>('tw_skills_run', {
+        packageId: id, version: opts.version, manifestHash: opts.manifestHash,
+        runtimeImage: opts.runtimeImage, runtimeProfileHash: opts.profileHash,
+        scope: opts.scope, projectId: opts.project, confirmed: opts.confirm,
+        input, approvalId: opts.approval,
+      })
+      // JSON keeps untrusted process output from becoming terminal control sequences.
+      printJson(result)
+      if (result.status !== 'succeeded') process.exitCode = 1
+    })
 
   ctx
     .command('search <intent>')

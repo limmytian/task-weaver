@@ -10,6 +10,12 @@ export const memoryTypeSchema = z.enum(["user", "feedback", "project", "referenc
 
 export const memoryEntityTypeSchema = z.enum(["project", "requirement", "task", "document"]);
 
+export const memoryProvenanceSchema = z.object({
+  origin: z.enum(["explicit", "reviewed_source"]),
+  sourceUpdatedAt: z.string().datetime().optional(),
+  confidence: z.number().min(0).max(1).optional(),
+}).strict();
+
 export const recordMemorySchema = z.object({
   title: z.string().min(1).max(500),
   content: z.string().min(1),
@@ -22,9 +28,12 @@ export const recordMemorySchema = z.object({
   entityType: memoryEntityTypeSchema.optional(),
   entityId: z.string().uuid().optional(),
   expiresAt: z.string().datetime().optional(),
+  provenance: memoryProvenanceSchema.optional(),
+  idempotencyKey: z.string().uuid().optional(),
 });
 
 export const updateMemorySchema = z.object({
+  provenance: memoryProvenanceSchema.optional(),
   title: z.string().min(1).max(500).optional(),
   content: z.string().min(1).optional(),
   memoryType: memoryTypeSchema.optional(),
@@ -33,9 +42,13 @@ export const updateMemorySchema = z.object({
   personalOwnerId: z.string().nullable().optional(),
   personalOwnerType: z.enum(["human", "agent"]).nullable().optional(),
   expiresAt: z.string().datetime().nullable().optional(),
+  expectedVersion: z.number().int().min(1).optional(),
 });
 
+export const forgetMemorySchema = z.object({ expectedVersion: z.number().int().min(1).optional() }).strict();
+
 export const searchMemorySchema = z.object({
+  view: z.enum(["summary", "full"]).optional(),
   query: z.string().trim().min(1).max(500),
   memoryType: memoryTypeSchema.optional(),
   projectId: z.string().uuid().optional(),
@@ -69,6 +82,7 @@ export const listMemoriesSchema = z.object({
 });
 
 export type MemoryType = z.infer<typeof memoryTypeSchema>;
+export type MemoryProvenance = z.infer<typeof memoryProvenanceSchema>;
 export type MemoryEntityType = z.infer<typeof memoryEntityTypeSchema>;
 export type RecordMemoryInput = z.infer<typeof recordMemorySchema>;
 export type UpdateMemoryInput = z.infer<typeof updateMemorySchema>;

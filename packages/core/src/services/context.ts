@@ -16,6 +16,7 @@ const CONTEXT_SUMMARY_COLUMNS = {
   personalOwnerId: documents.personalOwnerId,
   personalOwnerType: documents.personalOwnerType,
   updatedAt: documents.updatedAt,
+  version: documents.version,
 };
 
 const CONTEXT_FULL_COLUMNS = {

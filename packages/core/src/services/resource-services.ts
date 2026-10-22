@@ -1,3 +1,5 @@
+import { withEventActor } from "./durable-events";
+import { synchronizeAuthorizedMcpTools } from "./mcp-sync";
 import { getArchivedResourceReadAuthority } from "./api-keys";
 import { requireDaemonLease } from './daemon-lease-authorization';
 import { createTiExecutionService, isTiExecutionOperation } from './ti-execution';
@@ -111,7 +113,8 @@ function bindServices(context?: VerifiedRequestContext) {
         const db = args[0] as Database;
         if (group === "usage" && name === "reportTiUsage") return createTiExecutionService(context).invoke(db, "reportUsage", args.slice(1));
         if (group === "ti" && isTiExecutionOperation(name)) return createTiExecutionService(context).invoke(db, name, args.slice(1));
-        if (group === "mcp" && name === "callTool") return invokeMcpTool(db, context, args[1], args[2], args[3], args[4], args[5]);
+        if (group === "mcp" && name === "syncTools") return synchronizeAuthorizedMcpTools(db, context, args[1], args[2]);
+        if (group === "mcp" && name === "callTool") return invokeMcpTool(db, context, args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
         return db.transaction(async tx => {
           // Serialize policy mutations with resource operations, including reads and nested relations.
           await lockIdentityLifecycle(tx);
@@ -178,7 +181,11 @@ function bindServices(context?: VerifiedRequestContext) {
               result.push(status === undefined ? await taskImplementation.getTask(txDb, id) : await taskImplementation.updateTaskStatus(txDb, id, status, actor, reason));
             }
           } else {
-            result = await implementation(...call);
+            result = await withEventActor(actor, () => implementation(...call));
+            if (name === "recordMemory") {
+              await requireResource(txDb, authority, "memory", result.id, "resource.write");
+              await checkMemoryEntity(txDb, authority, result);
+            }
           }
           if (["recordMemory", "updateMemory", "forgetMemory", "unlinkDocuments", "unlinkDocumentFromTask", "unlinkDocumentFromRequirement", "removeTaskDependency"].includes(name)) {
             const entityId = typeof call[1] === "string" ? call[1] : result?.id;
@@ -286,6 +293,12 @@ function redactDelegatedInput(value: any): any {
 
 /** Task capabilities do not inherit the parent's project administration or unrelated write surfaces. */
 function authorizeDelegatedOperation(authority: ResourceAuthority, group: Group, name: string, call: any[]) {
+  const assetReads: Record<string, string[]> = {
+    memory: ["getMemory", "listMemories", "searchMemories"],
+    package: ["listPackages", "getPackage", "listPackageFiles", "readPackageTextFile"],
+    mcp: ["listServers", "searchTools", "getServer", "getToolDetail", "listServerTools"],
+  };
+  if (authority.bounds?.purpose === "automation" && assetReads[group]?.includes(name)) return;
   const reads = new Set(["getProject", "getRequirement", "getTask", "getTaskDetail", "listTasks", "listRequirements", "listProjects", "getDocument", "getDocumentDetail", "listDocuments", "getTaskClaim", "getRequirementClaim", "listExecutionSlices", "listTaskComments", "listTaskNotes", "listDocumentVersions", "getDocumentVersion", "getRequirementRepositories", "getTaskRepositories", "listRequirementRepositories", "listTaskRepositories", "getRepository", "listRepositories", "bootstrapContext", "getBootstrapContext", "searchTasks", "searchRequirements", "searchDocuments", "searchDocumentsFulltext", "searchAll", "resolveTitles", "listContextEntries", "searchContext", "getContextEntry"]);
   const writes = new Set(["updateTask", "updateTaskStatus", "addTaskComment", "addTaskNote", "claimTask", "releaseTask", "heartbeatClaim", "updateDocument"]);
   reads.add("listWorkflowOutputs");
@@ -807,7 +820,8 @@ function redactMcpResult(authority: ResourceAuthority, value: any): any {
   if ("registeredBy" in result && "transport" in result) {
     const config = result.config;
     result.config = canAccessResource(authority, result, "mcp.manage")
-      ? result.transport === "stdio" ? { command: config.command, args: config.args }
+      ? result.transport === "hosted-stdio" ? { profileId: config.profileId, profileHash: config.profileHash }
+        : result.transport === "stdio" ? { command: config.command, args: config.args }
         : { url: config.url }
       : result.transport === "stdio" ? { command: "" } : { url: "" };
     result.statusMessage = null;

@@ -1,3 +1,4 @@
+import { mcpServerCatalog, mcpServerReadTools } from "@task-weaver/contracts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -13,7 +14,7 @@ test("official SDK negotiates, lists the shared catalog and calls validated tool
   try {
     await server.connect(serverTransport);
     await client.connect(clientTransport);
-    assert.equal((await client.listTools()).tools.length, 44);
+    assert.equal((await client.listTools()).tools.length, mcpServerCatalog.length);
     const result = await client.callTool({ name: "tw_tasks_get", arguments: { id } });
     assert.deepEqual(result.structuredContent, { ok: true, data: { id, title: "Authorized task" } });
     await assert.rejects(client.callTool({ name: "tw_tasks_status", arguments: { id, status: "done", force: true } }), /Invalid tool arguments/);
@@ -32,7 +33,7 @@ test("read-only discovery and direct dispatch both prohibit writes", async () =>
   try {
     await server.connect(b); await client.connect(a);
     const list = await client.listTools();
-    assert.equal(list.tools.length, 24);
+    assert.equal(list.tools.length, mcpServerReadTools.length);
     assert.ok(list.tools.every(tool => tool.annotations?.readOnlyHint));
     const result = await client.callTool({ name: "tw_tasks_status", arguments: { id, status: "done" } });
     assert.equal(result.isError, true);

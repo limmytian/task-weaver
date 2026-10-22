@@ -88,7 +88,7 @@ task-weaver/
 
 ---
 
-### 2.4 Unified application and deferred plugin planning
+### 2.4 Unified application and external integrations
 
 Task Weaver has one application, without a separate CE/Pro product architecture.
 Contracts, Core, database, realtime and Partners Gateway packages still support
@@ -103,16 +103,9 @@ retries and lease recovery. `pnpm test:gateway-postgres` verifies disposable
 PostgreSQL and Gateway HTTP/SSE transport; `pnpm test:gateway-live` requires
 explicit test endpoints/credentials. The default worker does not invoke an AI model.
 
-Plugin work is a low-priority draft, not current implementation. Additional
-foundation features are not planned in this transition. Future third-party code
-runs in separate processes/containers without host database connections, arbitrary
-SQL or access to other plugin data. Host-brokered APIs and plugin-owned storage
-enforce the intersection of plugin grants and user/project access. Frontend
-isolation uses narrow bridges without host tokens. Permission declarations alone
-are not isolation; the old trusted official-code model is not a third-party sandbox.
+External integrations use events/webhooks, REST and MCP. Scheduled work reuses schedules. The planned execution path keeps Ti model/tool orchestration in Task Weaver and uses Partners MCP for sandbox execution; the current Gateway worker remains a prompt-printing adapter. See [the runtime integration assessment](agent-runtime.md).
 
-See [architecture transition](architecture-transition.md),
-[deferred plugin roadmap](plugin-roadmap.md) and [versioned packages](ce-packages.md).
+See [architecture transition](architecture-transition.md) and [versioned packages](ce-packages.md).
 
 ## 3. Data Model
 
@@ -604,7 +597,7 @@ PostgreSQL NOTIFY path:
 
 ## 12. Authentication and Authorization
 
-0.3.3 uses closed local accounts, revocable database sessions and subject-bound
+The application uses closed local accounts, revocable database sessions and subject-bound
 scoped API keys. A human key remains a human identity; a managed Agent has its own
 stable actor and managing human. Rotation changes the credential, not the actor.
 REST, tRPC, GraphQL, SSR and events use the same live core authorization rules.

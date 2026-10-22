@@ -16,6 +16,7 @@ export function registerMemory(program: Command): void {
     .option('--entity-type <type>', 'project|requirement|task|document')
     .option('--entity-id <id>', 'entity UUID to link this memory to')
     .option('--expires <datetime>', 'expiry datetime (ISO 8601)')
+    .option('--key <uuid>', 'save retry key; reuse with an identical payload')
     .option('--json', 'output raw JSON')
     .action(async (opts) => {
       const data = await post('/api/v1/memories', {
@@ -27,6 +28,7 @@ export function registerMemory(program: Command): void {
         entityType: opts.entityType,
         entityId: opts.entityId,
         expiresAt: opts.expires,
+        idempotencyKey: opts.key,
       })
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)
@@ -100,6 +102,7 @@ export function registerMemory(program: Command): void {
   mem
     .command('update <id>')
     .description('update a memory')
+    .option('--expected-version <n>', 'reject changes to a newer memory revision')
     .option('--title <title>', 'new title')
     .option('--content <content>', 'new content')
     .option('--type <type>', 'new memory type')
@@ -108,6 +111,7 @@ export function registerMemory(program: Command): void {
     .option('--json', 'output raw JSON')
     .action(async (id, opts) => {
       const body: Record<string, unknown> = {}
+      if (opts.expectedVersion) body.expectedVersion = Number(opts.expectedVersion)
       if (opts.title) body.title = opts.title
       if (opts.content) body.content = opts.content
       if (opts.type) body.memoryType = opts.type
@@ -122,8 +126,10 @@ export function registerMemory(program: Command): void {
   mem
     .command('forget <id>')
     .description('delete a memory')
-    .action(async (id) => {
-      await del(`/api/v1/memories/${id}`)
+    .option('--expected-version <n>', 'reject forgetting a newer memory revision')
+    .action(async (id, opts) => {
+      const query = opts.expectedVersion ? `?expectedVersion=${encodeURIComponent(opts.expectedVersion)}` : ''
+      await del(`/api/v1/memories/${id}${query}`)
       console.log(`Memory ${id} deleted`)
     })
 

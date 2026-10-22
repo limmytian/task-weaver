@@ -17,3 +17,15 @@ test("MCP omits privileged controls rather than silently accepting them", () => 
   assert.throws(() => parseMcpServerArguments("tw_tasks_create", { title: "Spoof", scope: "personal", personalOwnerId: id }));
   assert.equal((parseMcpServerArguments("tw_tasks_update", { id, patch: { expectedVersion: 5 } }).patch as { expectedVersion: number }).expectedVersion, 5);
 });
+
+test("MCP memory saves require explicit intent, retry keys and consistent scope", () => {
+  const save = { title: "Handoff", content: "Continue from verified state", projectId: id, confirmed: true, idempotencyKey: id };
+  assert.equal(parseMcpServerArguments("tw_memories_record", save).scope, "project");
+  for (const invalid of [
+    { ...save, confirmed: false }, { ...save, idempotencyKey: undefined },
+    { ...save, scope: "personal" }, { ...save, personalOwnerId: id },
+    { ...save, scope: "global" }, { ...save, metadata: { trusted: true } },
+  ]) assert.throws(() => parseMcpServerArguments("tw_memories_record", invalid));
+  assert.throws(() => parseMcpServerArguments("tw_memories_update", { id, patch: { content: "Changed" } }));
+  assert.throws(() => parseMcpServerArguments("tw_memories_forget", { id, confirmed: true }));
+});

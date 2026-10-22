@@ -1,4 +1,4 @@
-# Human repository delivery reconciliation (0.3.9)
+# Human repository delivery reconciliation
 
 A human with both `project.manage` and `repository.manage` in the requirement project, plus access to its catalog repository, can register or synchronize an externally delivered PR. This is a separate operation from daemon delivery: Agent credentials, execution delegations, and the existing daemon endpoints retain their role and lease restrictions.
 
@@ -26,7 +26,7 @@ A verified external merge preserves Task Weaver review evidence; it does not inv
 
 ## Direct integration without a pull request
 
-Version 0.3.9 accepts an explicit delivered commit instead of a PR URL. In
+Direct integration accepts an explicit delivered commit instead of a PR URL. In
 **Verify delivery**, select **Direct integration without a PR**, supply the full
 commit SHA and an audit reason. The configured repository link supplies the target
 branch; clients cannot override it. The server reads that branch from the trusted

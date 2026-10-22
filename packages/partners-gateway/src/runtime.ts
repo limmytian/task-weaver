@@ -1,5 +1,7 @@
+import { TiRuntimeWorker } from "./ti-runtime-worker.js";
 import { Hono } from "hono";
 import { z } from "zod";
+import { resourceAuthority, canAccessResource, AuthorizationError, type VerifiedRequestContext } from "@task-weaver/core";
 import type { Database } from "@task-weaver/db";
 import {
   getPartnersGatewayConfig,
@@ -33,10 +35,18 @@ export function createPartnersGatewayRuntime(db: Database, env: NodeJS.ProcessEn
   const defaultConfig = getPartnersGatewayConfig(env);
   const workerConfig = defaultConfig.enabled ? getPartnersGatewayWorkerConfig(env) : null;
   const config: PartnersGatewayConfig = gatewayConfigurationSchema.parse(defaultConfig);
-  let worker: TiAgentGatewayWorker | null = null;
+  let worker: TiAgentGatewayWorker | TiRuntimeWorker | null = null;
 
-  const routes = new Hono();
-  routes.get("/status", (context) => context.json(getTiAgentGatewayWorkerStatus(config, worker)));
+  const routes = new Hono<{ Variables: { identity: VerifiedRequestContext } }>();
+  routes.get("/status", (context) => context.json(worker?.getStatus() ?? getTiAgentGatewayWorkerStatus(config, null)));
+  routes.get("/cleanup", async context => {
+    const live = await resourceAuthority(db, context.get("identity"));
+    const ownerId = live.actor.type === "human" ? live.actor.id : live.actor.managedByActorId;
+    if (live.bounds) throw new AuthorizationError();
+    const projectIds = live.grants.flatMap(grant => grant.scope === "project" && grant.permissions.includes("resource.read") ? [grant.projectId] : []);
+    const includePersonal = canAccessResource(live, { personalOwnerId: ownerId, personalOwnerType: "human" }, "resource.read");
+    return context.json(worker instanceof TiRuntimeWorker ? await worker.cleanupMetrics({ ownerId, projectIds, includePersonal }) : []);
+  });
   routes.get("/health", async (context) => {
     const health = await checkTiAgentGatewayHealth(config);
     return context.json(health, health.ok ? 200 : 503);
@@ -55,7 +65,9 @@ export function createPartnersGatewayRuntime(db: Database, env: NodeJS.ProcessEn
       id: "partners-gateway-runner",
       start: () => {
         const resolvedWorkerConfig = workerConfig ?? getPartnersGatewayWorkerConfig(env);
-        worker = createTiAgentGatewayWorker(db, config, resolvedWorkerConfig, () => env.TW_PARTNERS_GATEWAY_API_KEY);
+        worker = env.TW_TI_RUNTIME_MODE === "shared" && config.enabled
+          ? new TiRuntimeWorker(db, config, resolvedWorkerConfig, env)
+          : createTiAgentGatewayWorker(db, config, resolvedWorkerConfig, () => env.TW_PARTNERS_GATEWAY_API_KEY);
         worker?.start();
       },
       stop: async () => {

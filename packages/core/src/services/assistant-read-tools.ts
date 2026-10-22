@@ -88,6 +88,9 @@ export async function authorizeAssistantReadReference(db: Database, identity: Ve
 
 export async function runAssistantReadTool(db: Database, identity: VerifiedRequestContext, name: string, raw: unknown) {
   const service = createResourceServices(identity);
+  const personal = identity.credential.kind === "delegation" ? { includePersonal: false } : {
+    includePersonal: true, personalOwnerId: identity.actor.id, personalOwnerType: "human" as const,
+  };
   const references: AssistantReadReference[] = [];
   const clean = (value: any): any => {
     if (value instanceof Date) return value.toISOString();
@@ -167,13 +170,13 @@ export async function runAssistantReadTool(db: Database, identity: VerifiedReque
     }
     case "search_memories": case "list_memories": {
       const args = extraSchemas[name].parse(raw);
-      const input = { ...args, includePersonal: true, personalOwnerId: identity.actor.id, personalOwnerType: "human" as const };
+      const input = { ...args, ...personal };
       data = record("memory", name === "search_memories" ? await service.memoryService.searchMemories(db, schemas.searchMemorySchema.parse(input)) : await service.memoryService.listMemories(db, schemas.listMemoriesSchema.parse(input))); break;
     }
     case "get_memory": data = record("memory", await service.memoryService.getMemory(db, extraSchemas.get_memory.parse(raw).memoryId)); break;
     case "list_skills": {
       const args = extraSchemas.list_skills.parse(raw);
-      data = record("package", await service.skillPackageService.listPackages(db, schemas.listSkillPackagesSchema.parse({ ...args, ...(args.projectId ? { includePersonal: false } : { includePersonal: true, personalOwnerId: identity.actor.id, personalOwnerType: "human" }), includeGlobal: true, limit: 20 }))); break;
+      data = record("package", await service.skillPackageService.listPackages(db, schemas.listSkillPackagesSchema.parse({ ...args, ...(args.projectId ? { includePersonal: false } : personal), includeGlobal: true, limit: 20 }))); break;
     }
     case "get_skill": data = record("package", await service.skillPackageService.getPackage(db, extraSchemas.get_skill.parse(raw).packageId)); break;
     case "load_skill": case "read_skill_file": {
@@ -188,7 +191,7 @@ export async function runAssistantReadTool(db: Database, identity: VerifiedReque
     }
     case "list_mcp_servers": {
       const args = extraSchemas.list_mcp_servers.parse(raw);
-      data = record("mcp", await service.mcpRegistryService.listServers(db, { ...args, includeGlobal: true, includePersonal: true, personalOwnerId: identity.actor.id, personalOwnerType: "human" })); break;
+      data = record("mcp", await service.mcpRegistryService.listServers(db, { ...args, includeGlobal: true, ...personal })); break;
     }
     case "get_mcp_server": {
       const { serverId } = extraSchemas.get_mcp_server.parse(raw);
@@ -196,7 +199,7 @@ export async function runAssistantReadTool(db: Database, identity: VerifiedReque
     }
     case "search_mcp_tools": {
       const args = extraSchemas.search_mcp_tools.parse(raw);
-      data = await service.mcpRegistryService.searchTools(db, { ...args, includePersonal: true, personalOwnerId: identity.actor.id, personalOwnerType: "human" });
+      data = await service.mcpRegistryService.searchTools(db, { ...args, ...personal });
       const tools = Array.isArray(data) ? data : (data as any).items ?? [];
       for (const tool of tools) references.push({ kind: "mcp", id: tool.serverId }); break;
     }

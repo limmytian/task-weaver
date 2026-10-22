@@ -1,6 +1,7 @@
 import type { SQL } from "drizzle-orm";
 import { and, eq, isNull, or, sql, desc } from "drizzle-orm";
-import { type Database, memories } from "@task-weaver/db";
+import { type Database, memories, memoryReceipts, tasks, requirements, documents, projects } from "@task-weaver/db";
+import { capabilityDigest } from "./capability-digest";
 import type { Actor } from "@task-weaver/contracts";
 import type {
   RecordMemoryInput,
@@ -8,7 +9,7 @@ import type {
   SearchMemoryInput,
   ListMemoriesInput,
 } from "@task-weaver/contracts";
-import { NotFoundError } from "@task-weaver/contracts";
+import { NotFoundError, ConflictError, ValidationError } from "@task-weaver/contracts";
 
 // -- Helpers --
 
@@ -26,7 +27,7 @@ function buildMemoryScopeCondition(input: {
     if (input.includeGlobal) {
       scopes.push(and(isNull(memories.projectId), isNull(memories.personalOwnerId))!);
     }
-  } else {
+  } else if (input.includeGlobal !== false) {
     scopes.push(and(isNull(memories.projectId), isNull(memories.personalOwnerId))!);
   }
 
@@ -40,7 +41,7 @@ function buildMemoryScopeCondition(input: {
     );
   }
 
-  return or(...scopes)!;
+  return or(...scopes) ?? sql`false`;
 }
 
 function notExpired() {
@@ -78,16 +79,40 @@ export function calculateSlidingRenewal(
 
 // -- CRUD --
 
+async function assertMemorySource(db: Database, input: { entityType?: string | null; entityId?: string | null; provenance?: Record<string, unknown> | null }) {
+  if (input.provenance?.origin !== "reviewed_source") return;
+  if (!input.entityType || !input.entityId || typeof input.provenance.sourceUpdatedAt !== "string") throw new ValidationError("Reviewed memory requires a source and its observed update time");
+  const table = input.entityType === "task" ? tasks : input.entityType === "requirement" ? requirements : input.entityType === "document" ? documents : projects;
+  const [source] = await db.select({ updatedAt: table.updatedAt }).from(table).where(eq(table.id, input.entityId));
+  if (!source) throw new NotFoundError("Memory source not found");
+  if (source.updatedAt.getTime() !== new Date(input.provenance.sourceUpdatedAt).getTime()) throw new ConflictError("Memory source changed; preview it again before saving", 0);
+}
+
 export async function recordMemory(
   db: Database,
   input: RecordMemoryInput,
   actor: Actor,
 ) {
+  const { idempotencyKey, ...payload } = input;
+  const scopeKey = input.projectId ? `project:${input.projectId}` : input.personalOwnerId ? `personal:${input.personalOwnerType}:${input.personalOwnerId}` : "global";
+  const payloadHash = capabilityDigest(payload);
+  const receiptWhere = and(eq(memoryReceipts.actorId, actor.id), eq(memoryReceipts.actorType, actor.type), eq(memoryReceipts.scopeKey, scopeKey), idempotencyKey ? eq(memoryReceipts.key, idempotencyKey) : undefined);
+  if (idempotencyKey) {
+    const [receipt] = await db.insert(memoryReceipts).values({ actorId: actor.id, actorType: actor.type, scopeKey, key: idempotencyKey, payloadHash }).onConflictDoNothing().returning();
+    if (!receipt) {
+      const existing = await db.query.memoryReceipts.findFirst({ where: receiptWhere });
+      if (!existing || existing.payloadHash !== payloadHash) throw new ConflictError("Memory save key was already used for different content", 0);
+      if (!existing.memoryId) throw new ConflictError("The saved memory was forgotten; use a new key for an intentional new save", 0);
+      return getMemory(db, existing.memoryId);
+    }
+  }
+  await assertMemorySource(db, input);
   const [memory] = await db
     .insert(memories)
     .values({
       title: input.title,
       content: input.content,
+      provenance: input.provenance ?? { origin: "explicit" },
       memoryType: input.memoryType ?? "other",
       projectId: input.projectId ?? null,
       personalOwnerId: input.personalOwnerId ?? null,
@@ -101,7 +126,7 @@ export async function recordMemory(
       createdByType: actor.type,
     })
     .returning();
-
+  if (idempotencyKey) await db.update(memoryReceipts).set({ memoryId: memory!.id }).where(receiptWhere);
   return memory!;
 }
 
@@ -119,9 +144,12 @@ export async function updateMemory(
   input: UpdateMemoryInput,
   _actor: Actor,
 ) {
-  await getMemory(db, id);
+  const current = await getMemory(db, id);
+  if (input.expectedVersion !== undefined && input.expectedVersion !== current.version) throw new ConflictError("Memory changed", current.version);
+  if (input.provenance) await assertMemorySource(db, { ...current, provenance: input.provenance });
 
-  const updates: Record<string, unknown> = { ...input, updatedAt: new Date() };
+  const { expectedVersion: _version, ...patch } = input;
+  const updates: Record<string, unknown> = { ...patch, updatedAt: new Date(), version: sql`${memories.version} + 1` };
   if (input.expiresAt === null) {
     updates.expiresAt = null;
   } else if (input.expiresAt) {
@@ -131,21 +159,22 @@ export async function updateMemory(
   const [updated] = await db
     .update(memories)
     .set(updates)
-    .where(eq(memories.id, id))
+    .where(and(eq(memories.id, id), eq(memories.version, current.version)))
     .returning();
 
-  if (!updated) throw new NotFoundError("Memory not found or not owned by actor");
+  if (!updated) throw new ConflictError("Memory changed", (await getMemory(db, id)).version);
   return updated;
 }
 
-export async function forgetMemory(db: Database, id: string, _actor: Actor) {
-  await getMemory(db, id);
+export async function forgetMemory(db: Database, id: string, _actor: Actor, expectedVersion?: number) {
+  const current = await getMemory(db, id);
+  if (expectedVersion !== undefined && expectedVersion !== current.version) throw new ConflictError("Memory changed", current.version);
   const result = await db
     .delete(memories)
-    .where(eq(memories.id, id))
+    .where(and(eq(memories.id, id), eq(memories.version, current.version)))
     .returning({ id: memories.id });
 
-  if (result.length === 0) throw new NotFoundError("Memory not found or not owned by actor");
+  if (result.length === 0) throw new ConflictError("Memory changed", (await getMemory(db, id)).version);
 }
 
 // -- Search --
@@ -191,7 +220,10 @@ export async function searchMemories(db: Database, input: SearchMemoryInput, aut
     .select({
       id: memories.id,
       title: memories.title,
-      content: memories.content,
+      content: input.view === "summary" ? sql<string>`left(${memories.content}, 512)` : memories.content,
+      version: memories.version,
+      provenance: memories.provenance,
+      updatedAt: memories.updatedAt,
       memoryType: memories.memoryType,
       projectId: memories.projectId,
       personalOwnerId: memories.personalOwnerId,

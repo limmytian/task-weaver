@@ -24,7 +24,7 @@ including GraphQL POST and tRPC mutations. Public health/version and explicit
 authentication entry points return no ordinary resource authority. Invalid Bearer
 headers are rejected even on public entry points.
 
-## Account and credential lifecycle (0.3.3)
+## Account and credential lifecycle
 
 | Method/path under `/api/v1` | Purpose and boundary |
 | --- | --- |
@@ -2307,7 +2307,7 @@ tw daemon start --tools codex \
 CLI daemon review:
 
 ```bash
-tw daemon review --project <project-id> --base 0.3.3 \
+tw daemon review --project <project-id> --base main \
   --check "pnpm typecheck" \
   --check "pnpm test" \
   --prompt-file ~/.config/tw/review-extra.md
@@ -2344,7 +2344,7 @@ The review daemon calls `apply-review` to claim one `in_review` requirement at a
 CLI daemon merge:
 
 ```bash
-tw daemon merge --project <project-id> --base 0.3.3
+tw daemon merge --project <project-id> --base main
 ```
 
 ### Apply Merge Lane
@@ -2456,7 +2456,7 @@ returns `{ items, hasNext }`. Summary metadata excludes grants and verifier
 material. The Web Key list uses this endpoint contract and fetches grants only
 when opening detail; the original full metadata listing remains compatible.
 
-### Human direct integration reconciliation (0.3.9)
+### Human direct integration reconciliation
 
 `POST /api/v1/requirement-repositories/:id/human-sync` also accepts `commit` (full SHA)
 instead of `pullRequestUrl`, with the same reason, revision, timestamp and request UUID.
@@ -2465,10 +2465,10 @@ Only authorized human management credentials may call it. Existing PR deliveries
 explicit `git_pr` workflows must use PR synchronization. No configured acceptance or
 integration stage is automatically advanced. Use `tw req repo sync-direct --help`.
 
-### Inbound MCP Server (0.3.10)
+### Inbound MCP Server
 
 `POST /api/v1/mcp-server` serves JSON-RPC over stateless Streamable HTTP using the
-shared 29-tool collaboration catalog. Supply a subject-bound API key in the
+shared authorization-filtered collaboration catalog. Supply a subject-bound API key in the
 Authorization header on every request. Browser sessions and execution
 delegations are not accepted by this endpoint. GET/DELETE return 405 because no
 persistent SSE stream or session is offered.

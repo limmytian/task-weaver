@@ -8,6 +8,7 @@ import {
 import type { RealtimeEvent } from "@task-weaver/realtime";
 import {
   webhookService,
+  processInboundEventOnce,
   skillPackageStorageService,
   skillPresetService,
   authenticationConfiguration,
@@ -41,11 +42,13 @@ import scheduleRoutes from "./routes/schedules.js";
 import searchRoutes from "./routes/search.js";
 import taskRoutes from "./routes/tasks.js";
 import versionRoutes from "./routes/version.js";
+import inboundRoutes from "./routes/inbound-events.js";
 import webhookRoutes from "./routes/webhooks.js";
 import { mcpPool } from "./mcp-pool.js";
 import { createPartnersGatewayRuntime } from "@task-weaver/partners-gateway/runtime";
+import { APPLICATION_VERSION } from "@task-weaver/contracts";
 
-export const TASK_WEAVER_VERSION = "0.3.11" as const;
+export const TASK_WEAVER_VERSION = APPLICATION_VERSION;
 
 interface ApplicationLogger {
   debug(message: string, details?: Record<string, unknown>): void;
@@ -114,6 +117,7 @@ const consoleLogger: ApplicationLogger = {
 function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
   let webhookQueue = Promise.resolve();
   let pendingWebhooks = 0;
+  let webhookBackground: Promise<void> | undefined;
   return {
     apiRoutes: [
       {
@@ -198,6 +202,7 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
         mountPath: "/api/v1",
         route: scheduleRoutes,
       },
+      { id: "verified-inbound-events", method: "GET", path: "/api/v1/inbound", route: inboundRoutes },
       { id: "ti-agent", method: "GET", path: "/api/v1/ti", route: tiRoutes },
       {
         id: "assistant",
@@ -246,6 +251,22 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
       },
     ],
     workers: [
+      {
+        id: "durable-webhook-delivery",
+        start(context: ApiRuntimeContext) {
+          webhookBackground = (async () => {
+            while (!context.signal.aborted) {
+              try {
+                for (let i = 0; i < 20 && !context.signal.aborted && await processInboundEventOnce(context.db); i++) { /* Durable verified inbox. */ }
+                for (let i = 0; i < 50 && !context.signal.aborted && await webhookService.expandWebhookEvent(context.db); i++) { /* Bounded durable fanout. */ }
+                for (let i = 0; i < 20 && !context.signal.aborted && await webhookService.runWebhookDeliveryOnce(context.db); i++) { /* Leased delivery batch. */ }
+              } catch { context.logger.error("Durable webhook worker will retry after an internal failure"); }
+              if (!context.signal.aborted) await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          })();
+        },
+        async stop() { await webhookBackground; },
+      },
       {
         id: "skill-preset-sync",
         start: async (context: ApiRuntimeContext) => {
@@ -311,8 +332,10 @@ export function createApiApplication(
   const services = applicationServices(env);
   const gateway = createPartnersGatewayRuntime(options.db, env);
   services.apiRoutes.push(...gateway.apiRoutes);
-  // C2 must bind persisted Gateway work to live execution authority before it can start.
-  // Mounting its routes does not enable workers or outbound event delivery during A4 staging.
+  if (env.TW_TI_RUNTIME_MODE === "shared") {
+    services.workers.push(...gateway.workers);
+    services.eventSubscribers.push(...gateway.eventSubscribers);
+  }
   services.healthChecks.push(...gateway.healthChecks);
   const controller = new AbortController();
   const mcpBudget = { active: 0, pending: new Set<Promise<unknown>>() };
@@ -329,6 +352,8 @@ export function createApiApplication(
   app.use("*", async (requestContext, next) => {
     requestContext.set("db", options.db);
     requestContext.set("auth", auth);
+    requestContext.set("skillRuntimeProfiles", env.TW_SKILL_RUNTIME_PROFILES);
+    requestContext.set("mcpReadOnly", env.TW_MCP_READ_ONLY === "true");
     await next();
   });
   app.use("*", authenticationMiddleware);
@@ -348,6 +373,7 @@ export function createApiApplication(
       .split(",").map(host => host.trim()).filter(Boolean),
     readOnly: env.TW_MCP_READ_ONLY === "true",
     packageStorageDir: env.SKILL_PACKAGE_STORAGE_DIR,
+    runtimeProfiles: env.TW_SKILL_RUNTIME_PROFILES,
     budget: mcpBudget,
     signal: controller.signal,
   }));

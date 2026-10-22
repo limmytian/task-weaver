@@ -106,14 +106,19 @@ pnpm typecheck        # Type check all packages
 ## Development and Delivery
 
 - GitHub `limmytian/task-weaver` is the canonical product source repository.
-- Develop the next patch release directly on `0.3.7`, based on the latest
-  canonical `0.3.6` code. Push each completed requirement to the remote `0.3.7`
-  branch. Do not merge to `main` until the owner authorizes the version release
-  merge.
+- Choose the development branch and target release from the current owner
+  instruction and Task Weaver requirement, based on the latest canonical source.
+  Use the owner-selected release branch without an agent-specific prefix. Keep
+  version-specific plans in Task Weaver, not in these standing instructions. Push completed work
+  to its development branch; merge to `main` only when authorized by the owner.
 - Validate development builds locally, push them to the owner-configured private
   registry, and deploy for owner acceptance before merging to `main`. After owner
   approval, publish a new immutable patch release and verify deployment using
   images pulled from the public registry.
+- Keep general guides and agent instructions independent of the current release.
+  Use package metadata and shared version constants for runtime identity. Retain
+  exact versions for release notes, upgrade boundaries, immutable artifacts,
+  protocol compatibility and dependency locks.
 - Every commit must include a DCO signoff (`git commit -s`).
 - Keep local environment configuration ignored. Never commit credentials,
   private infrastructure configuration, or private repository history.

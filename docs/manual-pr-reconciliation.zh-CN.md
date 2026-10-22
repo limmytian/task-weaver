@@ -1,4 +1,4 @@
-# 人工仓库交付登记与同步（0.3.9）
+# 人工仓库交付登记与同步
 
 人类用户在需求所属项目中同时拥有 `project.manage`、`repository.manage`，并可访问关联仓库时，可以登记或同步外部交付的 PR。Agent、执行委托和原有 daemon 接口继续受角色与租约限制。
 
@@ -26,7 +26,7 @@ REST：`POST /api/v1/requirement-repositories/:id/human-sync`，参数为 `pullR
 
 ## 无 PR 的直接整合
 
-0.3.9 补充直接整合确认：在 **Verify delivery** 选择 **Direct integration without a PR**，
+直接整合确认：在 **Verify delivery** 选择 **Direct integration without a PR**，
 填写完整提交 SHA 和原因。目标分支来自需求仓库关联，客户端不能覆盖。
 服务端读取可信 forge 的目标分支，确认该分支包含交付提交后登记为已整合，
 记录目标 tip、交付提交、核验来源和观察时间；观察时间不冒充历史合并时间。

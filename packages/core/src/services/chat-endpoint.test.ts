@@ -98,3 +98,18 @@ test("custom proxy settings require a valid noncredentialed HTTP(S) proxy URL", 
     assert.equal(saveChatModelSchema.safeParse({ ...model, proxyMode: "custom", proxyUrl }).success, false);
   }
 });
+
+test("model usage budget rejection retains its supervisor error instead of becoming an invalid response", async () => {
+  const server = createServer((_request, response) => {
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify({ choices: [{ message: { content: "A valid reply" } }], usage: { total_tokens: 100 } }));
+  });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  const budgetError = new Error("Supervisor token budget exceeded");
+  try {
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`;
+    await assert.rejects(requestChatTurn(url, "", {}, performance.now() + 5000, undefined, false, {}, {
+      async start() {}, observe() { throw budgetError; },
+    }), error => error === budgetError);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});

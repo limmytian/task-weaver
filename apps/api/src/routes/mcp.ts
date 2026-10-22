@@ -10,7 +10,7 @@ import {
   searchMcpToolsSchema,
   callMcpToolSchema,
   NotFoundError,
-  ConflictError,
+  ConflictError, McpInvocationBusy, getMcpServerReadiness,
 } from "@task-weaver/core";
 import type { Env } from "../middleware/actor.js";
 import { mcpPool } from "../mcp-pool.js";
@@ -89,6 +89,8 @@ mcp.get("/servers", async (c) => {
   return c.json({ items: servers });
 });
 
+mcp.get("/servers/:id/readiness", async c => c.json(await getMcpServerReadiness(c.get("db"), c.get("identity"), c.req.param("id"), mcpPool)));
+
 // GET /servers/:id - Get server detail
 mcp.get("/servers/:id", async (c) => {
   const db = c.get("db");
@@ -117,9 +119,11 @@ mcp.patch("/servers/:id", async (c) => {
 
   try {
     const server = await createResourceServices(c.get("identity")).mcpRegistryService.updateServer(db, id, parsed.data, actor);
+    if (parsed.data.active === false || parsed.data.config || parsed.data.readOnly !== undefined || parsed.data.projectId !== undefined || parsed.data.personalOwnerId !== undefined) await mcpPool.disconnect(id);
     return c.json(server);
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
+    if (err instanceof McpInvocationBusy) { c.header("Retry-After", "1"); return c.json({ error: "busy" }, 429); }
     if (err instanceof McpApprovalRequired) return c.json({ error: "approval_required", approvalId: err.approvalId }, 409);
     if (err instanceof ConflictError) return c.json({ error: err.message }, 409);
     throw err;
@@ -181,6 +185,7 @@ mcp.post("/servers/:id/heartbeat", async (c) => {
     return c.json({ success: true, expiresAt: server.expiresAt });
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
+    if (err instanceof McpInvocationBusy) { c.header("Retry-After", "1"); return c.json({ error: "busy" }, 429); }
     if (err instanceof McpApprovalRequired) return c.json({ error: "approval_required", approvalId: err.approvalId }, 409);
     if (err instanceof ConflictError) return c.json({ error: err.message }, 409);
     throw err;
@@ -268,10 +273,13 @@ mcp.post("/tools/:id/call", async (c) => {
       actor,
       mcpPool,
       parsed.data.approvalId,
+      undefined,
+      c.req.raw.signal,
     );
     return c.json(result);
   } catch (err) {
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
+    if (err instanceof McpInvocationBusy) { c.header("Retry-After", "1"); return c.json({ error: "busy" }, 429); }
     if (err instanceof McpApprovalRequired) return c.json({ error: "approval_required", approvalId: err.approvalId }, 409);
     if (err instanceof ConflictError) return c.json({ error: err.message }, 409);
     throw err;

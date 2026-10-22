@@ -1,3 +1,6 @@
+import { requireMcpInput } from "./mcp-input-validation";
+import { acquireMcpInvocation } from "./mcp-invocation-budget";
+import { resolveHostedMcpRuntime } from "./mcp-hosted-runtime";
 import { requireMcpApproval, recordMcpInvocationAudit, mcpPolicy, mcpScopeKey } from "./mcp-security";
 import { personalResourceOwnerId, type ResourceScope } from "./resource-authorization";
 import { createHash, randomBytes } from "node:crypto";
@@ -8,6 +11,8 @@ import { lockIdentityLifecycle } from "./auth-security";
 import { resourceAuthority } from "./resource-authorization";
 import { credentialBinding, requireMcpToolTarget, requireLocalHost, requireMcpServer } from "./mcp-authorization";
 import { callTool, type McpPool } from "./mcp-registry";
+import { capabilityDigest } from "./capability-digest";
+import { ValidationError } from "@task-weaver/contracts";
 import { redactAssistantValues } from "./assistant-assets";
 
 async function requireQueuedTool(db: Database, item: typeof mcpLocalRequests.$inferSelect) {
@@ -21,19 +26,19 @@ async function requireQueuedTool(db: Database, item: typeof mcpLocalRequests.$in
   if (policy.mode === "approval") {
     const approvalId = item.callerContext._mcpApprovalId;
     if (typeof approvalId !== "string") throw new AuthorizationError();
-    await requireMcpApproval(db, context, scope, tool.id, approvalOperation(item.arguments ?? {}, tool, server), approvalId, false, true);
+    await requireMcpApproval(db, context, scope, tool.id, mcpToolApprovalOperation(item.arguments ?? {}, tool, server), approvalId, false, true);
   }
   if (item.callerContext._mcpTool !== toolBinding(tool) || item.callerContext._mcpServer !== digest(serverBinding(server)) || policy.mode === "deny" || JSON.stringify(item.callerContext._mcpPolicy) !== JSON.stringify(policy)) throw new AuthorizationError();
 }
 
 const toolBinding = (tool: { id: string; name: string; inputSchema: unknown; readOnly: boolean; targetProjectArgument: string | null }) => JSON.stringify({ id: tool.id, name: tool.name, inputSchema: tool.inputSchema, readOnly: tool.readOnly, targetProjectArgument: tool.targetProjectArgument });
-const serverBinding = (server: { id: string; projectId: string | null; personalOwnerId: string | null; transport: string; config: unknown; readOnly: boolean }) => JSON.stringify({ id: server.id, projectId: server.projectId, personalOwnerId: server.personalOwnerId, transport: server.transport, config: server.config, readOnly: server.readOnly });
-const approvalOperation = (args: Record<string, unknown>, tool: unknown, server: Parameters<typeof serverBinding>[0]) => ({ args, tool, server: JSON.parse(serverBinding(server)) });
+const serverBinding = (server: { id: string; projectId: string | null; personalOwnerId: string | null; transport: string; config: unknown; readOnly: boolean }) => JSON.stringify({ id: server.id, projectId: server.projectId, personalOwnerId: server.personalOwnerId, transport: server.transport, config: server.config, readOnly: server.readOnly, runtime: server.transport === "hosted-stdio" ? resolveHostedMcpRuntime(server).fingerprint : undefined });
+export const mcpToolApprovalOperation = (args: Record<string, unknown>, tool: unknown, server: Parameters<typeof serverBinding>[0]) => ({ args, tool, server: JSON.parse(serverBinding(server)) });
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const failed = () => ({ isError: true, content: [{ type: "text", text: "Local MCP invocation failed or expired" }] });
 
 /** Network waits happen outside lifecycle transactions so the client can consume its mailbox. */
-async function invokeMcpToolUnchecked(db: Database, context: VerifiedRequestContext, toolId: string, args: Record<string, unknown> | undefined, actor: Actor, pool: McpPool, approvalId?: string) {
+async function invokeMcpToolUnchecked(db: Database, context: VerifiedRequestContext, toolId: string, args: Record<string, unknown> | undefined, actor: Actor, pool: McpPool, approvalId?: string, expectedSchemaHash?: string, signal?: AbortSignal) {
   args = callMcpToolSchema.parse({ arguments: args }).arguments;
   const prepared = await db.transaction(async tx => {
     await lockIdentityLifecycle(tx);
@@ -42,8 +47,10 @@ async function invokeMcpToolUnchecked(db: Database, context: VerifiedRequestCont
     if (actor.id !== authority.actor.id || actor.type !== authority.actor.type) throw new AuthorizationError();
     const tool = await tx.query.mcpTools.findFirst({ where: eq(mcpTools.id, toolId) });
     if (!tool) throw new NotFoundError("Resource not found");
+    if (expectedSchemaHash && expectedSchemaHash !== capabilityDigest({ name: tool.name, inputSchema: tool.inputSchema, readOnly: tool.readOnly, targetProjectArgument: tool.targetProjectArgument })) throw new ValidationError("The tool schema changed; discover and confirm the current schema");
     const server = await requireMcpServer(database, authority, context, tool.serverId, "mcp.invoke");
     await requireMcpToolTarget(database, authority, server, tool, args);
+    requireMcpInput(tool.inputSchema, args);
     if (!server.active || server.status !== "connected" || server.expiresAt && server.expiresAt <= new Date()) throw new NotFoundError("Resource not found");
     if (server.transport !== "stdio") {
       const partition = actor.id + ":" + credentialBinding(context);
@@ -81,17 +88,18 @@ async function invokeMcpToolUnchecked(db: Database, context: VerifiedRequestCont
         await revalidate();
         if (record.id !== remote.server.id) throw new AuthorizationError();
         const client = await pool.getOrConnect({ ...remote.server, authorizationPartition: remote.partition });
-        return { listTools: () => client.listTools(), callTool: async input => { await revalidate(); return client.callTool(input); } };
+        return { listTools: () => client.listTools(), callTool: async input => { await revalidate(); return client.callTool(input, undefined, { signal, timeout: 25000 }); } };
       },
       disconnect: id => pool.disconnect(id), isConnected: id => pool.isConnected(id),
-    });
+    }, undefined, undefined, signal);
     await revalidate();
     const headers = (remote.server.config as { headers?: Record<string, string> }).headers ?? {};
-    return redactAssistantValues(result, Object.values(headers));
+    return redactAssistantValues(result, [...Object.values(headers), ...(remote.server.transport === "hosted-stdio" ? Object.values(resolveHostedMcpRuntime(remote.server).secrets) : [])]);
   }
   const request = prepared.request;
   try {
     while (Date.now() < request.expiresAt.getTime()) {
+      signal?.throwIfAborted();
       const state = await db.transaction(async tx => {
         await lockIdentityLifecycle(tx);
         const database = tx as unknown as Database;
@@ -104,7 +112,7 @@ async function invokeMcpToolUnchecked(db: Database, context: VerifiedRequestCont
         await tx.update(mcpLocalRequests).set({ result: null, arguments: null, callerContext: {}, leaseHash: null }).where(eq(mcpLocalRequests.id, item.id));
         return { result: item.result ?? failed() };
       });
-      if (state) return state.result;
+      if (state) { signal?.throwIfAborted(); return state.result; }
       await new Promise(resolve => setTimeout(resolve, 150));
     }
     return failed();
@@ -159,20 +167,25 @@ export async function completeLocalToolRequest(db: Database, id: string, input: 
   return { completed: true };
 }
 
-export async function invokeMcpTool(db: Database, context: VerifiedRequestContext, toolId: string, args: Record<string, unknown> | undefined, actor: Actor, pool: McpPool, approvalId?: string) {
+export async function invokeMcpTool(db: Database, context: VerifiedRequestContext, toolId: string, args: Record<string, unknown> | undefined, actor: Actor, pool: McpPool, approvalId?: string, expectedSchemaHash?: string, signal?: AbortSignal) {
   const start = Date.now();
   let scope: ResourceScope = { personalOwnerId: personalResourceOwnerId(context), personalOwnerType: "human" };
   let serverId = "unknown";
+  let release = () => {};
   try {
+    signal?.throwIfAborted();
     const authority = await resourceAuthority(db, context);
     const tool = await db.query.mcpTools.findFirst({ where: eq(mcpTools.id, toolId) });
     if (!tool) throw new NotFoundError("Resource not found");
+    if (expectedSchemaHash && expectedSchemaHash !== capabilityDigest({ name: tool.name, inputSchema: tool.inputSchema, readOnly: tool.readOnly, targetProjectArgument: tool.targetProjectArgument })) throw new ValidationError("The tool schema changed; discover and confirm the current schema");
     const server = await requireMcpServer(db, authority, context, tool.serverId, "mcp.invoke");
     serverId = server.id;
     if (!server.active || server.status !== "connected" || server.expiresAt && server.expiresAt <= new Date()) throw new NotFoundError("Resource not found");
     scope = await requireMcpToolTarget(db, authority, server, tool, args);
+    requireMcpInput(tool.inputSchema, args);
+    release = acquireMcpInvocation(context.actor.id, serverId);
     const policy = await mcpPolicy(db, mcpScopeKey(scope), toolId);
-    await requireMcpApproval(db, context, scope, toolId, approvalOperation(args ?? {}, tool, server), approvalId);
+    await requireMcpApproval(db, context, scope, toolId, mcpToolApprovalOperation(args ?? {}, tool, server), approvalId);
     const checkedPool: McpPool = {
       disconnect: id => pool.disconnect(id),
       isConnected: id => pool.isConnected(id),
@@ -183,16 +196,17 @@ export async function invokeMcpTool(db: Database, context: VerifiedRequestContex
         return { listTools: () => client.listTools(), callTool: async input => {
           const current = await mcpPolicy(db, mcpScopeKey(scope), toolId);
           if (JSON.stringify(current) !== JSON.stringify(policy)) throw new AuthorizationError();
-          if (approvalId) await requireMcpApproval(db, context, scope, toolId, approvalOperation(args ?? {}, tool, server), approvalId, false, true);
-          return client.callTool(input);
+          if (approvalId) await requireMcpApproval(db, context, scope, toolId, mcpToolApprovalOperation(args ?? {}, tool, server), approvalId, false, true);
+          return client.callTool(input, undefined, { signal, timeout: 25000 });
         } };
       },
     };
-    const result = await invokeMcpToolUnchecked(db, context, toolId, args, actor, checkedPool, approvalId);
-    await recordMcpInvocationAudit(db, context, scope, serverId, toolId, start, undefined, Boolean((result as { isError?: boolean }).isError));
-    return result;
+    const result = await invokeMcpToolUnchecked(db, context, toolId, args, actor, checkedPool, approvalId, expectedSchemaHash, signal);
+    if (JSON.stringify(await mcpPolicy(db, mcpScopeKey(scope), toolId)) !== JSON.stringify(policy)) throw new AuthorizationError();
+    const audit = await recordMcpInvocationAudit(db, context, scope, serverId, toolId, start, undefined, Boolean((result as { isError?: boolean }).isError));
+    return { ...result, _meta: { ...(result._meta as Record<string, unknown> | undefined), "task-weaver/auditId": audit.id } };
   } catch (error) {
     await recordMcpInvocationAudit(db, context, scope, serverId, toolId, start, error);
     throw error;
-  }
+  } finally { release(); }
 }

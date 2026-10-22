@@ -2,6 +2,8 @@
 import { Command } from 'commander'
 import { APPLICATION_VERSION } from '@task-weaver/contracts'
 import { ApiError } from './client.js'
+import { registerInboundEvents } from "./commands/inbound-events.js"
+import { registerWebhooks } from './commands/webhooks.js'
 import { registerAgentUsage } from './commands/agent-usage.js'
 import { registerAuth } from './commands/auth.js'
 import { registerProjects } from './commands/projects.js'
@@ -22,9 +24,12 @@ import { registerEmbeddings } from './commands/embeddings.js'
 
 const program = new Command()
   .name('tw')
+  .enablePositionalOptions()
   .description('Task Weaver CLI — a shared workspace for humans and AI agents; manage projects, tasks, and documents')
   .version(APPLICATION_VERSION)
 
+registerInboundEvents(program)
+registerWebhooks(program)
 registerAgentUsage(program)
 registerAuth(program)
 registerProjects(program)

@@ -1,12 +1,28 @@
 import { z } from "zod";
 
-export const mcpTransportSchema = z.enum(["stdio", "sse", "streamable-http"]);
+export const mcpTransportSchema = z.enum(["stdio", "sse", "streamable-http", "hosted-stdio"]);
 
 export const mcpServerStdioConfigSchema = z.object({
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
   env: z.record(z.string()).optional(),
 });
+
+export const mcpServerHostedConfigSchema = z.object({
+  profileId: z.string().min(1).max(100).regex(/^[a-zA-Z0-9_-]+$/),
+  profileHash: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+
+export const hostedMcpRuntimeProfileSchema = z.object({
+  id: mcpServerHostedConfigSchema.shape.profileId,
+  image: z.string().max(512).regex(/^[a-zA-Z0-9][a-zA-Z0-9._/:-]*@sha256:[a-f0-9]{64}$/),
+  command: z.string().max(512).regex(/^\/[a-zA-Z0-9_./-]+$/),
+  args: z.array(z.string().max(32768)).max(32).default([]),
+  projectIds: z.array(z.string().uuid()).max(100).default([]),
+  personalActorIds: z.array(z.string().min(1).max(255)).max(100).default([]),
+  global: z.boolean().default(false),
+  secretReferences: z.record(z.string().regex(/^TW_MCP_SECRET_[A-Z0-9_]+$/)).default({}),
+}).strict().refine(profile => Object.keys(profile.secretReferences).length <= 16 && Object.keys(profile.secretReferences).every(key => /^[A-Z][A-Z0-9_]{0,99}$/.test(key) && !/^(PATH|HOME|LD_|NODE_|PYTHON|DOCKER|TW_)/.test(key)), "Secret target names must be bounded application-specific environment names");
 
 export const mcpServerHttpConfigSchema = z.object({
   url: z.string().url(),
@@ -50,7 +66,7 @@ export const registerMcpServerSchema = requireLocalScopeConsent(z.object({
   personalOwnerId: z.string().optional(),
   personalOwnerType: z.enum(["human", "agent"]).optional(),
   transport: mcpTransportSchema,
-  config: z.union([mcpServerStdioConfigSchema, mcpServerHttpConfigSchema]),
+  config: z.union([mcpServerHostedConfigSchema, mcpServerStdioConfigSchema, mcpServerHttpConfigSchema]),
   tags: z.array(z.string()).optional(),
   readOnly: z.boolean().default(false),
   active: z.boolean().default(true),
@@ -76,7 +92,7 @@ export const updateMcpServerSchema = requireLocalScopeConsent(z.object({
   personalOwnerId: z.string().nullable().optional(),
   personalOwnerType: z.enum(["human", "agent"]).nullable().optional(),
   transport: mcpTransportSchema.optional(),
-  config: z.union([mcpServerStdioConfigSchema, mcpServerHttpConfigSchema]).optional(),
+  config: z.union([mcpServerHostedConfigSchema, mcpServerStdioConfigSchema, mcpServerHttpConfigSchema]).optional(),
   tags: z.array(z.string()).optional(),
   readOnly: z.boolean().optional(),
   active: z.boolean().optional(),

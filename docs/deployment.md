@@ -1,6 +1,6 @@
 # Docker Compose Deployment
 
-The default Compose file runs the released 0.3.7 API and Web images published
+The default Compose file runs the released API and Web images published
 at GHCR. Both references are pinned to the immutable multi-platform OCI index
 digests from the release. PostgreSQL is provided by the operator through
 `DATABASE_URL`; the production Compose file contains no database service.
@@ -61,7 +61,8 @@ so a strictly DML-only runtime account is not a supported deployment mode.
 
 ## Source development
 
-Use Node.js from `.node-version` and pnpm 9.15.0:
+Use Node.js from `.node-version` and the pnpm version declared in the root
+`package.json` `packageManager` field:
 
 ```sh
 cp .env.example .env
@@ -78,7 +79,7 @@ Compose example deliberately uses the published digest-pinned images.
 
 ## Security and persistence
 
-Keep the default loopback bindings and use TLS outside loopback. The 0.3.7 images
+Keep the default loopback bindings and use TLS outside loopback. The deployment images
 include authenticated accounts, sessions, scoped Keys, and live resource
 authorization. Missing `TW_AUTH_SECRET` or `TW_AUTH_BASE_URL` fails closed; there
 is no anonymous fallback.
@@ -117,12 +118,12 @@ migrations. Preserve the failed environment until the incident is understood.
 
 ## Release scope
 
-The 0.3.7 release publishes signed, multi-platform API and Web image indexes.
+The release pipeline publishes signed, multi-platform API and Web image indexes.
 This deployment example continues to require an operator-provided PostgreSQL
 database. For a local trial, the separate Compose file supplies a
 PostgreSQL/pgvector container and binds application ports to loopback only.
 
-## Inbound MCP Server (0.3.10+)
+## Inbound MCP Server
 
 MCP HTTP runs inside the API container on port 3001 at `/api/v1/mcp-server`.
 The Web container does not serve or proxy this endpoint. Route it to the API and
@@ -130,8 +131,7 @@ use that API origin for MCP clients and `TW_API_URL` in local stdio setups.
 Set `TW_MCP_ALLOWED_HOSTS` to the actual public API host when it differs from
 `TW_AUTH_BASE_URL`; set `TW_MCP_READ_ONLY=true` for server-wide read-only access.
 Compose forwards both settings to API. Clients use a scoped API key on every
-call; browser cookies do not authenticate MCP. This feature requires a verified
-0.3.10-or-later matching image pair; the historical default image pair does not
+call; browser cookies do not authenticate MCP. This feature requires a verified matching image pair with MCP support; the historical default image pair does not
 acquire new features without an explicit image override. See the
 [MCP Server guide](mcp-server.md) ([中文](mcp-server.zh-CN.md)) for local/remote
 setup, Kubernetes ConfigMap keys, protocol headers and diagnostics.

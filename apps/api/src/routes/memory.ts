@@ -7,6 +7,8 @@ import {
   searchMemorySchema,
   listMemoriesSchema,
   NotFoundError,
+  ConflictError,
+  forgetMemorySchema,
 } from "@task-weaver/core";
 import type { Env } from "../middleware/actor.js";
 
@@ -23,8 +25,13 @@ memory.post("/", async (c) => {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
 
-  const result = await createResourceServices(c.get("identity")).memoryService.recordMemory(db, parsed.data, actor);
-  return c.json(result, 201);
+  try {
+    const result = await createResourceServices(c.get("identity")).memoryService.recordMemory(db, parsed.data, actor);
+    return c.json(result, 201);
+  } catch (err) {
+    if (err instanceof ConflictError) return c.json({ error: err.message, currentVersion: err.currentVersion }, 409);
+    throw err;
+  }
 });
 
 // GET /search — Search memories by query
@@ -95,6 +102,7 @@ memory.patch("/:id", async (c) => {
     const result = await createResourceServices(c.get("identity")).memoryService.updateMemory(db, id, parsed.data, actor);
     return c.json(result);
   } catch (err) {
+    if (err instanceof ConflictError) return c.json({ error: err.message, currentVersion: err.currentVersion }, 409);
     if (err instanceof NotFoundError) return c.json({ error: "Resource not found" }, 404);
     throw err;
   }
@@ -105,11 +113,14 @@ memory.delete("/:id", async (c) => {
   const db = c.get("db");
   const actor = c.get("actor");
   const id = c.req.param("id");
-
+  const version = c.req.query("expectedVersion");
+  const parsed = forgetMemorySchema.safeParse({ expectedVersion: version === undefined ? undefined : Number(version) });
+  if (!parsed.success) return c.json({ error: "Validation error" }, 400);
   try {
-    await createResourceServices(c.get("identity")).memoryService.forgetMemory(db, id, actor);
+    await createResourceServices(c.get("identity")).memoryService.forgetMemory(db, id, actor, parsed.data.expectedVersion);
     return c.json({ success: true });
   } catch (err) {
+    if (err instanceof ConflictError) return c.json({ error: err.message, currentVersion: err.currentVersion }, 409);
     if (err instanceof NotFoundError) return c.json({ error: "Resource not found" }, 404);
     throw err;
   }

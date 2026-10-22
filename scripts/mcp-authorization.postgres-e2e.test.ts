@@ -13,7 +13,7 @@ import { createApiApplication } from "../apps/api/src/application";
 import { createTRPCContextFactory } from "../apps/web/trpc/init";
 import { appRouter } from "../apps/web/trpc/routers/_app";
 const apiRequire = createRequire(new URL("../apps/api/package.json", import.meta.url));
-const { createDb, runMigrations, authInstanceState, mcpServers, mcpTools, mcpToolCalls, mcpLocalRequests } = apiRequire("@task-weaver/db");
+const { createDb, runMigrations, authInstanceState, mcpServers, mcpTools, mcpToolCalls, mcpLocalRequests, mcpInvocationAudits } = apiRequire("@task-weaver/db");
 const { configureMcpToolAuthorization, setMcpInvocationPolicy, approveMcpInvocation, listMcpInvocationAudits, McpApprovalRequired, createAuthenticationRuntime, createResourceServices, NotFoundError, AuthorizationError, registerMcpServerSchema, searchMcpToolsSchema } = apiRequire("@task-weaver/core");
 const { eq } = apiRequire("drizzle-orm");
 const databaseUrl = process.env.TW_AUTH_E2E_DATABASE_URL;
@@ -76,7 +76,7 @@ test("MCP authorization isolates discovery, local execution and live credentials
   const remote = await owner.service.mcpRegistryService.registerServer(db, registerMcpServerSchema.parse({
     projectId: project.id, name: randomUUID(), transport: "streamable-http", config: { url: "https://example.test/mcp", headers: { authorization: "fixture-secret" } },
   }), owner.actor);
-  const [tool] = await db.insert(mcpTools).values({ serverId: remote.id, name: "needle", description: "needle fixture" }).returning();
+  const [tool] = await db.insert(mcpTools).values({ serverId: remote.id, name: "needle", inputSchema: { type: "object" }, description: "needle fixture" }).returning();
   const keyInput = { name: "Local host fixture", grants: [{ scope: "personal", actorId: owner.actor.id, permissions: ["resource.read", "resource.write", "mcp.manage", "mcp.invoke"] }], expiresAt: null };
   async function keyFixture() {
     const key = await runtime.identity.issueKey(owner.headers, owner.actor.id, keyInput);
@@ -202,7 +202,15 @@ test("MCP authorization isolates discovery, local execution and live credentials
     assert.equal((await rest(`mcp/requests/${lease.id}/result`, host.headers, "POST", { leaseToken: "0".repeat(64), result: {} })).status, 409);
     const output = { content: [{ type: "text", text: "private-result" }] };
     assert.equal((await rest(`mcp/requests/${lease.id}/result`, host.headers, "POST", { leaseToken: lease.leaseToken, result: output })).status, 200);
-    assert.deepEqual(await invocation, output);
+    const result = await invocation;
+    const auditId = result._meta?.["task-weaver/auditId"];
+    assert.match(auditId, /^[a-f0-9-]{36}$/);
+    assert.deepEqual(result, { ...output, _meta: { "task-weaver/auditId": auditId } });
+    const [invocationAudit] = await db.select().from(mcpInvocationAudits).where(eq(mcpInvocationAudits.id, auditId));
+    assert.equal(invocationAudit.toolId, localTool.id);
+    assert.equal(invocationAudit.serverId, local.id);
+    assert.equal(invocationAudit.actorId, host.context.actor.id);
+    assert.equal(JSON.stringify(invocationAudit).includes("private-result"), false);
     assert.equal(connected, 0);
     assert.equal((await rest(`mcp/requests/${lease.id}/result`, host.headers, "POST", { leaseToken: lease.leaseToken, result: output })).status, 409);
     const stored = (await db.select().from(mcpLocalRequests).where(eq(mcpLocalRequests.id, lease.id)))[0];

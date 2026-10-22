@@ -53,9 +53,44 @@ export const mcpPlanValidateSchema = z.object({ plan: mcpPlanSchema }).strict();
 export const mcpPlanApplySchema = mcpPlanValidateSchema.extend({ idempotencyKey: z.string().uuid() }).strict();
 export const mcpAggregateContextSchema = z.object({
   id,
-  sections: z.array(z.enum(["parent", "tasks", "slices", "dependencies", "documents", "claim", "activity"])).max(7)
+  sections: z.array(z.enum(["parent", "tasks", "slices", "dependencies", "documents", "claim", "activity", "comments", "notes"])).max(9)
     .default(["parent", "dependencies", "documents", "claim"]),
   limit: z.number().int().min(1).max(20).default(10),
   offset: z.number().int().min(0).max(100000).default(0),
   maxBytes: z.number().int().min(2048).max(65536).default(32768),
+}).strict();
+
+export const mcpDependencyGraphSchema = z.object({
+  id, kind: z.enum(["task", "requirement"]),
+  maxDepth: z.number().int().min(1).max(4).default(2),
+  maxNodes: z.number().int().min(1).max(50).default(20),
+  maxEdges: z.number().int().min(1).max(100).default(40),
+  maxBytes: z.number().int().min(2048).max(32768).default(16384),
+}).strict();
+
+export const mcpDocumentHistorySchema = z.object({
+  id, offset: z.number().int().min(0).max(100000).default(0),
+  limit: z.number().int().min(1).max(20).default(10),
+}).strict();
+export const mcpDocumentVersionSchema = z.object({
+  id, version: z.number().int().min(1).max(2147483647),
+  offset: z.number().int().min(0).max(10000000).default(0),
+  limit: z.number().int().min(1).max(8000).default(4000),
+}).strict();
+
+export const mcpRepositoryListSchema = z.object({
+  scope: z.enum(["global", "personal"]).default("personal"),
+  query: z.string().trim().min(1).max(500).optional(),
+  offset: z.number().int().min(0).max(100000).default(0),
+  limit: z.number().int().min(1).max(20).default(10),
+}).strict();
+export const mcpScheduleListSchema = z.object({
+  scope: z.enum(["project", "personal"]).default("project"),
+  projectId: id.optional(),
+  offset: z.number().int().min(0).max(100000).default(0),
+  limit: z.number().int().min(1).max(20).default(10),
+}).strict();
+export const mcpUsageSummarySchema = z.object({
+  projectId: id, requirementId: id.optional(), taskId: id.optional(),
+  since: z.string().datetime().optional(), until: z.string().datetime().optional(),
 }).strict();

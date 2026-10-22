@@ -148,3 +148,5 @@ export type CreateTiAgentRunInput = z.input<typeof createTiAgentRunSchema>;
 export type ListTiAgentRunsInput = z.input<typeof listTiAgentRunsSchema>;
 export type AcquireTiAgentRunInput = z.input<typeof acquireTiAgentRunSchema>;
 export type CompleteTiAgentRunInput = z.input<typeof completeTiAgentRunSchema>;
+
+export const cancelTiAgentRunSchema = z.object({ reason: z.string().min(1).max(1000).optional() }).strict();

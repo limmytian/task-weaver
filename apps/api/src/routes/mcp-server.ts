@@ -1,9 +1,10 @@
+import { mcpPool } from "../mcp-pool";
 import { resolve } from "node:path";
 import { recordMcpInvocationAudit, personalResourceOwnerId, skillPackageStorageService } from "@task-weaver/core";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { AuthenticationError, MCP_SERVER_LIMITS } from "@task-weaver/contracts";
+import { AuthenticationError, MCP_SERVER_LIMITS, isMcpServerToolAllowed } from "@task-weaver/contracts";
 import { createMcpToolCaller, createTaskWeaverMcpServer, isMcpArgumentError, type McpCallBudget, type McpExecutor } from "@task-weaver/core/mcp-server";
 import { authorizedMcpToolNames, createAuthorizedMcpExecutor } from "@task-weaver/core/mcp-server/executor";
 import type { Env } from "../middleware/actor.js";
@@ -12,6 +13,7 @@ export interface McpRouteOptions {
   allowedHosts: readonly string[];
   readOnly?: boolean;
   packageStorageDir?: string;
+  runtimeProfiles?: string;
   budget?: McpCallBudget;
   signal?: AbortSignal;
   visibleTools?: (context: Env["Variables"]) => Promise<readonly string[]>;
@@ -24,6 +26,7 @@ export function createMcpServerRoutes(options: McpRouteOptions) {
   const budget: McpCallBudget = options.budget ?? { active: 0 };
   routes.use("*", bodyLimit({ maxSize: MCP_SERVER_LIMITS.requestBytes, onError: c => c.json({ error: "Request exceeds the MCP limit" }, 413) }));
   routes.use("*", async (c, next) => {
+    if (c.req.header("x-task-weaver-mcp-hop")) return c.json({ error: "Recursive MCP forwarding is not allowed" }, 400);
     const identity = c.get("identity");
     if (identity.credential.kind !== "api_key" || !c.req.header("authorization")) throw new AuthenticationError();
     // Never use forwarded Host values as authority. Reverse proxies must preserve
@@ -33,8 +36,14 @@ export function createMcpServerRoutes(options: McpRouteOptions) {
     await next();
   });
   const caller = (context: Env["Variables"], requestSignal: AbortSignal) => createMcpToolCaller(
-    options.executor?.(context) ?? createAuthorizedMcpExecutor(context.db, context.identity, new skillPackageStorageService.LocalSkillPackageStorageAdapter(options.packageStorageDir ?? process.env.SKILL_PACKAGE_STORAGE_DIR ?? resolve(process.cwd(), "data", "skill-packages"))),
-    { readOnly: options.readOnly, onRejected: options.executor ? undefined : (name, code) => recordMcpInvocationAudit(context.db, context.identity, { personalOwnerId: personalResourceOwnerId(context.identity), personalOwnerType: "human" }, "task-weaver", name, Date.now(), code), budget, signal: options.signal ? AbortSignal.any([requestSignal, options.signal]) : requestSignal },
+    options.executor?.(context) ?? createAuthorizedMcpExecutor(
+      context.db, context.identity,
+      new skillPackageStorageService.LocalSkillPackageStorageAdapter(options.packageStorageDir ?? process.env.SKILL_PACKAGE_STORAGE_DIR ?? resolve(process.cwd(), "data", "skill-packages")),
+      options.runtimeProfiles,
+      options.readOnly,
+      mcpPool,
+    ),
+    { readOnly: options.readOnly, onRejected: options.executor ? undefined : async (name, code) => { await recordMcpInvocationAudit(context.db, context.identity, { personalOwnerId: personalResourceOwnerId(context.identity), personalOwnerType: "human" }, "task-weaver", name, Date.now(), code); }, budget, signal: options.signal ? AbortSignal.any([requestSignal, options.signal]) : requestSignal },
   );
 
   // Authenticated JSON adapter used by local stdio clients through CLI request().
@@ -51,7 +60,7 @@ export function createMcpServerRoutes(options: McpRouteOptions) {
   });
   routes.get("/catalog", async c => {
     const names = await (options.visibleTools?.(c.var) ?? authorizedMcpToolNames(c.get("db"), c.get("identity")));
-    return c.json({ tools: names.filter(name => !options.readOnly || !/_(create|update|add|remove|status|claim|heartbeat|release|apply)$/.test(name)) });
+    return c.json({ tools: names.filter(name => isMcpServerToolAllowed(name, options.readOnly ?? false)) });
   });
   routes.all("/", async c => {
     if (c.req.method !== "POST") {
