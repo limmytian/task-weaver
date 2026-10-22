@@ -332,8 +332,10 @@ export function createApiApplication(
   const services = applicationServices(env);
   const gateway = createPartnersGatewayRuntime(options.db, env);
   services.apiRoutes.push(...gateway.apiRoutes);
-  // C2 must bind persisted Gateway work to live execution authority before it can start.
-  // Mounting its routes does not enable workers or outbound event delivery during A4 staging.
+  if (env.TW_TI_RUNTIME_MODE === "shared") {
+    services.workers.push(...gateway.workers);
+    services.eventSubscribers.push(...gateway.eventSubscribers);
+  }
   services.healthChecks.push(...gateway.healthChecks);
   const controller = new AbortController();
   const mcpBudget = { active: 0, pending: new Set<Promise<unknown>>() };
