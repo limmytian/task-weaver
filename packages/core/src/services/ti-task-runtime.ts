@@ -79,7 +79,8 @@ export async function executeTiTaskAttempt(db: Database, identity: VerifiedReque
                 summary = { ...(value == null ? summary : next), model: next.model === "unknown" ? summary.model : next.model };
                 if (value != null) {
                   tokens += (summary.inputTokens ?? 0) + (summary.outputTokens ?? 0);
-                  if (tokens > 65_536) throw new ValidationError("Ti token budget exceeded");
+                  // Repeated input context counts on every turn, including tool schemas.
+                  if (tokens > 131_072) throw new ValidationError("Ti token budget exceeded");
                 }
               },
               async finish(outcome) {
