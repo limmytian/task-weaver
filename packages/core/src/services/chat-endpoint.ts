@@ -63,7 +63,8 @@ export async function requestChatTurn(baseUrl: string, apiKey: string, payload: 
       response.on("end", () => {
         try {
           const result = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-          usage?.observe(result.usage, result.model);
+          try { usage?.observe(result.usage, result.model); }
+          catch (error) { reject(error); return; }
           const message = result.choices?.[0]?.message;
           const content = typeof message?.content === "string" ? (apiKey ? message.content.trim().split(apiKey).join("[redacted]") : message.content.trim()) : null;
           const rawCalls = message?.tool_calls ?? [];
