@@ -611,7 +611,7 @@ export async function updateRunProgress(
   const [updated] = await db
     .update(tiAgentRuns)
     .set({
-      status: "in_review",
+      status: "running",
       actualProvider: input.actualProvider ?? undefined,
       actualModel: input.actualModel ?? undefined,
       sandboxSessionId: input.sandboxSessionId ?? undefined,

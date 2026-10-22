@@ -113,7 +113,7 @@ async function generateModelResponse(
   ];
   messages.push({ role: "system", content: `Account operation permission: ${allowed ? "allowed" : "not allowed"}. ${confirmationRequired ? "Confirmation is required. Operation tools only record proposals; they do not create resources or return newly created IDs. Do not plan dependent calls using invented IDs." : allowed ? "Requested operations execute immediately." : "Write operations are disabled."} Use get_project for exact task statistics. Create requirements before their tasks, and use returned identifiers for dependencies. Omit assignee and assigneeType for unassigned tasks. When independent operations are requested, submit their tool calls together in one turn to reduce latency. Do not repeat failed calls with unchanged arguments.` });
   const deadline = performance.now() + 300_000;
-  const capabilities = createTiCapabilities(db, async () => identity, "chat");
+  const capabilities = createTiCapabilities(db, async () => identity, "chat", getContextRecord(getContextRecord(contextSnapshot.current).project).id as string | undefined);
   const references: AssistantReadReference[] = [];
   contextSnapshot.toolReads = references;
   const emit = (event: import("@task-weaver/contracts").AssistantStreamEvent) => observer?.(event, { conversationId, snapshot: contextSnapshot, actions: performed }) ?? Promise.resolve();

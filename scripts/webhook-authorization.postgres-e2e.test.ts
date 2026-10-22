@@ -219,11 +219,16 @@ test("webhook authorization binds ownership, scope, credentials and outbound ret
       const replayed = await services(owner).retryWebhookDelivery(db, managed.id, first.id);
       assert.equal(replayed.eventId, first.eventId); assert.notEqual(replayed.id, first.id); assert.equal(replayed.replayOf, first.id);
       const before = await db.select().from(webhookEvents);
+      const notifications: Promise<unknown>[] = [];
+      const { subscribe } = apiRequire("@task-weaver/realtime");
+      const unsubscribe = subscribe((event: any) => { notifications.push(webhookService.deliverEvent(db, event)); });
       await assert.rejects(db.transaction(async (tx: any) => {
         await owner.service.taskService.addTaskComment(tx, task.id, "Rolled-back outbox", owner.actor);
         throw new Error("Rollback fixture");
       }));
+      await Promise.all(notifications); unsubscribe();
       assert.equal((await db.select().from(webhookEvents)).length, before.length);
+      assert.equal(received.length, 3, "A rolled-back notification cannot recreate an outbox event");
     } finally {
       globalThis.fetch = mockedFetch;
       await services(owner).deleteWebhook(db, managed.id);

@@ -1,7 +1,7 @@
 import { TiRuntimeWorker } from "./ti-runtime-worker.js";
 import { Hono } from "hono";
 import { z } from "zod";
-import { resourceAuthority, type VerifiedRequestContext } from "@task-weaver/core";
+import { resourceAuthority, canAccessResource, AuthorizationError, type VerifiedRequestContext } from "@task-weaver/core";
 import type { Database } from "@task-weaver/db";
 import {
   getPartnersGatewayConfig,
@@ -42,7 +42,10 @@ export function createPartnersGatewayRuntime(db: Database, env: NodeJS.ProcessEn
   routes.get("/cleanup", async context => {
     const live = await resourceAuthority(db, context.get("identity"));
     const ownerId = live.actor.type === "human" ? live.actor.id : live.actor.managedByActorId;
-    return context.json(worker instanceof TiRuntimeWorker ? await worker.cleanupMetrics(ownerId) : []);
+    if (live.bounds) throw new AuthorizationError();
+    const projectIds = live.grants.flatMap(grant => grant.scope === "project" && grant.permissions.includes("resource.read") ? [grant.projectId] : []);
+    const includePersonal = canAccessResource(live, { personalOwnerId: ownerId, personalOwnerType: "human" }, "resource.read");
+    return context.json(worker instanceof TiRuntimeWorker ? await worker.cleanupMetrics({ ownerId, projectIds, includePersonal }) : []);
   });
   routes.get("/health", async (context) => {
     const health = await checkTiAgentGatewayHealth(config);

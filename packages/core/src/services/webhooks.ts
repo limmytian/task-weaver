@@ -170,8 +170,10 @@ async function enqueueDelivery(db: Database, row: Webhook, event: RealtimeEvent 
     const payload = test ? { event: "webhook.test", timestamp: new Date().toISOString(), data: { webhookId: row.id, message: "This is a test event from Task Weaver" } }
       : event ? await payloadFor(tx as unknown as Database, current, event) : null;
     if (!payload) throw new AuthorizationError();
+    const snapshot = replay?.payload as { timestamp?: string; actor?: unknown; causationId?: unknown; correlationId?: unknown } | undefined;
     const [delivery] = await tx.insert(webhookDeliveries).values({ webhookId: row.id, bindingId: row.bindingId, eventId: id,
-      eventType: payload.event, payload: { version: 1, id, ...payload }, replayOf: replay?.id,
+      eventType: payload.event, payload: { version: 1, id, ...payload, timestamp: snapshot?.timestamp ?? payload.timestamp,
+        ...(snapshot ? { actor: snapshot.actor ?? null, causationId: snapshot.causationId ?? null, correlationId: snapshot.correlationId ?? id } : {}) }, replayOf: replay?.id,
       retryCount: replay ? replay.retryCount + 1 : 0, status: "pending" }).onConflictDoNothing().returning();
     if (delivery) return delivery;
     const existing = await tx.query.webhookDeliveries.findFirst({ where: and(eq(webhookDeliveries.webhookId, row.id), eq(webhookDeliveries.bindingId, row.bindingId!), eq(webhookDeliveries.eventId, id), isNull(webhookDeliveries.replayOf)) });
@@ -275,7 +277,7 @@ export async function runWebhookDeliveryOnce(db: Database, deliveryId?: string) 
 export async function deliverEvent(db: Database, event: RealtimeEvent) {
   if (!eventMap[event.type]) return;
   const id = event.eventId ?? randomUUID(), occurredAt = new Date(event.serverTime ?? Date.now());
-  await db.insert(webhookEvents).values({ id, eventType: event.type, projectId: "projectId" in event ? event.projectId : null,
+  if (event.attributes?.durableOutbox !== true) await db.insert(webhookEvents).values({ id, eventType: event.type, projectId: "projectId" in event ? event.projectId : null,
     correlationId: id, event: { ...event, eventId: id, serverTime: occurredAt.toISOString() }, occurredAt }).onConflictDoNothing();
   await expandWebhookEvent(db, id);
   const deliveries = await db.select({ id: webhookDeliveries.id }).from(webhookDeliveries).where(eq(webhookDeliveries.eventId, id)).limit(100);

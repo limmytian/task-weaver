@@ -1,3 +1,4 @@
+import { requireMcpInput } from "./mcp-input-validation";
 import { acquireMcpInvocation } from "./mcp-invocation-budget";
 import { resolveHostedMcpRuntime } from "./mcp-hosted-runtime";
 import { requireMcpApproval, recordMcpInvocationAudit, mcpPolicy, mcpScopeKey } from "./mcp-security";
@@ -49,6 +50,7 @@ async function invokeMcpToolUnchecked(db: Database, context: VerifiedRequestCont
     if (expectedSchemaHash && expectedSchemaHash !== capabilityDigest({ name: tool.name, inputSchema: tool.inputSchema, readOnly: tool.readOnly, targetProjectArgument: tool.targetProjectArgument })) throw new ValidationError("The tool schema changed; discover and confirm the current schema");
     const server = await requireMcpServer(database, authority, context, tool.serverId, "mcp.invoke");
     await requireMcpToolTarget(database, authority, server, tool, args);
+    requireMcpInput(tool.inputSchema, args);
     if (!server.active || server.status !== "connected" || server.expiresAt && server.expiresAt <= new Date()) throw new NotFoundError("Resource not found");
     if (server.transport !== "stdio") {
       const partition = actor.id + ":" + credentialBinding(context);
@@ -180,6 +182,7 @@ export async function invokeMcpTool(db: Database, context: VerifiedRequestContex
     serverId = server.id;
     if (!server.active || server.status !== "connected" || server.expiresAt && server.expiresAt <= new Date()) throw new NotFoundError("Resource not found");
     scope = await requireMcpToolTarget(db, authority, server, tool, args);
+    requireMcpInput(tool.inputSchema, args);
     release = acquireMcpInvocation(context.actor.id, serverId);
     const policy = await mcpPolicy(db, mcpScopeKey(scope), toolId);
     await requireMcpApproval(db, context, scope, toolId, mcpToolApprovalOperation(args ?? {}, tool, server), approvalId);

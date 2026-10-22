@@ -7,7 +7,9 @@ import {
 
 /** Package files and indexed documents cannot point across the package's scope/version. */
 export function packageResourcePredicate(authority: ResourceAuthority, permission: AuthorizationPermission = "resource.read"): SQL {
-  const documentPredicate = resourcePredicate(authority, qualifiedScopeColumns(documents), permission);
+  // Package mirror documents validate package scope; they do not widen the task's general document access.
+  const mirrorAuthority = authority.bounds?.purpose === "automation" && permission === "resource.read" ? { ...authority, bounds: null } : authority;
+  const documentPredicate = resourcePredicate(mirrorAuthority, qualifiedScopeColumns(documents), permission);
   const sameScope = sql`documents.project_id IS NOT DISTINCT FROM ${skillPackages.projectId}
     AND documents.personal_owner_id IS NOT DISTINCT FROM ${skillPackages.personalOwnerId}
     AND documents.personal_owner_type IS NOT DISTINCT FROM ${skillPackages.personalOwnerType}`;

@@ -76,7 +76,7 @@ test("MCP authorization isolates discovery, local execution and live credentials
   const remote = await owner.service.mcpRegistryService.registerServer(db, registerMcpServerSchema.parse({
     projectId: project.id, name: randomUUID(), transport: "streamable-http", config: { url: "https://example.test/mcp", headers: { authorization: "fixture-secret" } },
   }), owner.actor);
-  const [tool] = await db.insert(mcpTools).values({ serverId: remote.id, name: "needle", description: "needle fixture" }).returning();
+  const [tool] = await db.insert(mcpTools).values({ serverId: remote.id, name: "needle", inputSchema: { type: "object" }, description: "needle fixture" }).returning();
   const keyInput = { name: "Local host fixture", grants: [{ scope: "personal", actorId: owner.actor.id, permissions: ["resource.read", "resource.write", "mcp.manage", "mcp.invoke"] }], expiresAt: null };
   async function keyFixture() {
     const key = await runtime.identity.issueKey(owner.headers, owner.actor.id, keyInput);

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, count, eq, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, isNull, lte, ne, or, sql, inArray } from "drizzle-orm";
 import { tiSandboxOperations, tiSandboxWorkspaces, tiAgentRuns, assistantConversations, type Database } from "@task-weaver/db";
 import { PartnersMcpError } from "./partners-mcp";
 import type { TiSandboxBinding } from "./ti-sandboxes";
@@ -91,9 +91,9 @@ export function createTiSandboxCleanup(db: Database, resolveBinding: (id: string
       }
       return true;
     },
-    async metrics(ownerId?: string) {
+    async metrics(scope?: { ownerId: string; projectIds: string[]; includePersonal: boolean }) {
       return db.select({ state: w.state, lastErrorCode: w.lastErrorCode, count: count(), oldestCreatedAt: sql<Date>`min(${w.createdAt})`,
-        retries: sql<number>`coalesce(sum(${w.cleanupAttempts}), 0)::int` }).from(w).where(and(ne(w.state, "deleted"), ownerId ? eq(w.ownerId, ownerId) : undefined)).groupBy(w.state, w.lastErrorCode);
+        retries: sql<number>`coalesce(sum(${w.cleanupAttempts}), 0)::int` }).from(w).where(and(ne(w.state, "deleted"), scope ? and(eq(w.ownerId, scope.ownerId), or(scope.projectIds.length ? inArray(w.projectId, scope.projectIds) : undefined, scope.includePersonal ? isNull(w.projectId) : undefined) ?? sql`false`) : undefined)).groupBy(w.state, w.lastErrorCode);
     },
   };
 }

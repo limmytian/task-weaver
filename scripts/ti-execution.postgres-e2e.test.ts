@@ -129,7 +129,8 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     await assert.rejects(() => child.taskService.getTask(db, sibling.id));
     const { createTiCapabilities } = await import("../packages/core/src/services/ti-capabilities");
     const tools = createTiCapabilities(db, async () => context, "task");
-    const result = await tools.read("list_memories", { projectId: project.id });
+    const result = await tools.read("list_memories", {});
+    assert.ok(JSON.stringify(await tools.read("list_skills", {})).includes(skill.id));
     assert.ok(JSON.stringify(result).includes(memory.id));
     assert.ok(!JSON.stringify(result).includes(personalMemory.id));
     await assert.rejects(() => tools.operation("create_project", { name: "Escaped" }));

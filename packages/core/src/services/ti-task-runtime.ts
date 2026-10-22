@@ -1,3 +1,4 @@
+import { McpInputValidationError } from "./mcp-input-validation";
 import { tiSandboxTools as sandboxTools } from "./ti-sandbox-tools";
 import { randomUUID } from "node:crypto";
 import { and, eq, ne } from "drizzle-orm";
@@ -120,7 +121,11 @@ export async function executeTiTaskAttempt(db: Database, identity: VerifiedReque
             const current = await tools.read("get_mcp_tool", { toolId: args.toolId });
             if (inspected.get(args.toolId) !== JSON.stringify(current.data)) throw new ValidationError("Inspect the current MCP tool schema before invoking it");
           }
-          result = await tools.operation(call.name, args);
+          try { result = await tools.operation(call.name, args); }
+          catch (error) {
+            if (!(error instanceof McpInputValidationError)) throw error;
+            result = { error: error.message, dispatched: false, guidance: "Inspect get_mcp_tool and supply the required tool input inside arguments." };
+          }
         }
         await authority();
         const text = clean(result);

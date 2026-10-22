@@ -11,7 +11,7 @@ const taskReads = new Set(["get_project", "get_requirement", "get_task", "list_t
 const taskWrites = new Set(["add_comment", "add_note", "update_task", "update_document", "call_mcp_tool"]);
 
 /** Shared capability vocabulary; the caller retains confirmation, durable operation receipts and execution leases. */
-export function createTiCapabilities(db: Database, identity: () => Promise<VerifiedRequestContext>, mode: "chat" | "task") {
+export function createTiCapabilities(db: Database, identity: () => Promise<VerifiedRequestContext>, mode: "chat" | "task", projectId?: string) {
   async function current() {
     const context = await identity();
     const live = await getLiveRequestAuthority(db, context);
@@ -23,7 +23,10 @@ export function createTiCapabilities(db: Database, identity: () => Promise<Verif
     operationTools: mode === "chat" ? assistantOperationTools : assistantOperationTools.filter(tool => taskWrites.has(tool.function.name)),
     async read(name: string, input: unknown) {
       if (mode === "task" && !taskReads.has(name)) throw new AuthorizationError();
-      const { context } = await current();
+      const { context, live } = await current();
+      const defaultProject = live.bounds?.projectId ?? projectId;
+      if (defaultProject && ["list_skills", "search_memories", "list_memories", "list_mcp_servers", "search_mcp_tools"].includes(name)
+        && input && typeof input === "object" && !Array.isArray(input) && !("projectId" in input)) input = { ...input, projectId: defaultProject };
       const result = await runAssistantReadTool(db, context, name, input);
       await current();
       return result;
