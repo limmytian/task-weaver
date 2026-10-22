@@ -176,7 +176,7 @@ test("webhook authorization binds ownership, scope, credentials and outbound ret
     await assert.rejects(services(owner).retryWebhookDelivery(db, hook.id, attempt.id));
     assert.equal(calls.length, 0);
     await services(owner).updateWebhook(db, hook.id, { rotateSecret: true });
-    assert.deepEqual(await services(owner).listWebhookDeliveries(db, hook.id), []);
+    assert.ok((await services(owner).listWebhookDeliveries(db, hook.id)).some((row: any) => row.id === attempt.id));
     await assert.rejects(services(owner).retryWebhookDelivery(db, hook.id, attempt.id));
     fail = false;
   });
@@ -229,6 +229,14 @@ test("webhook authorization binds ownership, scope, credentials and outbound ret
       await Promise.all(notifications); unsubscribe();
       assert.equal((await db.select().from(webhookEvents)).length, before.length);
       assert.equal(received.length, 3, "A rolled-back notification cannot recreate an outbox event");
+      await services(owner).updateWebhook(db, managed.id, { active: false });
+      assert.ok((await services(owner).listWebhookDeliveries(db, managed.id)).some((delivery: any) => delivery.id === first.id));
+      assert.deepEqual((await services(owner).getWebhookDeliveryAttempts(db, managed.id, first.id)).map((attempt: any) => attempt.outcome), ["success", "failed"]);
+      await assert.rejects(services(owner).retryWebhookDelivery(db, managed.id, first.id));
+      await services(owner).updateWebhook(db, managed.id, { active: true, rotateSecret: true });
+      assert.ok((await services(owner).listWebhookDeliveries(db, managed.id)).some((delivery: any) => delivery.id === first.id));
+      await assert.rejects(services(owner).retryWebhookDelivery(db, managed.id, first.id));
+      await assert.rejects(services(outsider).getWebhookDeliveryAttempts(db, managed.id, first.id));
     } finally {
       globalThis.fetch = mockedFetch;
       await services(owner).deleteWebhook(db, managed.id);

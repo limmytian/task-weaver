@@ -119,18 +119,17 @@ export function createWebhookService(context: VerifiedRequestContext) {
     },
     async listWebhookDeliveries(db: Database, id: string, filters?: { status?: string; limit?: number; offset?: number }) {
       return operation(db, async (tx, authority) => {
-        const row = await get(tx, authority, id);
-        if (!row.bindingId) return [];
+        await get(tx, authority, id);
         const limit = filters?.limit ?? 20, offset = filters?.offset ?? 0;
         if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0) throw new ValidationError("Invalid delivery pagination");
-        const attempts = await tx.select().from(webhookDeliveries).where(and(eq(webhookDeliveries.webhookId, id), eq(webhookDeliveries.bindingId, row.bindingId), filters?.status ? eq(webhookDeliveries.status, filters.status as Delivery["status"]) : undefined)).orderBy(desc(webhookDeliveries.createdAt)).limit(limit).offset(offset);
+        const attempts = await tx.select().from(webhookDeliveries).where(and(eq(webhookDeliveries.webhookId, id), filters?.status ? eq(webhookDeliveries.status, filters.status as Delivery["status"]) : undefined)).orderBy(desc(webhookDeliveries.createdAt)).limit(limit).offset(offset);
         return attempts.map(deliveryDto);
       });
     },
     async getWebhookDeliveryAttempts(db: Database, id: string, deliveryId: string) {
       return operation(db, async (tx, authority) => {
-        const hook = await get(tx, authority, id);
-        const delivery = await tx.query.webhookDeliveries.findFirst({ where: and(eq(webhookDeliveries.id, deliveryId), eq(webhookDeliveries.webhookId, id), eq(webhookDeliveries.bindingId, hook.bindingId!)) });
+        await get(tx, authority, id);
+        const delivery = await tx.query.webhookDeliveries.findFirst({ where: and(eq(webhookDeliveries.id, deliveryId), eq(webhookDeliveries.webhookId, id)) });
         if (!delivery) throw new NotFoundError("Delivery not found");
         return tx.select().from(webhookDeliveryAttempts).where(eq(webhookDeliveryAttempts.deliveryId, deliveryId)).orderBy(desc(webhookDeliveryAttempts.attempt)).limit(100);
       });
