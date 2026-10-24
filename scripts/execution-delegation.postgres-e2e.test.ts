@@ -4,6 +4,8 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { createTRPCContextFactory } from "../apps/web/trpc/init";
 import { appRouter } from "../apps/web/trpc/routers/_app";
+import { createTaskAccessBroker } from "../apps/cli/src/task-access-broker";
+import { runCommand } from "../apps/cli/src/async-command";
 import { createApiApplication } from "../apps/api/src/application";
 const apiRequire = createRequire(new URL("../apps/api/package.json", import.meta.url));
 const { createDb, runMigrations, authInstanceState, authSessions, authActors, authRateLimits, daemons, daemonWorkerProgress, apiKeys, requirements, executionDelegations, authAuditEvents, mcpServers, mcpTools, taskClaims, documentTaskLinks, documents, memories, skillPackages, skillPackageVersions, skillPackageFiles } = apiRequire("@task-weaver/db");
@@ -258,11 +260,34 @@ test("execution capabilities enforce immutable task bounds and revocable lease a
     const preview = await rest("mcp-server/tools/tw_memories_preview", executionHeaders, "POST", { sourceType: "task", sourceId: task.id, scope: "project", projectId: project.id });
     assert.equal(preview.status, 200, JSON.stringify(preview.body));
     assert.equal(preview.body.isError, undefined, JSON.stringify(preview.body));
+    let invalidations = 0;
+    const broker = await createTaskAccessBroker({ apiUrl: config.baseURL, capability: issued.body,
+      renew: async () => { throw new Error("Unexpected fixture renewal"); }, revoke: async () => {},
+      onInvalidation: () => { invalidations++; },
+      fetch: async (url, input) => app.request(String(url), input),
+    });
+    t.after(() => broker.close());
+    const brokerHeaders = { authorization: `Bearer ${broker.apiKey}`, "content-type": "application/json" };
+    const child = await runCommand(process.execPath, ["-e", `fetch(process.env.TW_API_URL + '/api/v1/mcp/tools/${tool.id}', { headers: { authorization: 'Bearer ' + process.env.TW_API_KEY } }).then(async response => { if (!response.ok) process.exit(1); console.log((await response.json()).schemaHash); })`], {
+      env: { TW_API_URL: broker.apiUrl, TW_API_KEY: broker.apiKey }, timeoutMs: 10000,
+    });
+    assert.equal(child.status, 0, child.stderr);
+    assert.match(child.stdout.trim(), /^[a-f0-9]{64}$/);
+    const brokerSave = await fetch(`${broker.apiUrl}/api/v1/memories`, { method: "POST", headers: brokerHeaders, body: JSON.stringify(save) });
+    assert.equal(brokerSave.status, 201);
+    assert.equal((await brokerSave.json() as any).id, saved.body.id);
+    assert.equal((await fetch(`${broker.apiUrl}/api/v1/documents/${hiddenDocument.id}`, { headers: brokerHeaders })).status, 404);
+    assert.equal((await fetch(`${broker.apiUrl}/api/v1/mcp/policy`, { method: "POST", headers: brokerHeaders, body: "{}" })).status, 403);
     const unrelatedFacade = await rest("mcp-server/tools/tw_documents_get", executionHeaders, "POST", { id: hiddenDocument.id });
     assert.equal(unrelatedFacade.body.isError, true, "Delegation facade cannot broaden ordinary document access");
     await apiKeyService.revokeScopedApiKey(db, owner.context, invoker.issued.id);
     await assert.rejects(services.mcpRegistryService.callTool(db, tool.id, {}, context.actor, pool, undefined, inspected.body.schemaHash));
     assert.equal(invocations, 1, "Revoked parent must not dispatch another tool call");
+    await fetch(`${broker.apiUrl}/api/v1/auth/me`, { headers: brokerHeaders }).catch(() => {});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(invalidations, 1);
+    await assert.rejects(fetch(`${broker.apiUrl}/api/v1/auth/me`, { headers: brokerHeaders }));
+    await broker.close();
     assert.equal((await rest("memories", executionHeaders, "POST", { ...save, idempotencyKey: randomUUID() })).status, 401);
     headers = await issue();
   });
