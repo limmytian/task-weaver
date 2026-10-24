@@ -12,6 +12,8 @@ const identifier = '[0-9a-fA-F-]{36}'
 const readPaths = new RegExp(`^/api/v1/(?:auth/me|projects(?:/${identifier}(?:/(?:requirements|tasks))?)?|tasks(?:/${identifier}(?:/(?:claim|comments|notes|repositories))?)?|requirements/${identifier}(?:/(?:slices|repositories|workflow-outputs|workflow-inputs))?|documents(?:/${identifier}(?:/(?:versions(?:/[0-9]+)?|links|backlinks))?)?|repositories(?:/${identifier})?|search/(?:tasks|requirements|documents(?:/fulltext)?|all)|context/(?:search|list|bootstrap|packages(?:/${identifier}(?:/(?:files|read))?)?|${identifier})|memories(?:/(?:search|${identifier}))?)/?$`)
 const writePaths = new RegExp(`^/api/v1/(?:tasks/${identifier}/(?:status|claim|release|heartbeat|comments|notes)|requirements/${identifier}/workflow-outputs)/?$`)
 const patchPaths = new RegExp(`^/api/v1/(?:tasks/${identifier}(?:/status)?|documents/${identifier})/?$`)
+const capabilityReads = new RegExp(`^/api/v1/mcp/(?:tools/(?:search|${identifier})|servers(?:/${identifier}(?:/tools)?)?)/?$`)
+const capabilityPosts = new RegExp(`^/api/v1/(?:mcp/tools/${identifier}/call|memories|mcp-server/tools/(?:tw_skill_packages_resolve|tw_skill_runtimes_list|tw_skills_run|tw_memories_preview|tw_memories_record))/?$`)
 const secretDigest = (value: string) => createHash('sha256').update(value).digest()
 
 /** The child receives a local capability handle; upstream tokens and supervisor credentials stay here. */
@@ -54,7 +56,10 @@ export async function createTaskAccessBroker(options: {
     const url = new URL(path, 'http://127.0.0.1')
     const method = request.method ?? 'GET'
     const gitRequest = method === 'POST' && url.pathname === '/api/v1/execution/git' && Boolean(options.controlledGit)
-    const allowed = gitRequest || (method === 'GET' ? readPaths.test(url.pathname) : method === 'POST' ? writePaths.test(url.pathname) : method === 'PATCH' ? patchPaths.test(url.pathname) : false)
+    const capabilityReadPost = method === "POST" && ["execute", "review"].includes(capability.delegation.purpose)
+      && /^\/api\/v1\/mcp-server\/tools\/(?:tw_skill_packages_resolve|tw_memories_preview)\/?$/.test(url.pathname)
+    const execution = capability.delegation.purpose === "execute" && capability.delegation.capabilityExecution === true
+    const allowed = capabilityReadPost || (execution && (method === "GET" && capabilityReads.test(url.pathname) || method === "POST" && capabilityPosts.test(url.pathname))) || gitRequest || (method === 'GET' ? readPaths.test(url.pathname) : method === 'POST' ? writePaths.test(url.pathname) : method === 'PATCH' ? patchPaths.test(url.pathname) : false)
     if (!allowed) return reject(403, 'Task access route denied')
     await renewing
     if (closed || Date.parse(capability.delegation.expiresAt) <= Date.now()) return reject(401, 'Task access ended')
@@ -89,7 +94,7 @@ export async function createTaskAccessBroker(options: {
         ...(method === 'GET' ? {} : { body: Buffer.concat(chunks) }),
       })
       const summary = /^\/api\/v1\/(?:context\/(?:search|list|packages)|memories(?:\/search)?)\/?$/.test(url.pathname)
-      const capabilityRead = /^\/api\/v1\/(?:context\/|memories(?:\/|$))/.test(url.pathname) && !url.pathname.endsWith('/bootstrap')
+      const capabilityRead = /^\/api\/v1\/(?:mcp\/|mcp-server\/|context\/|memories(?:\/|$))/.test(url.pathname) && !url.pathname.endsWith('/bootstrap')
       const limit = summary ? CAPABILITY_LIMITS.summaryBytes : capabilityRead ? 65536 : undefined
       let payload: string
       if (limit && upstream.body) {
@@ -102,7 +107,7 @@ export async function createTaskAccessBroker(options: {
           resultBytes += part.value.byteLength
           if (resultBytes > limit) {
             await reader.cancel()
-            return reject(413, 'Capability result exceeds the byte budget; narrow discovery or select a smaller text file')
+            return reject(413, method === 'GET' ? 'Capability result exceeds the byte budget; narrow discovery or select a smaller text file' : 'Capability result exceeds the byte budget; the operation may have committed. Inspect current state and do not blindly retry.')
           }
           parts.push(part.value)
         }
@@ -149,7 +154,7 @@ export async function createTaskAccessBroker(options: {
           const next = renewed.delegation
           if (closed) { await options.revoke(next.id).catch(() => {}); return }
           if (JSON.stringify(next.initiator) !== JSON.stringify(original.initiator) || next.delegatorActorId !== original.delegatorActorId || next.runId !== original.runId || next.executorActorId !== original.executorActorId || next.parentCredentialId !== original.parentCredentialId
-            || Boolean(next.sharedCapabilityReads) !== Boolean(original.sharedCapabilityReads) || next.requirementId !== original.requirementId || next.projectId !== original.projectId || next.purpose !== original.purpose || next.leaseGeneration !== original.leaseGeneration
+            || Boolean(next.capabilityExecution) !== Boolean(original.capabilityExecution) || Boolean(next.sharedCapabilityReads) !== Boolean(original.sharedCapabilityReads) || next.requirementId !== original.requirementId || next.projectId !== original.projectId || next.purpose !== original.purpose || next.leaseGeneration !== original.leaseGeneration
             || JSON.stringify(next.taskIds) !== JSON.stringify(original.taskIds) || JSON.stringify(next.repositoryIds) !== JSON.stringify(original.repositoryIds)
             || Date.parse(next.expiresAt) <= Date.now() || Date.parse(next.expiresAt) > Date.now() + 15 * 60_000) throw new Error('Invalid task capability renewal')
           capability = renewed

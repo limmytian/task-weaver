@@ -19,11 +19,16 @@ test('worker TW commands use a broker while supervisor, provider and Git secrets
     res.setHeader('content-type', 'application/json')
     if (req.url === `/api/v1/daemons/${daemonId}/delegations`) {
       assert.equal(req.headers.authorization, `Bearer ${supervisorKey}`)
+      const chunks: Buffer[] = []
+      for await (const chunk of req) chunks.push(Buffer.from(chunk))
+      const requested = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      assert.equal(requested.sharedCapabilityReads, true)
+      assert.equal(requested.capabilityExecution, true)
       res.statusCode = 201
       res.end(JSON.stringify({ token, delegation: {
         id: randomUUID(), parentCredentialId: randomUUID(), delegatorActorId: actorId, initiator: { id: actorId, type: 'agent' }, executorActorId: actorId,
         projectId: randomUUID(), requirementId, taskIds: [taskId], repositoryIds: [], runId, purpose: 'execute', leaseGeneration: 1,
-        expiresAt: new Date(Date.now() + 600_000).toISOString(),
+        sharedCapabilityReads: true, capabilityExecution: true, expiresAt: new Date(Date.now() + 600_000).toISOString(),
       } }))
     } else if (req.method === 'DELETE') {
       assert.equal(req.headers.authorization, `Bearer ${supervisorKey}`)
@@ -43,7 +48,7 @@ test('worker TW commands use a broker while supervisor, provider and Git secrets
   process.env.TW_API_KEY = supervisorKey
   let access: Awaited<ReturnType<typeof createTaskWorkerAccess>> | undefined
   try {
-    access = await createTaskWorkerAccess({ config: { apiUrl: `http://127.0.0.1:${address.port}`, apiKey: supervisorKey }, daemonId, requirementId, taskId, runId, workerIndex: 0, leaseGeneration: 1 })
+    access = await createTaskWorkerAccess({ config: { apiUrl: `http://127.0.0.1:${address.port}`, apiKey: supervisorKey }, daemonId, requirementId, taskId, runId, workerIndex: 0, leaseGeneration: 1, sharedCapabilityReads: true, capabilityExecution: true })
     assert.notEqual(access.environment.HOME, process.env.HOME)
     assert.equal(access.environment.CODEX_HOME, process.env.TW_CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), '.codex'))
     assert.equal(access.environment.CLAUDE_CONFIG_DIR, process.env.TW_CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'))

@@ -74,7 +74,8 @@ export function resourcePredicate(
   if (["automation", "execute", "review"].includes(authority.bounds.purpose) && ["memories", "skill_packages", "mcp_servers"].includes(tableName ?? "")
     && permission === "resource.read")
     return and(scoped, or(eq(sql`${columns.projectId}`, authority.bounds.projectId), isNull(columns.projectId)), unowned)!;
-  if (authority.bounds.purpose === "automation" && tableName === "mcp_servers" && permission === "mcp.invoke")
+  if (permission === "mcp.invoke" && (authority.bounds.purpose === "automation" && ["memories", "skill_packages", "mcp_servers"].includes(tableName ?? "")
+    || authority.bounds.purpose === "execute" && tableName === "mcp_servers"))
     return and(scoped, eq(sql`${columns.projectId}`, authority.bounds.projectId), unowned)!;
   const ids = tableName === "tasks" ? authority.bounds.taskIds : tableName === "documents" ? authority.bounds.documentIds : tableName === "requirements" ? [authority.bounds.requirementId] : [];
   return id && ids.length ? and(scoped, inArray(id, ids))! : sql`false`;
@@ -110,6 +111,8 @@ export async function requireResource(db: Database, authority: ResourceAuthority
   if (!stableActorReferenceSchema.safeParse({ id, type: "human" }).success) throw new ValidationError("Invalid resource ID");
   const delegatedAsset = Boolean(authority.bounds && (
     ["automation", "execute", "review"].includes(authority.bounds.purpose) && ["skill", "memory", "package", "mcp"].includes(kind) && permission === "resource.read"
+    || authority.bounds.purpose === "execute" && kind === "mcp" && permission === "mcp.invoke"
+    || authority.bounds.purpose === "execute" && kind === "memory" && permission === "resource.write"
     || authority.bounds.purpose === "automation" && ["memory", "package", "mcp"].includes(kind) && permission === "mcp.invoke"
   ));
   if (authority.bounds) {

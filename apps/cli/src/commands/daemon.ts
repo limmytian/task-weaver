@@ -635,6 +635,8 @@ export function registerDaemon(program: Command): void {
     .command('start')
     .description('start the local AI task runner daemon')
     .option('--tools <list>', 'comma-separated list of available AI tools (e.g. codex,claude,agy)')
+    .option('--shared-capability-reads', 'explicitly allow parent-authorized shared instruction reads')
+    .option('--capability-execution', 'explicitly allow parent-authorized project MCP/skill execution and confirmed source-reviewed memory saves')
     .option('--capabilities <list>', 'comma-separated auxiliary capabilities advertised for task matching')
     .option('--project <id>', 'restrict task polling to a specific project')
     .option('--mode <mode>', 'override server-recommended mode (polling|sse)')
@@ -1157,7 +1159,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           assertAuthority: async () => { assertActive(); await daemonPost(`/api/v1/daemons/${daemonId}/execution-authority`, { requirementId: requirement.id, ...leaseFence }) },
           record: input => daemonPost(`/api/v1/daemons/${daemonId}/git-synchronization`, { ...input, requirementId: requirement.id, ...leaseFence }),
         })
-        const access = await createTaskWorkerAccess({ config: cliConfig, daemonId, requirementId: requirement.id, taskId: task.id, runId: lane.runId, workerIndex: w.index, leaseGeneration: lane.leaseGeneration, signal: executionSignal, controlledGit }).catch(error => { controlMonitor.close(); throw error })
+        const access = await createTaskWorkerAccess({ config: cliConfig, daemonId, requirementId: requirement.id, taskId: task.id, sharedCapabilityReads: opts.sharedCapabilityReads, capabilityExecution: opts.capabilityExecution, runId: lane.runId, workerIndex: w.index, leaseGeneration: lane.leaseGeneration, signal: executionSignal, controlledGit }).catch(error => { controlMonitor.close(); throw error })
         let childResult: Awaited<ReturnType<typeof runMeteredAgent>>
         try {
         if (!workspaceQuarantined) await executorStatus.assertAvailable(toolCmd)

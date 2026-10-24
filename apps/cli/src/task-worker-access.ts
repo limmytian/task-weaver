@@ -12,6 +12,8 @@ export async function createTaskWorkerAccess(options: {
   daemonId: string
   requirementId: string
   taskId?: string
+  sharedCapabilityReads?: boolean
+  capabilityExecution?: boolean
   runId: string
   workerIndex: number
   leaseGeneration: number
@@ -31,6 +33,7 @@ export async function createTaskWorkerAccess(options: {
   try {
     const capability = await request<TaskCapability>('POST', endpoint, {
       requirementId: options.requirementId, taskId: options.taskId, runId: options.runId,
+      sharedCapabilityReads: options.sharedCapabilityReads ?? false, capabilityExecution: options.capabilityExecution ?? false,
       workerIndex: options.workerIndex, leaseGeneration: options.leaseGeneration,
     }, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]) })
     secrets.add(capability.token)

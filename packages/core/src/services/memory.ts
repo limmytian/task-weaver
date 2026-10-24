@@ -93,7 +93,7 @@ export async function recordMemory(
   input: RecordMemoryInput,
   actor: Actor,
 ) {
-  const { idempotencyKey, ...payload } = input;
+  const { idempotencyKey, confirmed: _confirmed, ...payload } = input;
   const scopeKey = input.projectId ? `project:${input.projectId}` : input.personalOwnerId ? `personal:${input.personalOwnerType}:${input.personalOwnerId}` : "global";
   const payloadHash = capabilityDigest(payload);
   const receiptWhere = and(eq(memoryReceipts.actorId, actor.id), eq(memoryReceipts.actorType, actor.type), eq(memoryReceipts.scopeKey, scopeKey), idempotencyKey ? eq(memoryReceipts.key, idempotencyKey) : undefined);

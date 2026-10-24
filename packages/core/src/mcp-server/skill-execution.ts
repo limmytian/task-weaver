@@ -1,3 +1,4 @@
+import { requireExecutionSynchronization } from "../services/execution-synchronization";
 import { mkdir, mkdtemp, writeFile, chmod, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep, dirname } from "node:path";
@@ -20,6 +21,7 @@ export async function prepareSkillExecution(db: Database, liveDb: Database, iden
   if (Buffer.byteLength(JSON.stringify(input.input)) > 16384) throw new ValidationError("Skill input exceeds the 16384-byte limit");
   if (!storage) throw new ValidationError("Skill package storage is unavailable");
   const authority = await resourceAuthority(db, identity);
+  if (authority.bounds?.purpose === "execute") await requireExecutionSynchronization(db, authority.bounds.requirementId, authority.bounds.runId);
   await requirePackage(db, authority, input.packageId);
   const scope = input.scope === "personal" ? { personalOwnerId: personalResourceOwnerId(identity), personalOwnerType: "human" as const }
     : input.scope === "global" ? {} : { projectId: input.projectId! };

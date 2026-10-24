@@ -85,6 +85,7 @@ export function registerMcp(program: Command): void {
   mcp
     .command('call <toolId>')
     .description('execute a tool via proxy')
+    .option('--schema-hash <sha256>', 'exact schema hash observed when inspecting the tool')
     .option('--params <json>', 'tool arguments as JSON', '{}')
     .option('--approval <id>', 'approved exact-operation request ID')
     .option('--json', 'output raw JSON')
@@ -96,7 +97,7 @@ export function registerMcp(program: Command): void {
         process.stderr.write('Error: --params must be valid JSON\n')
         process.exit(1)
       }
-      const data = await post(`/api/v1/mcp/tools/${toolId}/call`, { arguments: args, approvalId: opts.approval }).catch(error => {
+      const data = await post(`/api/v1/mcp/tools/${toolId}/call`, { arguments: args, approvalId: opts.approval, expectedSchemaHash: opts.schemaHash }).catch(error => {
         if (error instanceof ApiError && error.status === 409 && error.body && typeof error.body === 'object' && 'approvalId' in error.body) {
           printJson(error.body)
           process.exitCode = 1

@@ -85,7 +85,7 @@ test('upstream revocation closes task access and invokes cancellation without re
 })
 
 test('renewal rotates private tokens and rejects expansion of the task bound', async () => {
-  for (const expand of ["none", "tasks", "shared"]) {
+  for (const expand of ["none", "tasks", "shared", "execution"]) {
     const cap = capability(Date.now() + 1500)
     let invalidations = 0
     let observed = ''
@@ -93,7 +93,7 @@ test('renewal rotates private tokens and rejects expansion of the task bound', a
     const didRenew = new Promise<void>(resolve => { notifyRenewed = resolve })
     const next = { token: `twd_${'b'.repeat(64)}`, delegation: { ...cap.delegation, id: randomUUID(),
       taskIds: expand === "tasks" ? [...cap.delegation.taskIds, randomUUID()] : cap.delegation.taskIds,
-      sharedCapabilityReads: expand === "shared",
+      sharedCapabilityReads: expand === "shared", capabilityExecution: expand === "execution",
       expiresAt: new Date(Date.now() + 600_000).toISOString(),
     } }
     const broker = await createTaskAccessBroker({ apiUrl: 'https://tw.example', capability: cap,
@@ -186,7 +186,7 @@ test('capability reads enforce byte budgets without replaying oversized response
   let calls = 0
   const broker = await createTaskAccessBroker({ apiUrl: 'https://tw.example', capability: cap,
     renew: async () => cap, revoke: async () => {},
-    fetch: async () => { calls++; return Response.json({ content: '界'.repeat(23000) }) },
+    fetch: async () => { calls++; return Response.json({ content: '\u{1F680}'.repeat(23000) }) },
   })
   try {
     const headers = { authorization: `Bearer ${broker.apiKey}` }
@@ -196,5 +196,27 @@ test('capability reads enforce byte budgets without replaying oversized response
       assert.match((await response.json() as { error: string }).error, /byte budget/)
     }
     assert.equal(calls, 3)
+  } finally { await broker.close() }
+})
+
+test('explicit execution access permits bounded capability paths and denies management or arbitrary MCP facade calls', async () => {
+  const cap = capability()
+  cap.delegation.capabilityExecution = true
+  const calls: string[] = []
+  const broker = await createTaskAccessBroker({ apiUrl: 'https://tw.example', capability: cap,
+    renew: async () => cap, revoke: async () => {},
+    fetch: async url => { calls.push(String(url)); return Response.json({ ok: true }) },
+  })
+  try {
+    const id = randomUUID()
+    const headers = { authorization: `Bearer ${broker.apiKey}`, 'content-type': 'application/json' }
+    for (const [method, path] of [['GET', `mcp/tools/${id}`], ['GET', `mcp/tools/search?intent=fixture`], ['POST', `mcp/tools/${id}/call`], ['POST', 'memories'], ['POST', 'mcp-server/tools/tw_skill_packages_resolve'], ['POST', 'mcp-server/tools/tw_skill_runtimes_list'], ['POST', 'mcp-server/tools/tw_skills_run'], ['POST', 'mcp-server/tools/tw_memories_preview'], ['POST', 'mcp-server/tools/tw_memories_record']]) {
+      assert.equal((await fetch(`${broker.apiUrl}/api/v1/${path}`, { method, headers, ...(method === 'POST' ? { body: '{}' } : {}) })).status, 200, path)
+    }
+    const count = calls.length
+    for (const path of ['mcp/servers', 'mcp/policy', `mcp/approvals/${id}/approve`, 'mcp-server/tools/tw_memories_forget', 'mcp-server/tools/tw_plan_apply', 'mcp-server', 'context/packages/register']) {
+      assert.equal((await fetch(`${broker.apiUrl}/api/v1/${path}`, { method: 'POST', headers, body: '{}' })).status, 403, path)
+    }
+    assert.equal(calls.length, count)
   } finally { await broker.close() }
 })

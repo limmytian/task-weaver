@@ -142,7 +142,9 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
 /** A catalog is a hint; facade operations still authorize the actual target IDs. */
 export async function authorizedMcpToolNames(db: Database, identity: VerifiedRequestContext): Promise<readonly string[]> {
   const authority = await resourceAuthority(db, identity);
-  const delegatedReads = new Set(["tw_context_search", "tw_context_get", "tw_skill_packages_list", "tw_skill_packages_get", "tw_skill_package_files", "tw_skill_package_read", "tw_memories_search", "tw_memories_get"]);
+  const delegatedReads = new Set(["tw_context_search", "tw_context_get", "tw_skill_packages_list", "tw_skill_packages_get", "tw_skill_package_files", "tw_skill_package_read", "tw_memories_search", "tw_memories_get", "tw_memories_preview", "tw_skill_packages_resolve"]);
+  if (authority.bounds?.purpose === "execute" && canAccessResource(authority, { projectId: authority.bounds.projectId }, "mcp.invoke"))
+    for (const name of ["tw_skill_runtimes_list", "tw_skills_run", "tw_mcp_search", "tw_mcp_tool", "tw_mcp_call", "tw_memories_record"]) delegatedReads.add(name);
   const scopeKeys = authority.grants.flatMap(grant => grant.scope === "instance" ? [] : [mcpScopeKey(grant.scope === "project" ? { projectId: grant.projectId } : grant.scope === "personal" ? { personalOwnerId: grant.actorId } : {})]);
   const policies = scopeKeys.length ? await db.select().from(mcpInvocationPolicies).where(inArray(mcpInvocationPolicies.scopeKey, scopeKeys)) : [];
   const names: string[] = [];

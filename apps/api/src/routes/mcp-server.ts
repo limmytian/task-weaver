@@ -28,7 +28,7 @@ export function createMcpServerRoutes(options: McpRouteOptions) {
   routes.use("*", async (c, next) => {
     if (c.req.header("x-task-weaver-mcp-hop")) return c.json({ error: "Recursive MCP forwarding is not allowed" }, 400);
     const identity = c.get("identity");
-    if (identity.credential.kind !== "api_key" || !c.req.header("authorization")) throw new AuthenticationError();
+    if (!["api_key", "delegation"].includes(identity.credential.kind) || !c.req.header("authorization")) throw new AuthenticationError();
     // Never use forwarded Host values as authority. Reverse proxies must preserve
     // a configured public host or operators must explicitly allow their upstream host.
     if (!options.allowedHosts.includes(new URL(c.req.url).host)) return c.json({ error: "Untrusted MCP host" }, 403);

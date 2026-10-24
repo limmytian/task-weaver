@@ -21,6 +21,7 @@ function publicDelegation(row: StoredDelegation, initiatorType: 'human' | 'agent
     id: row.id, parentCredentialId: row.parentCredentialId, delegatorActorId: row.actorId,
     initiator: { id: row.initiatorActorId, type: initiatorType }, executorActorId: row.actorId,
     projectId: row.projectId, requirementId: row.requirementId, taskIds: row.taskIds,
+    capabilityExecution: row.purpose === "execute" && credentialGrantsSchema.parse(row.grants).some(grant => grant.scope === "project" && grant.permissions.includes("mcp.invoke")),
     sharedCapabilityReads: credentialGrantsSchema.parse(row.grants).some(grant => grant.scope === "global" && grant.permissions.includes("resource.read")),
     repositoryIds: row.repositoryIds, runId: row.runId, purpose: row.purpose,
     leaseGeneration: Number(row.leaseGeneration), expiresAt: row.expiresAt.toISOString(),
@@ -150,6 +151,10 @@ export function createExecutionDelegationService(context: VerifiedRequestContext
         const repositoryIds = [...new Set([...repositories, ...taskRepos].map(link => link.id))];
         for (const id of repositoryIds) await requireRepository(tx, authority, id);
         const permissions: AuthorizationPermission[] = ['resource.read', phasePermission(purpose), ...(['execute', 'delivery'].includes(purpose) ? ['resource.write' as const] : [])];
+        if (input.capabilityExecution) {
+          if (purpose !== 'execute') throw new ValidationError('Capability execution requires an execution task');
+          permissions.push('mcp.invoke');
+        }
         const grants: AuthorizationGrant[] = [{ scope: 'project', projectId: scope.projectId!, permissions }];
         // Shared reads are explicit and remain capability-only under execution bounds.
         if (input.sharedCapabilityReads && !['execute', 'review'].includes(purpose)) throw new ValidationError('Shared capability reads are unavailable for this execution purpose');

@@ -15,6 +15,13 @@ export class DeferredMcpOperation {
 
 async function target(db: Database, identity: VerifiedRequestContext, name: McpServerToolName, raw: Record<string, unknown>) {
   const authority = await resourceAuthority(db, identity);
+  if (authority.bounds) {
+    const reads = ["tw_context_search", "tw_context_get", "tw_skill_packages_list", "tw_skill_packages_get", "tw_skill_package_files", "tw_skill_package_read", "tw_memories_search", "tw_memories_get", "tw_memories_preview", "tw_skill_packages_resolve"];
+    const execution = ["tw_skill_runtimes_list", "tw_skills_run", "tw_mcp_search", "tw_mcp_tool", "tw_mcp_call", "tw_memories_record"];
+    if (!["execute", "review", "automation"].includes(authority.bounds.purpose)
+      || !reads.includes(name) && !(authority.bounds.purpose === "execute" && execution.includes(name)
+        && authority.grants.some(grant => grant.scope === "project" && grant.projectId === authority.bounds!.projectId && grant.permissions.includes("mcp.invoke")))) throw new AuthorizationError();
+  }
   const write = !(mcpServerReadTools as readonly string[]).includes(name);
   const permission = write ? "resource.write" : "resource.read";
   const projectId = raw.projectId ?? (raw.plan as { projectId?: string } | undefined)?.projectId;

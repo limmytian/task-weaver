@@ -320,6 +320,7 @@ export const executionDelegationSchema = z
     purpose: z.enum(["execute", "delivery", "review", "merge", "automation"]),
     leaseGeneration: z.number().int().positive(),
     sharedCapabilityReads: z.boolean().optional(),
+    capabilityExecution: z.boolean().optional(),
     expiresAt: timestampSchema,
   })
   .strict().superRefine((value, ctx) => {
@@ -420,6 +421,8 @@ export const requestIdentitySnapshotSchema = z
         "execution.review",
         "execution.merge",
       ];
+      if (delegation.capabilityExecution && (delegation.purpose !== "execute" || !credential.grants.some(grant => grant.scope === "project" && grant.projectId === delegation.projectId && grant.permissions.includes("mcp.invoke"))))
+        issue("Capability execution requires an execution-purpose invocation grant", ["credential", "delegation", "capabilityExecution"]);
       credential.grants.forEach((grant, index) => {
         if (grant.scope === "global") {
           if (delegation.sharedCapabilityReads !== true || !["execute", "review"].includes(delegation.purpose))
@@ -434,6 +437,8 @@ export const requestIdentitySnapshotSchema = z
             "projectId",
           ]);
         }
+        if (delegation.purpose === "execute" && grant.permissions.includes("mcp.invoke") && delegation.capabilityExecution !== true)
+          issue("Execution invocation requires explicit capability opt-in", ["credential", "delegation", "capabilityExecution"]);
         grant.permissions.forEach((permission) => {
           if (
             !delegatedPermissions.includes(permission) ||

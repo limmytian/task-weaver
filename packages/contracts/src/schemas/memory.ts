@@ -17,6 +17,7 @@ export const memoryProvenanceSchema = z.object({
 }).strict();
 
 export const recordMemorySchema = z.object({
+  confirmed: z.literal(true).optional(),
   title: z.string().min(1).max(500),
   content: z.string().min(1),
   memoryType: memoryTypeSchema.default("other"),

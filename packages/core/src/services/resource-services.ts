@@ -1,3 +1,4 @@
+import { capabilityDigest } from "./capability-digest";
 import { requireExecutionSynchronization } from "./execution-synchronization";
 import { planningImpact, invalidatePlanningExecutions } from "./planning-impact";
 import { withEventActor } from "./durable-events";
@@ -142,7 +143,7 @@ function bindServices(context?: VerifiedRequestContext) {
             const services = createResourceServices(context);
             call[3] = { createTask: services.taskService.createTask, createRun: services.tiAgentService.createRun };
           }
-          if (authority.bounds && ["updateTask", "updateTaskStatus", "updateDocument", "registerWorkflowOutput"].includes(name)) {
+          if (authority.bounds && ["updateTask", "updateTaskStatus", "updateDocument", "registerWorkflowOutput", "recordMemory"].includes(name)) {
             await requireExecutionSynchronization(txDb, authority.bounds.requirementId, authority.bounds.runId);
           }
           const impact = name === "updateTaskStatus" && call[6]?.daemonId ? [] : await planningImpact(txDb, name, call);
@@ -315,6 +316,15 @@ function authorizeDelegatedOperation(authority: ResourceAuthority, group: Group,
     mcp: ["listServers", "searchTools", "getServer", "getToolDetail", "listServerTools"],
   };
   if (authority.bounds && ["automation", "execute", "review"].includes(authority.bounds.purpose) && assetReads[group]?.includes(name)) return;
+  if (authority.bounds?.purpose === "execute" && name === "recordMemory") {
+    const input = call[1];
+    requireScope(authority, { projectId: authority.bounds.projectId }, "mcp.invoke");
+    if (input.projectId !== authority.bounds.projectId || input.personalOwnerId || input.personalOwnerType
+      || input.confirmed !== true || !input.idempotencyKey || input.provenance?.origin !== "reviewed_source"
+      || !input.provenance.sourceUpdatedAt || !input.entityType || !input.entityId
+      || Buffer.byteLength(input.content ?? "", "utf8") > 32768) throw new AuthorizationError();
+    return;
+  }
   const reads = new Set(["getProject", "getRequirement", "getTask", "getTaskDetail", "listTasks", "listRequirements", "listProjects", "getDocument", "getDocumentDetail", "listDocuments", "getTaskClaim", "getRequirementClaim", "listExecutionSlices", "listTaskComments", "listTaskNotes", "listDocumentVersions", "getDocumentVersion", "getRequirementRepositories", "getTaskRepositories", "listRequirementRepositories", "listTaskRepositories", "getRepository", "listRepositories", "bootstrapContext", "getBootstrapContext", "searchTasks", "searchRequirements", "searchDocuments", "searchDocumentsFulltext", "searchAll", "resolveTitles", "listContextEntries", "searchContext", "listSkills", "getSkill", "getContextEntry"]);
   const writes = new Set(["updateTask", "updateTaskStatus", "addTaskComment", "addTaskNote", "claimTask", "releaseTask", "heartbeatClaim", "updateDocument"]);
   reads.add("listWorkflowOutputs");
@@ -851,6 +861,7 @@ function redactMcpResult(authority: ResourceAuthority, value: any): any {
   if (Array.isArray(value)) return value.map(item => redactMcpResult(authority, item));
   if (!value || typeof value !== "object" || value instanceof Date) return value;
   const result = { ...value };
+  if ("serverId" in result && "inputSchema" in result) result.schemaHash = capabilityDigest({ name: result.name, inputSchema: result.inputSchema, readOnly: result.readOnly, targetProjectArgument: result.targetProjectArgument });
   if ("serverId" in result && "inputSchema" in result) result.authorization = {
     stableId: result.id, sourceServerId: result.serverId, requiredPermissions: ["mcp.invoke"],
     targetScope: result.targetProjectArgument ? "project_argument" : "server",

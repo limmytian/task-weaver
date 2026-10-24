@@ -273,7 +273,7 @@ mcp.post("/tools/:id/call", async (c) => {
       actor,
       mcpPool,
       parsed.data.approvalId,
-      undefined,
+      parsed.data.expectedSchemaHash,
       c.req.raw.signal,
     );
     return c.json(result);
