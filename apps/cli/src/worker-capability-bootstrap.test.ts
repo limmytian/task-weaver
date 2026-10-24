@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildCapabilityBootstrap } from '../../../packages/core/src/mcp-server/bootstrap.js'
-import { CAPABILITY_LIMITS, mcpServerCatalog } from '@task-weaver/contracts'
+import { CAPABILITY_LIMITS } from '@task-weaver/contracts'
 import { renderWorkerCapabilityBootstrap } from './worker-capability-bootstrap.js'
 
 function bootstrap() {
@@ -38,14 +37,6 @@ test('missing, incompatible and oversized bootstrap remain honest and bounded', 
   }
 })
 
-
-test('the live server bootstrap including stage guidance fits the worker prompt budget', () => {
-  const result = buildCapabilityBootstrap(mcpServerCatalog.map(tool => tool.name), { state: 'available', executionMode: 'isolated' })
-  const rendered = renderWorkerCapabilityBootstrap(result)
-  assert.match(rendered, /Worker Capability Bootstrap/)
-  assert.match(rendered, /tw_skills_run/)
-  assert.ok(Buffer.byteLength(rendered) <= CAPABILITY_LIMITS.bootstrapBytes)
-})
 
 test('CLI steps stay in the current project and do not advertise unavailable invocation', () => {
   const projectId = '00000000-0000-4000-8000-000000000001'

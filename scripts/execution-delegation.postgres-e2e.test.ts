@@ -4,6 +4,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { createTRPCContextFactory } from "../apps/web/trpc/init";
 import { appRouter } from "../apps/web/trpc/routers/_app";
+import { renderWorkerCapabilityBootstrap } from "../apps/cli/src/worker-capability-bootstrap";
 import { createTaskAccessBroker } from "../apps/cli/src/task-access-broker";
 import { runCommand } from "../apps/cli/src/async-command";
 import { createApiApplication } from "../apps/api/src/application";
@@ -221,6 +222,9 @@ test("execution capabilities enforce immutable task bounds and revocable lease a
     assert.equal(bootstrap.status, 200);
     assert.equal(bootstrap.body.capabilityBootstrap.capabilities.skills.state, "available");
     assert.equal(bootstrap.body.capabilityBootstrap.capabilities.hostedExecution.state, "unavailable");
+    const rendered = renderWorkerCapabilityBootstrap(bootstrap.body.capabilityBootstrap, project.id);
+    assert.match(rendered, /Worker Capability Bootstrap/);
+    assert.ok(Buffer.byteLength(rendered) <= 4096);
   });
   await t.test("capability execution requires parent opt-in, exact schemas and reviewed source-linked saves", async () => {
     assert.equal((await call(`${daemonId}/delegations`, executor.headers, { ...request, capabilityExecution: true })).response.status, 403);
