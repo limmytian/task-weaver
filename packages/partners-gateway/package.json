@@ -8,9 +8,9 @@
     "./runtime": "./src/runtime.ts"
   },
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "build": "node ../../scripts/workspace-build.mjs package-build",
     "test": "tsx --test src/*.test.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node ../../scripts/workspace-build.mjs package-typecheck",
     "prepublishOnly": "node -e \"throw new Error('Publish the verified CE release tarball, not the workspace package')\""
   },
   "dependencies": {

@@ -4,11 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/prepare-pdf-preview.mjs && next dev",
-    "build": "node scripts/prepare-pdf-preview.mjs && next build",
+    "build": "node ../../scripts/workspace-build.mjs web-build",
     "start": "next start",
     "test": "tsx --test lib/*.test.ts trpc/*.test.ts",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node ../../scripts/workspace-build.mjs package-typecheck",
     "check:interactions": "node scripts/check-interaction-regressions.mjs"
   },
   "dependencies": {

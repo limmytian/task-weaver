@@ -7,9 +7,9 @@
   },
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsc",
+    "build": "node ../../scripts/workspace-build.mjs package-build",
     "test": "tsx --test src/*.test.ts src/**/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "node ../../scripts/workspace-build.mjs package-typecheck"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
