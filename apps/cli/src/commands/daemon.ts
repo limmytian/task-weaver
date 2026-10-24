@@ -3,6 +3,7 @@ import { createControlledGit } from "../controlled-git.js";
 import { monitorExecutionControl, type ExecutionControl } from "../execution-control-monitor.js";
 import { ExecutorStatusClient } from '../executor-status-client.js'
 import { ExecutorResourceBlocked } from '../executor-availability.js'
+import { loadWorkerCapabilityBootstrap } from '../worker-capability-bootstrap.js'
 import { createTaskWorkerAccess } from '../task-worker-access.js'
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync } from 'fs'
 import { createHash, randomUUID } from 'crypto'
@@ -1013,19 +1014,6 @@ export function registerDaemon(program: Command): void {
           console.warn(`[Daemon] Worker ${w.index} could not report workspace progress:`, err instanceof Error ? err.message : String(err))
         })
 
-        let bootstrapText = ''
-        try {
-          const bs = await get<any>('/api/v1/context/bootstrap')
-          bootstrapText = `Task Weaver Platform Bootstrap Info:
-- Description: ${bs.description}
-- Usage: ${bs.usage}
-- Available Commands:
-${(bs.commands || []).map((c: any) => `  * ${c.name}: ${c.description}`).join('\n')}
-`
-        } catch {
-          bootstrapText = `Task Weaver Platform: Manage projects, requirements, tasks, documents, and search using 'tw' commands (e.g. tw task list, tw task status, tw doc get).`
-        }
-
         const workspaceSection = `Composite Repository Workspace:
 - Local path: ${workspacePath}
 - Frozen manifest: ${workspace.manifestPath}
@@ -1085,7 +1073,7 @@ This session is limited to the current task. Do not process other tasks in this 
           : ''
         const extraWorkerPromptSection = formatExtraWorkerPromptSection(extraWorkerPrompt)
 
-        const prompt = `You are an autonomous AI Agent triggered by Task Weaver to resolve part of a requirement lane:
+        const promptFor = (bootstrapText: string) => `You are an autonomous AI Agent triggered by Task Weaver to resolve part of a requirement lane:
 
 Requirement Details:
 - Project ID: ${requirement.projectId}
@@ -1162,6 +1150,8 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         const access = await createTaskWorkerAccess({ config: cliConfig, daemonId, requirementId: requirement.id, taskId: task.id, sharedCapabilityReads: opts.sharedCapabilityReads, capabilityExecution: opts.capabilityExecution, runId: lane.runId, workerIndex: w.index, leaseGeneration: lane.leaseGeneration, signal: executionSignal, controlledGit }).catch(error => { controlMonitor.close(); throw error })
         let childResult: Awaited<ReturnType<typeof runMeteredAgent>>
         try {
+        const bootstrapText = await loadWorkerCapabilityBootstrap({ apiUrl: access.environment.TW_API_URL!, apiKey: access.environment.TW_API_KEY! }, access.signal)
+        const prompt = promptFor(bootstrapText)
         if (!workspaceQuarantined) await executorStatus.assertAvailable(toolCmd)
         childResult = workspaceQuarantined ? {
           ok: false,

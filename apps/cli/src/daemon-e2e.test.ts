@@ -463,6 +463,7 @@ async function runDaemonScenario(mode: AgentMode, workers = 1, injectControlDisc
     }
 
     if (req.method === 'GET' && path === '/api/v1/context/bootstrap') {
+      assert.equal(req.headers.authorization, `Bearer twd_${'a'.repeat(64)}`)
       return sendJson(res, 200, { description: 'Test bootstrap', usage: 'test', commands: [] })
     }
 
