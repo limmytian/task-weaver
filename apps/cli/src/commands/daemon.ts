@@ -1150,7 +1150,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         const access = await createTaskWorkerAccess({ config: cliConfig, daemonId, requirementId: requirement.id, taskId: task.id, sharedCapabilityReads: opts.sharedCapabilityReads, capabilityExecution: opts.capabilityExecution, runId: lane.runId, workerIndex: w.index, leaseGeneration: lane.leaseGeneration, signal: executionSignal, controlledGit }).catch(error => { controlMonitor.close(); throw error })
         let childResult: Awaited<ReturnType<typeof runMeteredAgent>>
         try {
-        const bootstrapText = await loadWorkerCapabilityBootstrap({ apiUrl: access.environment.TW_API_URL!, apiKey: access.environment.TW_API_KEY! }, access.signal)
+        const bootstrapText = await loadWorkerCapabilityBootstrap({ apiUrl: access.environment.TW_API_URL!, apiKey: access.environment.TW_API_KEY! }, access.signal, requirement.projectId)
         const prompt = promptFor(bootstrapText)
         if (!workspaceQuarantined) await executorStatus.assertAvailable(toolCmd)
         childResult = workspaceQuarantined ? {

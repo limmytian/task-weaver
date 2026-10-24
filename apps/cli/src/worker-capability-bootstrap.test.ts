@@ -46,3 +46,14 @@ test('the live server bootstrap including stage guidance fits the worker prompt 
   assert.match(rendered, /tw_skills_run/)
   assert.ok(Buffer.byteLength(rendered) <= CAPABILITY_LIMITS.bootstrapBytes)
 })
+
+test('CLI steps stay in the current project and do not advertise unavailable invocation', () => {
+  const projectId = '00000000-0000-4000-8000-000000000001'
+  const rendered = renderWorkerCapabilityBootstrap(bootstrap(), projectId)
+  assert.match(rendered, new RegExp(`tw context search.*--project ${projectId}`))
+  assert.match(rendered, new RegExp(`tw memory search.*--project ${projectId}`))
+  assert.ok(!rendered.includes('tw mcp search'))
+  assert.ok(!rendered.includes('tw context run.'))
+  assert.ok(!renderWorkerCapabilityBootstrap(bootstrap(), 'untrusted; broaden-scope').includes('untrusted;'))
+  assert.ok(Buffer.byteLength(rendered) <= CAPABILITY_LIMITS.bootstrapBytes)
+})
