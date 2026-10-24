@@ -70,7 +70,7 @@ test("daemon authority scopes registration, queues and fenced operations", { ski
     return { response, body: await response.json() as any };
   }
   const daemonId = randomUUID(), startedAt = new Date().toISOString();
-  const registration = { id: daemonId, name: "Executor", role: "executor", capabilities: ["codex"], processStartedAt: startedAt };
+  const registration = { id: daemonId, name: "Executor", role: "executor", capabilities: ["codex", "live-plan-v1"], processStartedAt: startedAt };
   await t.test("registration binds real agents and rejects human, foreign and unbound legacy identities", async () => {
     assert.equal((await call("register", owner.headers, registration)).response.status, 403);
     const forged = new Headers(executor.headers);
@@ -80,7 +80,7 @@ test("daemon authority scopes registration, queues and fenced operations", { ski
     assert.equal(result.body.config.executionDelegationSupported, true);
     assert.equal(result.body.actorId, agent.id); assert.equal(result.body.actorType, "agent");
     assert.equal((await call("register", foreign.headers, registration)).response.status, 404);
-    assert.equal((await call("register", executor.headers, { ...registration, role: "reviewer", capabilities: ["review"] })).response.status, 404);
+    assert.equal((await call("register", executor.headers, { ...registration, role: "reviewer", capabilities: ["review", "live-plan-v1"] })).response.status, 404);
     const legacy = randomUUID();
     await db.insert(daemons).values({ id: legacy, name: "Unbound legacy" });
     assert.equal((await call("register", executor.headers, { ...registration, id: legacy })).response.status, 404);
@@ -124,7 +124,7 @@ test("daemon authority scopes registration, queues and fenced operations", { ski
   await t.test("all roles require their explicit execution entitlement and scoped registration", async () => {
     for (const role of ["reviewer", "merger"]) {
       const id = randomUUID();
-      assert.equal((await call("register", executor.headers, { ...registration, id, role, capabilities: [role === "reviewer" ? "review" : "merge"] })).response.status, 201);
+      assert.equal((await call("register", executor.headers, { ...registration, id, role, capabilities: [role === "reviewer" ? "review" : "merge", "live-plan-v1"] })).response.status, 201);
       const candidate = await owner.service.requirementService.createRequirement(db, { projectId: project.id, title: `${role} work`, status: "approved" }, owner.actor);
       await owner.service.taskService.createTask(db, { projectId: project.id, requirementId: candidate.id, title: `${role} task` }, owner.actor);
       await db.update(requirements).set({ workflow: null, status: role === "reviewer" ? "in_review" : "ready_to_merge" }).where(eq(requirements.id, candidate.id));

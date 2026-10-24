@@ -2483,3 +2483,7 @@ arguments return HTTP 400; business errors return isError=true in the tool resul
 This is separate from the outbound `/api/v1/mcp/*` Registry. See the
 [MCP Server guide](../../docs/mcp-server.md) for setup, errors, bounds and
 [the contract](../../docs/mcp-server-contract.md) for the catalog.
+
+## Execution control and recovery
+
+See [the normative execution recovery contract](../../docs/live-planning-recovery.md#interfaces-and-compatibility) for durable control listing/acknowledgment/resume, run-authority verification, synchronization records, explicit evidence revalidation and human recovery decisions. Daemon mutation fences include `runId` in addition to `daemonId` and `leaseGeneration`; lane heartbeat alone never restores an invalidated run. Delegated Git fetch/verify is available only through the local supervisor broker at `POST /api/v1/execution/git`, with `{ "operation": "fetch" | "verify", "repositoryId": "<uuid>" }`. This local endpoint is not an unrestricted server Git executor.

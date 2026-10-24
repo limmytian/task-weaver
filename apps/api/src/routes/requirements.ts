@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import {
   createResourceServices,
+  createExecutionControlService,
+  executionRevalidationSchema,
   createRequirementSchema,
   updateRequirementSchema,
   listRequirementsSchema,
@@ -24,6 +26,13 @@ import {
 import type { Env } from "../middleware/actor.js";
 
 const requirements = new Hono<Env>();
+
+requirements.post("/requirements/:id/execution-recovery", async c => c.json(await createExecutionControlService(c.get("identity")).authorizeRecovery(c.get("db"), c.req.param("id"), await c.req.json())));
+
+requirements.post("/requirements/:id/execution-revalidation", async c => {
+  const input = executionRevalidationSchema.parse(await c.req.json());
+  return c.json(await createExecutionControlService(c.get("identity")).revalidate(c.get("db"), c.req.param("id"), input.reason, input.expectedPlanRevision));
+});
 
 requirements.get("/requirements/:id/workflow-cleanup", async (c) => c.json(await createResourceServices(c.get("identity")).requirementService.getWorkflowCleanupEligibility(c.get("db"), c.req.param("id"))));
 requirements.post("/requirements/:id/workflow-output-retire", async (c) => {
@@ -285,6 +294,7 @@ requirements.post("/requirements/:id/release", async (c) => {
       parsed.data.reason,
       parsed.data.daemonId,
       parsed.data.leaseGeneration,
+      parsed.data.runId,
     );
     return c.json(result);
   } catch (err) {

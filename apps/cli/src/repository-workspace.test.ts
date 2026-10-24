@@ -377,3 +377,63 @@ test('repository workspace locks recover stale owners and report live owner diag
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('controlled Git requires agent-led synchronization of existing worktrees and preserves stale dirty work', { timeout: 60000 }, async () => {
+  const { createControlledGit } = await import('./controlled-git.js')
+  const root = await mkdtemp(join(tmpdir(), 'tw-controlled-git-'))
+  const previousHome = process.env.HOME
+  const home = join(root, 'home')
+  await mkdir(home)
+  process.env.HOME = home
+  try {
+    const remote = await createRemote(root, 'sync')
+    const seed = join(root, 'sync-seed')
+    const repository = entry({ linkId: 'sync-link', requirementId: 'sync-requirement', repositoryId: 'sync-repo', name: 'sync', canonicalKey: 'local.test/task-weaver/sync', remote, workingBranch: 'req/sync' })
+    repository.link.operationCheckpoints = { fetch: { status: 'completed', attempt: 1, updatedAt: new Date().toISOString() } }
+    repository.link.resumeOperation = 'push'
+    const config: Config = { apiUrl: 'http://task-weaver.test', nodeId: 'node-a' }
+    const workspace = await provisionCompositeWorkspace({ config, requirement: { id: 'sync-requirement', title: 'Sync' }, entries: [repository], updateDelivery: async () => {} })
+    const path = workspace.repositories[0]!.worktreePath
+    git(['config', 'user.name', 'Task Weaver Test'], path)
+    git(['config', 'user.email', 'task-weaver@example.test'], path)
+    let authorityChecks = 0
+    const records: unknown[] = []
+    const controlled = createControlledGit({ config, workspace, entries: [repository], assertAuthority: async () => { authorityChecks++ }, record: async input => { records.push(input) } })
+    await controlled({ operation: 'verify', repositoryId: 'sync-repo' })
+    assert.equal(records.length, 1)
+    git(['checkout', '-b', 'req/sync'], seed)
+    await writeFile(join(seed, 'remote.txt'), 'new result from node B\n')
+    git(['add', '.'], seed); git(['commit', '-m', 'advance target on node B'], seed); git(['push', 'origin', 'req/sync'], seed)
+    const latest = git(['rev-parse', 'HEAD'], seed)
+    const oldHead = git(['rev-parse', 'HEAD'], path)
+    const fetched = await controlled({ operation: 'fetch', repositoryId: 'sync-repo' })
+    assert.equal(fetched.remoteTip, latest)
+    assert.equal(git(['rev-parse', 'HEAD'], path), oldHead, 'fetch does not advance an existing worktree')
+    await assert.rejects(controlled({ operation: 'verify', repositoryId: 'sync-repo' }), /not in working history/)
+    await writeFile(join(path, 'preserved.txt'), 'untracked obsolete-run candidate\n')
+    git(['merge', '--ff-only', latest], path)
+    await controlled({ operation: 'verify', repositoryId: 'sync-repo' })
+    assert.equal(await readFile(join(path, 'preserved.txt'), 'utf8'), 'untracked obsolete-run candidate\n')
+    await writeFile(join(path, 'local.txt'), 'legitimate local commit\n')
+    git(['add', 'local.txt'], path); git(['commit', '-m', 'local work'], path)
+    const localHead = git(['rev-parse', 'HEAD'], path)
+    await writeFile(join(seed, 'second.txt'), 'second remote result\n')
+    git(['add', '.'], seed); git(['commit', '-m', 'advance again'], seed); git(['push', 'origin', 'req/sync'], seed)
+    await assert.rejects(controlled({ operation: 'verify', repositoryId: 'sync-repo' }), /not in working history/)
+    assert.equal(git(['rev-parse', 'HEAD'], path), localHead, 'divergence must not reset or automatically merge old work')
+    git(['merge', '--no-edit', 'origin/req/sync'], path)
+    const verified = await controlled({ operation: 'verify', repositoryId: 'sync-repo' })
+    assert.equal(verified.includesRemoteTip, true)
+    assert.notEqual(verified.localHead, verified.remoteTip, 'valid local commits do not require HEAD equality')
+    git(['push', '--force', 'origin', `${oldHead}:refs/heads/req/sync`], seed)
+    await assert.rejects(controlled({ operation: 'verify', repositoryId: 'sync-repo' }), /rewritten or deleted/)
+    await assert.rejects(controlled({ operation: 'verify', repositoryId: 'sync-repo' }), /rewritten or deleted/, 'repeated fetch must not silently clear rewrite provenance')
+    assert.ok(authorityChecks >= 10)
+    const revoked = createControlledGit({ config, workspace, entries: [repository], assertAuthority: async () => { throw new Error('revoked execution') }, record: async () => assert.fail('revoked run recorded sync') })
+    await assert.rejects(revoked({ operation: 'fetch', repositoryId: 'sync-repo' }), /revoked execution/)
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME
+    else process.env.HOME = previousHome
+    await rm(root, { recursive: true, force: true })
+  }
+})

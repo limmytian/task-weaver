@@ -291,7 +291,7 @@ export class GenericGitAdapter {
         deliveryStatus: 'failed', pushStatus: 'failed', reviewStatus: 'not_supported', mergeStatus: 'pending',
         failureCode: 'git_stage_failed', failureSummary: failureSummary('Git stage failed', add),
       }
-      const commit = await this.git(options.credential, ['commit', '-m', `feat: ${options.title.slice(0, 72)}`], options.worktreePath)
+      const commit = await this.git(options.credential, ['commit', '-s', '-m', `feat: ${options.title.slice(0, 72)}`], options.worktreePath)
       if (!commit.ok) return {
         deliveryStatus: 'failed', pushStatus: 'failed', reviewStatus: 'not_supported', mergeStatus: 'pending',
         failureCode: 'git_commit_failed', failureSummary: failureSummary('Git commit failed', commit),

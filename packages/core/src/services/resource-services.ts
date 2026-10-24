@@ -1,3 +1,5 @@
+import { requireExecutionSynchronization } from "./execution-synchronization";
+import { planningImpact, invalidatePlanningExecutions } from "./planning-impact";
 import { withEventActor } from "./durable-events";
 import { synchronizeAuthorizedMcpTools } from "./mcp-sync";
 import { getArchivedResourceReadAuthority } from "./api-keys";
@@ -5,7 +7,7 @@ import { requireDaemonLease } from './daemon-lease-authorization';
 import { createTiExecutionService, isTiExecutionOperation } from './ti-execution';
 import { inArray, and, eq, isNull, sql, desc } from "drizzle-orm";
 import {
-  apiKeyProjectCreations, apiKeys, projectPreferences, type Database, daemons, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
+  apiKeyProjectCreations, apiKeys, projectPreferences, type Database, daemons, requirementClaims, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
   mcpServers, mcpTools, mcpLocalRequests, requirementRepositories, skillPackages, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
   documentRequirementLinks, projectMemberships, activityLog, executionDelegations, taskComments, workflowOutputs,
 } from "@task-weaver/db";
@@ -140,6 +142,11 @@ function bindServices(context?: VerifiedRequestContext) {
             const services = createResourceServices(context);
             call[3] = { createTask: services.taskService.createTask, createRun: services.tiAgentService.createRun };
           }
+          if (authority.bounds && ["updateTask", "updateTaskStatus", "updateDocument", "registerWorkflowOutput"].includes(name)) {
+            await requireExecutionSynchronization(txDb, authority.bounds.requirementId, authority.bounds.runId);
+          }
+          const impact = name === "updateTaskStatus" && call[6]?.daemonId ? [] : await planningImpact(txDb, name, call);
+          const previousClaims = impact.length ? await tx.select().from(requirementClaims).where(inArray(requirementClaims.requirementId, impact)) : [];
           let result: any;
           if (name === "createProject") {
             if (authority.actor.type !== "human" || !authority.grants.some(g => g.scope === "instance" && g.permissions.includes("project.create"))) throw new AuthorizationError();
@@ -186,6 +193,11 @@ function bindServices(context?: VerifiedRequestContext) {
               await requireResource(txDb, authority, "memory", result.id, "resource.write");
               await checkMemoryEntity(txDb, authority, result);
             }
+          }
+          await invalidatePlanningExecutions(txDb, impact, name, previousClaims);
+          if (group === "requirement" && result?.id && impact.includes(result.id)) {
+            const currentPlan = await tx.query.requirements.findFirst({ where: eq(requirements.id, result.id) });
+            if (currentPlan) result = { ...result, planRevision: currentPlan.planRevision, evidenceNeedsReview: currentPlan.evidenceNeedsReview };
           }
           if (["recordMemory", "updateMemory", "forgetMemory", "unlinkDocuments", "unlinkDocumentFromTask", "unlinkDocumentFromRequirement", "removeTaskDependency"].includes(name)) {
             const entityId = typeof call[1] === "string" ? call[1] : result?.id;
@@ -310,13 +322,13 @@ function authorizeDelegatedOperation(authority: ResourceAuthority, group: Group,
   if (name === "updateTask" && Object.keys(call[2] ?? {}).some(key => !["title", "description", "priority", "expectedAt", "expectedVersion", "version", "status", "reason", "daemonId", "leaseGeneration"].includes(key))) throw new AuthorizationError();
   if (name === "updateTaskStatus") {
     if (call[5] === true) throw new AuthorizationError();
-    const fence = { daemonId: authority.bounds!.daemonId ?? undefined, leaseGeneration: Number(authority.bounds!.leaseGeneration) };
+    const fence = { daemonId: authority.bounds!.daemonId ?? undefined, leaseGeneration: Number(authority.bounds!.leaseGeneration), runId: authority.bounds!.runId };
     if ((call[6]?.daemonId && call[6].daemonId !== fence.daemonId) || (call[6]?.leaseGeneration !== undefined && call[6].leaseGeneration !== fence.leaseGeneration)) throw new AuthorizationError();
     call[6] = fence;
   }
   if (name === "updateDocument" && Object.keys(call[2] ?? {}).some(key => !["title", "content", "version"].includes(key))) throw new AuthorizationError();
   if (name === "registerWorkflowOutput") {
-    call[2] = { ...call[2], daemonId: authority.bounds!.daemonId ?? undefined, leaseGeneration: Number(authority.bounds!.leaseGeneration) };
+    call[2] = { ...call[2], daemonId: authority.bounds!.daemonId ?? undefined, leaseGeneration: Number(authority.bounds!.leaseGeneration), runId: authority.bounds!.runId };
   }
 }
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { docTypeSchema } from "./documents";
 import {
+  executionRecoveryPolicySchema,
   modelTierSchema,
   requirementPrioritySchema,
   requirementStatusSchema,
@@ -140,6 +141,7 @@ export const planRequirementSchema = z.object({
   tags: z.array(z.string()).optional(),
   branchName: z.string().optional(),
   expectedAt: z.coerce.date().optional(),
+  recoveryPolicy: executionRecoveryPolicySchema.optional(),
   workflowPreset: workflowPresetSchema.optional(),
   workflow: requirementWorkflowSchema.optional(),
   dependsOn: z.array(planRequirementDependencySchema).default([]),

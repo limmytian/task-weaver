@@ -48,7 +48,7 @@ async function routeRequirementForCreatedTask(
   if (!requirement) throw new NotFoundError("Requirement not found");
   const nextStatus = requirementStatusAfterTaskCreation(requirement.status, taskStatus);
   if (requirement.workflow && !["done", "cancelled"].includes(taskStatus)) {
-    await assertRequirementLease(db, requirementId, actor, fence);
+    if (fence.daemonId || fence.leaseGeneration !== undefined) await assertRequirementLease(db, requirementId, actor, fence);
     if (Object.values(requirement.workflowState ?? {}).some((state) => state !== "pending")) {
       await db.update(requirements).set({ workflowState: { delivery: "pending", acceptance: "pending", integration: "pending" }, workflowStateRevision: requirement.workflowStateRevision + 1, updatedAt: new Date() }).where(eq(requirements.id, requirementId));
     }
@@ -58,6 +58,7 @@ async function routeRequirementForCreatedTask(
     status: nextStatus,
     daemonId: fence.daemonId,
     leaseGeneration: fence.leaseGeneration,
+    runId: fence.runId,
   }, actor);
 }
 
@@ -86,7 +87,7 @@ export async function createTask(
         input.requirementId,
         input.status ?? "todo",
         actor,
-        { daemonId: input.daemonId, leaseGeneration: input.leaseGeneration },
+        { daemonId: input.daemonId, leaseGeneration: input.leaseGeneration, runId: input.runId },
       );
     }
 
@@ -510,7 +511,7 @@ export async function updateTaskStatus(
   const task = await getTask(db, id);
   let activeRequirementClaim: Awaited<ReturnType<typeof assertRequirementLease>> = null;
 
-  if (task.requirementId) {
+  if (task.requirementId && (!["todo", "cancelled"].includes(newStatus) || leaseFence?.daemonId || leaseFence?.leaseGeneration !== undefined)) {
     activeRequirementClaim = await assertRequirementLease(db, task.requirementId, actor, leaseFence);
   }
 

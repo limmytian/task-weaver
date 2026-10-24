@@ -75,7 +75,7 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   const key = await fixture.identity.issueKey(fixture.owner.headers, agent.id, { name: "Workflow fixture", expiresAt: null, grants: [{ scope: "project", projectId: fixture.project.id, permissions: ["resource.read", "resource.write", "execution.run", "audit.read"] }] });
   const agentHeaders = new Headers({ authorization: `Bearer ${key.rawKey}`, "content-type": "application/json" });
   const daemonA = randomUUID(), daemonB = randomUUID();
-  for (const [id, nodeId] of [[daemonA, "node-a"], [daemonB, "node-b"]]) await json(await api("/daemons/register", "POST", { id, name: "Workflow fixture", nodeId, capabilities: ["codex", "executor:codex", "workflow-agent"], role: "executor" }, agentHeaders), 201);
+  for (const [id, nodeId] of [[daemonA, "node-a"], [daemonB, "node-b"]]) await json(await api("/daemons/register", "POST", { id, name: "Workflow fixture", nodeId, capabilities: ["codex", "executor:codex", "workflow-agent", "live-plan-v1"], role: "executor" }, agentHeaders), 201);
 
   const delivery = await create({ status: "approved", workflowPreset: "url" });
   const lane = await json(await api(`/daemons/${daemonA}/apply-requirement`, "POST", { projectId: fixture.project.id, workerIndex: 0 }, agentHeaders));
@@ -88,7 +88,7 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   const delegated = new Headers({ authorization: `Bearer ${capability.token}`, "content-type": "application/json" });
   await json(await api(`/requirements/${delivery.id}/workflow-outputs`, "POST", { type: "url", url: "https://example.test/delivery" }, delegated), 201);
   assert.equal((await advance(delivery.id, { stage: "delivery", expectedRevision: 1 }, delegated)).status, 403);
-  const delivered = await json(await advance(delivery.id, { stage: "delivery", expectedRevision: 1, daemonId: daemonA, leaseGeneration: lane.leaseGeneration }, agentHeaders));
+  const delivered = await json(await advance(delivery.id, { stage: "delivery", expectedRevision: 1, daemonId: daemonA, runId: lane.runId, leaseGeneration: lane.leaseGeneration }, agentHeaders));
   assert.equal(delivered.status, "done");
   assert.equal((await api("/auth/me", "GET", undefined, delegated)).status, 401);
 

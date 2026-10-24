@@ -30,6 +30,12 @@ export const executionSliceStatusSchema = z.enum([
   "cancelled",
 ]);
 
+export const executionRecoveryPolicySchema = z.object({
+  retrySafe: z.boolean().default(false),
+  maxAttempts: z.number().int().min(0).max(20).default(3),
+  graceMs: z.number().int().min(1000).max(86_400_000).default(120_000),
+});
+
 export const createRequirementSchema = z.object({
   projectId: z.string().uuid(),
   title: z.string().min(1).max(500),
@@ -40,6 +46,7 @@ export const createRequirementSchema = z.object({
   tags: z.array(z.string()).optional(),
   branchName: z.string().optional(),
   expectedAt: z.coerce.date().optional(),
+  recoveryPolicy: executionRecoveryPolicySchema.optional(),
   workflowPreset: workflowPresetSchema.optional(),
   workflow: requirementWorkflowSchema.optional(),
 });
@@ -53,6 +60,7 @@ export const updateRequirementSchema = z.object({
   tags: z.array(z.string()).optional(),
   branchName: z.string().nullable().optional(),
   expectedAt: z.coerce.date().nullable().optional(),
+  recoveryPolicy: executionRecoveryPolicySchema.optional(),
   workflowPreset: workflowPresetSchema.optional(),
   workflow: requirementWorkflowSchema.optional(),
   ...requirementLeaseFenceFields,

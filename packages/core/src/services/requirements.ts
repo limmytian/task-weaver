@@ -1,3 +1,4 @@
+import { executionControls, executionSynchronizations } from "@task-weaver/db";
 import { RequirementCompletionError } from "@task-weaver/contracts";
 import type { RetrievalPredicates } from "./retrieval-predicates";
 import type { SQL } from "drizzle-orm";
@@ -67,6 +68,7 @@ export async function createRequirement(
       modelTier: input.modelTier,
       tags: input.tags,
       branchName: input.branchName,
+      recoveryPolicy: input.recoveryPolicy,
       workflow: resolved.workflow,
       workflowSource: resolved.source,
       workflowRevision: 1,
@@ -110,7 +112,9 @@ export async function getRequirement(db: Database, id: string) {
     },
   });
   if (!requirement) throw new NotFoundError("Requirement not found");
-  return requirement;
+  const executionRecovery = await db.query.executionControls.findMany({ where: eq(executionControls.requirementId, id), orderBy: (control, { desc }) => [desc(control.createdAt)], limit: 10 });
+  const synchronization = await db.query.executionSynchronizations.findMany({ where: eq(executionSynchronizations.requirementId, id), orderBy: (sync, { desc }) => [desc(sync.verifiedAt)], limit: 20 });
+  return { ...requirement, executionRecovery, executionSynchronizations: synchronization };
 }
 
 export async function listWorkflowOutputs(db: Database, requirementId: string) {
@@ -235,6 +239,7 @@ export async function registerWorkflowOutput(
   const [output] = await db.insert(workflowOutputs).values({
     requirementId, taskId: input.taskId, executionSliceId: input.executionSliceId,
     workflowRevision: requirement.workflowRevision,
+    planRevision: requirement.planRevision,
     requirementRepositoryId: input.requirementRepositoryId, type: input.type,
     referenceId: input.referenceId, url: input.url, nodeId: input.nodeId,
     relativePath: input.relativePath, sizeBytes: input.sizeBytes, sha256: input.sha256,
@@ -263,6 +268,7 @@ export async function advanceWorkflowStage(
   if (["done", "cancelled", "archived"].includes(requirement.status)) throw new ValidationError("Requirement is terminal");
   if (requirement.workflowStateRevision !== input.expectedRevision) throw new ConflictError("Workflow state changed", requirement.workflowStateRevision);
   await assertRequirementLease(db, requirementId, actor, input);
+  if (requirement.evidenceNeedsReview) throw new ValidationError("Changed execution inputs require explicit evidence revalidation before delivery");
   const workflow = requirementWorkflowSchema.parse(requirement.workflow);
   const state = { delivery: "pending", acceptance: "pending", integration: "pending", ...requirement.workflowState };
   if (input.decision === "complete") {
@@ -520,10 +526,10 @@ export async function updateRequirement(
   actor: Actor,
 ) {
   const existing = await getRequirementOrThrow(db, id);
-  const { leaseGeneration, daemonId, workflow, workflowPreset, ...fields } = input;
+  const { leaseGeneration, daemonId, runId, workflow, workflowPreset, ...fields } = input;
 
-  if (input.status || leaseGeneration !== undefined || daemonId !== undefined) {
-    await assertRequirementLease(db, id, actor, { leaseGeneration, daemonId });
+  if ((input.status && !["draft", "approved", "in_progress", "cancelled", "archived"].includes(input.status)) || leaseGeneration !== undefined || daemonId !== undefined) {
+    await assertRequirementLease(db, id, actor, { leaseGeneration, daemonId, runId });
   }
 
   if (existing.status === "cancelled") {
@@ -540,7 +546,7 @@ export async function updateRequirement(
   }
   let workflowChanges: Record<string, unknown> = {};
   if (workflow || workflowPreset) {
-    await assertRequirementLease(db, id, actor, { leaseGeneration, daemonId });
+    await assertRequirementLease(db, id, actor, { leaseGeneration, daemonId, runId });
     if (workflow && workflowPreset) throw new ValidationError("Specify either a workflow or a workflow preset");
     if (!["draft", "approved"].includes(existing.status)) throw new ValidationError("Workflow changes require a draft or approved requirement");
     const activeTasks = await db.query.tasks.findMany({ where: eq(tasks.requirementId, id) });
@@ -553,6 +559,7 @@ export async function updateRequirement(
       workflowStateRevision: existing.workflowStateRevision + 1,
     };
   }
+  if (input.status && ["in_review", "ready_to_merge", "done"].includes(input.status) && existing.evidenceNeedsReview) throw new ValidationError("Changed execution inputs require explicit evidence revalidation");
   if (input.status === "done") {
     if (existing.workflow) {
       const state = existing.workflowState ?? {};
@@ -765,14 +772,14 @@ export async function updateExecutionSlice(
   compact = false,
 ) {
   const existing = await getExecutionSlice(db, sliceId, compact);
-  const { taskIds, leaseGeneration, daemonId, ...fields } = input;
+  const { taskIds, leaseGeneration, daemonId, runId, ...fields } = input;
 
-  if (input.status || leaseGeneration !== undefined || daemonId !== undefined) {
+  if ((input.status && !["todo", "cancelled"].includes(input.status)) || leaseGeneration !== undefined || daemonId !== undefined) {
     await assertRequirementLease(
       db,
       existing.requirementId,
       actor,
-      { leaseGeneration, daemonId },
+      { leaseGeneration, daemonId, runId },
     );
   }
 

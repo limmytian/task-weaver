@@ -15,6 +15,7 @@ export async function createTaskWorkerAccess(options: {
   runId: string
   workerIndex: number
   leaseGeneration: number
+  controlledGit?: (input: { operation: 'fetch' | 'verify'; repositoryId: string }) => Promise<unknown>
   signal?: AbortSignal
 }): Promise<{ environment: NodeJS.ProcessEnv; signal: AbortSignal; redact: (value: string) => string; close: () => Promise<void> }> {
   if (!options.config.apiKey) throw new Error('Task worker requires an authenticated supervisor')
@@ -33,7 +34,7 @@ export async function createTaskWorkerAccess(options: {
       workerIndex: options.workerIndex, leaseGeneration: options.leaseGeneration,
     }, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]) })
     secrets.add(capability.token)
-    broker = await createTaskAccessBroker({ apiUrl: credential.apiUrl, capability,
+    broker = await createTaskAccessBroker({ apiUrl: credential.apiUrl, capability, controlledGit: options.controlledGit,
       renew: async id => {
         const next = await request<TaskCapability>('POST', `${endpoint}/${id}/renew`, {}, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5_000)]) })
         secrets.add(next.token)

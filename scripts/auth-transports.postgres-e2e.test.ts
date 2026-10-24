@@ -163,7 +163,12 @@ test(
           if (authorization === undefined && publicRoutes.has(identity)) continue;
           const headers = new Headers({ "x-actor-id": randomUUID(), "x-actor-type": "human" });
           if (authorization) headers.set("authorization", authorization);
-          const response = await api.request(path, { method: route.method, headers });
+          // Inbound events authenticate a signed raw body instead of a collaboration credential.
+          // Supply a body so this inventory reaches signature verification rather than body validation.
+          const response = await api.request(path, {
+            method: route.method, headers,
+            ...(identity === "POST /api/v1/inbound/events/:sourceId" ? { body: "{}" } : {}),
+          });
           assert.equal(response.status, 401, `${identity}: ${authorization ?? "actor headers"}`);
         }
       }

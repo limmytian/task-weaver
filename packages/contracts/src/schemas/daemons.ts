@@ -247,6 +247,7 @@ export const applyMergeSchema = z.object({
 
 export const daemonConfigSchema = z.object({
   executionDelegationSupported: z.boolean().optional(),
+  livePlanControlSupported: z.boolean().optional(),
   mode: z.enum(["polling", "sse"]),
   pollingIntervalMs: z.number(),
   pollingBackoffMax: z.number(),

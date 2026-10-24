@@ -11,6 +11,7 @@ export const paginationSchema = z.object({
 });
 
 export const requirementLeaseFenceFields = {
+  runId: z.string().uuid().optional(),
   leaseGeneration: z.number().int().positive().optional(),
   daemonId: z.string().uuid().optional(),
 };
@@ -18,6 +19,7 @@ export const requirementLeaseFenceFields = {
 export type Actor = z.infer<typeof actorSchema>;
 export type Pagination = z.infer<typeof paginationSchema>;
 export interface RequirementLeaseFence {
+  runId?: string;
   leaseGeneration?: number;
   daemonId?: string;
 }

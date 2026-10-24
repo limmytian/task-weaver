@@ -286,6 +286,7 @@ tasks.patch("/tasks/:id/status", async (c) => {
       parsed.data.force,
       {
         leaseGeneration: parsed.data.leaseGeneration,
+        runId: parsed.data.runId,
         daemonId: parsed.data.daemonId,
       },
     );

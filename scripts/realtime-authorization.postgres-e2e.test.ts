@@ -129,10 +129,17 @@ test("realtime authorization rechecks resource scopes, credentials and stream re
     await reader.read();
     emit({ type: "task_created", projectId: other.id, taskId: randomUUID(), title: "Hidden", sequence: 987654 });
     emit({ type: "task_created", projectId: project.id, taskId: task.id, title: "Secret", attributes: { secret: "provider" }, sequence: 987655 });
-    const frame = new TextDecoder().decode((await reader.read()).value);
-    assert.ok(frame.includes('"sequence":1'));
-    for (const hidden of ["987654", "987655", "Hidden", "Secret", "provider", "attributes", "cursor"]) assert.ok(!frame.includes(hidden));
-    await reader.cancel();
+    try {
+      let frame = "";
+      // Initial reconciliation may enqueue a heartbeat before the resource event.
+      while (!frame.includes("event: task_created")) {
+        const next = await reader.read();
+        assert.equal(next.done, false);
+        frame += new TextDecoder().decode(next.value);
+      }
+      assert.ok(frame.includes('"sequence":1'));
+      for (const hidden of ["987654", "987655", "Hidden", "Secret", "provider", "attributes", "cursor"]) assert.ok(!frame.includes(hidden));
+    } finally { await reader.cancel(); }
   });
   await t.test("membership change closes a live stream before the next event", async () => {
     const response = await createAuthorizedEventStream(db, viewer.context, new Request("http://localhost/events"), { heartbeatMs: 10 });

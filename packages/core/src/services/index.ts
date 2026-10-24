@@ -81,3 +81,5 @@ export { connectPartnersMcp } from "./partners-mcp";
 export { createTiSandboxCleanup } from "./ti-sandbox-cleanup";
 
 export { createInboundSourceService, acceptInboundEvent, processInboundEventOnce, InboundRateLimitError } from "./inbound-events";
+
+export { createExecutionControlService } from "./execution-controls";

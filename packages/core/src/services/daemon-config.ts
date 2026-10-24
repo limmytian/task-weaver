@@ -4,6 +4,7 @@ export function getDaemonConfig(): DaemonConfig {
   const mode = process.env.TW_DAEMON_MODE === "sse" ? "sse" : "polling" as const;
   return {
     executionDelegationSupported: true,
+    livePlanControlSupported: true,
     mode,
     pollingIntervalMs: Number(process.env.TW_DAEMON_POLL_INTERVAL_MS) || 10_000,
     pollingBackoffMax: Number(process.env.TW_DAEMON_POLL_BACKOFF_MAX_MS) || 60_000,

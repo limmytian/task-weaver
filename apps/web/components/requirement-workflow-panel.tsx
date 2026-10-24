@@ -14,6 +14,10 @@ type Output = { id: string; type: string; summary: string | null; url: string | 
 type WorkflowRequirement = {
   id: string; status: string; workflow: unknown; workflowSource: string | null;
   workflowState: unknown; workflowStateRevision: number;
+  planRevision?: number; evidenceNeedsReview?: boolean; recoveryAttempts?: number;
+  recoveryPolicy?: { retrySafe: boolean; maxAttempts: number; graceMs: number };
+  executionRecovery?: Array<{ id: string; runId: string; daemonId: string; phase: string; reason: string; revision: number; deadline: Date | string; workspace: Record<string, unknown> | null }>;
+  executionSynchronizations?: Array<{ id: string; runId: string; repositoryId: string; remoteTip: string; planRevision: number; fetchedAt: Date | string }>;
   workflowOutputs?: Output[];
   workflowInputs?: Array<{ id: string; output: Output; taskId: string | null; executionSliceId: string | null }>;
 };
@@ -57,6 +61,17 @@ export function RequirementWorkflowPanel({ requirement }: { requirement: Workflo
   return <Card>
     <CardHeader><CardTitle>{workflow ? "Delivery, acceptance and integration" : "Legacy Git workflow"}</CardTitle></CardHeader>
     <CardContent className="space-y-4 text-sm">
+      <p className="text-muted-foreground">Plan revision {requirement.planRevision ?? 0}. Execution input edits stop affected runs. Notification receipt does not confirm that execution has stopped.</p>
+      {requirement.evidenceNeedsReview && <p role="alert" className="rounded border border-amber-500 p-3">The plan changed after work completed. Inspect historical evidence against the latest acceptance criteria and record explicit revalidation before delivery.</p>}
+      {requirement.executionRecovery?.map(control => <div key={control.id} className="rounded border p-3">
+        <p className="font-medium">Execution recovery: {control.phase}</p>
+        <p>{control.reason}</p>
+        <p className="break-all text-xs text-muted-foreground">Run {control.runId} · daemon {control.daemonId} · revision {control.revision} · deadline {new Date(control.deadline).toISOString()}</p>
+        {typeof control.workspace?.nodeId === "string" && <p className="text-xs text-muted-foreground">Node: {control.workspace.nodeId}</p>}
+      </div>)}
+      {requirement.executionSynchronizations?.slice(0, 3).map(sync => <p key={sync.id} className="break-all text-xs text-muted-foreground">Observed target baseline: {sync.remoteTip} · plan {sync.planRevision} · fetched {new Date(sync.fetchedAt).toISOString()} · run {sync.runId}. The remote branch may advance after this observation.</p>)}
+      {requirement.recoveryPolicy && <p className="text-xs text-muted-foreground">Recovery attempts: {requirement.recoveryAttempts ?? 0}/{requirement.recoveryPolicy.maxAttempts}. {requirement.recoveryPolicy.retrySafe ? "Cross-node retries may lose local progress and duplicate computation." : "Unknown replay safety requires manual recovery."} Local metadata does not reconstruct files.</p>}
+
       {!workflow && <p className="text-muted-foreground">This requirement keeps its existing Git delivery flow. Unstarted requirements can migrate to a configurable workflow.</p>}
       {workflow && <>
         <p className="text-muted-foreground">Source: {requirement.workflowSource ?? "explicit"} · {terminal ? "Workflow closed" : `Next action: ${nextStage ?? "complete"}`}</p>

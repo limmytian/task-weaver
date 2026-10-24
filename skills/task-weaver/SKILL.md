@@ -189,7 +189,7 @@ Rules:
 
 - Search and reuse the canonical repository before creating one; the same entry may serve unrelated Projects.
 - Add a repository to the Requirement explicitly before linking it to a Task. `tw task repo add --add-to-requirement` performs both writes intentionally.
-- A running slice receives a frozen repository manifest. Additions apply to the next slice.
+- A running slice receives a frozen repository manifest. Execution-relevant workspace changes fence the old run and require reconciliation against a fresh manifest.
 - Catalog endpoints and authentication policies contain no credentials. Credential profile references and readiness are actor/node scoped; trusted daemon code performs Git and forge operations.
 - Multi-repository delivery is independent. A successful repository remains successful when a sibling fails and only the failed link is retried.
 
@@ -685,3 +685,52 @@ This inbound Server is separate from the outbound Registry commands above.
 OAuth-only onboarding, resources, prompts, attachments, daemon controls, registry
 management and release actions are not part of this catalog. See the
 [MCP Server guide](../../docs/mcp-server.md) for credentials, limits and setup.
+
+## Live Planning and Recovery
+
+Planning changes from every interface use core impact classification. Descriptions,
+acceptance text, DAG/slice changes, ownership, repository scope and declared inputs
+can revoke a running execution immediately. Comments and priority do not restart
+it. A draft requirement is not schedulable; a draft predecessor still blocks work.
+Old execution authority cannot complete tasks, register outputs or advance delivery.
+The healthy supervisor renews lane ownership while stopping and assessing work,
+then starts a new run with current inputs or releases capacity while dependencies
+block it. Do not claim/release the lane from a daemon child.
+
+Before substantive source work in every new task execution, inspect the frozen
+manifest and preserved-work provenance. Old dirty files may belong to an invalidated
+run; never blindly continue, discard or publish them. Use:
+
+```bash
+tw execution git fetch <repository-id> --json
+# Inspect and reconcile with ordinary local Git; resolve conflicts and validate.
+tw execution git verify <repository-id> --json
+```
+
+Verify freshly fetches the target branch and records that its observed tip is in
+local working history. Substantive delegated updates and completion are rejected
+until linked repositories are verified. Repeat before completion if remote code
+advances. Report blocked/review with a concrete reason if synchronization or required
+inputs cannot be established. Do not force push. The daemon supplies authenticated
+Git operations without exposing credentials; it does not resolve conflicts for you.
+There is no last-handoff-commit baseline or automatic `tw workspace sync` engine.
+
+`tw req get <id> --json` exposes revision, recovery phases, deadline, attempt budget
+and evidence review. A human can use `tw req revalidate <id> --revision <n> --reason
+'<evidence>'` or `tw req recover <id> <control-id> --revision <n> --reason '<verified
+outcome>'` after inspection. Retry policy is explicit, for example:
+
+```bash
+tw req update <id> --recovery-policy '{"retrySafe":true,"maxAttempts":2,"graceMs":120000}'
+```
+
+Unknown safety defaults to manual recovery. After fenced authority and bounded
+grace, retry-safe work may restart on another node using durable inputs and pushed
+code, losing local progress and duplicating computation. Dependency waiting keeps
+files/metadata while releasing worker capacity. Local-only required inputs and
+uncertain external outcomes need explicit handling. Returning stale nodes stop old
+managed work and retain it for inspection; they cannot overwrite the replacement.
+No shared checkpoint upload is required. Leases cannot undo network requests already
+sent and do not promise exactly-once physical execution.
+
+See [the execution recovery specification](../../docs/live-planning-recovery.md).

@@ -1,3 +1,4 @@
+import { assertRunNotInvalidated } from "./planning-impact";
 import { liveTiRunAuthority } from './ti-execution-authorization';
 import { z } from 'zod';
 import { createHash, randomBytes } from 'node:crypto';
@@ -120,6 +121,7 @@ export function createExecutionDelegationService(context: VerifiedRequestContext
         if (!daemon || daemon.actorId !== authority.actor.id || daemon.actorType !== 'agent') throw new NotFoundError('Daemon not found');
         if (!claim || claim.id !== input.runId || claim.daemonId !== daemonId || claim.claimedBy !== authority.actor.id || claim.claimedByType !== 'agent'
           || claim.generation !== input.leaseGeneration || claim.workerIndex !== String(input.workerIndex) || claim.expiresAt <= new Date()) throw new ValidationError('Delegation requires the original active worker lease');
+        await assertRunNotInvalidated(tx, claim.id);
         const purpose = daemon.role === 'reviewer' ? 'review' : daemon.role === 'merger' ? 'merge' : input.taskId ? 'execute' : 'delivery';
         const scope = await requireResource(tx, authority, 'requirement', input.requirementId, phasePermission(purpose));
         const requirement = await tx.query.requirements.findFirst({ where: eq(requirements.id, input.requirementId) });

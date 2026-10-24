@@ -664,7 +664,7 @@ export async function reopenRequirementRepositoryDelivery(
     db,
     link.requirementId,
     actor,
-    { leaseGeneration: input.leaseGeneration, daemonId: input.daemonId },
+    { leaseGeneration: input.leaseGeneration, daemonId: input.daemonId, runId: input.runId },
     true,
   );
   if (!isTerminalRepositoryDeliveryStatus(link.deliveryStatus)) {
@@ -751,6 +751,7 @@ export async function updateRequirementRepositoryDelivery(
   const {
     leaseGeneration,
     daemonId,
+    runId,
     reviewPolicyDecision,
     reviewPolicyEvidence,
     manualOverrideReason,
@@ -762,7 +763,7 @@ export async function updateRequirementRepositoryDelivery(
     db,
     link.requirementId,
     actor,
-    { leaseGeneration, daemonId },
+    { leaseGeneration, daemonId, runId },
     true,
   );
   if (fields.deliveryStatus) {
@@ -994,7 +995,7 @@ export async function syncRequirementRepositoryForgeState(
     db,
     link.requirementId,
     actor,
-    { daemonId: input.daemonId, leaseGeneration: input.leaseGeneration },
+    { daemonId: input.daemonId, leaseGeneration: input.leaseGeneration, runId: input.runId },
     Boolean(input.daemonId || input.leaseGeneration !== undefined),
   );
 

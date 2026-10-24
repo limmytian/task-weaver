@@ -20,6 +20,7 @@ export async function createTaskAccessBroker(options: {
   capability: TaskCapability
   renew: (id: string) => Promise<TaskCapability>
   revoke: (id: string) => Promise<unknown>
+  controlledGit?: (input: { operation: 'fetch' | 'verify'; repositoryId: string }) => Promise<unknown>
   onInvalidation?: () => void
   fetch?: typeof fetch
 }): Promise<TaskAccessBroker> {
@@ -52,7 +53,8 @@ export async function createTaskAccessBroker(options: {
     if (!path.startsWith('/api/v1/') || path.startsWith('//')) return reject(403, 'Task access route denied')
     const url = new URL(path, 'http://127.0.0.1')
     const method = request.method ?? 'GET'
-    const allowed = method === 'GET' ? readPaths.test(url.pathname) : method === 'POST' ? writePaths.test(url.pathname) : method === 'PATCH' ? patchPaths.test(url.pathname) : false
+    const gitRequest = method === 'POST' && url.pathname === '/api/v1/execution/git' && Boolean(options.controlledGit)
+    const allowed = gitRequest || (method === 'GET' ? readPaths.test(url.pathname) : method === 'POST' ? writePaths.test(url.pathname) : method === 'PATCH' ? patchPaths.test(url.pathname) : false)
     if (!allowed) return reject(403, 'Task access route denied')
     await renewing
     if (closed || Date.parse(capability.delegation.expiresAt) <= Date.now()) return reject(401, 'Task access ended')
@@ -69,6 +71,18 @@ export async function createTaskAccessBroker(options: {
         chunks.push(Buffer.from(chunk))
       }
       if (closed || Date.parse(capability.delegation.expiresAt) <= Date.now()) return reject(401, 'Task access ended')
+      if (gitRequest) {
+        const input = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+        if (!input || !['fetch', 'verify'].includes(input.operation) || typeof input.repositoryId !== 'string' || !capability.delegation.repositoryIds.includes(input.repositoryId)) return reject(403, 'Git repository is outside this execution')
+        const live = await fetchUpstream(`${origin.origin}/api/v1/auth/me`, { headers: { authorization: `Bearer ${capability.token}` }, redirect: 'error', signal: controller.signal })
+        await live.body?.cancel()
+        if (!live.ok) { reject(401, 'Execution authority ended'); invalidate(); return }
+        const result = await options.controlledGit!(input)
+        if (closed) return
+        response.writeHead(200)
+        response.end(JSON.stringify(result))
+        return
+      }
       const upstream = await fetchUpstream(`${origin.origin}${url.pathname}${url.search}`, {
         method, redirect: 'error', signal: controller.signal,
         headers: { authorization: `Bearer ${capability.token}`, 'content-type': 'application/json' },
@@ -79,8 +93,11 @@ export async function createTaskAccessBroker(options: {
       response.writeHead(upstream.status)
       response.end(payload)
       if (upstream.status === 401) invalidate()
-    } catch {
-      if (!response.destroyed && !response.writableEnded) reject(503, 'Task access unavailable')
+    } catch (error) {
+      if (!response.destroyed && !response.writableEnded) {
+        if (gitRequest && error instanceof Error) reject(409, `Controlled Git blocked: ${error.message}`)
+        else reject(503, 'Task access unavailable')
+      }
     } finally {
       response.off('close', onClose)
       requests.delete(controller)

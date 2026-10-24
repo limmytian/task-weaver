@@ -5,6 +5,7 @@ import {
   executorToolSchema,
   createAuthorizedEventStream,
   createResourceServices,
+  createExecutionControlService,
   createExecutionDelegationService,
   issueExecutionDelegationSchema,
   daemonSloService,
@@ -43,6 +44,14 @@ daemonsRouter.get("/observability/overview", async (c) => {
   }
   return c.json(await daemonObservabilityService.getDaemonObservabilityOverview(c.get("db"), parsed.data));
 });
+
+daemonsRouter.post("/:id/execution-authority", async c => c.json(await createExecutionControlService(c.get("identity")).authority(c.get("db"), c.req.param("id"), await c.req.json())));
+
+daemonsRouter.post("/:id/git-synchronization", async c => c.json(await createExecutionControlService(c.get("identity")).synchronization(c.get("db"), c.req.param("id"), await c.req.json())));
+
+daemonsRouter.get("/:id/execution-controls", async c => c.json({ items: await createExecutionControlService(c.get("identity")).list(c.get("db"), c.req.param("id")) }));
+daemonsRouter.post("/:id/execution-controls/:controlId/ack", async c => c.json(await createExecutionControlService(c.get("identity")).acknowledge(c.get("db"), c.req.param("id"), c.req.param("controlId"), await c.req.json())));
+daemonsRouter.post("/:id/execution-controls/:controlId/resume", async c => c.json(await createExecutionControlService(c.get("identity")).resume(c.get("db"), c.req.param("id"), c.req.param("controlId"), await c.req.json())));
 
 // GET / - List all online/active daemons
 daemonsRouter.get("/", async (c) => {

@@ -1,3 +1,4 @@
+import { recordExpiredExecution, recordRecoveryAcquisitionBlock } from "./execution-recovery";
 import { matchDaemonTaskCapabilities } from "./daemon-capabilities";
 import { matchAvailableExecutor, availableDaemonCapabilities, listExecutorProfiles } from "./executor-availability";
 import type { MetadataReadScope } from "./metadata-read-scope";
@@ -437,7 +438,7 @@ const DAEMON_OFFLINE_RETAIN_HOURS = 24;
 
 export async function cleanExpiredDaemons(db: Database) {
   const now = new Date();
-  const oneMinuteAgo = new Date(now.getTime() - 60_000);
+  const oneMinuteAgo = new Date(now.getTime() - (Number(process.env.TW_DAEMON_FAILURE_TIMEOUT_MS) || 60_000));
 
   // Find all daemons that haven't sent heartbeats in 1 minute and are not offline
   const expired = await db.query.daemons.findMany({
@@ -499,6 +500,7 @@ export async function cleanExpiredDaemons(db: Database) {
             continue;
           }
 
+          if (activeClaim) await recordExpiredExecution(db, activeClaim);
           await reconcileInterruptedWorker(
             db,
             d,
@@ -891,6 +893,7 @@ export async function applyTask(
   if (caller) assertDaemonActor(daemon, caller);
   assertDaemonRole(daemon, "executor");
   if (!daemonAcceptsWork(daemon)) return null;
+  if (!daemon.capabilities?.includes("live-plan-v1")) return null;
   const actor = daemonActor(daemon);
 
 
@@ -1200,6 +1203,7 @@ export async function applyRequirement(
   modelTiers?: ("fast" | "standard" | "strong")[],
   caller?: Actor,
   authorizationFilter?: SQL,
+  retainedRunId?: string,
 ) {
   const daemon = await db.query.daemons.findFirst({
     where: eq(daemons.id, daemonId),
@@ -1211,6 +1215,7 @@ export async function applyRequirement(
   if (caller) assertDaemonActor(daemon, caller);
   assertDaemonRole(daemon, "executor");
   if (!daemonAcceptsWork(daemon)) return null;
+  if (!daemon.capabilities?.includes("live-plan-v1")) return null;
   const actor = daemonActor(daemon);
 
 
@@ -1239,7 +1244,7 @@ export async function applyRequirement(
     FROM tasks t
     JOIN requirements r ON r.id = t.requirement_id
     LEFT JOIN execution_slices es ON es.id = t.execution_slice_id
-    WHERE t.status = 'todo'
+    WHERE (t.status = 'todo' OR (t.status = 'in_progress' AND (EXISTS (SELECT 1 FROM requirement_claims expired_lane WHERE expired_lane.requirement_id = r.id AND expired_lane.expires_at <= now()) OR EXISTS (SELECT 1 FROM execution_controls recovery WHERE recovery.requirement_id = r.id AND recovery.phase NOT IN ('resumed', 'manual')))))
       AND ${authorizationFilter ?? sql`false`}
       ${projectFilter}
       ${tierFilter}
@@ -1296,7 +1301,7 @@ export async function applyRequirement(
       )
       AND NOT EXISTS (
         SELECT 1 FROM requirement_claims rc
-        WHERE rc.requirement_id = r.id AND rc.expires_at > now()
+        WHERE rc.requirement_id = r.id AND rc.expires_at > now() AND rc.id IS DISTINCT FROM ${retainedRunId ?? null}::uuid
       )
       AND NOT EXISTS (
         SELECT 1 FROM task_claims tc
@@ -1346,6 +1351,8 @@ export async function applyRequirement(
     const executionSliceId = row.execution_slice_id as string | null;
 
     try {
+      const expired = await db.query.requirementClaims.findFirst({ where: and(eq(requirementClaims.requirementId, requirementId), lt(requirementClaims.expiresAt, new Date())) });
+      if (expired) await recordExpiredExecution(db, expired);
       const claim = await claimRequirement(
         db,
         requirementId,
@@ -1362,7 +1369,7 @@ export async function applyRequirement(
           actor,
           "Picked up by daemon requirement lane",
           true,
-          { daemonId, leaseGeneration: claim.generation },
+          { daemonId, leaseGeneration: claim.generation, runId: claim.id },
         );
       } catch (err) {
         if (!(err instanceof ValidationError)) {
@@ -1425,7 +1432,7 @@ export async function applyRequirement(
         runId: claim.id,
       };
     } catch (err) {
-      if (err instanceof ValidationError) continue;
+      if (err instanceof ValidationError) { await recordRecoveryAcquisitionBlock(db, requirementId, err); continue; }
       throw err;
     }
   }
@@ -1439,7 +1446,7 @@ export async function applyRequirement(
       AND r.workflow #>> '{delivery,mode}' IN ('automatic', 'skip')
       AND (r.workflow_state->>'delivery' = 'pending' OR r.workflow_state->>'acceptance' = 'failed')
       AND NOT EXISTS (SELECT 1 FROM tasks open_task WHERE open_task.requirement_id = r.id AND open_task.status NOT IN ('done', 'cancelled'))
-      AND NOT EXISTS (SELECT 1 FROM requirement_claims rc WHERE rc.requirement_id = r.id AND rc.expires_at > now())
+      AND NOT EXISTS (SELECT 1 FROM requirement_claims rc WHERE rc.requirement_id = r.id AND rc.expires_at > now() AND rc.id IS DISTINCT FROM ${retainedRunId ?? null}::uuid)
       AND NOT EXISTS (SELECT 1 FROM requirement_dependencies rd JOIN requirements upstream ON upstream.id = rd.depends_on_requirement_id WHERE rd.requirement_id = r.id AND rd.type = 'blocks' AND upstream.status NOT IN ('done', 'cancelled'))
       AND NOT EXISTS (SELECT 1 FROM workflow_outputs wo WHERE wo.requirement_id = r.id AND wo.workflow_revision = r.workflow_revision AND wo.type = 'local' AND (wo.node_id IS DISTINCT FROM ${daemon.nodeId ?? null} OR wo.availability <> 'available'))
       AND NOT EXISTS (SELECT 1 FROM workflow_inputs wi JOIN workflow_outputs wo ON wo.id = wi.output_id WHERE wi.requirement_id = r.id AND wo.type = 'local' AND (wo.node_id IS DISTINCT FROM ${daemon.nodeId ?? null} OR wo.availability <> 'available'))
@@ -1475,6 +1482,7 @@ export async function applyReview(
   if (caller) assertDaemonActor(daemon, caller);
   assertDaemonRole(daemon, "reviewer");
   if (!daemonAcceptsWork(daemon)) return null;
+  if (!daemon.capabilities?.includes("live-plan-v1")) return null;
   const executorTools = (daemon.capabilities ?? []).filter(tool => ["codex", "claude", "agy", "aider", "cursor"].includes(tool));
   if (executorTools.length && !(await availableDaemonCapabilities(db, daemon.id, executorTools)).length) return null;
   const actor = daemonActor(daemon);
@@ -1606,6 +1614,7 @@ export async function applyMerge(
   if (caller) assertDaemonActor(daemon, caller);
   assertDaemonRole(daemon, "merger");
   if (!daemonAcceptsWork(daemon)) return null;
+  if (!daemon.capabilities?.includes("live-plan-v1")) return null;
   const actor = daemonActor(daemon);
 
 

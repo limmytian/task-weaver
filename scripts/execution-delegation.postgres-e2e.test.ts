@@ -72,7 +72,7 @@ test("execution capabilities enforce immutable task bounds and revocable lease a
     return { response, body: await response.json() as any };
   }
   const daemonId = randomUUID(), startedAt = new Date().toISOString();
-  const registration = { id: daemonId, name: "Executor", role: "executor", capabilities: ["codex"], processStartedAt: startedAt };
+  const registration = { id: daemonId, name: "Executor", role: "executor", capabilities: ["codex", "live-plan-v1"], processStartedAt: startedAt };
   assert.equal((await call("register", executor.headers, registration)).response.status, 201);
   const requirement = await owner.service.requirementService.createRequirement(db, { projectId: project.id, title: "Bound execution", status: "approved" }, owner.actor);
   const task = await owner.service.taskService.createTask(db, { projectId: project.id, requirementId: requirement.id, title: "Current task" }, owner.actor);

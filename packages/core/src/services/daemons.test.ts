@@ -5,6 +5,9 @@ import { eq } from "drizzle-orm";
 import { subscribe } from "@task-weaver/realtime";
 import {
   executorAvailability,
+  executionDelegations,
+  executionControls,
+  requirementRepositories,
   webhookEvents,
   activityLog,
   daemonWorkerProgress,
@@ -144,6 +147,7 @@ class FakeDb {
   private idCounter = 1;
 
   query = {
+    executionControls: { findFirst: async () => undefined },
     requirements: {
       findFirst: async (options: Row) => {
         const id = this.idFromWhere(options?.where, requirements);
@@ -310,7 +314,7 @@ class FakeDb {
   select() {
     return {
       from: (table: unknown) => ({
-        where: () => { assert.equal(table, executorAvailability); return { limit: async () => [] }; },
+        where: () => { if (table === requirementRepositories || table === tasks) return []; assert.equal(table, executorAvailability); return { limit: async () => [] }; },
         innerJoin: () => ({
           where: (condition: unknown) => {
             if (table !== requirementDependencies) {
@@ -356,6 +360,7 @@ class FakeDb {
             },
           };
         }
+        if (table === executionControls) return { onConflictDoNothing: async () => undefined, onConflictDoUpdate: async () => undefined };
         const inserted = this.insertRow(table, values);
         return {
           onConflictDoNothing: async () => inserted,
@@ -402,6 +407,7 @@ class FakeDb {
       priority: "medium",
       modelTier: "standard",
       leaseGeneration: 0,
+      recoveryPolicy: { retrySafe: false, maxAttempts: 3, graceMs: 120000 },
       tags: [],
       branchName: `req/${id}`,
       createdBy: "test",
@@ -441,13 +447,13 @@ class FakeDb {
       status: "idle",
       controlState: "running",
       controlReason: null,
-      capabilities: ["codex"],
       activeTaskIds: [],
       activeWorkerStates: [],
       lastHeartbeatAt: now,
       createdAt: now,
       updatedAt: now,
       ...values,
+      capabilities: [...(values.capabilities ?? ["codex"]), "live-plan-v1"],
     });
   }
 
@@ -483,6 +489,7 @@ class FakeDb {
   }
 
   private updateRows(table: unknown, condition: unknown, values: Row) {
+    if (table === executionDelegations) return [];
     const ids = this.idsFromCondition(condition);
     const conditionText = sqlText(condition);
     let rows = this.rowsForTable(table).filter((row) => this.matchesIds(row, ids));
@@ -1413,7 +1420,7 @@ test("one actor can run three isolated daemon roles concurrently", async () => {
       id: daemonA,
       name: "executor",
       role: "executor",
-      capabilities: ["codex"],
+      capabilities: ["codex", "live-plan-v1"],
       processStartedAt,
       workerCapacity: 2,
     }, actor),
@@ -1421,7 +1428,7 @@ test("one actor can run three isolated daemon roles concurrently", async () => {
       id: reviewerDaemon,
       name: "reviewer",
       role: "reviewer",
-      capabilities: ["review", "codex"],
+      capabilities: ["review", "codex", "live-plan-v1"],
       processStartedAt,
       workerCapacity: 1,
     }, actor),
@@ -1429,7 +1436,7 @@ test("one actor can run three isolated daemon roles concurrently", async () => {
       id: mergerDaemon,
       name: "merger",
       role: "merger",
-      capabilities: ["merge"],
+      capabilities: ["merge", "live-plan-v1"],
       processStartedAt,
       workerCapacity: 1,
     }, actor),
@@ -1589,7 +1596,7 @@ test("task status changes advance authoritative worker progress automatically", 
     { id: "agent-a", type: "agent" },
     "Task implementation completed",
     false,
-    { daemonId: daemonA, leaseGeneration: selected.leaseGeneration },
+    { daemonId: daemonA, leaseGeneration: selected.leaseGeneration, runId: selected.runId },
   );
 
   await updateTaskStatus(
@@ -1599,7 +1606,7 @@ test("task status changes advance authoritative worker progress automatically", 
     { id: "agent-a", type: "agent" },
     "Advancing to the next task",
     false,
-    { daemonId: daemonA, leaseGeneration: selected.leaseGeneration },
+    { daemonId: daemonA, leaseGeneration: selected.leaseGeneration, runId: selected.runId },
   );
 
   assert.equal(db.daemonWorkerProgress.get(`${daemonA}:0`)?.currentTaskId, "task-next");
@@ -1711,7 +1718,7 @@ test("stale daemon generations cannot heartbeat or release a reclaimed Requireme
       actorA,
       "stale progress",
       false,
-      { daemonId: daemonA, leaseGeneration: first.generation },
+      { daemonId: daemonA, leaseGeneration: first.generation, runId: first.id },
     ),
     ValidationError,
   );
@@ -1719,7 +1726,7 @@ test("stale daemon generations cannot heartbeat or release a reclaimed Requireme
     () => updateRequirement(
       db as any,
       "req-1",
-      { status: "in_review", daemonId: daemonA, leaseGeneration: first.generation },
+      { status: "in_review", daemonId: daemonA, leaseGeneration: first.generation, runId: first.id },
       actorA,
     ),
     ValidationError,
@@ -1736,13 +1743,13 @@ test("stale daemon generations cannot heartbeat or release a reclaimed Requireme
     actorB,
     "current progress",
     false,
-    { daemonId: daemonB, leaseGeneration: second.generation },
+    { daemonId: daemonB, leaseGeneration: second.generation, runId: second.id },
   );
   assert.equal(task.status, "in_progress");
   const requirement = await updateRequirement(
     db as any,
     "req-1",
-    { status: "in_review", daemonId: daemonB, leaseGeneration: second.generation },
+    { status: "in_review", daemonId: daemonB, leaseGeneration: second.generation, runId: second.id },
     actorB,
   );
   assert.equal(requirement.status, "in_review");

@@ -129,3 +129,27 @@ test('expiry cancels in-flight access even when the supervisor renewal cannot co
     assert.equal(invalidations, 1)
   } finally { await broker.close() }
 })
+
+test('controlled Git stays scoped to the current capability and exposes actionable synchronization failures', async () => {
+  const cap = capability()
+  const repositoryId = randomUUID()
+  cap.delegation.repositoryIds = [repositoryId]
+  let gitCalls = 0
+  let authorityCalls = 0
+  const broker = await createTaskAccessBroker({ apiUrl: 'https://tw.example', capability: cap,
+    renew: async () => cap, revoke: async () => {},
+    fetch: async (_url, input) => { authorityCalls++; assert.equal(new Headers(input?.headers).get('authorization'), `Bearer ${cap.token}`); return Response.json({ actor: {} }) },
+    controlledGit: async input => { gitCalls++; assert.equal(input.repositoryId, repositoryId); throw new Error('Latest observed target tip is not in working history') },
+  })
+  try {
+    const call = (repositoryId: string) => fetch(`${broker.apiUrl}/api/v1/execution/git`, { method: 'POST', headers: { authorization: `Bearer ${broker.apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ operation: 'verify', repositoryId }) })
+    assert.equal((await call(randomUUID())).status, 403)
+    assert.equal(gitCalls, 0)
+    const blocked = await call(repositoryId)
+    assert.equal(blocked.status, 409)
+    const detail = await blocked.json() as { error: string }
+    assert.match(detail.error, /target tip is not in working history/)
+    assert.equal(gitCalls, 1)
+    assert.equal(authorityCalls, 1)
+  } finally { await broker.close() }
+})

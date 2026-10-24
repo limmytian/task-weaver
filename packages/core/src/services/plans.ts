@@ -153,6 +153,7 @@ export async function applyPlan(
         expectedAt: requirement.expectedAt,
         workflow: requirement.workflow,
         workflowPreset: requirement.workflowPreset,
+        recoveryPolicy: requirement.recoveryPolicy,
       }, actor);
       refs.requirements.set(requirement.key, created.id);
     }

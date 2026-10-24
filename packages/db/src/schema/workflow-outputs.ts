@@ -7,6 +7,7 @@ import { requirementRepositories } from "./repositories";
 export const workflowOutputs = pgTable("workflow_outputs", {
   id: uuid("id").primaryKey().defaultRandom(),
   requirementId: uuid("requirement_id").references(() => requirements.id, { onDelete: "cascade" }).notNull(),
+  planRevision: integer("plan_revision").default(0).notNull(),
   workflowRevision: integer("workflow_revision").default(1).notNull(),
   taskId: uuid("task_id").references(() => tasks.id, { onDelete: "set null" }),
   executionSliceId: uuid("execution_slice_id").references(() => executionSlices.id, { onDelete: "set null" }),

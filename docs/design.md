@@ -718,3 +718,7 @@ credentials and text-based estimates. Embedding usage is separate. See
 [Agent token usage](agent-token-usage.md) for contracts, limits and validation.
 
 [Requirement workflows](workflows.md)
+
+## Live planning and execution recovery
+
+The normative [live planning and execution recovery contract](live-planning-recovery.md) defines transactional impact classification, per-run fencing, durable controls, bounded best-effort node recovery, and agent-led synchronization against the latest target branch. Lane ownership and execution authority are distinct; local recovery metadata is not a shared file checkpoint.

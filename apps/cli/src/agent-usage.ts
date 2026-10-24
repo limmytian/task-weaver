@@ -196,14 +196,14 @@ export async function runMeteredAgent(
     ...options,
     signal,
     onStderr: (chunk) => { detector?.push('stderr', chunk); options.onStderr?.(chunk) },
-    onSpawn: () => {
+    onSpawn: (pid) => {
       launched = true
       startedAt = new Date().toISOString()
       flushing = true
       inFlight = flush(unknownUsage(), 'running', null).finally(() => {
         flushing = false
       })
-      options.onSpawn?.()
+      options.onSpawn?.(pid)
     },
     onStdout: (chunk) => {
       detector?.push('stdout', chunk)

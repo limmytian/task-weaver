@@ -46,7 +46,7 @@ function leaseFenceFromEnvironment() {
   const leaseGeneration = Number(process.env.TW_REQUIREMENT_LEASE_GENERATION)
   const daemonId = process.env.TW_DAEMON_ID
   return Number.isInteger(leaseGeneration) && leaseGeneration > 0 && daemonId
-    ? { leaseGeneration, daemonId }
+    ? { leaseGeneration, daemonId, runId: process.env.TW_DAEMON_RUN_ID }
     : {}
 }
 

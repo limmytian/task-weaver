@@ -151,7 +151,7 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
   });
   await t.test("active and inactive legacy daemons require fresh registration and explicit resume", async () => {
     for (const daemon of [active, inactive]) {
-      const registration = await call("daemons/register", executor.headers, { id: daemon.id, name: "Recovered fixture", role: "executor", processStartedAt: new Date().toISOString(), capabilities: ["codex", "tw-v0.3.3-development"], workerCapacity: 4 });
+      const registration = await call("daemons/register", executor.headers, { id: daemon.id, name: "Recovered fixture", role: "executor", processStartedAt: new Date().toISOString(), nodeId: "upgrade-fixture", capabilities: ["codex", "live-plan-v1", "tw-v0.3.3-development"], workerCapacity: 4 });
       assert.equal(registration.status, 201, JSON.stringify(registration.body));
       assert.equal((await call(`daemons/${daemon.id}/status`, executor.headers, { status: "idle", activeTaskIds: [] })).status, 200);
       const paused = await call(`daemons/${daemon.id}/apply-requirement`, executor.headers, { projectId: project.id, workerIndex: 0 });
@@ -175,11 +175,14 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
     await assert.rejects(runtime.verify(new Headers({ authorization: `Bearer ${child.token}` })));
     const blocked = await call(`daemons/${active.id}/apply-requirement`, executor.headers, { projectId: project.id, workerIndex: 0 });
     assert.equal(blocked.body.requirement, null, "Interrupted in-progress work is not silently resumed");
-    const recovery = await executor.service.claimService.claimRequirement(db, requirement.id, executor.actor, 2, { daemonId: active.id, workerIndex: 0 });
-    const reconciled = await call(`daemons/${active.id}/reconcile`, executor.headers, { runId: recovery.id, workerIndex: 0, requirementId: requirement.id, leaseGeneration: recovery.generation, reason: "Explicit clean disposable recovery", workspaceState: "clean" });
-    assert.equal(reconciled.status, 200, JSON.stringify(reconciled.body));
-    await executor.service.claimService.releaseRequirement(db, requirement.id, executor.actor, "Reconciliation complete", active.id, recovery.generation);
-    const result = await call(`daemons/${active.id}/apply-requirement`, executor.headers, { projectId: project.id, workerIndex: 0 });
+    const controls = await call(`daemons/${active.id}/execution-controls`, executor.headers, undefined, "GET");
+    const control = controls.body.items.find((row: any) => row.runId === lane.runId);
+    assert.ok(control, "Expired execution must have a durable stop/reassessment record");
+    for (const phase of ["received", "stopping", "stopped", "reconciling"]) {
+      const acknowledged = await call(`daemons/${active.id}/execution-controls/${control.id}/ack`, executor.headers, { phase, revision: control.revision, workspace: { nodeId: "upgrade-fixture", state: "clean", summary: "Explicit disposable stop and local inspection" } });
+      assert.equal(acknowledged.status, 200, JSON.stringify(acknowledged.body));
+    }
+    const result = await call(`daemons/${active.id}/execution-controls/${control.id}/resume`, executor.headers, { workerIndex: 0 });
     assert.equal(result.status, 200, JSON.stringify(result.body));
     assert.equal(result.body.requirement.id, requirement.id);
     assert.ok(result.body.leaseGeneration > lane.leaseGeneration);
@@ -193,7 +196,7 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
       const work = await owner.service.taskService.createTask(db, { projectId: project.id, requirementId: req.id, title: "Pending diff" }, owner.actor);
       const workerIndex = index + 1;
       const claim = await executor.service.claimService.claimRequirement(db, req.id, executor.actor, 2, { daemonId: active.id, workerIndex });
-      await executor.service.taskService.updateTaskStatus(db, work.id, "in_progress", executor.actor, "Disposable interrupted work", false, { daemonId: active.id, leaseGeneration: claim.generation });
+      await executor.service.taskService.updateTaskStatus(db, work.id, "in_progress", executor.actor, "Disposable interrupted work", false, { daemonId: active.id, runId: claim.id, leaseGeneration: claim.generation });
       const result = await call(`daemons/${active.id}/reconcile`, executor.headers, { runId: claim.id, workerIndex, requirementId: req.id, leaseGeneration: claim.generation, reason: "Explicit disposable workspace recovery", workspaceState, pendingDiffSummary: "Synthetic unreviewed changes" });
       assert.equal(result.status, 200, JSON.stringify(result.body));
       assert.equal(result.body.recoveryDisposition, workspaceState === "dirty" ? "resume" : "quarantine");

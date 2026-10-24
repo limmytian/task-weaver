@@ -1,3 +1,6 @@
+import { recordLocalExecution, clearLocalExecution, reconcileLocalExecution, observedLocalStop, localExecutionInventory } from "../local-execution-inventory.js";
+import { createControlledGit } from "../controlled-git.js";
+import { monitorExecutionControl, type ExecutionControl } from "../execution-control-monitor.js";
 import { ExecutorStatusClient } from '../executor-status-client.js'
 import { ExecutorResourceBlocked } from '../executor-availability.js'
 import { createTaskWorkerAccess } from '../task-worker-access.js'
@@ -16,7 +19,7 @@ import {
   throwIfCancelled,
 } from '../daemon-lifecycle.js'
 import { LeaseSupervisor, type LeaseHealthSnapshot } from '../lease-supervisor.js'
-import { get, request } from '../client.js'
+import { ApiError, get, request } from '../client.js'
 import { loadConfig, type Config } from '../config.js'
 import {
   mergeRequirementBranch,
@@ -690,6 +693,7 @@ export function registerDaemon(program: Command): void {
         role: 'executor',
         capabilities: [
           ...tools,
+          'live-plan-v1',
           ...tools.map((tool) => `executor:${tool}`),
           ...auxiliaryCapabilities,
           ...supportedModelTiers.map((tier) => `model-tier:${tier}`),
@@ -700,8 +704,8 @@ export function registerDaemon(program: Command): void {
         workerCapacity: numWorkers,
       })
 
-      if (registerRes.config?.executionDelegationSupported !== true) {
-        throw new Error('Authenticated task delegation is not available; daemon stopped before acquisition or execution')
+      if (registerRes.config?.executionDelegationSupported !== true || registerRes.config?.livePlanControlSupported !== true) {
+        throw new Error('Authenticated task delegation or live planning control is not available; daemon stopped before acquisition or execution')
       }
 
       const serverConfig: DaemonConfig = registerRes.config ?? {
@@ -829,7 +833,7 @@ export function registerDaemon(program: Command): void {
         const requirement = lane.requirement
         const workflow = requirementWorkflowSchema.parse(requirement.workflow)
         if (workflow.integration.target && ['git_provider', 'git_direct'].includes(workflow.integration.method) && lane.repositories.some((entry) => entry.link.baseBranch !== workflow.integration.target)) throw new Error('Git integration target must match every repository base branch')
-        const fence = { daemonId, leaseGeneration: lane.leaseGeneration }
+        const fence = { daemonId, leaseGeneration: lane.leaseGeneration, runId: lane.runId }
         const active = () => { throwIfCancelled(signal); leaseSupervisor.assertHealthy(String(w.index)) }
         const patchDelivery = async (linkId: string, fields: Record<string, unknown>) => {
           active()
@@ -843,7 +847,7 @@ export function registerDaemon(program: Command): void {
         await reportDaemonStatus('busy')
         let succeeded = false
         try {
-          const workspace = await provisionCompositeWorkspace({
+          const workspace = await provisionCompositeWorkspace({ assertAuthority: async () => { await daemonPost(`/api/v1/daemons/${daemonId}/execution-authority`, { requirementId: requirement.id, ...fence }) }, executionRunId: lane.runId,
             config: cliConfig, requirement, executionSlice: lane.executionSlice,
             entries: workflowNeedsWorktree(workflow) ? lane.repositories : [], updateDelivery: patchDelivery, includeDeliveredRepositories: true, signal,
           })
@@ -863,7 +867,7 @@ export function registerDaemon(program: Command): void {
               workerIndex: w.index, stage: 'delivery', tool, argv: buildArgv(tool, prompt, workspace.rootPath, modelMappings.strong, thinkMappings.strong), cwd: workspace.rootPath, signal })
           }
           if (result.decision === 'complete' && gitDelivery) {
-            const deliveries = await finalizeCompositeWorkspace({ config: cliConfig, workspace, entries: lane.repositories, requirement, updateDelivery: patchDelivery, createPullRequest: workflow.delivery.method === 'git_pr', signal })
+            const deliveries = await finalizeCompositeWorkspace({ assertAuthority: async () => { await daemonPost(`/api/v1/daemons/${daemonId}/execution-authority`, { requirementId: requirement.id, ...fence }) }, config: cliConfig, workspace, entries: lane.repositories, requirement, updateDelivery: patchDelivery, createPullRequest: workflow.delivery.method === 'git_pr', signal })
             if (deliveries.some((delivery) => delivery.result.deliveryStatus === 'failed')) throw new Error('Git delivery remains incomplete')
             for (const delivery of deliveries) await daemonPost(`/api/v1/requirements/${requirement.id}/workflow-outputs`, {
               type: workflow.delivery.method, requirementRepositoryId: delivery.linkId,
@@ -893,7 +897,7 @@ export function registerDaemon(program: Command): void {
       const runAgent = async (w: WorkerState, lane: RequirementLane, signal: AbortSignal): Promise<void> => {
         if (lane.stage === 'delivery') return runDelivery(w, lane, signal)
         const { requirement, executionSlice, task } = lane
-        const leaseFence = { daemonId, leaseGeneration: lane.leaseGeneration }
+        const leaseFence = { daemonId, leaseGeneration: lane.leaseGeneration, runId: lane.runId }
         const assertLease = () => leaseSupervisor.assertHealthy(String(w.index))
         const assertActive = () => {
           throwIfCancelled(signal)
@@ -936,13 +940,15 @@ export function registerDaemon(program: Command): void {
             .replace(/^-+|-+$/g, '')
             .slice(0, 40)
           branchName = `req/${(requirement.id as string).slice(0, 8)}-${slug}`
-          try {
-            await fencedPatch(`/api/v1/requirements/${requirement.id}`, { branchName })
-            console.log(`[Daemon] Worker ${w.index} auto-generated branch name '${branchName}' and saved to requirement.`)
-          } catch (err) {
-            console.warn(`[Daemon] Worker ${w.index} could not save branch name to requirement:`, err instanceof Error ? err.message : String(err))
-          }
+          console.log(`[Daemon] Worker ${w.index} using deterministic branch '${branchName}'.`)
         }
+
+        if (!lane.runId) throw new Error('Execution requires a current run identifier')
+        await daemonPost(`/api/v1/daemons/${daemonId}/execution-authority`, { requirementId: requirement.id, ...leaseFence })
+        await reconcileLocalExecution(requirement.id, lane.runId, async previous => {
+          try { await daemonPost(`/api/v1/daemons/${previous.daemonId}/execution-authority`, { requirementId: previous.requirementId, runId: previous.runId, leaseGeneration: previous.leaseGeneration }); return true }
+          catch (error) { if (error instanceof ApiError && [400, 401, 403, 404].includes(error.status)) return false; throw error }
+        })
 
         let workspace: Awaited<ReturnType<typeof provisionCompositeWorkspace>>
         let workflowInputRows: any[] = []
@@ -953,12 +959,12 @@ export function registerDaemon(program: Command): void {
             await verifyLocalWorkflowOutputs(workflowInputRows.map((input) => input.output), cliConfig,
               (output, probe) => daemonPost(`/api/v1/requirements/${output.requirementId}/workflow-output-availability`, { outputId: output.id, nodeId: cliConfig.nodeId, daemonId, ...probe }), signal)
           }
-          workspace = await provisionCompositeWorkspace({
+          workspace = await provisionCompositeWorkspace({ assertAuthority: async () => { await daemonPost(`/api/v1/daemons/${daemonId}/execution-authority`, { requirementId: requirement.id, ...leaseFence }) }, executionRunId: lane.runId,
             config: cliConfig,
-            requirement: { id: requirement.id, title: requirement.title, branchName },
+            requirement: { id: requirement.id, title: requirement.title, branchName, planRevision: requirement.planRevision },
             executionSlice: executionSlice ? { id: executionSlice.id, orderIndex: executionSlice.orderIndex } : null,
             entries: requirement.workflow && !workflowNeedsWorktree(requirementWorkflowSchema.parse(requirement.workflow)) ? [] : lane.repositories,
-            includeDeliveredRepositories: Boolean(requirement.workflow),
+            includeDeliveredRepositories: true,
             updateDelivery: (linkId, fields) => fencedPatch(`/api/v1/requirement-repositories/${linkId}/delivery`, fields),
             signal,
           })
@@ -996,7 +1002,7 @@ export function registerDaemon(program: Command): void {
           currentTaskId: task.id,
           phase: 'executing',
           message: initialWorkspaceSnapshot.workspaceState === 'dirty'
-            ? 'Resuming preserved uncommitted workspace changes'
+            ? 'Preserved changes require provenance inspection and synchronization'
             : 'Worker workspace is ready',
           workspaceState: initialWorkspaceSnapshot.workspaceState,
           recoveryDisposition: initialWorkspaceSnapshot.workspaceState === 'dirty' ? 'resume' : 'none',
@@ -1028,12 +1034,15 @@ ${workspace.repositories.length > 0
 - The 'tw' CLI is available and pre-configured with the correct API URL and key. Use it directly (no setup needed).
 - Run: cd ${workspacePath} before any file edits or shell commands.
 - Work inside the listed repository directories when the task changes source code. For non-repository outputs, follow the configured delivery instructions and register the output in Task Weaver.
-- Do not run authenticated Git network operations; the daemon owns fetch, push, and forge delivery.`
+- Before substantive source changes, run tw execution git fetch <repository-id> for every repository. Inspect status/diffs and reconcile local history with the returned latest target tip using local Git merge/rebase. Resolve conflicts and validate, then run tw execution git verify <repository-id>. The server rejects substantive progress until this verification is recorded.
+- The daemon owns authenticated Git network requests, push and forge delivery. Use controlled fetch/verify again before completing work. If synchronization fails or required predecessor work was never pushed, report blocked with a concrete reason. Do not force push or blindly reuse stale dirty files.`
 
         const workspaceRecoverySection = `Workspace Recovery State:
 - State: ${initialWorkspaceSnapshot.workspaceState}
+- Previous run manifest, when present: ${join(workspacePath, 'previous-execution-provenance.json')}. Compare its run ID, repository scope and baseline with the current frozen manifest before selectively reusing files.
 - Existing changes: ${initialWorkspaceSnapshot.pendingDiffSummary ?? 'none'}
-- Dirty changes are intentionally preserved for this run. Continue from them instead of resetting or discarding them.`
+- Unknown external outcomes require verification or manual recovery; never repeat a non-idempotent action just because a task was retried.
+- Existing files may belong to an invalidated execution. Inspect provenance, diffs and the latest plan before selectively reusing and validating them. Never blindly continue stale work or discard it. Synchronization failure must be reported as blocked with a concrete reason.`
 
         const taskRoadmap = [task].map((t: any, index: number) =>
           `${index + 1}. [${t.status}] ${t.title} (${t.id})${t.description ? `\n   ${t.description}` : ''}`,
@@ -1136,7 +1145,19 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           console.warn(`[Daemon] Worker ${w.index} quarantined workspace in state '${initialWorkspaceSnapshot.workspaceState}' before agent launch.`)
         }
         if (!lane.runId) throw new Error('Task execution requires a recorded worker run')
-        const access = await createTaskWorkerAccess({ config: cliConfig, daemonId, requirementId: requirement.id, taskId: task.id, runId: lane.runId, workerIndex: w.index, leaseGeneration: lane.leaseGeneration, signal })
+        const executionController = new AbortController()
+        const executionSignal = AbortSignal.any([signal, executionController.signal])
+        const controlEndpoint = `/api/v1/daemons/${daemonId}/execution-controls`
+        const readControls = async () => (await daemonGet<{ items: ExecutionControl[] }>(controlEndpoint)).items
+        const controlMonitor = monitorExecutionControl({ runId: lane.runId, list: readControls,
+          acknowledge: (control, phase) => daemonPost(`${controlEndpoint}/${control.id}/ack`, { phase, revision: control.revision }),
+          stop: () => executionController.abort(new Error('Execution invalidated by a planning change')),
+        })
+        const controlledGit = createControlledGit({ config: cliConfig, workspace, entries: lane.repositories, signal: executionSignal,
+          assertAuthority: async () => { assertActive(); await daemonPost(`/api/v1/daemons/${daemonId}/execution-authority`, { requirementId: requirement.id, ...leaseFence }) },
+          record: input => daemonPost(`/api/v1/daemons/${daemonId}/git-synchronization`, { ...input, requirementId: requirement.id, ...leaseFence }),
+        })
+        const access = await createTaskWorkerAccess({ config: cliConfig, daemonId, requirementId: requirement.id, taskId: task.id, runId: lane.runId, workerIndex: w.index, leaseGeneration: lane.leaseGeneration, signal: executionSignal, controlledGit }).catch(error => { controlMonitor.close(); throw error })
         let childResult: Awaited<ReturnType<typeof runMeteredAgent>>
         try {
         if (!workspaceQuarantined) await executorStatus.assertAvailable(toolCmd)
@@ -1156,6 +1177,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           buildArgv(toolCmd, prompt, workspacePath, selectedModel, selectedReasoningEffort),
           {
             cwd: workspacePath,
+            onSpawn: pid => { try { if (pid) recordLocalExecution({ requirementId: requirement.id, daemonId, runId: lane.runId!, leaseGeneration: lane.leaseGeneration, pid, workspacePath }) } catch (error) { executionController.abort(error) } },
             env: access.environment,
             timeoutMs: Number.isFinite(configuredAgentTimeout) && configuredAgentTimeout > 0
               ? configuredAgentTimeout
@@ -1177,7 +1199,47 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           if (!(error instanceof ExecutorResourceBlocked)) throw error
           childResult = { ok: false, status: null, stdout: '', stderr: '', command: 'executor-preflight', signal: null,
             timedOut: false, cancelled: false, outputTruncated: false, durationMs: 0, resourceInterruption: error.observation }
-        } finally { await access.close() }
+        } finally { controlMonitor.close(); await access.close(); await clearLocalExecution(requirement.id, lane.runId) }
+        // runMeteredAgent has observed managed process exit. Keep the lane heartbeat while inspecting.
+        let control = (await readControls()).find(row => row.runId === lane.runId)
+        if (control) {
+          const snapshot = await inspectCompositeWorkspace(workspace, { config: cliConfig, entries: lane.repositories })
+          let replacement: any = { requirement: null, recovery: 'manual' }
+          for (let attempt = 0; attempt < 8; attempt++) {
+            const acknowledge = (phase: string) => daemonPost(`${controlEndpoint}/${control!.id}/ack`, {
+              phase, revision: control!.revision, workspace: { path: workspacePath, nodeId: cliConfig.nodeId, state: snapshot.workspaceState, summary: snapshot.pendingDiffSummary ?? 'No pending diff' },
+            })
+            try {
+              await acknowledge('received')
+              await acknowledge('stopping')
+              await acknowledge('stopped')
+              await acknowledge('reconciling')
+              replacement = await daemonPost<any>(`${controlEndpoint}/${control.id}/resume`, { workerIndex: w.index })
+              break
+            } catch (error) {
+              if (!(error instanceof ApiError) || error.status !== 409) throw error
+              control = (await readControls()).find(row => row.runId === lane.runId)
+              if (!control) throw new Error('Execution control disappeared during reconciliation')
+              if (attempt === 7) await acknowledge('manual')
+            }
+          }
+          if (replacement.requirement && replacement.runId && !signal.aborted) {
+            w.runId = replacement.runId
+            return runAgent(w, { ...replacement, repositories: normalizeRequirementRepositoryEntries(replacement.repositories ?? []) }, signal)
+          }
+          await daemonPost(`/api/v1/requirements/${requirement.id}/release`, { reason: 'Plan recovery is blocked or needs manual assessment; worker capacity released', ...leaseFence }).catch(() => undefined)
+          leaseSupervisor.unregister(String(w.index))
+          w.activeProcess = false
+          w.currentTaskId = null
+          w.currentRequirementId = null
+          w.currentExecutionSliceId = null
+          w.runId = null
+          w.leaseGeneration = null
+          await reportDaemonStatus(workers.some(candidate => candidate.activeProcess) ? 'busy' : 'idle')
+          if (opts.once) await stopDaemon('idle', 1)
+          else { resetBackoff(w); schedulePoll(w) }
+          return
+        }
         if (childResult.cancelled && !signal.aborted && !childResult.timedOut && !childResult.resourceInterruption) {
           try {
             assertActive()
@@ -1259,7 +1321,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
               pendingDiffSummary: workspaceSnapshot.pendingDiffSummary,
               sliceSummary: `${reason}; active work was reconciled from durable progress.`,
               handoffSummary: workspaceSnapshot.workspaceState === 'dirty'
-                ? 'Resume the preserved workspace changes before starting new work.'
+                ? 'Inspect preserved changes against the latest plan and remote target branch before selective reuse; do not blindly continue obsolete execution state.'
                 : workspaceSnapshot.workspaceState === 'conflicted' || workspaceSnapshot.workspaceState === 'missing'
                   ? 'Workspace was quarantined and requires operator review.'
                   : 'Retry only tasks that were active when the worker stopped.',
@@ -1339,7 +1401,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
                   let finalizationSummary = `Delivery stage reached with ${reqTasks.length} terminal tasks. Method: ${method}.`
                   if (method === 'git_branch' || method === 'git_pr') {
                     if (lane.repositories.length === 0) throw new Error('Git delivery requires a linked repository')
-                    const delivery = await finalizeCompositeWorkspace({
+                    const delivery = await finalizeCompositeWorkspace({ assertAuthority: async () => { await daemonPost(`/api/v1/daemons/${daemonId}/execution-authority`, { requirementId: requirement.id, ...leaseFence }) },
                       config: cliConfig, workspace, entries: lane.repositories,
                       requirement: { title: req.title },
                       updateDelivery: (linkId, fields) => fencedPatch(`/api/v1/requirement-repositories/${linkId}/delivery`, fields),
@@ -1370,7 +1432,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
                   }
                   console.log(`[Daemon] Worker ${w.index} completed configured delivery for requirement ${requirementId}.`)
                 } else {
-                const delivery = await finalizeCompositeWorkspace({
+                const delivery = await finalizeCompositeWorkspace({ assertAuthority: async () => { await daemonPost(`/api/v1/daemons/${daemonId}/execution-authority`, { requirementId: requirement.id, ...leaseFence }) },
                   config: cliConfig,
                   workspace,
                   entries: lane.repositories,
@@ -1470,18 +1532,49 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           }
 
           await executorStatus.refresh()
-          const res = await daemonPost<{ requirement: any | null; stage?: 'execution' | 'delivery'; executionSlice?: any | null; task: any | null; tasks: any[]; repositories: RequirementRepositoryEntry[]; executorTool?: string | null; eligibility?: SchedulerEligibilityDiagnostics; leaseGeneration?: number; runId?: string }>(`/api/v1/daemons/${daemonId}/apply-requirement`, {
+          const acquireNextLane = () => daemonPost<{ requirement: any | null; stage?: 'execution' | 'delivery'; executionSlice?: any | null; task: any | null; tasks: any[]; repositories: RequirementRepositoryEntry[]; executorTool?: string | null; eligibility?: SchedulerEligibilityDiagnostics; leaseGeneration?: number; runId?: string }>(`/api/v1/daemons/${daemonId}/apply-requirement`, {
             projectId: opts.project,
             workerIndex: w.index,
             modelTiers: supportedModelTiers.length > 0 ? supportedModelTiers : undefined,
             includeDiagnostics: true,
           })
+          if (w.index === 0) for (const previous of localExecutionInventory()) {
+            if (previous.daemonId === daemonId) continue
+            try {
+              // Successful authorized reads establish whether the old run was superseded; a 403 alone is not proof.
+              const requirement = await daemonGet<any>(`/api/v1/requirements/${previous.requirementId}`)
+              const claim = await daemonGet<any>(`/api/v1/requirements/${previous.requirementId}/claim`)
+              const fenced = !claim || claim.id !== previous.runId || Date.parse(claim.expiresAt) <= Date.now()
+                || requirement.executionRecovery?.some((control: any) => control.runId === previous.runId)
+              if (fenced) await reconcileLocalExecution(previous.requirementId, `reconcile-${daemonId}`, async () => false)
+            } catch (error) {
+              console.warn(`[Daemon] Local execution ${previous.runId} awaits authorized reconciliation: ${error instanceof Error ? error.message : String(error)}`)
+            }
+          }
+          let recoveredLane: any = null
+          const pending = await daemonGet<{ items: ExecutionControl[] }>(`/api/v1/daemons/${daemonId}/execution-controls`)
+          for (const control of pending.items) {
+            if (!control.requirementId || ['resumed', 'blocked', 'manual'].includes(control.phase)) continue
+            const stopped = observedLocalStop(control.requirementId, control.runId)
+            if (!stopped) continue
+            try {
+              for (const phase of ['received', 'stopping', 'stopped', 'reconciling']) await daemonPost(`/api/v1/daemons/${daemonId}/execution-controls/${control.id}/ack`, {
+                phase, revision: control.revision, workspace: { path: stopped.workspacePath, nodeId: cliConfig.nodeId, state: 'unknown', summary: 'Local supervisor durably observed managed process-group termination before reconnect' },
+              })
+              recoveredLane = await daemonPost<any>(`/api/v1/daemons/${daemonId}/execution-controls/${control.id}/resume`, { workerIndex: w.index })
+              if (recoveredLane.requirement) break
+            } catch (error) {
+              if (!(error instanceof ApiError) || ![400, 403, 409].includes(error.status)) throw error
+            }
+          }
+          const res = recoveredLane?.requirement ? recoveredLane : await acquireNextLane()
           if (res && res.requirement && (res.task || res.stage === 'delivery') && res.leaseGeneration) {
             if (lifecycle.isDraining) {
               await daemonPost(`/api/v1/requirements/${res.requirement.id}/release`, {
                 reason: 'daemon entered drain mode during acquisition',
                 daemonId,
                 leaseGeneration: res.leaseGeneration,
+                runId: res.runId,
               }).catch(() => undefined)
               return
             }
@@ -1525,7 +1618,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
                 resourceInterruption: error instanceof ExecutorResourceBlocked,
               }).then(() => { recoveryRecorded = true }).catch(() => undefined)
               if (!(error instanceof ExecutorResourceBlocked) || recoveryRecorded) await daemonPost(`/api/v1/requirements/${res.requirement.id}/release`, {
-                reason: 'Worker stopped before successful task completion', daemonId, leaseGeneration: res.leaseGeneration,
+                reason: 'Worker stopped before successful task completion', daemonId, leaseGeneration: res.leaseGeneration, runId: res.runId,
               }).catch(() => undefined)
               leaseSupervisor.unregister(String(w.index))
               w.activeProcess = false
@@ -1718,14 +1811,14 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         id: daemonId,
         name: `review-daemon-${host}`,
         role: 'reviewer',
-        capabilities: ['review', ...tools, ...(reviewTool ? ['workflow-agent'] : [])],
+        capabilities: ['review', 'live-plan-v1', ...tools, ...(reviewTool ? ['workflow-agent'] : [])],
         host,
         nodeId: cliConfig.nodeId,
         processStartedAt: identity.processStartedAt,
         workerCapacity: numWorkers,
       })
-      if (reviewRegistration.config?.executionDelegationSupported !== true) {
-        throw new Error('Authenticated task delegation is not available; daemon stopped before acquisition or execution')
+      if (reviewRegistration.config?.executionDelegationSupported !== true || reviewRegistration.config?.livePlanControlSupported !== true) {
+        throw new Error('Authenticated task delegation or live planning control is not available; daemon stopped before acquisition or execution')
       }
 
       const executorStatus = new ExecutorStatusClient(daemonId, reviewTool ? [reviewTool] : [])
@@ -1906,7 +1999,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
       ) => {
         const requirement = lane.requirement
         const requirementId = requirement.id as string
-        const leaseFence = { daemonId, leaseGeneration: lane.leaseGeneration }
+        const leaseFence = { daemonId, leaseGeneration: lane.leaseGeneration, runId: lane.runId }
         const assertLease = () => leaseSupervisor.assertHealthy(String(w.index))
         const assertActive = () => {
           throwIfCancelled(signal)
@@ -1939,7 +2032,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
             await verifyLocalWorkflowOutputs([...outputRows, ...inputs.map((input) => input.output)], cliConfig,
               (output, probe) => daemonPost(`/api/v1/requirements/${output.requirementId}/workflow-output-availability`, { outputId: output.id, nodeId: cliConfig.nodeId, daemonId, ...probe }), signal)
             const reviewPrompt = `Perform only the acceptance stage. Integration is a later stage; its outputs are not acceptance prerequisites. Local availability reporting is performed by the daemon; inspect file bytes directly instead of calling tw req output verify.\nReview this Task Weaver requirement delivery.\nRequirement: ${requirement.title}\nDescription: ${requirement.description ?? ''}\nDelivery instructions: ${workflow.delivery.instructions ?? ''}\nAcceptance instructions: ${workflow.acceptance.instructions ?? ''}\nRequired checks: ${(workflow.acceptance.requiredChecks ?? []).join('; ') || 'None'}\nRegistered outputs: ${JSON.stringify(outputRows)}\nLocal artifact root: ${process.env.TW_ARTIFACT_ROOT ?? join(homedir(), '.task-weaver', 'artifacts')}\nInspect the outputs and any available workspace.\n${extraWorkerPrompt ?? ''}\n${WORKFLOW_RESULT_PROTOCOL}`
-            const workspace = await provisionCompositeWorkspace({
+            const workspace = await provisionCompositeWorkspace({ assertAuthority: async () => { await daemonPost(`/api/v1/daemons/${daemonId}/execution-authority`, { requirementId: requirement.id, ...leaseFence }) }, executionRunId: lane.runId,
               config: cliConfig, requirement, executionSlice: lane.executionSlice,
               entries: workflowNeedsWorktree(requirementWorkflowSchema.parse(workflow)) ? lane.repositories ?? [] : [], updateDelivery: () => Promise.resolve(undefined),
               includeDeliveredRepositories: true,
@@ -1972,7 +2065,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
 
           const updateDelivery = (linkId: string, fields: Record<string, unknown>) =>
             fencedPatch(`/api/v1/requirement-repositories/${linkId}/delivery`, fields)
-          const workspace = await provisionCompositeWorkspace({
+          const workspace = await provisionCompositeWorkspace({ assertAuthority: async () => { await daemonPost(`/api/v1/daemons/${daemonId}/execution-authority`, { requirementId: requirement.id, ...leaseFence }) }, executionRunId: lane.runId,
             config: cliConfig,
             requirement,
             executionSlice: lane.executionSlice,
@@ -2472,14 +2565,14 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         id: daemonId,
         name: `merge-daemon-${host}`,
         role: 'merger',
-        capabilities: ['merge', ...integrationTools, ...(integrationTool ? ['workflow-agent'] : [])],
+        capabilities: ['merge', 'live-plan-v1', ...integrationTools, ...(integrationTool ? ['workflow-agent'] : [])],
         host,
         nodeId: cliConfig.nodeId,
         processStartedAt: identity.processStartedAt,
         workerCapacity: numWorkers,
       })
-      if (mergeRegistration.config?.executionDelegationSupported !== true) {
-        throw new Error('Authenticated task delegation is not available; daemon stopped before acquisition or execution')
+      if (mergeRegistration.config?.executionDelegationSupported !== true || mergeRegistration.config?.livePlanControlSupported !== true) {
+        throw new Error('Authenticated task delegation or live planning control is not available; daemon stopped before acquisition or execution')
       }
 
       const mergeDaemonConfig: DaemonConfig = mergeRegistration.config ?? {
@@ -2616,7 +2709,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
       ) => {
         const requirement = lane.requirement
         const requirementId = requirement.id as string
-        const leaseFence = { daemonId, leaseGeneration: lane.leaseGeneration }
+        const leaseFence = { daemonId, leaseGeneration: lane.leaseGeneration, runId: lane.runId }
         const assertLease = () => leaseSupervisor.assertHealthy(String(w.index))
         const assertActive = () => {
           throwIfCancelled(signal)
@@ -2655,7 +2748,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           if (requirement.workflow) {
             const method = requirement.workflow.integration.method as string
             if (method !== 'git_provider' && method !== 'git_direct') {
-              const workspace = await provisionCompositeWorkspace({
+              const workspace = await provisionCompositeWorkspace({ assertAuthority: async () => { await daemonPost(`/api/v1/daemons/${daemonId}/execution-authority`, { requirementId: requirement.id, ...leaseFence }) }, executionRunId: lane.runId,
                 config: cliConfig, requirement, executionSlice: lane.executionSlice,
                 entries: workflowNeedsWorktree(requirementWorkflowSchema.parse(requirement.workflow)) ? lane.repositories : [],
                 includeDeliveredRepositories: true,
@@ -2707,7 +2800,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           }
           const updateDelivery = (linkId: string, fields: Record<string, unknown>) =>
             fencedPatch(`/api/v1/requirement-repositories/${linkId}/delivery`, fields)
-          const workspace = await provisionCompositeWorkspace({
+          const workspace = await provisionCompositeWorkspace({ assertAuthority: async () => { await daemonPost(`/api/v1/daemons/${daemonId}/execution-authority`, { requirementId: requirement.id, ...leaseFence }) }, executionRunId: lane.runId,
             config: cliConfig,
             requirement,
             executionSlice: lane.executionSlice,

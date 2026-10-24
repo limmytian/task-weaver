@@ -1,3 +1,4 @@
+import { reconcileLocalExecution } from './local-execution-inventory.js'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { mkdir, readFile, readdir, realpath, rm, writeFile } from 'fs/promises'
 import { randomUUID } from 'crypto'
@@ -234,13 +235,11 @@ export async function withRepositoryWorkspaceLock<T>(options: {
   }
 }
 
-function cancellableAdapter(provider: string, signal?: AbortSignal) {
-  return getGitProviderAdapter(
-    provider,
-    signal
-      ? (command, args, cwd, environment) => runTrustedGitCommand(command, args, cwd, environment, signal)
-      : undefined,
-  )
+function cancellableAdapter(provider: string, signal?: AbortSignal, assertAuthority?: () => Promise<void>) {
+  return getGitProviderAdapter(provider, async (command, args, cwd, environment) => {
+    if (assertAuthority && (command !== 'git' || ['clone', 'fetch', 'push'].includes(args[0] ?? ''))) await assertAuthority()
+    return runTrustedGitCommand(command, args, cwd, environment, signal)
+  })
 }
 
 function safeSegment(value: string) {
@@ -390,16 +389,23 @@ async function existingBranchWorktree(
 
 export async function provisionCompositeWorkspace(options: {
   config: Config
-  requirement: { id: string; title: string; branchName?: string | null }
+  requirement: { id: string; title: string; branchName?: string | null; planRevision?: number }
   executionSlice?: { id: string; orderIndex?: number } | null
   entries: RequirementRepositoryEntry[]
   updateDelivery: UpdateDelivery
   preserveDeliveryStatus?: boolean
   deliveryPhase?: RepositoryDeliveryPhase
   includeDeliveredRepositories?: boolean
+  executionRunId?: string
+  assertAuthority?: () => Promise<void>
   signal?: AbortSignal
 }): Promise<CompositeWorkspace> {
   const { config, requirement, executionSlice, updateDelivery } = options
+  if (options.executionRunId && options.assertAuthority) {
+    await options.assertAuthority()
+    // A current exclusive run fence establishes that a different local run no longer owns this workspace.
+    await reconcileLocalExecution(requirement.id, options.executionRunId, async () => false)
+  }
   const deliveryPhase = options.deliveryPhase ?? 'execution'
   const entries = options.entries
     .filter((entry) => options.includeDeliveredRepositories ? !isTerminalRepositoryEntry(entry) : isRepositoryRelevantToPhase(entry, deliveryPhase))
@@ -449,7 +455,7 @@ export async function provisionCompositeWorkspace(options: {
       })
       throw new Error(`Repository ${repository.canonicalKey} is not ready: ${credential.reasonCode}`)
     }
-    const adapter = cancellableAdapter(repository.provider, options.signal)
+    const adapter = cancellableAdapter(repository.provider, options.signal, options.assertAuthority)
     const remote = remoteFor(repository, credential.transport)
     if (!remote) throw new Error(`Repository ${repository.canonicalKey} has no ${credential.transport} clone endpoint`)
     const basePath = baseCheckoutPath(config, repository)
@@ -479,7 +485,7 @@ export async function provisionCompositeWorkspace(options: {
       }
       if (!canSkipCompletedOperation('clone')) await checkpoint('clone', 'skipped', 'Existing checkout verified')
     }
-    if (!canSkipCompletedOperation('fetch')) {
+    {
       await checkpoint('fetch', 'in_progress')
       const fetch = await adapter.git(credential, ['fetch', '--prune', 'origin'], basePath)
       if (!fetch.ok) {
@@ -515,7 +521,10 @@ export async function provisionCompositeWorkspace(options: {
       } else {
         const remoteBranch = await adapter.git(credential, ['rev-parse', '--verify', '--quiet', `origin/${workingBranch}`], basePath)
         const startRef = remoteBranch.ok ? `origin/${workingBranch}` : `origin/${baseBranch}`
-        const add = await adapter.git(credential, ['worktree', 'add', '-B', workingBranch, worktreePath, startRef], basePath)
+        const localBranch = await adapter.git(credential, ['rev-parse', '--verify', '--quiet', `refs/heads/${workingBranch}`], basePath)
+        const add = await adapter.git(credential, localBranch.ok
+          ? ['worktree', 'add', worktreePath, workingBranch]
+          : ['worktree', 'add', '-b', workingBranch, worktreePath, startRef], basePath)
         if (!add.ok) {
           await updateDelivery(link.id, {
             deliveryStatus: 'failed', failureCode: 'git_worktree_failed',
@@ -527,6 +536,13 @@ export async function provisionCompositeWorkspace(options: {
     }
     await configureSecretFreeWorktree(adapter, credential, worktreePath)
     const head = await adapter.git(credential, ['rev-parse', 'HEAD'], worktreePath)
+    if (deliveryPhase !== 'execution') {
+      const remoteTip = await adapter.git(credential, ['rev-parse', '--verify', `refs/remotes/origin/${workingBranch}`], worktreePath)
+      if (remoteTip.ok) {
+        const included = await adapter.git(credential, ['merge-base', '--is-ancestor', remoteTip.stdout.trim(), 'HEAD'], worktreePath)
+        if (!included.ok) throw new Error('Workspace synchronization required before review/integration: the agent must reconcile the latest target branch and validate')
+      }
+    }
     const workspaceKey = `${config.nodeId ?? 'local-node'}:${requirement.id}:${repository.id}`
     await updateDelivery(link.id, {
       workspaceKey,
@@ -552,8 +568,16 @@ export async function provisionCompositeWorkspace(options: {
   }
 
   const manifestPath = join(rootPath, 'repository-manifest.json')
+  if (options.executionRunId && existsSync(manifestPath)) {
+    const previous = JSON.parse(await readFile(manifestPath, 'utf8'))
+    if (previous.executionRunId !== options.executionRunId) {
+      writeFileSync(join(rootPath, 'previous-execution-provenance.json'), JSON.stringify(previous, null, 2) + '\n', { mode: 0o600 })
+    }
+  }
   writeFileSync(manifestPath, JSON.stringify({
     version: manifestVersion,
+    executionRunId: options.executionRunId ?? null,
+    planRevision: requirement.planRevision ?? null,
     requirementId: requirement.id,
     executionSliceId: executionSlice?.id ?? null,
     frozenAt: new Date().toISOString(),
@@ -579,6 +603,7 @@ export async function finalizeCompositeWorkspace(options: {
   updateDelivery: UpdateDelivery
   signal?: AbortSignal
   createPullRequest?: boolean
+  assertAuthority?: () => Promise<void>
 }): Promise<Array<{ linkId: string; result: RepositoryDeliveryResult }>> {
   const entryByLink = new Map(options.entries.map((entry) => [entry.link.id, entry]))
   const results: Array<{ linkId: string; result: RepositoryDeliveryResult }> = []
@@ -587,7 +612,7 @@ export async function finalizeCompositeWorkspace(options: {
     const entry = entryByLink.get(provisioned.linkId)
     if (!entry) continue
     const credential = resolveRepositoryCredential(options.config, entry.repository, 'push')
-    const adapter = cancellableAdapter(entry.repository.provider, options.signal)
+    const adapter = cancellableAdapter(entry.repository.provider, options.signal, options.assertAuthority)
     const forgeCredential = adapter.capabilities.pullRequest
       ? resolveRepositoryCredential(options.config, entry.repository, 'forge')
       : undefined
@@ -595,6 +620,18 @@ export async function finalizeCompositeWorkspace(options: {
     const checkpointCompleted = (operation: string) => {
       const status = checkpointStatus(operation)
       return status === 'completed' || status === 'skipped'
+    }
+    // A completed fetch/push from an older run says nothing about the branch today.
+    const refreshed = await adapter.git(credential, ['fetch', '--prune', 'origin'], provisioned.worktreePath)
+    const remote = refreshed.ok ? await adapter.git(credential, ['rev-parse', '--verify', `refs/remotes/origin/${provisioned.workingBranch}`], provisioned.worktreePath) : null
+    const included = remote?.ok ? await adapter.git(credential, ['merge-base', '--is-ancestor', remote.stdout.trim(), 'HEAD'], provisioned.worktreePath) : null
+    if (!refreshed.ok || (included && !included.ok)) {
+      const result: RepositoryDeliveryResult = { deliveryStatus: 'failed', pushStatus: 'failed', reviewStatus: 'pending', mergeStatus: 'pending',
+        failureCode: refreshed.ok ? 'branch_synchronization_required' : 'git_fetch_failed',
+        failureSummary: refreshed.ok ? 'Target branch advanced; agent must reconcile and validate before delivery' : 'Target branch fetch failed; repository delivery is blocked' }
+      await options.updateDelivery(provisioned.linkId, { ...result, lastAttemptAt: new Date().toISOString() })
+      results.push({ linkId: provisioned.linkId, result })
+      continue
     }
     await options.updateDelivery(provisioned.linkId, {
       deliveryStatus: 'pushing',
@@ -610,7 +647,7 @@ export async function finalizeCompositeWorkspace(options: {
       body: `Automated delivery for ${options.requirement.title}.`,
       credential,
       forgeCredential,
-      skipPush: checkpointCompleted('push'),
+      skipPush: false,
       createPullRequest: options.createPullRequest,
       repository: {
         host: entry.repository.host,

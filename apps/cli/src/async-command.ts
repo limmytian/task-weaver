@@ -20,7 +20,7 @@ export interface AsyncCommandOptions {
   /** Raw stdout observer, before redaction and bounded log retention. */
   onStdout?: (chunk: Buffer) => void
   onStderr?: (chunk: Buffer) => void
-  onSpawn?: () => void
+  onSpawn?: (pid?: number) => void
 }
 
 export interface AsyncCommandResult {
@@ -58,12 +58,18 @@ function commandLabel(command: string, args: string[]) {
   return [command, ...args].join(' ')
 }
 
+function signalManagedGroup(child: ChildProcess, signal: NodeJS.Signals) {
+  try {
+    if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, signal)
+    else child.kill(signal)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+  }
+}
+
 function requestStop(child: ChildProcess, killGraceMs: number) {
-  if (child.exitCode !== null || child.signalCode !== null) return undefined
-  child.kill('SIGTERM')
-  const timer = setTimeout(() => {
-    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-  }, killGraceMs)
+  signalManagedGroup(child, 'SIGTERM')
+  const timer = setTimeout(() => { signalManagedGroup(child, 'SIGKILL') }, killGraceMs)
   timer.unref()
   return timer
 }
@@ -111,10 +117,11 @@ export async function runCommand(
       env: options.env,
       shell: options.shell,
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
     })
 
     child.once('spawn', () => {
-      try { options.onSpawn?.() } catch { /* Observers cannot interrupt execution. */ }
+      try { options.onSpawn?.(child.pid) } catch { /* Observers cannot interrupt execution. */ }
     })
 
     const emit = (stream: CommandOutputStream, chunk: Buffer) => {
@@ -167,6 +174,8 @@ export async function runCommand(
       settled = true
       if (timeout) clearTimeout(timeout)
       if (killTimer) clearTimeout(killTimer)
+      // A completed agent must not leave managed background writers behind.
+      if (process.platform !== 'win32' || killTimer) signalManagedGroup(child, 'SIGKILL')
       options.signal?.removeEventListener('abort', abort)
 
       const capturedStdout = redact(stdout.toString('utf8')).trim()

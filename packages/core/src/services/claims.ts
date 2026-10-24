@@ -1,3 +1,5 @@
+import { enforceRecoveryAcquisition, recordExpiredExecution } from "./execution-recovery";
+import { assertRunNotInvalidated } from "./planning-impact";
 import { ClaimConflictError } from "@task-weaver/contracts";
 import type { SQL } from "drizzle-orm";
 import { qualifiedColumn } from "./resource-authorization";
@@ -263,6 +265,10 @@ export async function claimRequirement(
       );
     }
 
+    const oldClaim = await tx.query.requirementClaims.findFirst({ where: eq(requirementClaims.requirementId, requirementId) });
+    if (oldClaim && oldClaim.expiresAt <= now) await recordExpiredExecution(tx as unknown as Database, oldClaim);
+    if (!oldClaim || oldClaim.expiresAt <= now) await enforceRecoveryAcquisition(tx as unknown as Database, requirementId, metadata?.daemonId);
+
     await tx
       .delete(requirementClaims)
       .where(and(eq(requirementClaims.requirementId, requirementId), lt(requirementClaims.expiresAt, now)));
@@ -398,6 +404,8 @@ export async function assertRequirementLease(
     return null;
   }
   assertRequirementClaimOwner(existing, actor, fence);
+  if (existing.daemonId && fence?.runId !== existing.id) throw new ValidationError("Daemon mutation requires the current execution runId");
+  await assertRunNotInvalidated(db, existing.id);
   return existing;
 }
 
@@ -408,6 +416,7 @@ export async function releaseRequirement(
   reason?: string,
   daemonId?: string,
   leaseGeneration?: number,
+  runId?: string,
 ) {
   const requirement = await db.query.requirements.findFirst({ where: eq(requirements.id, requirementId) });
   if (!requirement) throw new NotFoundError("Requirement not found");
@@ -422,6 +431,7 @@ export async function releaseRequirement(
 
   if (existing.expiresAt <= new Date()) throw new ValidationError("Requirement lease has expired");
   assertRequirementClaimOwner(existing, actor, { daemonId, leaseGeneration });
+  if (runId !== undefined && runId !== existing.id) throw new ValidationError("Release belongs to a superseded execution run");
 
   await db.delete(requirementClaims).where(eq(requirementClaims.id, existing.id));
 
@@ -475,9 +485,9 @@ export async function heartbeatRequirementClaim(
 export async function getRequirementClaim(db: Database, requirementId: string) {
   const now = new Date();
 
-  await db
-    .delete(requirementClaims)
-    .where(and(eq(requirementClaims.requirementId, requirementId), lt(requirementClaims.expiresAt, now)));
+  const expired = await db.query.requirementClaims.findFirst({ where: and(eq(requirementClaims.requirementId, requirementId), lt(requirementClaims.expiresAt, now)) });
+  if (expired) await recordExpiredExecution(db, expired);
+  await db.delete(requirementClaims).where(and(eq(requirementClaims.requirementId, requirementId), lt(requirementClaims.expiresAt, now)));
 
   return db.query.requirementClaims.findFirst({
     where: eq(requirementClaims.requirementId, requirementId),

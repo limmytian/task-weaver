@@ -130,7 +130,11 @@ const fs = require('node:fs'), path = require('node:path');
  }
  const manifest = fs.existsSync('repository-manifest.json') ? JSON.parse(fs.readFileSync('repository-manifest.json', 'utf8')) : {repositories: []};
  fs.writeFileSync('child-environment.json', JSON.stringify({ ...process.env, TW_API_KEY: '[REDACTED]' }));
- for (const repository of manifest.repositories) fs.writeFileSync(path.join(repository.relativePath, 'result.txt'), 'Authenticated fixture\\n');
+ for (const repository of manifest.repositories) {
+   const synchronized = await fetch(process.env.TW_API_URL + '/api/v1/execution/git', { method: 'POST', headers: { 'Content-Type': 'application/json', authorization: 'Bearer ' + process.env.TW_API_KEY }, body: JSON.stringify({ operation: 'verify', repositoryId: repository.repositoryId }) });
+   if (!synchronized.ok) throw new Error('Git verification failed: ' + synchronized.status);
+   fs.writeFileSync(path.join(repository.relativePath, 'result.txt'), 'Authenticated fixture\\n');
+ }
  const response = await fetch(process.env.TW_API_URL + '/api/v1/tasks/' + process.env.TW_TASK_ID + '/status', { method: 'PATCH', headers: { 'Content-Type': 'application/json', authorization: 'Bearer ' + process.env.TW_API_KEY }, body: JSON.stringify({status:'done',reason:'Disposable authenticated child'}) });
  if (!response.ok) throw new Error('Task mutation failed: ' + response.status);
 })().catch(error => { console.error(error); process.exit(1); });
@@ -179,10 +183,10 @@ const fs = require('node:fs'), path = require('node:path');
       const response = await app.request(`/api/v1/${path}`, { method, headers, body: JSON.stringify(body) });
       return { status: response.status, body: await response.json() as any };
     }
-    assert.equal((await request("daemons/register", { id: daemonId, name: "Reacquired reviewer", role: "reviewer", capabilities: ["review"] })).status, 201);
+    assert.equal((await request("daemons/register", { id: daemonId, name: "Reacquired reviewer", role: "reviewer", capabilities: ["review", "live-plan-v1"] })).status, 201);
     const lane = await request(`daemons/${daemonId}/apply-review`, { projectId: project.id, workerIndex: 1 });
     assert.equal(lane.status, 200); assert.equal(lane.body.requirement.id, requirement.id);
-    const fence = { daemonId, leaseGeneration: lane.body.leaseGeneration };
+    const fence = { daemonId, runId: lane.body.runId, leaseGeneration: lane.body.leaseGeneration };
     assert.notEqual(lane.body.runId, review.leaseRunId);
     assert.equal((await request(`review-runs/${review.id}/checks`, { ...fence, name: "stale-check", status: "passed" }, "PUT")).status, 403);
     assert.equal((await request(`requirement-repositories/${link.id}/delivery`, { ...fence, deliveryStatus: "merged", mergeStatus: "merged" }, "PATCH")).status, 403);

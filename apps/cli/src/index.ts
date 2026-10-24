@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerExecution } from "./commands/execution.js";
 import { Command } from 'commander'
 import { APPLICATION_VERSION } from '@task-weaver/contracts'
 import { ApiError } from './client.js'
@@ -34,6 +35,7 @@ registerAgentUsage(program)
 registerAuth(program)
 registerProjects(program)
 registerRequirements(program)
+registerExecution(program)
 registerTasks(program)
 registerDocuments(program)
 registerSearch(program)

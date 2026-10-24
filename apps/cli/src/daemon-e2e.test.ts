@@ -8,10 +8,12 @@ import { delimiter, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { test } from 'node:test'
 
-type AgentMode = 'happy' | 'no-change' | 'push-failure' | 'partial-retry' | 'non-zero' | 'no-finalize' | 'slow' | 'delegation-unavailable' | 'human-key'
+type AgentMode = 'plan-change' | 'happy' | 'no-change' | 'push-failure' | 'partial-retry' | 'non-zero' | 'no-finalize' | 'slow' | 'delegation-unavailable' | 'human-key'
 
 type ScenarioResult = {
   applyCount: number
+  controlPhases: string[]
+  droppedControlRequests: number
   releaseCount: number
   requirement: Record<string, any>
   executionSlice: Record<string, any>
@@ -24,6 +26,7 @@ type ScenarioResult = {
   stdout: string
   stderr: string
   branchPushed: boolean
+  branchCommitMessage: string | null
   branchFile: string | null
   delivery: Record<string, any>
   secondaryBranchPushed: boolean
@@ -138,6 +141,17 @@ const { join } = require('node:path');
 
   const manifest = JSON.parse(readFileSync(join(process.cwd(), 'repository-manifest.json'), 'utf8'));
   const repositoryCwds = manifest.repositories.map((repository) => join(process.cwd(), repository.relativePath));
+  if (mode === 'plan-change') {
+    const marker = join(process.cwd(), '.plan-change-observed');
+    if (!existsSync(marker)) {
+      writeFileSync(marker, 'interrupted execution metadata');
+      writeFileSync(join(repositoryCwds[0], 'preserved-work.txt'), 'candidate evidence inspected by replacement');
+      await fetch(process.env.TW_API_URL + '/api/v1/tasks/' + process.env.TW_TASK_ID + '/comments', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.TW_API_KEY }, body: JSON.stringify({ content: 'request-live-plan-change' }) });
+      await new Promise(() => { setInterval(() => {}, 1000); });
+    }
+    if (readFileSync(join(repositoryCwds[0], 'preserved-work.txt'), 'utf8') !== 'candidate evidence inspected by replacement') throw new Error('preserved work was lost');
+  }
+
   if (mode !== 'no-change' && mode !== 'no-finalize') {
     for (const repositoryCwd of repositoryCwds) {
       writeFileSync(join(repositoryCwd, 'daemon-output.txt'), \`\${mode} fake-agent completed the daemon path\\n\`);
@@ -217,7 +231,7 @@ async function createGitFixture(
   return { home, bin, remote, secondaryRemote }
 }
 
-async function runDaemonScenario(mode: AgentMode, workers = 1): Promise<ScenarioResult> {
+async function runDaemonScenario(mode: AgentMode, workers = 1, injectControlDisconnects = false): Promise<ScenarioResult> {
   const root = await mkdtemp(join(tmpdir(), `tw-daemon-${mode}-`))
   const projectId = '00000000-0000-4000-8000-0000000000f1'
   const daemonId = '00000000-0000-4000-8000-0000000000da'
@@ -336,6 +350,9 @@ async function runDaemonScenario(mode: AgentMode, workers = 1): Promise<Scenario
   const reconcileReports: any[] = []
   let applyCount = 0
   let releaseCount = 0
+  const controlPhases: string[] = []
+  let planControl: Record<string, any> | null = null
+  let droppedControlRequests = 0
   const maxApplications = mode === 'partial-retry' ? 2 : 1
 
   const requirementPayload = () => ({
@@ -348,6 +365,29 @@ async function runDaemonScenario(mode: AgentMode, workers = 1): Promise<Scenario
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const path = url.pathname
+    if (req.method === 'GET' && path === `/api/v1/daemons/${daemonId}/execution-controls`) {
+      if (injectControlDisconnects && planControl && droppedControlRequests === 0) {
+        droppedControlRequests++;
+        req.socket.destroy();
+        return;
+      }
+      return sendJson(res, 200, { items: planControl ? [planControl] : [] })
+    }
+    if (req.method === 'POST' && path === `/api/v1/daemons/${daemonId}/execution-authority`) return sendJson(res, 200, { active: true })
+    if (req.method === 'POST' && path.endsWith('/execution-controls/control-change/ack')) {
+      const body = await readJson(req); controlPhases.push(body.phase); if (planControl) planControl.phase = body.phase;
+      if (injectControlDisconnects && body.phase === 'received' && droppedControlRequests === 1) {
+        // Persist the receipt, then lose its response to exercise ambiguous acknowledgement results.
+        droppedControlRequests++;
+        req.socket.destroy();
+        return;
+      }
+      return sendJson(res, 200, planControl)
+    }
+    if (req.method === 'POST' && path.endsWith('/execution-controls/control-change/resume')) {
+      await readJson(req); assert.ok(controlPhases.includes('stopped')); assert.ok(controlPhases.includes('reconciling'));
+      return sendJson(res, 200, { requirement: requirementPayload(), task: tasks[0], executionSlice: slicePayload(), tasks, leaseGeneration: 1, runId: '00000000-0000-4000-8000-0000000000f2', repositories: [{ link: delivery, repository }, { link: secondaryDelivery, repository: secondaryRepository }] })
+    }
     if (req.method === 'GET' && path === `/api/v1/daemons/${daemonId}/executors`) return sendJson(res, 200, { items: [] })
     if (req.method === 'POST' && path === `/api/v1/daemons/${daemonId}/executors/observations`) return sendJson(res, 200, { saved: true })
     if (path === '/api/v1/auth/me') return sendJson(res, 200, { actor: { id: '00000000-0000-4000-8000-0000000000aa', type: mode === 'human-key' ? 'human' : 'agent' }, account: null, session: null })
@@ -369,7 +409,7 @@ async function runDaemonScenario(mode: AgentMode, workers = 1): Promise<Scenario
       return sendJson(res, 201, {
         id: daemonId,
         status: 'idle',
-        config: { executionDelegationSupported: mode !== 'delegation-unavailable', mode: 'polling', pollingIntervalMs: 20, pollingBackoffMax: 50 },
+        config: { executionDelegationSupported: mode !== 'delegation-unavailable', livePlanControlSupported: true, mode: 'polling', pollingIntervalMs: 20, pollingBackoffMax: 50 },
       })
     }
 
@@ -474,6 +514,8 @@ async function runDaemonScenario(mode: AgentMode, workers = 1): Promise<Scenario
     if (req.method === 'POST' && commentMatch) {
       const body = await readJson(req)
       comments.push({ taskId: commentMatch[1]!, content: String(body.content ?? '') })
+      if (body.content === 'request-live-plan-change') planControl = { id: 'control-change', runId: '00000000-0000-4000-8000-0000000000f1', revision: 2, phase: 'pending', reason: 'Task acceptance criteria changed', deadline: new Date(Date.now() + 300000).toISOString() }
+
       return sendJson(res, 201, { id: randomUUID(), taskId: commentMatch[1], content: body.content })
     }
 
@@ -564,11 +606,14 @@ async function runDaemonScenario(mode: AgentMode, workers = 1): Promise<Scenario
       comments,
       statusReports,
       progressReports,
+      controlPhases,
+      droppedControlRequests,
       reconcileReports,
       exitCode: result.code,
       stdout: result.stdout,
       stderr: result.stderr,
       branchPushed,
+      branchCommitMessage: branchPushed ? runGit(['--git-dir', remote, 'log', '-1', '--format=%B', branchName]).stdout : null,
       branchFile: branchFileResult.status === 0 ? branchFileResult.stdout : null,
       delivery,
       secondaryBranchPushed: secondaryRevParse.status === 0,
@@ -602,6 +647,7 @@ test('daemon --once runs a fake-agent requirement lane and publishes both reposi
   assert.equal(result.delivery.deliveryStatus, 'pushed')
   assert.equal(result.branchPushed, true)
   assert.equal(result.branchFile, 'happy fake-agent completed the daemon path')
+  assert.match(result.branchCommitMessage ?? '', /^Signed-off-by: .+ <.+>$/m)
   assert.equal(result.secondaryDelivery.deliveryStatus, 'pushed')
   assert.equal(result.secondaryBranchPushed, true)
   assert.equal(result.secondaryBranchFile, 'happy fake-agent completed the daemon path')
@@ -632,7 +678,7 @@ test('daemon --once finalizes no-change clean runs with an auditable comment', {
   assert.match(result.comments[0]?.content ?? '', /Repository delivery finished/)
 })
 
-test('daemon --once preserves one successful repository when another push fails', { timeout: 60_000 }, async () => {
+test('daemon --once preserves one successful repository when another delivery remote becomes unavailable', { timeout: 60_000 }, async () => {
   const result = await runDaemonScenario('push-failure')
 
   assert.equal(result.exitCode, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`)
@@ -641,7 +687,7 @@ test('daemon --once preserves one successful repository when another push fails'
   assert.equal(result.tasks.every((task) => task.status === 'done'), true)
   assert.equal(result.branchPushed, false)
   assert.equal(result.delivery.deliveryStatus, 'failed')
-  assert.equal(result.delivery.failureCode, 'git_push_failed')
+  assert.equal(result.delivery.failureCode, 'git_fetch_failed')
   assert.equal(result.secondaryBranchPushed, true)
   assert.equal(result.secondaryBranchFile, 'push-failure fake-agent completed the daemon path')
   assert.equal(result.secondaryDelivery.deliveryStatus, 'pushed')
@@ -714,7 +760,7 @@ test('daemon SIGINT drains a running child and leaves durable retry state', { ti
 test('daemon stops before acquisition when bounded delegation is unavailable', { timeout: 60_000 }, async () => {
   const result = await runDaemonScenario('delegation-unavailable')
   assert.equal(result.exitCode, 1)
-  assert.match(result.stderr, /delegation is not available/)
+  assert.match(result.stderr, /delegation or live planning control is not available/)
   assert.equal(result.applyCount, 0)
   assert.equal(result.progressReports.length, 0)
   assert.equal(result.branchPushed, false)
@@ -727,4 +773,32 @@ test('human keys never become managed-agent daemon identities', { timeout: 60_00
   assert.equal(result.applyCount, 0)
   assert.equal(result.progressReports.length, 0)
   assert.equal(result.branchPushed, false)
+})
+
+
+test('live plan control stops only its agent and launches a fresh run on the retained workspace', { timeout: 60000 }, async () => {
+  const result = await runDaemonScenario('plan-change')
+  assert.equal(result.exitCode, 0, `stdout: ${result.stdout}\nstderr: ${result.stderr}`)
+  assert.equal(result.applyCount, 1, 'healthy reconciliation keeps the original lane rather than reacquiring a worker')
+  assert.ok(result.controlPhases.includes('received'))
+  assert.ok(result.controlPhases.includes('stopping'))
+  assert.ok(result.controlPhases.includes('stopped'))
+  assert.ok(result.controlPhases.includes('reconciling'))
+  assert.ok(result.progressReports.some(report => report.runId === '00000000-0000-4000-8000-0000000000f1'))
+  assert.ok(result.progressReports.some(report => report.runId === '00000000-0000-4000-8000-0000000000f2'))
+  assert.equal(result.tasks.every(task => task.status === 'done'), true)
+  assert.equal(result.releaseCount, 1)
+})
+
+
+test('live plan polling survives a disconnected notification read and a lost receipt response', { timeout: 60000 }, async () => {
+  const result = await runDaemonScenario('plan-change', 1, true)
+  assert.equal(result.exitCode, 0, `stdout: ${result.stdout}\nstderr: ${result.stderr}`)
+  assert.equal(result.droppedControlRequests, 2)
+  assert.equal(result.applyCount, 1)
+  assert.ok(result.controlPhases.includes('stopped'))
+  assert.ok(result.controlPhases.includes('reconciling'))
+  assert.ok(result.progressReports.some(report => report.runId === '00000000-0000-4000-8000-0000000000f2'))
+  assert.equal(result.tasks.every(task => task.status === 'done'), true)
+  assert.equal(result.releaseCount, 1)
 })

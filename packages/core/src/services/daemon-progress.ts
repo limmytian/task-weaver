@@ -281,7 +281,7 @@ export async function reportWorkerProgress(
     db,
     input.requirementId,
     actor,
-    { daemonId, leaseGeneration: input.leaseGeneration },
+    { daemonId, leaseGeneration: input.leaseGeneration, runId: input.runId },
     true,
   );
   if (!claim) throw new ValidationError("Progress reporting requires an active Requirement claim");
@@ -927,7 +927,7 @@ export async function reconcileWorkerRun(
     db,
     input.requirementId,
     actor,
-    { daemonId, leaseGeneration: input.leaseGeneration },
+    { daemonId, leaseGeneration: input.leaseGeneration, runId: input.runId },
     true,
   );
   if (!claim || claim.id !== input.runId) {

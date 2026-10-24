@@ -284,7 +284,7 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.equal((await owner.service.taskService.getTask(db, task.id)).title, "Task");
   const beforeLoop = calls;
   for (let round = 0; round < 16; round++) modelReplies.push({ content: null, tool_calls: [toolCall("list_projects", {})] });
-  await assert.rejects(ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ message: "Unbounded query fixture", context: {} })), /query limit reached/);
+  await assert.rejects(ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ message: "Unbounded query fixture", context: {} })), { name: "TiRuntimeError", code: "round_limit" });
   assert.equal(calls - beforeLoop, 16);
   assert.equal(lastModelPayload.tool_choice, "none");
   const proposed = await ownerChat.sendReadOnlyMessage(db, sendAssistantMessageSchema.parse({ ...input, proposedActions: [{ actionType: "update_task", payload: { taskId: task.id, title: "Reviewed task" } }] }));
@@ -571,7 +571,7 @@ test("assistant authorization isolates accounts and resources across REST and tR
   assert.ok(lastModelPayload.tools.every((tool: any) => !tool.function.name.startsWith("create_")));
   const failedRequestId = randomUUID();
   modelReplies.push({ content: "<｜DSML｜function_calls>invalid provider tool markup" });
-  await assert.rejects(ownerChat.sendReadOnlyMessage(db, { ...input, requestId: failedRequestId }), /invalid tool response/);
+  await assert.rejects(ownerChat.sendReadOnlyMessage(db, { ...input, requestId: failedRequestId }), { name: "TiRuntimeError", code: "invalid_response" });
   assert.equal((await ownerChat.getMessageResult(db, { requestId: failedRequestId })).status, "failed");
   const configs = await ownerModels.list(db);
   assert.equal(configs[0].hasApiKey, true);

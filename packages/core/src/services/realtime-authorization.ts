@@ -1,7 +1,7 @@
 import { authorizeDaemonOperation } from "./daemon-authorization";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { type Database, schedules, daemonWorkerProgress, daemons, activityLog, documents } from "@task-weaver/db";
+import { type Database, schedules, daemonWorkerProgress, daemons, activityLog, documents, executionControls } from "@task-weaver/db";
 import { AuthorizationError, NotFoundError, type VerifiedRequestContext, type RealtimeEvent } from "@task-weaver/contracts";
 import { subscribe } from "@task-weaver/realtime";
 import { lockIdentityLifecycle } from "./auth-security";
@@ -29,6 +29,9 @@ export async function authorizedRealtimeEvent(db: Database, authority: ResourceA
       await resource("task", value.taskId, "taskId");
     } else if (event.type.startsWith("requirement_")) {
       await resource("requirement", value.requirementId, "requirementId");
+      if (event.type === "requirement_execution_invalidated") {
+        for (const key of ["daemonId", "runId", "controlId", "revision"]) output[key] = value[key];
+      }
     } else if (event.type.startsWith("document_")) {
       if (event.type === "document_deleted") {
         if (await db.query.documents.findFirst({ where: eq(documents.id, event.documentId) })) return null;
@@ -88,12 +91,13 @@ function authorityFingerprint(authority: ResourceAuthority) {
   return JSON.stringify({ actor: authority.actor, grants: authority.grants.map(g => JSON.stringify({ ...g, permissions: [...g.permissions].sort() })).sort() });
 }
 
-/** No replay buffer exists. Reconnects receive an explicit resync without echoing untrusted cursors. */
+/** Reconnects replay current durable execution controls; ordinary resource events request a resync. */
 export async function createAuthorizedEventStream(db: Database, context: VerifiedRequestContext, request: Request, options: { daemon?: boolean; heartbeatMs?: number } = {}): Promise<Response> {
   const initial = await resourceAuthority(db, context);
   const fingerprint = authorityFingerprint(initial);
   const connectionId = randomUUID();
   let sequence = 0;
+  const replayedControls = new Map<string, number>();
   let closed = false;
   let pending = 0;
   let queue = Promise.resolve();
@@ -123,8 +127,22 @@ export async function createAuthorizedEventStream(db: Database, context: Verifie
         await lockIdentityLifecycle(tx);
         const authority = await resourceAuthority(tx, context);
         if (authorityFingerprint(authority) !== fingerprint) { close(); return; }
-        if (!event) { write("heartbeat", {}); return; }
-        if (options.daemon && !["task_created", "task_released", "requirement_created", "requirement_released", "repository_retry_requested"].includes(event.type)) return;
+        if (!event) {
+          if (options.daemon && !authority.bounds) {
+            const owned = tx.select({ id: daemons.id }).from(daemons).where(eq(daemons.actorId, authority.actor.id));
+            const controls = await tx.select().from(executionControls).where(inArray(executionControls.daemonId, owned));
+            for (const control of controls) {
+              if (control.phase === 'resumed' || replayedControls.get(control.id) === control.revision) continue;
+              const payload = await authorizedRealtimeEvent(tx as unknown as Database, authority, { type: 'requirement_execution_invalidated', projectId: control.projectId, requirementId: control.requirementId, daemonId: control.daemonId, runId: control.runId, controlId: control.id, revision: control.revision });
+              if (payload) {
+                write('requirement_execution_invalidated', payload, `${control.id}:${control.revision}`);
+                replayedControls.set(control.id, control.revision);
+              }
+            }
+          }
+          write("heartbeat", {}); return;
+        }
+        if (options.daemon && !["task_created", "task_released", "requirement_created", "requirement_released", "repository_retry_requested", "requirement_execution_invalidated"].includes(event.type)) return;
         const payload = await authorizedRealtimeEvent(tx as unknown as Database, authority, event);
         if (payload) write(event.type, { ...payload, sequence: ++sequence }, `${connectionId}-${sequence}`);
       });
@@ -136,6 +154,7 @@ export async function createAuthorizedEventStream(db: Database, context: Verifie
       // Resume identifiers are connection-local; all reconnects refetch authorized current state.
       write("connected", { resume: "resync" });
       unsubscribe = subscribe(enqueue);
+      enqueue();
       timer = setInterval(() => enqueue(), options.heartbeatMs ?? 1000);
       request.signal.addEventListener("abort", close, { once: true });
       if (request.signal.aborted) close();

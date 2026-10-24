@@ -118,6 +118,12 @@ export function registerRequirements(program: Command): void {
       printKv(data as Record<string, unknown>)
     })
 
+  req.command('revalidate <id>').description('record human verification of historical evidence after a plan change')
+    .requiredOption('--reason <text>', 'evidence inspected and verification reason').requiredOption('--revision <number>', 'latest inspected planning revision').option('--json', 'output JSON')
+    .action(async (id, opts) => printJson(await post(`/api/v1/requirements/${id}/execution-revalidation`, { reason: opts.reason, expectedPlanRevision: Number(opts.revision) })))
+  req.command('recover <id> <control-id>').description('authorize a fresh recovery after inspecting uncertain outcomes and required inputs')
+    .requiredOption('--reason <text>', 'verified outcomes, available inputs and recovery decision').requiredOption('--revision <number>', 'latest inspected plan revision').option('--json', 'output JSON')
+    .action(async (id, controlId, opts) => printJson(await post(`/api/v1/requirements/${id}/execution-recovery`, { controlId, reason: opts.reason, expectedPlanRevision: Number(opts.revision) })))
   const output = req.command('output').description('manage requirement delivery outputs')
   output.command('list <requirement-id>')
     .option('--json', 'output raw JSON')
@@ -285,6 +291,7 @@ export function registerRequirements(program: Command): void {
     .option('--branch-name <name>', 'git branch name for this requirement')
     .option('--workflow <preset>', 'replace workflow with a preset')
     .option('--workflow-file <path>', 'replace workflow with a JSON definition')
+    .option('--recovery-policy <json>', 'explicit retrySafe, maxAttempts and graceMs policy')
     .option('--json', 'output raw JSON')
     .action(async (id, opts) => {
       if (opts.workflow && opts.workflowFile) throw new Error('Choose either --workflow or --workflow-file')
@@ -296,6 +303,7 @@ export function registerRequirements(program: Command): void {
       if (opts.modelTier) body.modelTier = opts.modelTier
       if (opts.branchName !== undefined) body.branchName = opts.branchName
       if (opts.workflow) body.workflowPreset = opts.workflow
+      if (opts.recoveryPolicy) body.recoveryPolicy = JSON.parse(opts.recoveryPolicy)
       if (opts.workflowFile) body.workflow = requirementWorkflowSchema.parse(JSON.parse(readFileSync(opts.workflowFile, 'utf8')))
       const data = await patch(`/api/v1/requirements/${id}`, body)
       if (opts.json) return printJson(data)

@@ -1,3 +1,4 @@
+import { assertRunNotInvalidated } from "./planning-impact";
 import { eq } from 'drizzle-orm';
 import { daemons, requirementClaims, requirements, type Database } from '@task-weaver/db';
 import { AuthorizationError, type DaemonRole } from '@task-weaver/contracts';
@@ -17,7 +18,8 @@ export async function requireDaemonLease(db: Database, authority: ResourceAuthor
   if (!requirement || !claim || ['done', 'cancelled', 'archived'].includes(requirement.status)
     || claim.claimedBy !== authority.actor.id || claim.claimedByType !== 'agent' || claim.daemonId !== daemon.id
     || claim.generation !== input.leaseGeneration || requirement.leaseGeneration !== claim.generation || claim.expiresAt <= new Date()
-    || (input.runId !== undefined && input.runId !== claim.id)
+    || (input.runId !== claim.id)
     || (input.workerIndex !== undefined && String(input.workerIndex) !== claim.workerIndex)) throw new AuthorizationError();
+  await assertRunNotInvalidated(db, claim.id);
   return { daemon, claim, requirement };
 }
