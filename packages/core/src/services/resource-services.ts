@@ -1,3 +1,4 @@
+import { capabilityOperationEvidence } from "./capability-evidence";
 import { capabilityDigest } from "./capability-digest";
 import { requireExecutionSynchronization } from "./execution-synchronization";
 import { planningImpact, invalidatePlanningExecutions } from "./planning-impact";
@@ -241,7 +242,7 @@ function bindServices(context?: VerifiedRequestContext) {
           if (group === "embedding") result = redactEmbeddingResult(authority, result);
           if (group === "repository") result = redactRepositoryResult(result);
           if (group === "ti" || group === "activity" || group === "schedule") result = redactMetadataResult(result, group);
-          if (authority.bounds) await auditIdentity(tx, "delegation.operation", actor.id, actor.id, authority.bounds.id, { operation: name, runId: authority.bounds.runId, requirementId: authority.bounds.requirementId, parentCredentialId: authority.bounds.parentCredentialId });
+          if (authority.bounds) await auditIdentity(tx, "delegation.operation", actor.id, actor.id, authority.bounds.id, { operation: name, runId: authority.bounds.runId, requirementId: authority.bounds.requirementId, parentCredentialId: authority.bounds.parentCredentialId, projectId: authority.bounds.projectId, ...capabilityOperationEvidence(name, call[1], result) });
           if (group === "project") {
             const pins = new Map((await tx.select().from(projectPreferences).where(eq(projectPreferences.actorId, actor.id))).map(pin => [pin.projectId, pin.pinnedAt]));
             const personalize = (value: any): any => {

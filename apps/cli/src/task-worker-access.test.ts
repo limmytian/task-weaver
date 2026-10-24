@@ -81,3 +81,30 @@ test('worker TW commands use a broker while supervisor, provider and Git secrets
     await new Promise<void>(resolve => server.close(() => resolve()))
   }
 })
+
+test('default worker requests omit new opt-in fields for strict legacy issuers', async () => {
+  const actorId = randomUUID(), daemonId = randomUUID(), requirementId = randomUUID(), taskId = randomUUID(), runId = randomUUID()
+  let issued = false
+  const server = createServer(async (req, res) => {
+    res.setHeader('content-type', 'application/json')
+    if (req.method === 'POST') {
+      const chunks: Buffer[] = []
+      for await (const chunk of req) chunks.push(Buffer.from(chunk))
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      assert.deepEqual(Object.keys(body).sort(), ['requirementId', 'taskId', 'runId', 'workerIndex', 'leaseGeneration'].sort())
+      issued = true
+      res.statusCode = 201
+      res.end(JSON.stringify({ token, delegation: {
+        id: randomUUID(), parentCredentialId: randomUUID(), delegatorActorId: actorId, initiator: { id: actorId, type: 'agent' }, executorActorId: actorId,
+        projectId: randomUUID(), requirementId, taskIds: [taskId], repositoryIds: [], runId, purpose: 'execute', leaseGeneration: 1,
+        expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      } }))
+    } else res.end('{}')
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const address = server.address() as { port: number }
+    const access = await createTaskWorkerAccess({ config: { apiUrl: `http://127.0.0.1:${address.port}`, apiKey: supervisorKey }, daemonId, requirementId, taskId, runId, workerIndex: 0, leaseGeneration: 1 })
+    try { assert.equal(issued, true) } finally { await access.close() }
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())) }
+})

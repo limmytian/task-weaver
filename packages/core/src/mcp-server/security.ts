@@ -1,3 +1,4 @@
+import { capabilityOperationEvidence } from "../services/capability-evidence";
 import { requireRepository } from "../services/repository-authorization";
 import { requireMcpServer, requireMcpToolTarget } from "../services/mcp-authorization";
 import { lockIdentityLifecycle } from "../services/auth-security";
@@ -96,7 +97,8 @@ export function secureMcpExecutor(db: Database, identity: VerifiedRequestContext
         const current = await target(db, identity, name, input);
         if (mcpScopeKey(current.scope) !== mcpScopeKey(scope) || JSON.stringify(await mcpPolicy(db, mcpScopeKey(current.scope), name)) !== JSON.stringify(policy)) throw new AuthorizationError();
       }
-      await recordMcpInvocationAudit(db, identity, scope, "task-weaver", name, start);
+      const executionFailed = name === "tw_skills_run" && (completed as { status?: string })?.status === "failed";
+      await recordMcpInvocationAudit(db, identity, scope, "task-weaver", name, start, undefined, executionFailed, capabilityOperationEvidence(name, input, completed));
       return completed;
     } catch (error) {
       await recordMcpInvocationAudit(db, identity, scope, "task-weaver", name, start, error);

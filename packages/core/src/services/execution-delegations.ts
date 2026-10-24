@@ -21,8 +21,8 @@ function publicDelegation(row: StoredDelegation, initiatorType: 'human' | 'agent
     id: row.id, parentCredentialId: row.parentCredentialId, delegatorActorId: row.actorId,
     initiator: { id: row.initiatorActorId, type: initiatorType }, executorActorId: row.actorId,
     projectId: row.projectId, requirementId: row.requirementId, taskIds: row.taskIds,
-    capabilityExecution: row.purpose === "execute" && credentialGrantsSchema.parse(row.grants).some(grant => grant.scope === "project" && grant.permissions.includes("mcp.invoke")),
-    sharedCapabilityReads: credentialGrantsSchema.parse(row.grants).some(grant => grant.scope === "global" && grant.permissions.includes("resource.read")),
+    ...(row.purpose === "execute" && credentialGrantsSchema.parse(row.grants).some(grant => grant.scope === "project" && grant.permissions.includes("mcp.invoke")) ? { capabilityExecution: true } : {}),
+    ...(credentialGrantsSchema.parse(row.grants).some(grant => grant.scope === "global" && grant.permissions.includes("resource.read")) ? { sharedCapabilityReads: true } : {}),
     repositoryIds: row.repositoryIds, runId: row.runId, purpose: row.purpose,
     leaseGeneration: Number(row.leaseGeneration), expiresAt: row.expiresAt.toISOString(),
   });

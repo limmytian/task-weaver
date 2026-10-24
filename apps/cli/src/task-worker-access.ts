@@ -33,7 +33,8 @@ export async function createTaskWorkerAccess(options: {
   try {
     const capability = await request<TaskCapability>('POST', endpoint, {
       requirementId: options.requirementId, taskId: options.taskId, runId: options.runId,
-      sharedCapabilityReads: options.sharedCapabilityReads ?? false, capabilityExecution: options.capabilityExecution ?? false,
+      ...(options.sharedCapabilityReads ? { sharedCapabilityReads: true } : {}),
+      ...(options.capabilityExecution ? { capabilityExecution: true } : {}),
       workerIndex: options.workerIndex, leaseGeneration: options.leaseGeneration,
     }, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]) })
     secrets.add(capability.token)

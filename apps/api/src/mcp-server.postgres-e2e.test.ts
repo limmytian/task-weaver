@@ -20,7 +20,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { createDb, runMigrations, apiKeys, mcpInvocationApprovals, projectMemberships, mcpInvocationAudits, taskDependencies } from "@task-weaver/db";
+import { createDb, runMigrations, apiKeys, mcpInvocationApprovals, projectMemberships, mcpInvocationAudits, taskDependencies, authAuditEvents } from "@task-weaver/db";
 import { cleanupMcpInvocationHistory, setMcpInvocationPolicy, approveMcpInvocation, listMcpInvocationAudits, createResourceServices, skillPackageStorageService, registerSkillPackageSchema } from "@task-weaver/core";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 import { createApiApplication } from "./application";
@@ -395,6 +395,9 @@ test("MCP transports use live scoped authority and preserve collaboration guards
     const refreshed = await invoke("tw_memories_preview", previewInput);
     const refreshedMemory = await invoke("tw_memories_update", { id: sourceMemory.id, patch: { content: refreshed.candidate.content, provenance: refreshed.candidate.provenance, expectedVersion: sourceMemory.version } });
     assert.equal(refreshedMemory.sourceFreshness, "current");
+    const evidenceRows = await db.select().from(authAuditEvents).where(eq(authAuditEvents.entityId, key.id));
+    assert.ok(evidenceRows.some(event => event.action === "capability.operation" && event.metadata?.assetId === sourceMemory.id && event.metadata?.attribution === "credential" && !event.metadata?.runId));
+    assert.ok(!JSON.stringify(evidenceRows).includes(refreshed.candidate.content));
     await invoke("tw_memories_forget", { id: sourceMemory.id, expectedVersion: refreshedMemory.version, confirmed: true });
   }
   // Personal-only retrieval must not accidentally include a readable global memory.

@@ -107,6 +107,8 @@ test("execution capabilities enforce immutable task bounds and revocable lease a
   await t.test("capability material is returned once and identity, lease and bounds are server-derived", async () => {
     assert.match(capability.token, /^twd_[0-9a-f]{64}$/);
     assert.deepEqual(capability.delegation.taskIds, [task.id]);
+    assert.equal(capability.delegation.capabilityExecution, undefined);
+    assert.equal(capability.delegation.sharedCapabilityReads, undefined);
     assert.equal(capability.delegation.executorActorId, agent.id);
     assert.equal(capability.delegation.initiator.id, agent.id);
     assert.ok(Date.parse(capability.delegation.expiresAt) <= Date.now() + 15 * 60_000);
@@ -290,6 +292,14 @@ test("execution capabilities enforce immutable task bounds and revocable lease a
     assert.equal((await brokerSave.json() as any).id, saved.body.id);
     assert.equal((await fetch(`${broker.apiUrl}/api/v1/documents/${hiddenDocument.id}`, { headers: brokerHeaders })).status, 404);
     assert.equal((await fetch(`${broker.apiUrl}/api/v1/mcp/policy`, { method: "POST", headers: brokerHeaders, body: "{}" })).status, 403);
+    const reported = await fetch(`${broker.apiUrl}/api/v1/tasks/${task.id}/comments`, { method: "POST", headers: brokerHeaders, body: JSON.stringify({ content: "Agent report: the fixture was useful." }) });
+    assert.equal(reported.status, 201);
+    const reportId = (await reported.json() as any).id;
+    const capabilityEvents = await db.select().from(authAuditEvents).where(eq(authAuditEvents.entityId, issued.body.delegation.id));
+    assert.ok(capabilityEvents.some((event: any) => event.metadata.runId === request.runId && event.metadata.assetId === saved.body.id && event.metadata.assetVersion === "1" && event.metadata.evidenceSource === "api"));
+    assert.ok(capabilityEvents.some((event: any) => event.metadata.assetId === tool.id && event.metadata.assetSha256 === inspected.body.schemaHash && event.metadata.assetHashKind === "tool_schema"));
+    assert.ok(capabilityEvents.some((event: any) => event.metadata.reportId === reportId && event.metadata.evidenceSource === "agent_report" && !event.metadata.assetId));
+    assert.ok(!JSON.stringify(capabilityEvents).includes(save.content));
     const unrelatedFacade = await rest("mcp-server/tools/tw_documents_get", executionHeaders, "POST", { id: hiddenDocument.id });
     assert.equal(unrelatedFacade.body.isError, true, "Delegation facade cannot broaden ordinary document access");
     await apiKeyService.revokeScopedApiKey(db, owner.context, invoker.issued.id);

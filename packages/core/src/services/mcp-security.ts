@@ -102,9 +102,17 @@ export async function listMcpInvocationAudits(db: Database, identity: VerifiedRe
     return tx.select().from(mcpInvocationAudits).where(eq(mcpInvocationAudits.scopeKey, mcpScopeKey(scope))).orderBy(desc(mcpInvocationAudits.createdAt), mcpInvocationAudits.id).limit(Math.min(limit, 100)).offset(offset);
   });
 }
-export async function recordMcpInvocationAudit(db: Database, identity: VerifiedRequestContext, scope: ResourceScope, serverId: string, toolId: string, start: number, error?: unknown, isError = false) {
+export async function recordMcpInvocationAudit(db: Database, identity: VerifiedRequestContext, scope: ResourceScope, serverId: string, toolId: string, start: number, error?: unknown, isError = false, reference: Record<string, string | number | boolean> = {}) {
   const errorCode = error instanceof McpInvocationBusy ? "busy" : typeof error === "string" && ["read_only", "validation_error"].includes(error) ? error : error instanceof McpApprovalRequired ? "approval_required" : error instanceof AuthorizationError ? "permission_denied" : error instanceof NotFoundError ? "not_found" : error ? "invocation_failed" : isError ? "upstream_error" : null;
   const [audit] = await db.insert(mcpInvocationAudits).values({ actorId: identity.actor.id, credentialId: identity.credential.id, scopeKey: mcpScopeKey(scope), serverId, toolId, durationMs: Math.max(0, Date.now() - start), outcome: errorCode ? "error" : "success", errorCode }).returning({ id: mcpInvocationAudits.id });
+  const delegation = identity.credential.kind === "delegation" ? identity.credential.delegation : undefined;
+  if (delegation || Object.keys(reference).length) {
+    await auditIdentity(db, delegation ? "delegation.capability_invocation" : "capability.operation", identity.actor.id, identity.actor.id, identity.credential.id, {
+      ...reference, capabilityEvidenceVersion: 1, credentialId: identity.credential.id, scopeKey: mcpScopeKey(scope), attribution: delegation ? "run" : "credential",
+      ...(delegation ? { runId: delegation.runId, projectId: delegation.projectId, requirementId: delegation.requirementId } : {}),
+      invocationAuditId: audit!.id, evidenceSource: error ? "api_attempt" : "api", capabilityOutcome: errorCode ?? "returned",
+    });
+  }
   return audit!;
 }
 /** Operators run scoped cleanup explicitly; no user payload is ever retained. */

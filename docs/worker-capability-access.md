@@ -68,6 +68,10 @@ scripts merely because their text is readable.
 
 ## Explicit capability execution
 
+The API/CLI pair must implement the requested opt-in fields. Default requests and
+responses omit disabled opt-ins for strict legacy peers. Unsupported explicit
+modes fail closed; do not drop requested restrictions or retry with broader credentials.
+
 Instruction access is the default. A supervisor can opt an execution task into
 project capability execution with `capabilityExecution=true` at issuance. The
 parent must already grant project `mcp.invoke` and the normal execution/write

@@ -1,3 +1,4 @@
+import { capabilityOperationEvidence } from "./capability-evidence";
 import { requireExecutionSynchronization } from "./execution-synchronization";
 import { requireMcpInput } from "./mcp-input-validation";
 import { acquireMcpInvocation } from "./mcp-invocation-budget";
@@ -207,7 +208,7 @@ export async function invokeMcpTool(db: Database, context: VerifiedRequestContex
     };
     const result = await invokeMcpToolUnchecked(db, context, toolId, args, actor, checkedPool, approvalId, expectedSchemaHash, signal);
     if (JSON.stringify(await mcpPolicy(db, mcpScopeKey(scope), toolId)) !== JSON.stringify(policy)) throw new AuthorizationError();
-    const audit = await recordMcpInvocationAudit(db, context, scope, serverId, toolId, start, undefined, Boolean((result as { isError?: boolean }).isError));
+    const audit = await recordMcpInvocationAudit(db, context, scope, serverId, toolId, start, undefined, Boolean((result as { isError?: boolean }).isError), capabilityOperationEvidence("callTool", { toolId, expectedSchemaHash }, result));
     return { ...result, _meta: { ...(result._meta as Record<string, unknown> | undefined), "task-weaver/auditId": audit.id } };
   } catch (error) {
     await recordMcpInvocationAudit(db, context, scope, serverId, toolId, start, error);
