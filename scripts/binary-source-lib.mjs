@@ -22,11 +22,58 @@ export function publicUrl(value) {
   return url.href;
 }
 
-export function getText(url) {
-  const result = spawnSync("curl", ["--fail", "--silent", "--show-error", "--location", "--proto", "=https",
-    "--proto-redir", "=https", "--max-time", "45", publicUrl(url)], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
-  if (result.status !== 0) throw new Error(`Upstream metadata unavailable: ${new URL(url).hostname}`);
-  return result.stdout;
+// Only safe public metadata GETs use this policy. Artifact writes and downloads
+// retain their own identity/checksum checks and are never replayed by this helper.
+export function getText(url, {
+  execute = spawnSync,
+  now = () => performance.now(),
+  sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms),
+} = {}) {
+  let current = publicUrl(url);
+  const deadline = now() + 90_000;
+  let requests = 0;
+  let retries = 0;
+  let redirects = 0;
+  const fail = (reason) => {
+    throw new Error(`Upstream metadata unavailable: ${new URL(current).hostname}; ${reason}; requests=${requests}`);
+  };
+  while (true) {
+    const remaining = deadline - now();
+    if (remaining <= 0) fail("deadline exhausted");
+    requests += 1;
+    // Disable curlrc and automatic redirects: every target must pass publicUrl.
+    // The final two lines are curl metadata, separate from the response body.
+    const result = execute("curl", ["--disable", "--globoff", "--silent", "--show-error", "--proto", "=https",
+      "--connect-timeout", "10", "--max-time", String(Math.min(45_000, remaining) / 1000),
+      "--write-out", "\\n%{http_code}\\n%{redirect_url}", current],
+    { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: remaining });
+    if (now() >= deadline) fail("deadline exhausted");
+    if (result.error || result.signal) fail("transport process failed");
+    let transient = false;
+    let reason;
+    if (result.status !== 0) {
+      // TLS, authentication, malformed URLs and local errors fail closed.
+      transient = [5, 6, 7, 18, 28, 52, 55, 56, 92].includes(result.status);
+      reason = `curl exit ${Number.isInteger(result.status) ? result.status : "unknown"}`;
+    } else {
+      const match = /\n(\d{3})\n([^\n]*)$/.exec(result.stdout ?? "");
+      if (!match) fail("invalid response metadata");
+      const status = Number(match[1]);
+      if (status >= 200 && status < 300) return result.stdout.slice(0, match.index);
+      if ([301, 302, 303, 307, 308].includes(status)) {
+        if (!match[2] || ++redirects > 5) fail("redirect budget exhausted");
+        // Do not include a rejected URL or upstream stderr in diagnostics.
+        try { current = publicUrl(match[2]); } catch { fail("redirect target rejected"); }
+        continue;
+      }
+      transient = [408, 429, 500, 502, 503, 504].includes(status);
+      reason = `HTTP ${status}`;
+    }
+    if (!transient || retries >= 2) fail(reason);
+    const delay = 250 * 2 ** retries++;
+    if (deadline - now() <= delay) fail("deadline exhausted");
+    sleep(delay);
+  }
 }
 
 export function expandVersion(value, variables) {
