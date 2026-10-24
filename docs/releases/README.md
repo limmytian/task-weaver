@@ -6,7 +6,7 @@ Use the notes for your installed and target versions when planning an upgrade.
 
 | Version | Summary | Notes |
 | --- | --- | --- |
-| 0.3.13 (source candidate) | Live planning controls, fenced execution, bounded multi-node recovery and agent-led Git synchronization. | [English](0.3.13.md) · [简体中文](0.3.13.zh-CN.md) |
+| 0.3.13 | Live planning controls, fenced execution, bounded multi-node recovery and agent-led Git synchronization. | [English](0.3.13.md) · [简体中文](0.3.13.zh-CN.md) |
 | 0.3.12 | Hosted capabilities, scoped memory, unified MCP and collaboration context. | [English](0.3.12.md) · [简体中文](0.3.12.zh-CN.md) |
 | 0.3.11 | MCP skills, atomic plans, execution slices and bounded context. | [English](0.3.11.md) · [简体中文](0.3.11.zh-CN.md) |
 | 0.3.10 | Inbound MCP Server with authenticated stdio/HTTP collaboration tools. | [English](0.3.10.md) · [简体中文](0.3.10.zh-CN.md) |
