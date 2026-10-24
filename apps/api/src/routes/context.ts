@@ -325,10 +325,10 @@ context.get("/:id", async (c) => {
   const id = c.req.param("id");
 
   try {
-    const doc = await createResourceServices(c.get("identity")).documentService.getDocument(db, id);
+    const doc = await createResourceServices(c.get("identity")).contextService.getSkill(db, id);
     return c.json(doc);
-  } catch {
-    return c.json({ error: "Skill not found" }, 404);
+  } catch (err) {
+    return handleSkillPackageError(c, err);
   }
 });
 

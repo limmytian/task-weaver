@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { createTRPCContextFactory } from "../apps/web/trpc/init";
 import { appRouter } from "../apps/web/trpc/routers/_app";
 import { createApiApplication } from "../apps/api/src/application";
 const apiRequire = createRequire(new URL("../apps/api/package.json", import.meta.url));
-const { createDb, runMigrations, authInstanceState, authSessions, authActors, authRateLimits, daemons, daemonWorkerProgress, apiKeys, requirements, executionDelegations, authAuditEvents, taskClaims, documentTaskLinks } = apiRequire("@task-weaver/db");
+const { createDb, runMigrations, authInstanceState, authSessions, authActors, authRateLimits, daemons, daemonWorkerProgress, apiKeys, requirements, executionDelegations, authAuditEvents, taskClaims, documentTaskLinks, documents, memories, skillPackages, skillPackageVersions, skillPackageFiles } = apiRequire("@task-weaver/db");
 const { createAuthenticationRuntime, createResourceServices, apiKeyService, authorizedRealtimeEvent, resourceAuthority } = apiRequire("@task-weaver/core");
 const { eq, like } = apiRequire("drizzle-orm");
 const databaseUrl = process.env.TW_AUTH_E2E_DATABASE_URL;
@@ -58,8 +58,8 @@ test("execution capabilities enforce immutable task bounds and revocable lease a
   const permissions = ["resource.read", "resource.write", "execution.run", "execution.review", "execution.merge"];
   await runtime.identity.setMembership(owner.headers, project.id, agent.id, { role: "member", explicitPermissions: ["execution.run", "execution.review", "execution.merge"] });
   await runtime.identity.setMembership(outsider.headers, other.id, otherAgent.id, { role: "member", explicitPermissions: ["execution.run"] });
-  async function key(actorId: string, human: any, projectId: string, actions = permissions) {
-    const issued = await apiKeyService.issueScopedApiKey(db, human.context, actorId, { name: "Daemon fixture", grants: [{ scope: "project", projectId, permissions: actions }], expiresAt: null });
+  async function key(actorId: string, human: any, projectId: string, actions = permissions, shared = false) {
+    const issued = await apiKeyService.issueScopedApiKey(db, human.context, actorId, { name: "Daemon fixture", grants: [{ scope: "project", projectId, permissions: actions }, ...(shared ? [{ scope: "global", permissions: ["resource.read"] }] : [])], expiresAt: null });
     const headers = new Headers({ authorization: `Bearer ${issued.rawKey}` });
     const context = await runtime.verify(headers);
     return { headers, context, issued, service: createResourceServices(context), actor: { id: context.actor.id, type: context.actor.type } };
@@ -141,6 +141,84 @@ test("execution capabilities enforce immutable task bounds and revocable lease a
     assert.equal((await rest(`tasks/${task.id}/status`, headers, "PATCH", { status: "in_progress", leaseGeneration: lane.body.leaseGeneration + 1, daemonId })).status, 403);
     assert.equal((await rest(`tasks/${task.id}/status`, headers, "PATCH", { status: "in_progress" })).status, 200);
 
+  });
+  await t.test("typed capability reads do not open ordinary content or capability writes", async () => {
+    const makeSkill = (projectId: string | null, title: string, extra = {}) => db.insert(documents).values({ projectId, title, content: "Inspect the current source before continuing.", docType: "skill", createdBy: owner.actor.id, ...extra }).returning().then((rows: any[]) => rows[0]);
+    const skill = await makeSkill(project.id, "Capability fixture");
+    const shared = await makeSkill(null, "Shared capability fixture");
+    const foreign = await makeSkill(other.id, "Foreign capability fixture");
+    const personal = await makeSkill(null, "Personal capability fixture", { personalOwnerId: owner.actor.id, personalOwnerType: "human" });
+    assert.equal((await createResourceServices(await runtime.verify(headers)).contextService.getSkill(db, skill.id)).id, skill.id);
+    assert.equal((await rest(`context/${skill.id}`, headers)).status, 200);
+    assert.equal((await rest(`documents/${skill.id}`, headers)).status, 404);
+    assert.equal((await rest(`context/${hiddenDocument.id}`, headers)).status, 404);
+    for (const asset of [shared, foreign, personal]) assert.equal((await rest(`context/${asset.id}`, headers)).status, 404);
+    const oversized = await makeSkill(project.id, "Oversized instruction fixture", { content: "x".repeat(32769) });
+    const tooLarge = await rest(`context/${oversized.id}`, headers);
+    assert.equal(tooLarge.status, 400);
+    assert.match(tooLarge.body.error, /read limit/);
+    const found = await rest(`context/search?intent=Capability&projectId=${project.id}&mode=full`, headers);
+    assert.equal(found.status, 200, JSON.stringify(found.body));
+    assert.deepEqual(found.body.items.map((row: any) => row.id), [skill.id]);
+    assert.ok(!("content" in found.body.items[0]), "Worker discovery stays summary-only");
+    assert.equal((await rest(`context/list?projectId=${project.id}`, headers)).status, 200);
+    assert.equal((await rest(`context/${skill.id}`, headers, "PATCH", { content: "Do not change instructions" })).status, 403);
+
+    const [pkg] = await db.insert(skillPackages).values({ name: "Capability fixture", projectId: project.id, primaryDocumentId: skill.id, createdBy: owner.actor.id }).returning();
+    const [version] = await db.insert(skillPackageVersions).values({ packageId: pkg.id, version: "1.0.0", createdBy: owner.actor.id }).returning();
+    await db.insert(skillPackageFiles).values({ packageVersionId: version.id, path: "SKILL.md", kind: "text", isReadableText: true, sizeBytes: Buffer.byteLength(skill.content), sha256: createHash("sha256").update(skill.content).digest("hex"), indexedDocumentId: skill.id });
+    for (const path of [`context/packages?projectId=${project.id}`, `context/packages/${pkg.id}`, `context/packages/${pkg.id}/files`, `context/packages/${pkg.id}/read?path=SKILL.md&version=1.0.0`]) {
+      const result = await rest(path, headers);
+      assert.equal(result.status, 200, JSON.stringify(result.body));
+    }
+    await db.update(skillPackageVersions).set({ status: "archived" }).where(eq(skillPackageVersions.id, version.id));
+    assert.equal((await rest(`context/${skill.id}`, headers)).status, 404);
+    assert.equal((await rest(`context/packages/${pkg.id}/read?path=SKILL.md&version=1.0.0`, headers)).status, 404);
+    assert.equal((await rest(`context/search?intent=Capability&projectId=${project.id}`, headers)).body.items.length, 0);
+    await db.update(skillPackageVersions).set({ status: "active" }).where(eq(skillPackageVersions.id, version.id));
+
+    const [memory] = await db.insert(memories).values({ title: "Capability memory", content: "Verified source", projectId: project.id, entityType: "task", entityId: task.id, createdBy: owner.actor.id, createdByType: "human" }).returning();
+    assert.equal((await rest(`memories/${memory.id}`, headers)).status, 200);
+    const [unrelated] = await db.insert(memories).values({ title: "Capability memory hidden", content: "Unrelated task", projectId: project.id, entityType: "task", entityId: sibling.id, createdBy: owner.actor.id, createdByType: "human" }).returning();
+    assert.equal((await rest(`memories/${unrelated.id}`, headers)).status, 404);
+    assert.deepEqual((await rest(`memories/search?query=Capability&projectId=${project.id}`, headers)).body.items.map((row: any) => row.id), [memory.id]);
+    await db.update(memories).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(memories.id, memory.id));
+    assert.equal((await rest(`memories/${memory.id}`, headers)).status, 404);
+    assert.equal((await rest(`memories?projectId=${project.id}&includeExpired=true`, headers)).body.items.length, 0);
+    assert.equal((await rest("memories", headers, "POST", { projectId: project.id, title: "Unreviewed", content: "Do not save" })).status, 403);
+    assert.equal((await rest(`context/packages/${pkg.id}`, headers, "PATCH", { status: "archived" })).status, 403);
+    assert.equal((await call(`${daemonId}/delegations`, executor.headers, { ...request, sharedCapabilityReads: true })).response.status, 403);
+    // Failed shared opt-in leaves the current delegation valid.
+    assert.equal((await rest(`context/${skill.id}`, headers)).status, 200);
+    const [sharedPackage] = await db.insert(skillPackages).values({ name: "Shared instruction fixture", primaryDocumentId: shared.id, createdBy: owner.actor.id }).returning();
+    const [sharedVersion] = await db.insert(skillPackageVersions).values({ packageId: sharedPackage.id, version: "1.0.0", createdBy: owner.actor.id }).returning();
+    await db.insert(skillPackageFiles).values({ packageVersionId: sharedVersion.id, path: "SKILL.md", kind: "text", isReadableText: true, sizeBytes: Buffer.byteLength(shared.content), sha256: createHash("sha256").update(shared.content).digest("hex"), indexedDocumentId: shared.id });
+    const [sharedMemory] = await db.insert(memories).values({ title: "Shared reviewed lesson", content: "Check current source evidence", createdBy: owner.actor.id, createdByType: "human" }).returning();
+    assert.equal((await rest(`context/packages/${sharedPackage.id}`, headers)).status, 404);
+    assert.equal((await rest(`memories/${sharedMemory.id}`, headers)).status, 404);
+    const sharedParent = await key(agent.id, owner, project.id, permissions, true);
+    const opted = await call(`${daemonId}/delegations`, sharedParent.headers, { ...request, sharedCapabilityReads: true });
+    assert.equal(opted.response.status, 201, opted.body.error);
+    const sharedHeaders = new Headers({ authorization: `Bearer ${opted.body.token}` });
+    assert.equal((await rest(`context/${shared.id}`, sharedHeaders)).status, 200);
+    assert.equal((await rest(`context/packages/${sharedPackage.id}/read?path=SKILL.md&version=1.0.0`, sharedHeaders)).status, 200);
+    assert.equal((await rest(`memories/${sharedMemory.id}`, sharedHeaders)).status, 200);
+    assert.equal((await rest(`documents/${shared.id}`, sharedHeaders)).status, 404);
+    assert.equal((await rest(`context/${personal.id}`, sharedHeaders)).status, 404);
+    assert.equal((await rest(`context/${foreign.id}`, sharedHeaders)).status, 404);
+    assert.equal((await rest(`documents/${hiddenDocument.id}`, sharedHeaders)).status, 404);
+    assert.equal((await rest(`context/${shared.id}`, sharedHeaders, "PATCH", { content: "No shared writes" })).status, 403);
+    const renewed = await call(`${daemonId}/delegations/${opted.body.delegation.id}/renew`, sharedParent.headers, {});
+    assert.equal(renewed.response.status, 200, renewed.body.error);
+    assert.equal((await rest(`context/${shared.id}`, new Headers({ authorization: `Bearer ${renewed.body.token}` }))).status, 200);
+    await apiKeyService.revokeScopedApiKey(db, owner.context, sharedParent.issued.id);
+    assert.equal((await rest(`context/${shared.id}`, new Headers({ authorization: `Bearer ${renewed.body.token}` }))).status, 401);
+    // Return subsequent lifecycle tests to the original project-only supervisor.
+    headers = await issue();
+    const bootstrap = await rest("context/bootstrap", headers);
+    assert.equal(bootstrap.status, 200);
+    assert.equal(bootstrap.body.capabilityBootstrap.capabilities.skills.state, "available");
+    assert.equal(bootstrap.body.capabilityBootstrap.capabilities.hostedExecution.state, "unavailable");
   });
   await t.test("tRPC and GraphQL reuse the same task/resource capability boundary", async () => {
     const caller = appRouter.createCaller(await createTRPCContextFactory({ db, auth: runtime })({ req: new Request(`${config.trustedOrigins[0]}/api/trpc`, { headers, method: "POST" }) }));

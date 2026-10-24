@@ -287,5 +287,6 @@ export const issueExecutionDelegationSchema = z.object({
   workerIndex: z.number().int().min(0).max(255),
   leaseGeneration: z.number().int().positive().safe(),
   taskId: z.string().uuid().optional(),
+  sharedCapabilityReads: z.boolean().default(false),
 }).strict();
 export type IssueExecutionDelegationInput = z.infer<typeof issueExecutionDelegationSchema>;

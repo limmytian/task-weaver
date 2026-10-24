@@ -42,7 +42,7 @@ export async function readMcpSkill(db: Database, identity: VerifiedRequestContex
   return db.transaction(async tx => {
     await lockIdentityLifecycle(tx);
     const authority = await resourceAuthority(tx, identity);
-    await requireResource(tx as unknown as Database, authority, "document", id);
+    await requireResource(tx as unknown as Database, authority, "skill", id);
     const [record] = await tx.select({ content: documents.content, docType: documents.docType, version: documents.version }).from(documents).where(eq(documents.id, id));
     if (!record || record.docType !== "skill") throw new NotFoundError("Resource not found");
     if (expectedVersion !== undefined && expectedVersion !== record.version) throw new ConflictError("Skill changed; resolve its capability manifest again", record.version);
@@ -53,7 +53,7 @@ export async function readMcpSkill(db: Database, identity: VerifiedRequestContex
       .where(and(eq(skillPackageFiles.indexedDocumentId, id), or(ne(skillPackages.status, "active"), ne(skillPackageVersions.status, "active"), not(packageResourcePredicate(authority))))).limit(1);
     if (unavailable.length) throw new NotFoundError("Resource not found");
     if (Buffer.byteLength(record.content, "utf8") > 32768) throw new McpToolFailure("result_too_large", "Skill text exceeds the 32768-byte read limit.");
-    return createResourceServices(identity).documentService.getDocument(tx as unknown as Database, id);
+    return createResourceServices(identity).contextService.getSkill(tx as unknown as Database, id);
   });
 }
 

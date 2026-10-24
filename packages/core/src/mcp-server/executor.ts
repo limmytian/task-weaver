@@ -142,11 +142,12 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
 /** A catalog is a hint; facade operations still authorize the actual target IDs. */
 export async function authorizedMcpToolNames(db: Database, identity: VerifiedRequestContext): Promise<readonly string[]> {
   const authority = await resourceAuthority(db, identity);
-  if (authority.bounds) return [];
+  const delegatedReads = new Set(["tw_context_search", "tw_context_get", "tw_skill_packages_list", "tw_skill_packages_get", "tw_skill_package_files", "tw_skill_package_read", "tw_memories_search", "tw_memories_get"]);
   const scopeKeys = authority.grants.flatMap(grant => grant.scope === "instance" ? [] : [mcpScopeKey(grant.scope === "project" ? { projectId: grant.projectId } : grant.scope === "personal" ? { personalOwnerId: grant.actorId } : {})]);
   const policies = scopeKeys.length ? await db.select().from(mcpInvocationPolicies).where(inArray(mcpInvocationPolicies.scopeKey, scopeKeys)) : [];
   const names: string[] = [];
   for (const tool of mcpServerCatalog) {
+    if (authority.bounds && (!["execute", "review", "automation"].includes(authority.bounds.purpose) || !delegatedReads.has(tool.name))) continue;
     const projectOnly = /^tw_(projects|requirements|requirement_dependencies|execution_slices|plan)_/.test(tool.name);
     const permission = tool.name === "tw_usage_summary" ? "audit.read" : tool.name.startsWith("tw_mcp_") ? "mcp.invoke" : tool.name === "tw_projects_discover" ? "project.discover" : (mcpServerReadTools as readonly string[]).includes(tool.name) && tool.name !== "tw_plan_validate" ? "resource.read" : "resource.write";
     for (const grant of authority.grants) {

@@ -85,14 +85,15 @@ test('upstream revocation closes task access and invokes cancellation without re
 })
 
 test('renewal rotates private tokens and rejects expansion of the task bound', async () => {
-  for (const expand of [false, true]) {
+  for (const expand of ["none", "tasks", "shared"]) {
     const cap = capability(Date.now() + 1500)
     let invalidations = 0
     let observed = ''
     let notifyRenewed!: () => void
     const didRenew = new Promise<void>(resolve => { notifyRenewed = resolve })
     const next = { token: `twd_${'b'.repeat(64)}`, delegation: { ...cap.delegation, id: randomUUID(),
-      taskIds: expand ? [...cap.delegation.taskIds, randomUUID()] : cap.delegation.taskIds,
+      taskIds: expand === "tasks" ? [...cap.delegation.taskIds, randomUUID()] : cap.delegation.taskIds,
+      sharedCapabilityReads: expand === "shared",
       expiresAt: new Date(Date.now() + 600_000).toISOString(),
     } }
     const broker = await createTaskAccessBroker({ apiUrl: 'https://tw.example', capability: cap,
@@ -103,7 +104,7 @@ test('renewal rotates private tokens and rejects expansion of the task bound', a
     try {
       await didRenew
       await new Promise(resolve => setImmediate(resolve))
-      if (expand) {
+      if (expand !== "none") {
         assert.equal(invalidations, 1)
         await assert.rejects(fetch(`${broker.apiUrl}/api/v1/auth/me`, { headers: { authorization: `Bearer ${broker.apiKey}` } }))
       } else {
@@ -151,5 +152,49 @@ test('controlled Git stays scoped to the current capability and exposes actionab
     assert.match(detail.error, /target tip is not in working history/)
     assert.equal(gitCalls, 1)
     assert.equal(authorityCalls, 1)
+  } finally { await broker.close() }
+})
+
+test('capability instruction reads use delegated tokens while mutation and installation routes stay closed', async () => {
+  const cap = capability()
+  const forwarded: string[] = []
+  const broker = await createTaskAccessBroker({ apiUrl: 'https://tw.example', capability: cap,
+    renew: async () => cap, revoke: async () => {},
+    fetch: async (url, input) => {
+      forwarded.push(String(url))
+      assert.equal(new Headers(input?.headers).get('authorization'), `Bearer ${cap.token}`)
+      return Response.json({ ok: true })
+    },
+  })
+  try {
+    const id = randomUUID()
+    const headers = { authorization: `Bearer ${broker.apiKey}` }
+    for (const path of [`context/packages?projectId=${cap.delegation.projectId}`, `context/packages/${id}`, `context/packages/${id}/files?version=1.0.0`, `context/packages/${id}/read?path=SKILL.md&version=1.0.0`, `context/${id}`, `memories?projectId=${cap.delegation.projectId}`, `memories/search?query=recovery`, `memories/${id}`]) {
+      const result = await fetch(`${broker.apiUrl}/api/v1/${path}`, { headers })
+      assert.equal(result.status, 200, path)
+    }
+    assert.equal(forwarded.length, 8)
+    for (const [method, path] of [['GET', `context/packages/${id}/download`], ['POST', 'context/packages/register'], ['PATCH', `context/packages/${id}`], ['POST', 'memories'], ['PATCH', `memories/${id}`], ['POST', `mcp/tools/${id}/call`], ['POST', `context/packages/${id}/reindex`]]) {
+      assert.equal((await fetch(`${broker.apiUrl}/api/v1/${path}`, { headers, method })).status, 403, `${method} ${path}`)
+    }
+    assert.equal(forwarded.length, 8)
+  } finally { await broker.close() }
+})
+
+test('capability reads enforce byte budgets without replaying oversized responses', async () => {
+  const cap = capability()
+  let calls = 0
+  const broker = await createTaskAccessBroker({ apiUrl: 'https://tw.example', capability: cap,
+    renew: async () => cap, revoke: async () => {},
+    fetch: async () => { calls++; return Response.json({ content: '界'.repeat(23000) }) },
+  })
+  try {
+    const headers = { authorization: `Bearer ${broker.apiKey}` }
+    for (const path of ['context/search?intent=test', `context/packages/${randomUUID()}/read?path=SKILL.md`, `memories/${randomUUID()}`]) {
+      const response = await fetch(`${broker.apiUrl}/api/v1/${path}`, { headers })
+      assert.equal(response.status, 413)
+      assert.match((await response.json() as { error: string }).error, /byte budget/)
+    }
+    assert.equal(calls, 3)
   } finally { await broker.close() }
 })

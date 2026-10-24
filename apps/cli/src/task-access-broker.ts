@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
-import { executionDelegationSchema, type ExecutionDelegation } from '@task-weaver/contracts'
+import { CAPABILITY_LIMITS, executionDelegationSchema, type ExecutionDelegation } from '@task-weaver/contracts'
 
 export interface TaskCapability { delegation: ExecutionDelegation; token: string }
 export interface TaskAccessBroker {
@@ -9,7 +9,7 @@ export interface TaskAccessBroker {
   close(): Promise<void>
 }
 const identifier = '[0-9a-fA-F-]{36}'
-const readPaths = new RegExp(`^/api/v1/(?:auth/me|projects(?:/${identifier}(?:/(?:requirements|tasks))?)?|tasks(?:/${identifier}(?:/(?:claim|comments|notes|repositories))?)?|requirements/${identifier}(?:/(?:slices|repositories|workflow-outputs|workflow-inputs))?|documents(?:/${identifier}(?:/(?:versions(?:/[0-9]+)?|links|backlinks))?)?|repositories(?:/${identifier})?|search/(?:tasks|requirements|documents(?:/fulltext)?|all)|context/(?:search|list|bootstrap|${identifier}))/?$`)
+const readPaths = new RegExp(`^/api/v1/(?:auth/me|projects(?:/${identifier}(?:/(?:requirements|tasks))?)?|tasks(?:/${identifier}(?:/(?:claim|comments|notes|repositories))?)?|requirements/${identifier}(?:/(?:slices|repositories|workflow-outputs|workflow-inputs))?|documents(?:/${identifier}(?:/(?:versions(?:/[0-9]+)?|links|backlinks))?)?|repositories(?:/${identifier})?|search/(?:tasks|requirements|documents(?:/fulltext)?|all)|context/(?:search|list|bootstrap|packages(?:/${identifier}(?:/(?:files|read))?)?|${identifier})|memories(?:/(?:search|${identifier}))?)/?$`)
 const writePaths = new RegExp(`^/api/v1/(?:tasks/${identifier}/(?:status|claim|release|heartbeat|comments|notes)|requirements/${identifier}/workflow-outputs)/?$`)
 const patchPaths = new RegExp(`^/api/v1/(?:tasks/${identifier}(?:/status)?|documents/${identifier})/?$`)
 const secretDigest = (value: string) => createHash('sha256').update(value).digest()
@@ -88,7 +88,26 @@ export async function createTaskAccessBroker(options: {
         headers: { authorization: `Bearer ${capability.token}`, 'content-type': 'application/json' },
         ...(method === 'GET' ? {} : { body: Buffer.concat(chunks) }),
       })
-      const payload = await upstream.text()
+      const summary = /^\/api\/v1\/(?:context\/(?:search|list|packages)|memories(?:\/search)?)\/?$/.test(url.pathname)
+      const capabilityRead = /^\/api\/v1\/(?:context\/|memories(?:\/|$))/.test(url.pathname) && !url.pathname.endsWith('/bootstrap')
+      const limit = summary ? CAPABILITY_LIMITS.summaryBytes : capabilityRead ? 65536 : undefined
+      let payload: string
+      if (limit && upstream.body) {
+        const reader = upstream.body.getReader()
+        const parts: Uint8Array[] = []
+        let resultBytes = 0
+        for (;;) {
+          const part = await reader.read()
+          if (part.done) break
+          resultBytes += part.value.byteLength
+          if (resultBytes > limit) {
+            await reader.cancel()
+            return reject(413, 'Capability result exceeds the byte budget; narrow discovery or select a smaller text file')
+          }
+          parts.push(part.value)
+        }
+        payload = Buffer.concat(parts).toString('utf8')
+      } else payload = await upstream.text()
       if (closed || Date.parse(capability.delegation.expiresAt) <= Date.now()) { invalidate(); return }
       response.writeHead(upstream.status)
       response.end(payload)
@@ -130,7 +149,7 @@ export async function createTaskAccessBroker(options: {
           const next = renewed.delegation
           if (closed) { await options.revoke(next.id).catch(() => {}); return }
           if (JSON.stringify(next.initiator) !== JSON.stringify(original.initiator) || next.delegatorActorId !== original.delegatorActorId || next.runId !== original.runId || next.executorActorId !== original.executorActorId || next.parentCredentialId !== original.parentCredentialId
-            || next.requirementId !== original.requirementId || next.projectId !== original.projectId || next.purpose !== original.purpose || next.leaseGeneration !== original.leaseGeneration
+            || Boolean(next.sharedCapabilityReads) !== Boolean(original.sharedCapabilityReads) || next.requirementId !== original.requirementId || next.projectId !== original.projectId || next.purpose !== original.purpose || next.leaseGeneration !== original.leaseGeneration
             || JSON.stringify(next.taskIds) !== JSON.stringify(original.taskIds) || JSON.stringify(next.repositoryIds) !== JSON.stringify(original.repositoryIds)
             || Date.parse(next.expiresAt) <= Date.now() || Date.parse(next.expiresAt) > Date.now() + 15 * 60_000) throw new Error('Invalid task capability renewal')
           capability = renewed

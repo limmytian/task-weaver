@@ -10,7 +10,7 @@ import {
 import { getLiveRequestAuthority } from "./api-keys";
 import { grantsAreCovered, loadActivePrincipal, type AuthDatabase } from "./auth-principals";
 
-export type ResourceKind = "project" | "requirement" | "task" | "document" | "memory" | "slice" | "package" | "profile" | "mcp";
+export type ResourceKind = "project" | "requirement" | "task" | "document" | "skill" | "memory" | "slice" | "package" | "profile" | "mcp";
 export type ResourceScope = {
   projectId?: string | null;
   personalOwnerId?: string | null;
@@ -71,8 +71,10 @@ export function resourcePredicate(
   const tableName = columns.resourceTable ?? (projectColumn.table ? getTableName(projectColumn.table) : undefined);
   const table = projectColumn.table as unknown as { id?: AnyColumn } | undefined;
   const id = columns.resourceId ?? (table?.id ? sql`${table.id}` : undefined);
-  if (authority.bounds.purpose === "automation" && ["memories", "skill_packages", "mcp_servers"].includes(tableName ?? "")
-    && ["resource.read", "mcp.invoke"].includes(permission))
+  if (["automation", "execute", "review"].includes(authority.bounds.purpose) && ["memories", "skill_packages", "mcp_servers"].includes(tableName ?? "")
+    && permission === "resource.read")
+    return and(scoped, or(eq(sql`${columns.projectId}`, authority.bounds.projectId), isNull(columns.projectId)), unowned)!;
+  if (authority.bounds.purpose === "automation" && tableName === "mcp_servers" && permission === "mcp.invoke")
     return and(scoped, eq(sql`${columns.projectId}`, authority.bounds.projectId), unowned)!;
   const ids = tableName === "tasks" ? authority.bounds.taskIds : tableName === "documents" ? authority.bounds.documentIds : tableName === "requirements" ? [authority.bounds.requirementId] : [];
   return id && ids.length ? and(scoped, inArray(id, ids))! : sql`false`;
@@ -106,8 +108,10 @@ export function projectPredicate(authority: ResourceAuthority, permission: Autho
 
 export async function requireResource(db: Database, authority: ResourceAuthority, kind: ResourceKind, id: string, permission: AuthorizationPermission = "resource.read") {
   if (!stableActorReferenceSchema.safeParse({ id, type: "human" }).success) throw new ValidationError("Invalid resource ID");
-  const delegatedAsset = authority.bounds?.purpose === "automation" && ["memory", "package", "mcp"].includes(kind)
-    && ["resource.read", "mcp.invoke"].includes(permission);
+  const delegatedAsset = Boolean(authority.bounds && (
+    ["automation", "execute", "review"].includes(authority.bounds.purpose) && ["skill", "memory", "package", "mcp"].includes(kind) && permission === "resource.read"
+    || authority.bounds.purpose === "automation" && ["memory", "package", "mcp"].includes(kind) && permission === "mcp.invoke"
+  ));
   if (authority.bounds) {
     const bounds = authority.bounds;
     const allowed = kind === "task" ? bounds.taskIds.includes(id) : kind === "document" ? bounds.documentIds.includes(id)
@@ -124,12 +128,12 @@ export async function requireResource(db: Database, authority: ResourceAuthority
   } else {
     const row = kind === "task" ? await db.query.tasks.findFirst({ where: eq(tasks.id, id) })
       : kind === "requirement" ? await db.query.requirements.findFirst({ where: eq(requirements.id, id) })
-      : kind === "document" ? await db.query.documents.findFirst({ where: eq(documents.id, id) })
+      : kind === "document" || kind === "skill" ? await db.query.documents.findFirst({ where: eq(documents.id, id) })
       : kind === "package" ? await db.query.skillPackages.findFirst({ where: eq(skillPackages.id, id) })
       : kind === "profile" ? await db.query.embeddingProfiles.findFirst({ where: eq(embeddingProfiles.id, id) })
       : kind === "mcp" ? await db.query.mcpServers.findFirst({ where: eq(mcpServers.id, id) })
       : await db.query.memories.findFirst({ where: eq(memories.id, id) });
-    scope = row;
+    scope = kind === "skill" && (!row || !("docType" in row) || row.docType !== "skill") ? undefined : row;
     if (kind === "mcp" && row && "registeredBy" in row) {
       const creator = row.registeredBy ? await db.query.authActors.findFirst({ where: sql`${authActors.id}::text = ${row.registeredBy}` }) : undefined;
       if (!creator) scope = undefined;
@@ -155,7 +159,9 @@ export async function requireResource(db: Database, authority: ResourceAuthority
       }
     }
   }
-  if (delegatedAsset && scope?.projectId !== authority.bounds!.projectId) throw new NotFoundError("Resource not found");
+  if (delegatedAsset && (scope?.personalOwnerId || scope?.personalOwnerType
+    || scope?.projectId && scope.projectId !== authority.bounds!.projectId
+    || permission !== "resource.read" && scope?.projectId !== authority.bounds!.projectId)) throw new NotFoundError("Resource not found");
   if (!scope || !canAccessResource(authority, scope)) throw new NotFoundError("Resource not found");
   requireScope(authority, scope, permission);
   return scope;
@@ -224,4 +230,13 @@ export function qualifiedScopeColumns(columns: { projectId: AnyColumn; personalO
     personalOwnerType: columns.personalOwnerType ? qualifiedColumn(columns.personalOwnerType) : undefined,
     createdBy: columns.createdBy ? qualifiedColumn(columns.createdBy) : undefined,
   };
+}
+
+/** Capability discovery can read skill text without opening ordinary documents. */
+export function skillResourcePredicate(authority: ResourceAuthority): SQL {
+  if (!authority.bounds || !["execute", "review", "automation"].includes(authority.bounds.purpose))
+    return and(resourcePredicate(authority, documents), eq(documents.docType, "skill"))!;
+  return and(resourcePredicate({ ...authority, bounds: null }, documents), eq(documents.docType, "skill"),
+    or(eq(documents.projectId, authority.bounds.projectId), isNull(documents.projectId)),
+    isNull(documents.personalOwnerId), isNull(documents.personalOwnerType))!;
 }

@@ -8,7 +8,7 @@ import { createTiExecutionService, isTiExecutionOperation } from './ti-execution
 import { inArray, and, eq, isNull, sql, desc } from "drizzle-orm";
 import {
   apiKeyProjectCreations, apiKeys, projectPreferences, type Database, daemons, requirementClaims, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
-  mcpServers, mcpTools, mcpLocalRequests, requirementRepositories, skillPackages, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
+  mcpServers, mcpTools, mcpLocalRequests, requirementRepositories, skillPackages, skillPackageVersions, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
   documentRequirementLinks, projectMemberships, activityLog, executionDelegations, taskComments, workflowOutputs,
 } from "@task-weaver/db";
 import {
@@ -34,7 +34,7 @@ import * as packageImplementation from "./skill-packages";
 import { packageResourcePredicate, requirePackage, profileResourcePredicate, requireProfile, requireProfileManagement, canManageProvider } from "./asset-authorization";
 import { auditIdentity, lockIdentityLifecycle } from "./auth-security";
 import {
-  canAccessResource, labelledResourcePredicate, qualifiedScopeColumns, taskResourcePredicate, memoryResourcePredicate, resourceAuthority, requireResource, requireScope, resourcePredicate, projectPredicate,
+  canAccessResource, skillResourcePredicate, labelledResourcePredicate, qualifiedScopeColumns, taskResourcePredicate, memoryResourcePredicate, resourceAuthority, requireResource, requireScope, resourcePredicate, projectPredicate,
   validateAssignee, type ResourceAuthority, type ResourceKind, type ResourceScope,
 } from "./resource-authorization";
 
@@ -64,7 +64,7 @@ const readById: Record<string, ResourceKind> = {
   getRequirementRecord: "requirement", listRequirementDependenciesPage: "requirement",
   listTaskCommentsPage: "task", listTaskDependenciesPage: "task",
   getProject: "project", getRequirement: "requirement", getTask: "task", getTaskDetail: "task",
-  getDocument: "document", getDocumentDetail: "document", getMemory: "memory", getExecutionSlice: "slice",
+  getSkill: "skill", getDocument: "document", getDocumentDetail: "document", getMemory: "memory", getExecutionSlice: "slice",
   getTaskClaim: "task", getRequirementClaim: "requirement", listExecutionSlices: "requirement",
   listRequirementDependencies: "requirement", checkBlockingDependencies: "task", checkBlockingRequirementDependencies: "requirement",
   getBacklinks: "document", getDocumentVersion: "document",
@@ -232,6 +232,10 @@ function bindServices(context?: VerifiedRequestContext) {
           if (["updateProject", "deleteProject"].includes(name) && result?.status === "archived") {
             await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(isNull(executionDelegations.revokedAt), eq(executionDelegations.projectId, call[1])));
           }
+          if (authority.bounds && group === "package" && name === "getPackage") {
+            // Manifests are metadata; content is read through the selected-file budget.
+            result = { ...result, primaryDocument: null, versions: result.versions.filter((version: any) => version.status === "active") };
+          }
           if (group === "mcp" && name !== "callTool") result = redactMcpResult(authority, result);
           if (group === "embedding") result = redactEmbeddingResult(authority, result);
           if (group === "repository") result = redactRepositoryResult(result);
@@ -310,8 +314,8 @@ function authorizeDelegatedOperation(authority: ResourceAuthority, group: Group,
     package: ["listPackages", "getPackage", "listPackageFiles", "readPackageTextFile"],
     mcp: ["listServers", "searchTools", "getServer", "getToolDetail", "listServerTools"],
   };
-  if (authority.bounds?.purpose === "automation" && assetReads[group]?.includes(name)) return;
-  const reads = new Set(["getProject", "getRequirement", "getTask", "getTaskDetail", "listTasks", "listRequirements", "listProjects", "getDocument", "getDocumentDetail", "listDocuments", "getTaskClaim", "getRequirementClaim", "listExecutionSlices", "listTaskComments", "listTaskNotes", "listDocumentVersions", "getDocumentVersion", "getRequirementRepositories", "getTaskRepositories", "listRequirementRepositories", "listTaskRepositories", "getRepository", "listRepositories", "bootstrapContext", "getBootstrapContext", "searchTasks", "searchRequirements", "searchDocuments", "searchDocumentsFulltext", "searchAll", "resolveTitles", "listContextEntries", "searchContext", "getContextEntry"]);
+  if (authority.bounds && ["automation", "execute", "review"].includes(authority.bounds.purpose) && assetReads[group]?.includes(name)) return;
+  const reads = new Set(["getProject", "getRequirement", "getTask", "getTaskDetail", "listTasks", "listRequirements", "listProjects", "getDocument", "getDocumentDetail", "listDocuments", "getTaskClaim", "getRequirementClaim", "listExecutionSlices", "listTaskComments", "listTaskNotes", "listDocumentVersions", "getDocumentVersion", "getRequirementRepositories", "getTaskRepositories", "listRequirementRepositories", "listTaskRepositories", "getRepository", "listRepositories", "bootstrapContext", "getBootstrapContext", "searchTasks", "searchRequirements", "searchDocuments", "searchDocumentsFulltext", "searchAll", "resolveTitles", "listContextEntries", "searchContext", "listSkills", "getSkill", "getContextEntry"]);
   const writes = new Set(["updateTask", "updateTaskStatus", "addTaskComment", "addTaskNote", "claimTask", "releaseTask", "heartbeatClaim", "updateDocument"]);
   reads.add("listWorkflowOutputs");
   reads.add("listWorkflowInputs");
@@ -334,6 +338,9 @@ function authorizeDelegatedOperation(authority: ResourceAuthority, group: Group,
 
 async function authorizeOperation(db: Database, authority: ResourceAuthority, group: Group, name: string, call: any[], context: VerifiedRequestContext) {
   if (authority.bounds) {
+    if (["listSkills", "searchContext", "listPackages", "listMemories", "searchMemories"].includes(name)) {
+      call[1] = { ...call[1], limit: Math.min(call[1]?.limit ?? 20, 20), ...(group === "memory" ? { includeExpired: false } : {}), ...(name === "listPackages" ? { status: "active" } : {}), ...(name === "searchContext" ? { mode: "summary" } : {}) };
+    }
     authorizeDelegatedOperation(authority, group, name, call);
     for (let index = 1; index < call.length; index++) call[index] = redactDelegatedInput(call[index]);
   }
@@ -539,12 +546,30 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     if (!reads.includes(name) && !writes.includes(name)) throw new AuthorizationError();
     const packageId = typeof id === "string" ? id : id.packageId;
     await requirePackage(db, authority, packageId, writes.includes(name) ? "resource.write" : "resource.read");
+    if (authority.bounds) {
+      const pkg = await db.query.skillPackages.findFirst({ where: eq(skillPackages.id, packageId) });
+      if (pkg?.status !== "active") throw new NotFoundError("Skill package not found");
+      if (["listPackageFiles", "readPackageTextFile"].includes(name)) {
+        const [version] = await db.select({ version: skillPackageVersions.version }).from(skillPackageVersions)
+          .where(and(eq(skillPackageVersions.packageId, packageId), eq(skillPackageVersions.status, "active"),
+            id.version ? eq(skillPackageVersions.version, id.version) : undefined))
+          .orderBy(desc(skillPackageVersions.createdAt)).limit(1);
+        if (!version) throw new NotFoundError("Skill package version not found");
+        call[1] = { ...id, version: version.version };
+      }
+      if (name === "readPackageTextFile") call[3] = 32768;
+    }
     if (name === "reindexPackageTextFiles") call[4] = resourcePredicate(authority, documents);
     return;
   }
   if (name === "importSkill" || name === "bulkImportSkills") {
     for (const input of name === "bulkImportSkills" ? id : [id]) requireScope(authority, input);
     call[3] = resourcePredicate(authority, documents);
+    return;
+  }
+  if (name === "getSkill") {
+    await requireResource(db, authority, "skill", id);
+    call[2] = packageResourcePredicate(authority);
     return;
   }
   if (readById[name]) {
@@ -564,6 +589,7 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     }
     if (name === "getMemory") {
       const memory = await db.query.memories.findFirst({ where: eq(memories.id, id) });
+      if (authority.bounds && memory?.expiresAt && memory.expiresAt <= new Date()) throw new NotFoundError("Memory not found");
       await checkMemoryEntity(db, authority, memory!);
     }
     return;
@@ -637,7 +663,8 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     if (input.entityId && input.entityType) await checkMemoryEntity(db, authority, input);
     call[2] = name === "searchTasks" ? taskResourcePredicate(authority)
       : name === "searchRequirements" ? resourcePredicate(authority, requirements)
-      : name === "searchMemories" ? memoryResourcePredicate(authority) : resourcePredicate(authority, documents);
+      : name === "searchMemories" ? memoryResourcePredicate(authority)
+      : name === "searchContext" || name === "listSkills" ? skillResourcePredicate(authority) : resourcePredicate(authority, documents);
     if (name === "searchContext" || name === "listSkills") call[3] = packageResourcePredicate(authority);
     if (name === "searchDocuments" || name === "searchDocumentsWithMetadata") call[3] = labelledResourcePredicate(authority, embeddingProfiles);
     return;

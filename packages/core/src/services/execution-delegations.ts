@@ -21,6 +21,7 @@ function publicDelegation(row: StoredDelegation, initiatorType: 'human' | 'agent
     id: row.id, parentCredentialId: row.parentCredentialId, delegatorActorId: row.actorId,
     initiator: { id: row.initiatorActorId, type: initiatorType }, executorActorId: row.actorId,
     projectId: row.projectId, requirementId: row.requirementId, taskIds: row.taskIds,
+    sharedCapabilityReads: credentialGrantsSchema.parse(row.grants).some(grant => grant.scope === "global" && grant.permissions.includes("resource.read")),
     repositoryIds: row.repositoryIds, runId: row.runId, purpose: row.purpose,
     leaseGeneration: Number(row.leaseGeneration), expiresAt: row.expiresAt.toISOString(),
   });
@@ -150,6 +151,13 @@ export function createExecutionDelegationService(context: VerifiedRequestContext
         for (const id of repositoryIds) await requireRepository(tx, authority, id);
         const permissions: AuthorizationPermission[] = ['resource.read', phasePermission(purpose), ...(['execute', 'delivery'].includes(purpose) ? ['resource.write' as const] : [])];
         const grants: AuthorizationGrant[] = [{ scope: 'project', projectId: scope.projectId!, permissions }];
+        // Shared reads are explicit and remain capability-only under execution bounds.
+        if (input.sharedCapabilityReads && !['execute', 'review'].includes(purpose)) throw new ValidationError('Shared capability reads are unavailable for this execution purpose');
+        if (input.sharedCapabilityReads) {
+          const shared: AuthorizationGrant = { scope: 'global', permissions: ['resource.read'] };
+          if (!grantsAreCovered([shared], authority.grants)) throw new AuthorizationError();
+          grants.push(shared);
+        }
         if (!grantsAreCovered(grants, authority.grants)) throw new AuthorizationError();
         await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(eq(executionDelegations.runId, claim.id), eq(executionDelegations.purpose, purpose), isNull(executionDelegations.revokedAt)));
         const deadline = context.credential.expiresAt ? new Date(Math.min(new Date(context.credential.expiresAt).getTime(), claim.expiresAt.getTime())) : claim.expiresAt;
