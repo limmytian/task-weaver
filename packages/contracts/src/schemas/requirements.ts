@@ -45,7 +45,7 @@ export const createRequirementSchema = z.object({
   modelTier: modelTierSchema.default("standard"),
   tags: z.array(z.string()).optional(),
   branchName: z.string().optional(),
-  expectedAt: z.coerce.date().optional(),
+  expectedAt: z.coerce.date<Date>().optional(),
   recoveryPolicy: executionRecoveryPolicySchema.optional(),
   workflowPreset: workflowPresetSchema.optional(),
   workflow: requirementWorkflowSchema.optional(),
@@ -59,7 +59,7 @@ export const updateRequirementSchema = z.object({
   modelTier: modelTierSchema.optional(),
   tags: z.array(z.string()).optional(),
   branchName: z.string().nullable().optional(),
-  expectedAt: z.coerce.date().nullable().optional(),
+  expectedAt: z.coerce.date<Date>().nullable().optional(),
   recoveryPolicy: executionRecoveryPolicySchema.optional(),
   workflowPreset: workflowPresetSchema.optional(),
   workflow: requirementWorkflowSchema.optional(),
@@ -73,8 +73,8 @@ export const listRequirementsSchema = z.object({
   tag: z.string().optional(),
   query: z.string().trim().min(1).max(500).optional(),
   view: z.enum(["summary", "full"]).optional(),
-  page: z.coerce.number().int().min(1).optional(),
-  pageSize: z.coerce.number().int().min(1).max(50).optional(),
+  page: z.coerce.number<number>().int().min(1).optional(),
+  pageSize: z.coerce.number<number>().int().min(1).max(50).optional(),
   completedWithinDays: z
     .number()
     .int()

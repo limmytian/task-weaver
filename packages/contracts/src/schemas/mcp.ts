@@ -5,7 +5,7 @@ export const mcpTransportSchema = z.enum(["stdio", "sse", "streamable-http", "ho
 export const mcpServerStdioConfigSchema = z.object({
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
-  env: z.record(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
 });
 
 export const mcpServerHostedConfigSchema = z.object({
@@ -21,12 +21,12 @@ export const hostedMcpRuntimeProfileSchema = z.object({
   projectIds: z.array(z.string().uuid()).max(100).default([]),
   personalActorIds: z.array(z.string().min(1).max(255)).max(100).default([]),
   global: z.boolean().default(false),
-  secretReferences: z.record(z.string().regex(/^TW_MCP_SECRET_[A-Z0-9_]+$/)).default({}),
+  secretReferences: z.record(z.string(), z.string().regex(/^TW_MCP_SECRET_[A-Z0-9_]+$/)).default({}),
 }).strict().refine(profile => Object.keys(profile.secretReferences).length <= 16 && Object.keys(profile.secretReferences).every(key => /^[A-Z][A-Z0-9_]{0,99}$/.test(key) && !/^(PATH|HOME|LD_|NODE_|PYTHON|DOCKER|TW_)/.test(key)), "Secret target names must be bounded application-specific environment names");
 
 export const mcpServerHttpConfigSchema = z.object({
   url: z.string().url(),
-  headers: z.record(z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
 });
 
 export const mcpScopeSchema = z.enum(["private", "local"]);
@@ -37,8 +37,8 @@ const queryBooleanSchema = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
-const requireLocalScopeConsent = <T extends { transport?: string; scope?: string; nodeId?: string; localScopeConsent?: boolean }>(
-  schema: z.ZodType<T>,
+const requireLocalScopeConsent = <S extends z.ZodType<{ transport?: string; scope?: string; nodeId?: string; localScopeConsent?: boolean }>>(
+  schema: S,
 ) => schema
   .refine((data) => {
     if (data.scope === "local" && !data.nodeId) {
@@ -74,7 +74,7 @@ export const registerMcpServerSchema = requireLocalScopeConsent(z.object({
   nodeId: z.string().optional(),
   scope: mcpScopeSchema.default("private"),
   localScopeConsent: z.boolean().optional(),
-  ttl: z.coerce.number().int().min(5).max(3600).default(60),
+  ttl: z.coerce.number<number>().int().min(5).max(3600).default(60),
 })).refine((data) => {
   if (data.transport === "stdio" && !data.clientId) {
     return false;
@@ -100,7 +100,7 @@ export const updateMcpServerSchema = requireLocalScopeConsent(z.object({
   nodeId: z.string().optional(),
   scope: mcpScopeSchema.optional(),
   localScopeConsent: z.boolean().optional(),
-  ttl: z.coerce.number().int().min(5).max(3600).optional(),
+  ttl: z.coerce.number<number>().int().min(5).max(3600).optional(),
 }));
 
 export const searchMcpToolsSchema = z.object({
@@ -114,12 +114,12 @@ export const searchMcpToolsSchema = z.object({
   personalOwnerType: z.enum(["human", "agent"]).optional(),
   clientId: z.string().optional(),
   nodeId: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(20).default(10),
+  limit: z.coerce.number<number>().int().min(1).max(20).default(10),
 });
 
 export const callMcpToolSchema = z.object({
   approvalId: z.string().uuid().optional(),
-  arguments: z.record(z.unknown()).refine(value => JSON.stringify(value).length <= 1_048_576, "MCP arguments exceed size limit").optional(),
+  arguments: z.record(z.string(), z.unknown()).refine(value => JSON.stringify(value).length <= 1_048_576, "MCP arguments exceed size limit").optional(),
 });
 
 export type McpTransport = z.infer<typeof mcpTransportSchema>;
@@ -133,13 +133,13 @@ export const uploadMcpToolsSchema = z.object({
   tools: z.array(z.object({
     name: z.string().min(1).max(255),
     description: z.string().max(16_384).optional(),
-    inputSchema: z.record(z.unknown()).optional(),
+    inputSchema: z.record(z.string(), z.unknown()).optional(),
   }).strict()).max(1000),
 }).strict();
 
 export const completeLocalMcpRequestSchema = z.object({
   leaseToken: z.string().regex(/^[a-f0-9]{64}$/),
-  result: z.record(z.unknown()).refine(value => JSON.stringify(value).length <= 1_048_576, "MCP result exceeds size limit"),
+  result: z.record(z.string(), z.unknown()).refine(value => JSON.stringify(value).length <= 1_048_576, "MCP result exceeds size limit"),
 }).strict();
 
 export const mcpSecurityScopeSchema = z.object({
@@ -156,6 +156,6 @@ export const mcpToolAuthorizationSchema = z.object({
 }).strict();
 
 export const listMcpInvocationAuditsSchema = mcpSecurityScopeSchema.extend({
-  limit: z.coerce.number().int().min(1).max(100).default(20),
-  offset: z.coerce.number().int().min(0).max(100000).default(0),
+  limit: z.coerce.number<number>().int().min(1).max(100).default(20),
+  offset: z.coerce.number<number>().int().min(0).max(100000).default(0),
 }).strict();

@@ -147,7 +147,8 @@ test('memory search rejects blank queries after trimming', () => {
 
   assert.equal(result.success, false)
   if (!result.success) {
-    assert.deepEqual(result.error.flatten().fieldErrors.query, ['String must contain at least 1 character(s)'])
+    assert.equal(result.error.issues[0]?.code, 'too_small')
+    assert.deepEqual(result.error.issues[0]?.path, ['query'])
   }
 })
 

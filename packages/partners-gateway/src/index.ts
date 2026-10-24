@@ -12,7 +12,7 @@ const gatewayConfigSchema = z.object({
   serviceToken: optionalString(z.string().min(1)),
   tenantId: optionalString(z.string().min(1)),
   projectId: optionalString(z.string().min(1)),
-  defaultTimeoutSeconds: z.coerce.number().int().min(30).max(86_400).default(900),
+  defaultTimeoutSeconds: z.coerce.number<number>().int().min(30).max(86_400).default(900),
 }).superRefine((config, ctx) => {
   if (Boolean(config.baseUrl) !== Boolean(config.serviceToken)) {
     ctx.addIssue({
@@ -26,13 +26,13 @@ const gatewayWorkerConfigSchema = z.object({
   actorId: optionalString(z.string().min(1)).default("task-weaver:ti-agent"),
   assignedAgentId: optionalString(z.string().min(1)).default("task-weaver:ti-agent"),
   workerId: optionalString(z.string().min(1)),
-  leaseDurationMinutes: z.coerce.number().int().min(1).max(15).default(15),
-  heartbeatIntervalMs: z.coerce.number().int().min(100).max(86_400_000).default(300_000),
-  progressFlushIntervalMs: z.coerce.number().int().min(100).max(3_600_000).default(2_000),
-  idlePollIntervalMs: z.coerce.number().int().min(100).max(3_600_000).default(5_000),
-  statusPollIntervalMs: z.coerce.number().int().min(100).max(3_600_000).default(2_000),
-  retryBaseDelayMs: z.coerce.number().int().min(100).max(3_600_000).default(1_000),
-  retryMaxDelayMs: z.coerce.number().int().min(100).max(86_400_000).default(300_000),
+  leaseDurationMinutes: z.coerce.number<number>().int().min(1).max(15).default(15),
+  heartbeatIntervalMs: z.coerce.number<number>().int().min(100).max(86_400_000).default(300_000),
+  progressFlushIntervalMs: z.coerce.number<number>().int().min(100).max(3_600_000).default(2_000),
+  idlePollIntervalMs: z.coerce.number<number>().int().min(100).max(3_600_000).default(5_000),
+  statusPollIntervalMs: z.coerce.number<number>().int().min(100).max(3_600_000).default(2_000),
+  retryBaseDelayMs: z.coerce.number<number>().int().min(100).max(3_600_000).default(1_000),
+  retryMaxDelayMs: z.coerce.number<number>().int().min(100).max(86_400_000).default(300_000),
 }).superRefine((config, ctx) => {
   if (config.heartbeatIntervalMs >= config.leaseDurationMinutes * 60_000) {
     ctx.addIssue({

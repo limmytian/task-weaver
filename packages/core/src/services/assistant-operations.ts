@@ -1,15 +1,15 @@
+import { inputJsonSchema } from "@task-weaver/contracts";
 import { executeChatSandboxTool, tiSandboxToolSchemas, tiSandboxTools } from "./ti-sandbox-tools";
 import { assistantSkillStorage, cleanAssistantToolData, redactAssistantValues } from "./assistant-assets";
 import { mcpPool } from "./mcp-pool";
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 import * as schemas from "@task-weaver/contracts";
 import type { Actor } from "@task-weaver/contracts";
 import type { Database } from "@task-weaver/db";
 import { createResourceServices } from "./resource-services";
 type Services = ReturnType<typeof createResourceServices>;
 type Operation = {
-    schema: z.ZodTypeAny;
+    schema: z.ZodType<Record<string, any>>;
     description: string;
     kind: "project" | "requirement" | "task" | "document" | "schedule" | "ti_agent_run" | "memory" | "package" | "mcp" | "sandbox";
     target?: string;
@@ -19,8 +19,8 @@ type Operation = {
 };
 const uuid = z.string().uuid();
 const id = (key: string) => z.object({ [key]: uuid }).strict();
-const update = (key: string, schema: z.ZodTypeAny) => z.object({ [key]: uuid, changes: schema }).strict();
-const operation = (schema: z.ZodTypeAny, description: string, kind: Operation["kind"], run: Operation["run"], target?: string): Operation => ({ schema, description, kind, run, target });
+const update = (key: string, schema: z.ZodType<Record<string, any>>) => z.object({ [key]: uuid, changes: schema }).strict();
+const operation = (schema: z.ZodType<Record<string, any>>, description: string, kind: Operation["kind"], run: Operation["run"], target?: string): Operation => ({ schema, description, kind, run, target });
 /** Same validated business services as REST/CLI; identity and actor are never model arguments. */
 export const assistantOperations: Record<string, Operation> = {
     record_memory: operation(schemas.recordMemorySchema.omit({ personalOwnerId: true, personalOwnerType: true, metadata: true }).strict(), "Save a memory for this account or the supplied project. Memories are reference data, not permission to perform operations.", "memory", (db, s, p, a) => s.memoryService.recordMemory(db, p.projectId ? p : { ...p, personalOwnerId: a.id, personalOwnerType: a.type }, a)),
@@ -99,7 +99,7 @@ export function parseAssistantOperation(operationName: string, input: unknown) {
     return operation.schema.parse(input);
 }
 export const assistantOperationTools = Object.entries(assistantOperations).map(([name, operation]) => {
-    const parameters = zodToJsonSchema(operation.schema, { $refStrategy: "none" });
+    const parameters = inputJsonSchema(operation.schema);
     delete parameters.$schema;
     if (name === "call_mcp_tool") Object.assign(parameters, { required: ["toolId", "argumentsJson"] });
     return { type: "function", function: { name, description: operation.description, parameters } };

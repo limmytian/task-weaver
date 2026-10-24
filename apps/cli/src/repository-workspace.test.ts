@@ -384,6 +384,8 @@ test('controlled Git requires agent-led synchronization of existing worktrees an
   const previousHome = process.env.HOME
   const home = join(root, 'home')
   await mkdir(home)
+  await writeFile(join(home, '.gitconfig'), '[credential]\n\thelper = store\n[user]\n\tname = Task Weaver Test\n\temail = task-weaver@example.test\n', 'utf8')
+  await chmod(join(home, '.gitconfig'), 0o600)
   process.env.HOME = home
   try {
     const remote = await createRemote(root, 'sync')

@@ -153,6 +153,6 @@ export const runSkillCapabilitySchema = resolveSkillCapabilitiesSchema.extend({
   manifestHash: z.string().regex(/^[a-f0-9]{64}$/),
   runtimeImage: skillRuntimeProfileSchema.shape.image,
   runtimeProfileHash: z.string().regex(/^[a-f0-9]{64}$/),
-  input: z.record(z.unknown()).default({}),
+  input: z.record(z.string(), z.unknown()).default({}),
   confirmed: z.literal(true),
 }).strict();

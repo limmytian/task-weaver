@@ -34,13 +34,13 @@ export const upsertTiModelConfigSchema = z.object({
   isDefaultChat: z.boolean().default(false),
   isDefaultAgent: z.boolean().default(false),
   capabilities: z.array(z.string().min(1).max(100)).optional(),
-  costMetadata: z.record(z.unknown()).nullable().optional(),
-  availabilityCheckedAt: z.coerce.date().nullable().optional(),
+  costMetadata: z.record(z.string(), z.unknown()).nullable().optional(),
+  availabilityCheckedAt: z.coerce.date<Date>().nullable().optional(),
 });
 
 export const listTiModelConfigsSchema = z.object({
   ...ownerSchema,
-  includeDisabled: z.coerce.boolean().default(false),
+  includeDisabled: z.coerce.boolean<boolean>().default(false),
 });
 
 export const setDefaultTiModelSchema = z.object({
@@ -107,7 +107,7 @@ export const listTiAgentRunsSchema = z.object({
   scheduleRunId: z.string().uuid().optional(),
   assignedAgentId: z.string().optional(),
   status: tiAgentRunStatusSchema.optional(),
-  limit: z.coerce.number().int().positive().max(100).default(50),
+  limit: z.coerce.number<number>().int().positive().max(100).default(50),
 });
 
 export const acquireTiAgentRunSchema = z.object({
@@ -132,7 +132,7 @@ export const completeTiAgentRunSchema = z.object({
   eventLog: z.array(z.unknown()).nullable().optional(),
   outputSummary: z.string().max(8000).nullable().optional(),
   errorMessage: z.string().max(8000).nullable().optional(),
-  costMetadata: z.record(z.unknown()).nullable().optional(),
+  costMetadata: z.record(z.string(), z.unknown()).nullable().optional(),
 });
 
 export type TiCredentialStatus = z.infer<typeof tiCredentialStatusSchema>;

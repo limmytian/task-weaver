@@ -52,9 +52,12 @@
       "browserslist": "4.28.7",
       "eslint-plugin-react-hooks": "7.0.1",
       "lodash-es": "4.18.0",
-      "@graphql-tools/utils": "12.0.1",
+      "@graphql-tools/utils": "12.0.2",
       "source-map-js": "1.2.2",
-      "@codemirror/state": "6.7.6"
+      "@codemirror/state": "6.7.6",
+      "dompurify": "3.4.17",
+      "body-parser": "2.4.0",
+      "zod": "4.6.6"
     }
   },
   "engines": {

@@ -53,7 +53,7 @@ export const daemonOutcomeSchema = z.object({
   nextActor: daemonQueueOwnerSchema,
   followUpTask: daemonFollowUpPolicySchema,
   operatorMessage: z.string().min(1).max(1000),
-  auditMetadata: z.record(z.unknown()),
+  auditMetadata: z.record(z.string(), z.unknown()),
 });
 
 export type DaemonPhase = z.infer<typeof daemonPhaseSchema>;

@@ -1,4 +1,4 @@
-import { createRepositorySchema, createScheduleSchema } from "@task-weaver/contracts";
+import { registerMcpServerSchema, createRepositorySchema, createScheduleSchema } from "@task-weaver/contracts";
 import { capabilityDigest } from "@task-weaver/core";
 import { hostedMcpRuntimeProfileSchema } from "@task-weaver/contracts";
 import { Server as ProtocolServer } from "@modelcontextprotocol/sdk/server/index.js";
@@ -525,13 +525,13 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   await once(externalHttp, "listening");
   t.after(async () => { if ("closeAllConnections" in externalHttp) externalHttp.closeAllConnections(); await new Promise<void>(resolve => externalHttp.close(() => resolve())); });
   const registryService = createResourceServices(f.owner.context).mcpRegistryService;
-  const externalServer = await registryService.registerServer(db, { name: "external-fixture", transport: "streamable-http", config: { url: `http://127.0.0.1:${(externalHttp.address() as { port: number }).port}/mcp` }, projectId: f.project.id, active: true, readOnly: false, tags: [] }, f.owner.context.actor);
+  const externalServer = await registryService.registerServer(db, registerMcpServerSchema.parse({ name: "external-fixture", transport: "streamable-http", config: { url: `http://127.0.0.1:${(externalHttp.address() as { port: number }).port}/mcp` }, projectId: f.project.id, active: true, readOnly: false, tags: [] }), f.owner.context.actor);
   t.after(() => mcpPool.disconnect(externalServer.id));
   const synced = await registryService.syncTools(db, externalServer.id, mcpPool);
   const externalTool = synced[0]!;
   await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: "member", explicitPermissions: ["mcp.invoke"] });
   const registryKey = await f.identity.issueKey(f.owner.headers, agent.id, { name: "External MCP fixture", expiresAt: null, grants: [{ scope: "project", projectId: f.project.id, permissions: ["resource.read", "mcp.invoke"] }] });
-  const recursiveServer = await registryService.registerServer(db, { name: "recursive-fixture", transport: "streamable-http", config: { url: `http://${host}/api/v1/mcp-server`, headers: { authorization: `Bearer ${registryKey.rawKey}` } }, projectId: f.project.id, active: true, readOnly: false, tags: [] }, f.owner.context.actor);
+  const recursiveServer = await registryService.registerServer(db, registerMcpServerSchema.parse({ name: "recursive-fixture", transport: "streamable-http", config: { url: `http://${host}/api/v1/mcp-server`, headers: { authorization: `Bearer ${registryKey.rawKey}` } }, projectId: f.project.id, active: true, readOnly: false, tags: [] }), f.owner.context.actor);
   t.after(() => mcpPool.disconnect(recursiveServer.id));
   await assert.rejects(registryService.syncTools(db, recursiveServer.id, mcpPool));
   const registryClient = new Client({ name: "registry-http", version: "1" });
@@ -635,7 +635,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   assert.notEqual(refreshedTool.data.schemaHash, invocation.schemaHash);
   invocation.schemaHash = refreshedTool.data.schemaHash;
   assert.equal((await registryCall("tw_mcp_call", invocation)).ok, true);
-  const flakyServer = await registryService.registerServer(db, { name: "flaky-fixture", transport: "streamable-http", config: { url: `http://127.0.0.1:${(externalHttp.address() as { port: number }).port}/flaky` }, projectId: f.project.id, active: true, readOnly: false, tags: [] }, f.owner.context.actor);
+  const flakyServer = await registryService.registerServer(db, registerMcpServerSchema.parse({ name: "flaky-fixture", transport: "streamable-http", config: { url: `http://127.0.0.1:${(externalHttp.address() as { port: number }).port}/flaky` }, projectId: f.project.id, active: true, readOnly: false, tags: [] }), f.owner.context.actor);
   t.after(() => mcpPool.disconnect(flakyServer.id));
   const flakyTools = await registryService.syncTools(db, flakyServer.id, mcpPool);
   const flakyDetail = await registryCall("tw_mcp_tool", { toolId: flakyTools[0]!.id });
@@ -683,7 +683,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
  done`;
     const hostedProfile = hostedMcpRuntimeProfileSchema.parse({ id: "fixture-hosted", image: process.env.TW_SKILL_RUNTIME_TEST_IMAGE, command: "/bin/sh", args: ["-c", hostedScript], projectIds: [f.project.id], secretReferences: { APP_SECRET: "TW_MCP_SECRET_FIXTURE" } });
     process.env.TW_MCP_RUNTIME_PROFILES = JSON.stringify([hostedProfile]);
-    const hostedServer = await registryService.registerServer(db, { name: "hosted-fixture", transport: "hosted-stdio", config: { profileId: hostedProfile.id, profileHash: capabilityDigest(hostedProfile) }, projectId: f.project.id, active: true, readOnly: false, tags: [] }, f.owner.context.actor);
+    const hostedServer = await registryService.registerServer(db, registerMcpServerSchema.parse({ name: "hosted-fixture", transport: "hosted-stdio", config: { profileId: hostedProfile.id, profileHash: capabilityDigest(hostedProfile) }, projectId: f.project.id, active: true, readOnly: false, tags: [] }), f.owner.context.actor);
     t.after(() => mcpPool.disconnect(hostedServer.id));
     const hostedTools = await registryService.syncTools(db, hostedServer.id, mcpPool);
     assert.equal(hostedTools[0]!.name, "hosted_echo");

@@ -49,17 +49,17 @@ export const assistantWorkflowSchema = z.enum([
 ]);
 
 export const assistantContextLimitsSchema = z.object({
-  recentActivity: z.coerce.number().int().min(0).max(50).default(10),
-  recentMessages: z.coerce.number().int().min(0).max(50).default(12),
-  requirements: z.coerce.number().int().min(0).max(50).default(12),
-  tasks: z.coerce.number().int().min(0).max(100).default(25),
-  schedules: z.coerce.number().int().min(0).max(50).default(10),
-  documents: z.coerce.number().int().min(0).max(50).default(8),
-  memories: z.coerce.number().int().min(0).max(50).default(8),
-  mcpTools: z.coerce.number().int().min(0).max(50).default(12),
-  tiRuns: z.coerce.number().int().min(0).max(50).default(8),
-  textChars: z.coerce.number().int().min(200).max(8000).default(1200),
-}).default({});
+  recentActivity: z.coerce.number<number>().int().min(0).max(50).default(10),
+  recentMessages: z.coerce.number<number>().int().min(0).max(50).default(12),
+  requirements: z.coerce.number<number>().int().min(0).max(50).default(12),
+  tasks: z.coerce.number<number>().int().min(0).max(100).default(25),
+  schedules: z.coerce.number<number>().int().min(0).max(50).default(10),
+  documents: z.coerce.number<number>().int().min(0).max(50).default(8),
+  memories: z.coerce.number<number>().int().min(0).max(50).default(8),
+  mcpTools: z.coerce.number<number>().int().min(0).max(50).default(12),
+  tiRuns: z.coerce.number<number>().int().min(0).max(50).default(8),
+  textChars: z.coerce.number<number>().int().min(200).max(8000).default(1200),
+}).prefault({});
 
 export const buildAssistantContextSchema = z.object({
   contextKind: assistantContextKindSchema.default("global"),
@@ -69,8 +69,8 @@ export const buildAssistantContextSchema = z.object({
   scheduleId: z.string().uuid().optional(),
   conversationId: z.string().uuid().optional(),
   intent: z.string().max(1000).optional(),
-  includeGlobal: z.coerce.boolean().default(true),
-  includePersonal: z.coerce.boolean().default(true),
+  includeGlobal: z.coerce.boolean<boolean>().default(true),
+  includePersonal: z.coerce.boolean<boolean>().default(true),
   limits: assistantContextLimitsSchema,
 });
 
@@ -89,8 +89,8 @@ export const listAssistantConversationsSchema = z.object({
   taskId: z.string().uuid().nullable().optional(),
   scheduleId: z.string().uuid().nullable().optional(),
   contextKind: assistantContextKindSchema.optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(30),
-  offset: z.coerce.number().int().min(0).default(0),
+  limit: z.coerce.number<number>().int().min(1).max(100).default(30),
+  offset: z.coerce.number<number>().int().min(0).default(0),
 });
 
 export const renameAssistantConversationSchema = z.object({
@@ -102,11 +102,11 @@ export const createAssistantMessageSchema = z.object({
   conversationId: z.string().uuid(),
   role: assistantMessageRoleSchema,
   content: z.string().min(1).max(100_000),
-  contextSnapshot: z.record(z.unknown()).nullable().optional(),
+  contextSnapshot: z.record(z.string(), z.unknown()).nullable().optional(),
   tiAgentRunId: z.string().uuid().nullable().optional(),
   provider: z.string().max(120).nullable().optional(),
   model: z.string().max(200).nullable().optional(),
-  metadata: z.record(z.unknown()).nullable().optional(),
+  metadata: z.record(z.string(), z.unknown()).nullable().optional(),
 });
 
 export const createAssistantActionSchema = z.object({
@@ -115,13 +115,13 @@ export const createAssistantActionSchema = z.object({
   actionType: assistantActionTypeSchema,
   targetType: z.enum(["project", "requirement", "task", "schedule", "document", "ti_agent_run"]).nullable().optional(),
   targetId: z.string().uuid().nullable().optional(),
-  payload: z.record(z.unknown()),
+  payload: z.record(z.string(), z.unknown()),
   preview: z.string().max(8000).nullable().optional(),
 });
 
 export const updateAssistantActionStatusSchema = z.object({
   status: assistantActionStatusSchema,
-  executionResult: z.record(z.unknown()).nullable().optional(),
+  executionResult: z.record(z.string(), z.unknown()).nullable().optional(),
   activityLogId: z.string().uuid().nullable().optional(),
   errorMessage: z.string().max(8000).nullable().optional(),
 });
@@ -159,9 +159,9 @@ const createScheduleActionPayloadSchema = z.object({
   title: z.string().min(1).max(500),
   description: z.string().optional(),
   timezone: z.string().min(1).max(100).default("UTC"),
-  startsAt: z.coerce.date(),
-  endsAt: z.coerce.date().optional(),
-  nextRunAt: z.coerce.date().optional(),
+  startsAt: z.coerce.date<Date>(),
+  endsAt: z.coerce.date<Date>().optional(),
+  nextRunAt: z.coerce.date<Date>().optional(),
   recurrenceSyntax: scheduleRecurrenceSyntaxSchema.optional(),
   recurrenceRule: z.string().min(1).max(2000).optional(),
   catchUpPolicy: scheduleCatchUpPolicySchema.default("latest"),
@@ -249,7 +249,7 @@ const draftDocumentActionPayloadSchema = z.object({
 });
 
 export const assistantActionProposalSchema = z.discriminatedUnion("actionType", [
-  z.object({ actionType: z.literal("platform_operation"), payload: z.object({ operation: z.string().min(1).max(100), input: z.record(z.unknown()) }).strict(), preview: z.string().optional() }),
+  z.object({ actionType: z.literal("platform_operation"), payload: z.object({ operation: z.string().min(1).max(100), input: z.record(z.string(), z.unknown()) }).strict(), preview: z.string().optional() }),
   z.object({
     actionType: z.literal("create_task"),
     payload: createTaskActionPayloadSchema,

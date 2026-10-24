@@ -24,7 +24,7 @@ export const recordMemorySchema = z.object({
   personalOwnerId: z.string().optional(),
   personalOwnerType: z.enum(["human", "agent"]).optional(),
   tags: z.array(z.string()).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   entityType: memoryEntityTypeSchema.optional(),
   entityId: z.string().uuid().optional(),
   expiresAt: z.string().datetime().optional(),
@@ -38,7 +38,7 @@ export const updateMemorySchema = z.object({
   content: z.string().min(1).optional(),
   memoryType: memoryTypeSchema.optional(),
   tags: z.array(z.string()).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   personalOwnerId: z.string().nullable().optional(),
   personalOwnerType: z.enum(["human", "agent"]).nullable().optional(),
   expiresAt: z.string().datetime().nullable().optional(),
@@ -61,7 +61,7 @@ export const searchMemorySchema = z.object({
   createdBy: z.string().optional(),
   preferredActorId: z.string().optional(),
   tags: z.array(z.string()).optional(),
-  limit: z.coerce.number().int().min(1).max(50).default(10),
+  limit: z.coerce.number<number>().int().min(1).max(50).default(10),
   includeExpired: queryBooleanSchema.default(false),
 });
 
@@ -77,8 +77,8 @@ export const listMemoriesSchema = z.object({
   createdBy: z.string().optional(),
   tags: z.array(z.string()).optional(),
   includeExpired: queryBooleanSchema.default(false),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
-  offset: z.coerce.number().int().min(0).default(0),
+  limit: z.coerce.number<number>().int().min(1).max(100).default(20),
+  offset: z.coerce.number<number>().int().min(0).default(0),
 });
 
 export type MemoryType = z.infer<typeof memoryTypeSchema>;

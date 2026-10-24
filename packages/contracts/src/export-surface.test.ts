@@ -50,7 +50,7 @@ test("declares a database-free dependency and export surface", () => {
     exports?: Record<string, string>;
   };
 
-  assert.deepEqual(packageJson.dependencies, { zod: "^3.24.0" });
+  assert.deepEqual(packageJson.dependencies, { zod: "4.6.6" });
   assert.deepEqual(Object.keys(packageJson.exports ?? {}).sort(), [
     ".",
     "./errors",

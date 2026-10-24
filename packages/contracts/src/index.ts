@@ -10,3 +10,5 @@ export * from "./version";
 export * from "./sse";
 
 export * from "./schemas/execution-controls";
+
+export { inputJsonSchema } from "./json-schema";

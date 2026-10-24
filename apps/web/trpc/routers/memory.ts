@@ -10,7 +10,7 @@ import {
 
 export const memoryRouter = router({
   list: resourceProcedure
-    .input(listMemoriesSchema.default({}))
+    .input(listMemoriesSchema.prefault({}))
     .query(async ({ ctx, input }) => {
       return createResourceServices(ctx.identity).memoryService.listMemories(ctx.db, {
         ...input,

@@ -1,5 +1,5 @@
+import { inputJsonSchema } from "@task-weaver/contracts";
 import * as schemas from "@task-weaver/contracts";
-import { zodToJsonSchema } from "zod-to-json-schema";
 import { assistantSkillStorage, cleanAssistantToolData } from "./assistant-assets";
 import { z } from "zod";
 import type { Database } from "@task-weaver/db";
@@ -71,7 +71,7 @@ const descriptions: Record<keyof typeof extraSchemas, string> = {
   get_requirement_run_history: "Read an accessible requirement's correlated daemon execution history, with pagination. This only reads past work and never starts a runner.",
 };
 for (const [name, schema] of Object.entries(extraSchemas)) {
-  const parameters = zodToJsonSchema(schema, { $refStrategy: "none" }); delete parameters.$schema;
+  const parameters = inputJsonSchema(schema); delete parameters.$schema;
   assistantReadTools.push({ type: "function", function: { name, description: descriptions[name as keyof typeof extraSchemas], parameters: parameters as any } });
 }
 

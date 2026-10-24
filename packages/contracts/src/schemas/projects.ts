@@ -26,8 +26,8 @@ export const listProjectsSchema = z.object({
   status: projectStatusSchema.optional(),
   query: z.string().trim().min(1).max(500).optional(),
   view: z.enum(["summary", "full"]).optional(),
-  page: z.coerce.number().int().min(1).optional(),
-  pageSize: z.coerce.number().int().min(1).max(50).optional(),
+  page: z.coerce.number<number>().int().min(1).optional(),
+  pageSize: z.coerce.number<number>().int().min(1).max(50).optional(),
 });
 
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;

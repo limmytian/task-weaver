@@ -18,7 +18,7 @@ const taskCreate = taskFields.extend({ scope: z.enum(["project", "personal"]).de
 const taskList = z.object({ ...page, scope: z.enum(["project", "personal"]).default("project"), projectId: id.optional(), requirementId: id.optional(), status: updateTaskStatusSchema.shape.status.optional(), query: z.string().trim().min(1).max(500).optional(), assignee: z.string().optional() }).strict();
 const search = z.object({ query: z.string().trim().min(1).max(500), projectId: id.optional(), scope: z.enum(["project", "personal"]).default("project"), entity: z.enum(["all", "task", "requirement", "document"]).default("all"), mode: z.enum(["keyword", "fulltext", "semantic", "hybrid"]).default("keyword"), limit: z.number().int().min(1).max(50).default(20), includeGlobal: z.boolean().default(true) }).strict();
 
-function tool(name: McpServerToolName, description: string, schema: z.AnyZodObject) {
+function tool(name: McpServerToolName, description: string, schema: z.ZodObject) {
   return { name, description, schema: (mcpServerReadTools as readonly string[]).includes(name) ? schema : schema.extend({ approvalId: id.optional() }).strict() };
 }
 

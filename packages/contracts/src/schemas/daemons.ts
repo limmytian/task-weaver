@@ -135,7 +135,7 @@ export const reportDaemonProgressSchema = z.object({
   source: daemonProgressSourceSchema.default("daemon"),
   severity: z.enum(["debug", "info", "warn", "error"]).optional(),
   leaseGeneration: z.number().int().positive(),
-  details: z.record(z.unknown()).default({}),
+  details: z.record(z.string(), z.unknown()).default({}),
 });
 
 export const reconcileDaemonWorkerSchema = z.object({
@@ -156,13 +156,13 @@ export const daemonProgressQuerySchema = z.object({
   daemonId: z.string().uuid().optional(),
   requirementId: z.string().uuid().optional(),
   runId: z.string().uuid().optional(),
-  workerIndex: z.coerce.number().int().min(0).optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(50),
+  workerIndex: z.coerce.number<number>().int().min(0).optional(),
+  limit: z.coerce.number<number>().int().min(1).max(200).default(50),
 });
 
 export const daemonTimelineQuerySchema = z.object({
   requirementId: z.string().uuid(),
-  limit: z.coerce.number().int().min(1).max(200).default(100),
+  limit: z.coerce.number<number>().int().min(1).max(200).default(100),
 });
 
 export const daemonHistoryKindSchema = z.enum([
@@ -179,23 +179,23 @@ export const daemonHistoryQuerySchema = z.object({
   daemonId: z.string().uuid().optional(),
   requirementId: z.string().uuid().optional(),
   runId: z.string().uuid().optional(),
-  workerIndex: z.coerce.number().int().min(0).optional(),
+  workerIndex: z.coerce.number<number>().int().min(0).optional(),
   cursor: z.string().min(1).max(512).optional(),
   since: z.string().datetime({ offset: true }).optional(),
   until: z.string().datetime({ offset: true }).optional(),
   severity: z.enum(["debug", "info", "warn", "error"]).optional(),
   kind: daemonHistoryKindSchema.optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(100),
+  limit: z.coerce.number<number>().int().min(1).max(200).default(100),
 });
 
 export const daemonSloQuerySchema = z.object({
-  windowHours: z.coerce.number().int().min(1).max(24 * 30).default(24),
+  windowHours: z.coerce.number<number>().int().min(1).max(24 * 30).default(24),
 });
 
 export const daemonMetricsQuerySchema = z.object({
   projectId: z.string().uuid().optional(),
-  windowHours: z.coerce.number().int().min(1).max(24 * 30).default(24),
-  bucketMinutes: z.coerce.number().int().min(1).max(360).default(60),
+  windowHours: z.coerce.number<number>().int().min(1).max(24 * 30).default(24),
+  bucketMinutes: z.coerce.number<number>().int().min(1).max(360).default(60),
 });
 
 export const applyTaskSchema = z.object({
@@ -227,7 +227,7 @@ export const schedulerEligibilityDiagnosticsSchema = z.object({
   runnableCount: z.number().int().min(0),
   selectedCount: z.number().int().min(0).max(1),
   truncated: z.boolean(),
-  skipCounts: z.record(schedulerEligibilityReasonSchema, z.number().int().min(0)),
+  skipCounts: z.partialRecord(schedulerEligibilityReasonSchema, z.number().int().min(0)),
   samples: z.array(z.object({
     requirementId: z.string(),
     taskId: z.string(),

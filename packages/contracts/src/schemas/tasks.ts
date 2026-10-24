@@ -30,7 +30,7 @@ const baseCreateTaskSchema = z.object({
   requestedModel: z.string().optional(),
   tags: z.array(z.string()).optional(),
   branchName: z.string().optional(),
-  expectedAt: z.coerce.date().optional(),
+  expectedAt: z.coerce.date<Date>().optional(),
   ...requirementLeaseFenceFields,
 });
 
@@ -81,7 +81,7 @@ export const updateTaskSchema = z.object({
   requestedModel: z.string().nullable().optional(),
   tags: z.array(z.string()).optional(),
   branchName: z.string().nullable().optional(),
-  expectedAt: z.coerce.date().nullable().optional(),
+  expectedAt: z.coerce.date<Date>().nullable().optional(),
   expectedVersion: z.number().int().positive().optional().describe(
     "Optimistic concurrency: update only if current version matches. Returns 409 on mismatch.",
   ),
@@ -127,8 +127,8 @@ export const listTasksSchema = z.object({
   tag: z.string().optional(),
   query: z.string().trim().min(1).max(500).optional(),
   view: z.enum(["summary", "full"]).optional(),
-  page: z.coerce.number().int().min(1).optional(),
-  pageSize: z.coerce.number().int().min(1).max(50).optional(),
+  page: z.coerce.number<number>().int().min(1).optional(),
+  pageSize: z.coerce.number<number>().int().min(1).max(50).optional(),
   completedWithinDays: z
     .number()
     .int()

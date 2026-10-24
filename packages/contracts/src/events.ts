@@ -179,7 +179,7 @@ const realtimeEventMetadataSchema = z.object({
   serverTime: z.string().datetime({ offset: true }).optional(),
   severity: z.enum(["debug", "info", "warn", "error"]).optional(),
   source: z.enum(["daemon", "worker", "task_status", "recovery", "system", "api"]).optional(),
-  attributes: z.record(z.unknown()).optional(),
+  attributes: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const realtimeEventSchema = z.intersection(

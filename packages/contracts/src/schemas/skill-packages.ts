@@ -41,7 +41,7 @@ export const skillPackageStorageObjectKindSchema = z.enum([
   "file",
 ]);
 
-export const skillPackageManifestSchema = z.record(z.unknown());
+export const skillPackageManifestSchema = z.record(z.string(), z.unknown());
 
 export const skillPackagePathSchema = z.string()
   .min(1)
@@ -195,8 +195,8 @@ export const listSkillPackagesSchema = skillPackageScopeFieldsSchema.partial().e
   status: skillPackageStatusSchema.optional(),
   tag: z.string().optional(),
   query: z.string().trim().min(1).max(500).optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
-  offset: z.coerce.number().int().min(0).default(0),
+  limit: z.coerce.number<number>().int().min(1).max(100).default(20),
+  offset: z.coerce.number<number>().int().min(0).default(0),
 }).superRefine(validateSkillPackageScope);
 
 export const getSkillPackageSchema = z.object({

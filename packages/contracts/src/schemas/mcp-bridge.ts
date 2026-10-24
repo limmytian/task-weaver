@@ -10,7 +10,7 @@ export const mcpRegistrySearchSchema = mcpRetrievalScopeSchema.extend({
 export const mcpRegistryToolSchema = z.object({ toolId: z.string().uuid() }).strict();
 export const mcpRegistryCallSchema = mcpRegistryToolSchema.extend({
   schemaHash: z.string().regex(/^[a-f0-9]{64}$/),
-  arguments: z.record(z.unknown()).default({}),
+  arguments: z.record(z.string(), z.unknown()).default({}),
   confirmed: z.literal(true),
   timeoutMs: z.number().int().min(100).max(25000).default(25000),
   targetApprovalId: z.string().uuid().optional(),

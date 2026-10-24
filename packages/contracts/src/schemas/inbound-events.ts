@@ -21,12 +21,12 @@ export const createInboundSourceSchema = z.object({
   name: z.string().min(1).max(200), projectId: z.string().uuid(), requirementId: z.string().uuid(),
   active: z.boolean().default(true), rules: z.array(inboundRuleSchema).min(1).max(20).refine(rules => new Set(rules.map(rule => rule.id)).size === rules.length, "Rule IDs must be unique"),
 }).strict();
-export const updateInboundSourceSchema = createInboundSourceSchema.omit({ projectId: true, requirementId: true }).partial().extend({ rotateSecret: z.boolean().optional() }).strict();
+export const updateInboundSourceSchema = createInboundSourceSchema.omit({ projectId: true, requirementId: true }).partial().extend({ active: createInboundSourceSchema.shape.active.removeDefault().optional(), rotateSecret: z.boolean().optional() }).strict();
 export const inboundEventSchema = z.object({
   eventId: z.string().min(1).max(200), type: z.string().min(1).max(100), occurredAt: z.string().datetime().optional(),
-  data: z.record(z.unknown()),
+  data: z.record(z.string(), z.unknown()),
 }).strict();
-export const listInboundEventsSchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(20), offset: z.coerce.number().int().min(0).default(0) }).strict();
+export const listInboundEventsSchema = z.object({ limit: z.coerce.number<number>().int().min(1).max(100).default(20), offset: z.coerce.number<number>().int().min(0).default(0) }).strict();
 export type InboundAction = z.infer<typeof inboundActionSchema>;
 export type InboundRule = z.infer<typeof inboundRuleSchema>;
 export type InboundEvent = z.infer<typeof inboundEventSchema>;

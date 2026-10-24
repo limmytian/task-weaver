@@ -9,6 +9,6 @@ export const activityQuerySchema = z.object({
   action: z.string().min(1).max(200).optional(),
   since: z.string().datetime({ offset: true }).optional(),
   until: z.string().datetime({ offset: true }).optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
-  offset: z.coerce.number().int().min(0).default(0),
+  limit: z.coerce.number<number>().int().min(1).max(100).default(50),
+  offset: z.coerce.number<number>().int().min(0).default(0),
 });

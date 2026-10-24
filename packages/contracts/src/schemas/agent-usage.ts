@@ -127,8 +127,8 @@ export const agentUsageQuerySchema = z
     until: z.string().datetime().optional(),
     phase: usagePhaseSchema.optional(),
     completeness: z.enum(["complete", "partial", "unknown"]).optional(),
-    limit: z.coerce.number().int().min(1).max(100).default(25),
-    offset: z.coerce.number().int().nonnegative().default(0),
+    limit: z.coerce.number<number>().int().min(1).max(100).default(25),
+    offset: z.coerce.number<number>().int().nonnegative().default(0),
   })
   .strict()
   .refine(v => v.scope === "project" ? !!v.projectId : !v.projectId && !v.requirementId && !v.taskId,

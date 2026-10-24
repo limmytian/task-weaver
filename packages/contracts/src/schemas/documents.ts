@@ -61,8 +61,8 @@ export const listDocumentsSchema = z.object({
   tag: z.string().optional(),
   query: z.string().trim().min(1).max(500).optional(),
   view: z.enum(["summary", "full"]).optional(),
-  page: z.coerce.number().int().min(1).optional(),
-  pageSize: z.coerce.number().int().min(1).max(50).optional(),
+  page: z.coerce.number<number>().int().min(1).optional(),
+  pageSize: z.coerce.number<number>().int().min(1).max(50).optional(),
 });
 
 export const searchDocumentsSchema = z.object({
@@ -73,9 +73,9 @@ export const searchDocumentsSchema = z.object({
   includePersonal: queryBooleanSchema.default(false),
   personalOwnerId: z.string().optional(),
   personalOwnerType: z.enum(["human", "agent"]).optional(),
-  limit: z.coerce.number().int().min(1).max(50).default(20),
-  keywordWeight: z.coerce.number().min(0).max(1).default(0.3),
-  fulltextWeight: z.coerce.number().min(0).max(1).default(0.7),
+  limit: z.coerce.number<number>().int().min(1).max(50).default(20),
+  keywordWeight: z.coerce.number<number>().min(0).max(1).default(0.3),
+  fulltextWeight: z.coerce.number<number>().min(0).max(1).default(0.7),
 });
 
 export const linkDocumentsSchema = z.object({
@@ -91,14 +91,14 @@ export const linkDocumentToTaskSchema = z.object({
 
 export const listDocumentVersionsSchema = z.object({
   documentId: z.string().uuid(),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
-  offset: z.coerce.number().int().min(0).default(0),
+  limit: z.coerce.number<number>().int().min(1).max(100).default(50),
+  offset: z.coerce.number<number>().int().min(0).default(0),
 });
 
 export const compareDocumentVersionsSchema = z.object({
   documentId: z.string().uuid(),
-  from: z.coerce.number().int().min(1),
-  to: z.coerce.number().int().min(1),
+  from: z.coerce.number<number>().int().min(1),
+  to: z.coerce.number<number>().int().min(1),
 });
 
 export const revertDocumentSchema = z.object({
@@ -109,7 +109,7 @@ export const revertDocumentSchema = z.object({
 export const searchContextSchema = z.object({
   intent: z.string().min(1).max(500),
   tags: z.array(z.string()).optional(),
-  limit: z.coerce.number().int().min(1).max(10).default(5),
+  limit: z.coerce.number<number>().int().min(1).max(10).default(5),
   mode: z.enum(["summary", "full"]).default("summary"),
   projectId: z.string().uuid().optional(),
   includeGlobal: queryBooleanSchema.default(true),
@@ -147,15 +147,15 @@ export const attachmentMetadataSchema = z.object({
   originalFilename: z.string().min(1).max(500).refine(v => !/[\x00-\x1f\x7f]/.test(v), "Invalid filename"),
   mimeType: z.string().max(200).regex(/^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/).default("application/octet-stream"),
 }).strict();
-export const replaceAttachmentSchema = attachmentMetadataSchema.pick({ originalFilename: true, mimeType: true }).extend({ expectedVersion: z.coerce.number().int().positive() }).strict();
-export const attachmentFileQuerySchema = z.object({ fileVersion: z.coerce.number().int().positive().optional(), preview: queryBooleanSchema.default(false) }).strict();
+export const replaceAttachmentSchema = attachmentMetadataSchema.pick({ originalFilename: true, mimeType: true }).extend({ expectedVersion: z.coerce.number<number>().int().positive() }).strict();
+export const attachmentFileQuerySchema = z.object({ fileVersion: z.coerce.number<number>().int().positive().optional(), preview: queryBooleanSchema.default(false) }).strict();
 export type AttachmentMetadata = z.infer<typeof attachmentMetadataSchema>;
 
 /** Public file metadata excludes backend identifiers and storage paths. */
 export const attachmentFileMetadataSchema = z.object({
   id: z.string().uuid(), documentId: z.string().uuid(), version: z.number().int().positive(),
   originalFilename: z.string(), mimeType: z.string(), sizeBytes: z.number().int().nonnegative(),
-  sha256: z.string().regex(/^[0-9a-f]{64}$/), createdAt: z.coerce.date(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/), createdAt: z.coerce.date<Date>(),
   createdBy: z.string(), createdByType: z.enum(["human", "agent"]),
 });
 export type AttachmentFileMetadata = z.infer<typeof attachmentFileMetadataSchema>;

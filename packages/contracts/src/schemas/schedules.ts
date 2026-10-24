@@ -31,9 +31,9 @@ const scheduleBaseSchema = z.object({
   title: z.string().min(1).max(500),
   description: z.string().optional(),
   timezone: z.string().min(1).max(100).default("UTC"),
-  startsAt: z.coerce.date(),
-  endsAt: z.coerce.date().optional(),
-  nextRunAt: z.coerce.date().optional(),
+  startsAt: z.coerce.date<Date>(),
+  endsAt: z.coerce.date<Date>().optional(),
+  nextRunAt: z.coerce.date<Date>().optional(),
   recurrenceSyntax: scheduleRecurrenceSyntaxSchema.optional(),
   recurrenceRule: z.string().min(1).max(2000).optional(),
   catchUpPolicy: scheduleCatchUpPolicySchema.default("latest"),
@@ -79,13 +79,17 @@ export const createScheduleSchema = scheduleBaseSchema.superRefine(validateSched
 export const updateScheduleSchema = scheduleBaseSchema
   .partial()
   .extend({
+    targetScope: scheduleBaseSchema.shape.targetScope.removeDefault().optional(),
+    timezone: scheduleBaseSchema.shape.timezone.removeDefault().optional(),
+    catchUpPolicy: scheduleBaseSchema.shape.catchUpPolicy.removeDefault().optional(),
+    autoRun: scheduleBaseSchema.shape.autoRun.removeDefault().optional(),
     status: scheduleStatusSchema.optional(),
   })
   .superRefine(validateScheduleShape);
 
 export const createScheduleRunSchema = z.object({
   scheduleId: z.string().uuid(),
-  plannedFor: z.coerce.date(),
+  plannedFor: z.coerce.date<Date>(),
   status: scheduleRunStatusSchema.default("pending"),
   generatedTaskId: z.string().uuid().optional(),
   skippedReason: z.string().max(1000).optional(),
@@ -105,20 +109,20 @@ export const updateScheduleRunSchema = z.object({
   requestedModel: z.string().nullable().optional(),
   actualProvider: z.string().nullable().optional(),
   actualModel: z.string().nullable().optional(),
-  startedAt: z.coerce.date().nullable().optional(),
-  completedAt: z.coerce.date().nullable().optional(),
+  startedAt: z.coerce.date<Date>().nullable().optional(),
+  completedAt: z.coerce.date<Date>().nullable().optional(),
 });
 
 export const listSchedulesSchema = z.object({
   projectId: z.string().uuid().optional(),
   status: scheduleStatusSchema.optional(),
   targetScope: scheduleTargetScopeSchema.optional(),
-  includeArchived: z.coerce.boolean().default(false),
+  includeArchived: z.coerce.boolean<boolean>().default(false),
 });
 
 export const acquireDueSchedulesSchema = z.object({
   projectId: z.string().uuid().optional(),
-  now: z.coerce.date().optional(),
+  now: z.coerce.date<Date>().optional(),
   limit: z.number().int().positive().max(100).default(20),
 });
 

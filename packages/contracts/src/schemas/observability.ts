@@ -41,7 +41,7 @@ export const observabilityEventEnvelopeSchema = z.object({
   serverTime: z.string().datetime({ offset: true }),
   severity: observabilitySeveritySchema,
   source: observabilityEventSourceSchema,
-  attributes: z.record(z.unknown()).default({}),
+  attributes: z.record(z.string(), z.unknown()).default({}),
 });
 
 export const observabilityNextActionSchema = z.object({
@@ -84,7 +84,7 @@ export const daemonObservabilityQuerySchema = z.object({
     if (value === true || value === false) return value;
     return value === "true" || value === "1";
   }, z.boolean()),
-  limit: z.coerce.number().int().min(1).max(200).default(100),
+  limit: z.coerce.number<number>().int().min(1).max(200).default(100),
 });
 
 export type ObservabilityLiveness = z.infer<typeof observabilityLivenessSchema>;

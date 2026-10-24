@@ -93,8 +93,8 @@ export const upsertReviewCheckSchema = z.object({
   externalUrl: z.string().url().max(2000).nullable().optional(),
   summary: z.string().max(4000).nullable().optional(),
   details: z.record(z.string(), z.unknown()).default({}),
-  startedAt: z.coerce.date().nullable().optional(),
-  completedAt: z.coerce.date().nullable().optional(),
+  startedAt: z.coerce.date<Date>().nullable().optional(),
+  completedAt: z.coerce.date<Date>().nullable().optional(),
   ...requirementLeaseFenceFields,
 });
 
@@ -136,8 +136,8 @@ export const evaluateReviewRunSchema = z.object({
 });
 
 export const listReviewRunsSchema = z.object({
-  limit: z.coerce.number().int().min(1).max(100).default(20),
-  offset: z.coerce.number().int().min(0).default(0),
+  limit: z.coerce.number<number>().int().min(1).max(100).default(20),
+  offset: z.coerce.number<number>().int().min(0).default(0),
 });
 
 export type ReviewMergeMode = z.infer<typeof reviewMergeModeSchema>;

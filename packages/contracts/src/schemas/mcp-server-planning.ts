@@ -22,9 +22,9 @@ export const mcpSliceUpdateSchema = updateExecutionSliceSchema.omit({ leaseGener
 }).strict();
 
 // Plans cannot expand the authority exposed by individual MCP writes.
-const document = planDocumentSchema.innerType().omit({ projectId: true, generatedBy: true, generationPrompt: true, confidence: true, needsReview: true }).strict();
-const task = planTaskSchema.innerType().omit({ requestedProvider: true, requestedModel: true, branchName: true, assignee: true, assigneeType: true, comments: true, notes: true }).extend({ status: z.literal("todo").default("todo") }).strict();
-const requirement = planRequirementSchema.innerType().omit({ workflow: true, workflowPreset: true, branchName: true }).extend({
+const document = z.object(planDocumentSchema.shape).omit({ projectId: true, generatedBy: true, generationPrompt: true, confidence: true, needsReview: true }).strict();
+const task = z.object(planTaskSchema.shape).omit({ requestedProvider: true, requestedModel: true, branchName: true, assignee: true, assigneeType: true, comments: true, notes: true }).extend({ status: z.literal("todo").default("todo") }).strict();
+const requirement = z.object(planRequirementSchema.shape).omit({ workflow: true, workflowPreset: true, branchName: true }).extend({
   status: z.enum(["draft", "approved"]).default("draft"),
   tasks: z.array(task).max(50).default([]),
   slices: z.array(planSliceSchema.strict()).max(20).default([]),
@@ -47,7 +47,7 @@ export const mcpPlanSchema = planSchema.extend({
   const count = plan.requirements.reduce((sum, item) => sum + item.tasks.length, 0);
   if (count > 100) ctx.addIssue({ code: "custom", path: ["requirements"], message: "A plan supports at most 100 tasks" });
   const parsed = planSchema.safeParse(plan);
-  if (!parsed.success) for (const issue of parsed.error.issues) ctx.addIssue(issue);
+  if (!parsed.success) for (const issue of parsed.error.issues) ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
 });
 export const mcpPlanValidateSchema = z.object({ plan: mcpPlanSchema }).strict();
 export const mcpPlanApplySchema = mcpPlanValidateSchema.extend({ idempotencyKey: z.string().uuid() }).strict();

@@ -44,8 +44,8 @@ export const listWebhooksSchema = z.object({
 
 export const listWebhookDeliveriesSchema = z.object({
   status: z.enum(["pending", "success", "failed"]).optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(20).optional(),
-  offset: z.coerce.number().int().min(0).default(0).optional(),
+  limit: z.coerce.number<number>().int().min(1).max(100).default(20).optional(),
+  offset: z.coerce.number<number>().int().min(0).default(0).optional(),
 }).strict();
 
 export type CreateWebhookInput = z.infer<typeof createWebhookSchema>;

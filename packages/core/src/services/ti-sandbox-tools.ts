@@ -1,9 +1,9 @@
+import { inputJsonSchema } from "@task-weaver/contracts";
 import { createHash } from "node:crypto";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { tiSandboxWorkspaces, type Database } from "@task-weaver/db";
 import { ValidationError, type VerifiedRequestContext } from "@task-weaver/contracts";
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 import { connectPartnersMcp } from "./partners-mcp";
 import { createTiSandboxAuthority } from "./ti-sandbox-authorization";
 import { createTiSandboxService } from "./ti-sandboxes";
@@ -21,7 +21,7 @@ const descriptions = {
   sandbox_write: "Conditionally write a UTF-8 file. Supply createOnly=true or expectedHash from a prior read.",
 };
 export const tiSandboxTools = Object.entries(tiSandboxToolSchemas).map(([name, schema]) => {
-  const parameters = zodToJsonSchema(schema, { $refStrategy: "none" }); delete parameters.$schema;
+  const parameters = inputJsonSchema(schema); delete parameters.$schema;
   return { type: "function", function: { name, description: descriptions[name as keyof typeof descriptions], parameters } };
 });
 export function configuredTiSandboxBinding(env: NodeJS.ProcessEnv = process.env) {

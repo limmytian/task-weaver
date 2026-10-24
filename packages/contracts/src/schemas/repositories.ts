@@ -191,21 +191,21 @@ export const updateRequirementRepositoryDeliverySchema = z
     ...requirementLeaseFenceFields,
     workspaceKey: z.string().min(1).max(1000).nullable().optional(),
     manifestVersion: z.number().int().positive().nullable().optional(),
-    provisionedAt: z.coerce.date().nullable().optional(),
+    provisionedAt: z.coerce.date<Date>().nullable().optional(),
     headCommit: z.string().max(128).nullable().optional(),
     pushedCommit: z.string().max(128).nullable().optional(),
     pushStatus: repositoryPushStatusSchema.optional(),
-    pushedAt: z.coerce.date().nullable().optional(),
+    pushedAt: z.coerce.date<Date>().nullable().optional(),
     pullRequestProvider: z.string().max(100).nullable().optional(),
     pullRequestExternalId: z.string().max(500).nullable().optional(),
     pullRequestUrl: repositoryEndpointSchema.nullable().optional(),
     reviewStatus: repositoryReviewStatusSchema.optional(),
     mergeStatus: repositoryMergeStatusSchema.optional(),
-    mergedAt: z.coerce.date().nullable().optional(),
+    mergedAt: z.coerce.date<Date>().nullable().optional(),
     deliveryStatus: repositoryDeliveryStatusSchema.optional(),
     failureCode: z.string().max(100).regex(/^[a-z0-9][a-z0-9_.-]*$/).nullable().optional(),
     failureSummary: z.string().max(2000).nullable().optional(),
-    lastAttemptAt: z.coerce.date().nullable().optional(),
+    lastAttemptAt: z.coerce.date<Date>().nullable().optional(),
     reviewPolicyDecision: z.enum(["satisfied", "bypassed", "blocked"]).optional(),
     reviewPolicyEvidence: z.array(
       z.enum(["configured_checks", "ai_review", "human_approval", "forge_approval", "manual_override"]),
@@ -215,7 +215,7 @@ export const updateRequirementRepositoryDeliverySchema = z
     mergeMode: z.enum(["provider", "direct", "manual"]).nullable().optional(),
     manualActionUrl: repositoryEndpointSchema.nullable().optional(),
     externalState: z.record(z.string(), z.unknown()).optional(),
-    externalStateUpdatedAt: z.coerce.date().nullable().optional(),
+    externalStateUpdatedAt: z.coerce.date<Date>().nullable().optional(),
     externalSyncRevision: z.number().int().min(0).optional(),
     operationCheckpoint: repositoryOperationCheckpointSchema.optional(),
   })
@@ -253,7 +253,7 @@ export const syncRequirementRepositoryForgeStateSchema = z.object({
   snapshot: forgePullRequestSnapshotSchema,
   idempotencyKey: z.string().trim().min(1).max(500),
   expectedRevision: z.number().int().min(0).optional(),
-  observedAt: z.coerce.date().default(() => new Date()),
+  observedAt: z.coerce.date<Date>().default(() => new Date()),
   ...requirementLeaseFenceFields,
 });
 
@@ -291,7 +291,7 @@ export type RepositoryReadinessInput = z.infer<typeof repositoryReadinessInputSc
 const humanReconciliationFields = {
   reason: z.string().trim().min(3).max(2000),
   expectedRevision: z.number().int().min(0),
-  expectedUpdatedAt: z.coerce.date(),
+  expectedUpdatedAt: z.coerce.date<Date>(),
   idempotencyKey: z.string().uuid(),
 };
 export const reconcileHumanDirectRepositoryDeliverySchema = z.object({
