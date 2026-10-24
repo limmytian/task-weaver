@@ -259,6 +259,14 @@ test("execution capabilities enforce immutable task bounds and revocable lease a
     const saved = await rest("memories", executionHeaders, "POST", save);
     assert.equal(saved.status, 201, JSON.stringify(saved.body));
     assert.equal((await rest("memories", executionHeaders, "POST", save)).body.id, saved.body.id);
+    const currentMemory = await rest(`memories/${saved.body.id}`, executionHeaders);
+    assert.equal(currentMemory.body.sourceFreshness, "current");
+    assert.equal(currentMemory.body.expired, false);
+    await db.update(memories).set({ provenance: { origin: "reviewed_source", sourceUpdatedAt: new Date(0).toISOString() } }).where(eq(memories.id, saved.body.id));
+    assert.equal((await rest(`memories/${saved.body.id}`, executionHeaders)).body.sourceFreshness, "changed");
+    const remoteMemory = await rest("mcp-server/tools/tw_memories_get", executionHeaders, "POST", { id: saved.body.id });
+    assert.equal(remoteMemory.body.structuredContent.data.sourceFreshness, "changed");
+    await db.update(memories).set({ provenance: save.provenance }).where(eq(memories.id, saved.body.id));
     assert.equal((await rest("memories", executionHeaders, "POST", { ...save, idempotencyKey: randomUUID(), provenance: { origin: "reviewed_source", sourceUpdatedAt: new Date(0).toISOString() } })).status, 409);
     assert.equal((await rest(`memories/${saved.body.id}`, executionHeaders, "PATCH", { content: "No unrelated edits" })).status, 403);
     const preview = await rest("mcp-server/tools/tw_memories_preview", executionHeaders, "POST", { sourceType: "task", sourceId: task.id, scope: "project", projectId: project.id });

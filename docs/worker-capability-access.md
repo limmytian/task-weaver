@@ -36,8 +36,10 @@ delegation reports `sharedCapabilityReads` so the broker can reject expansion.
 
 Memory entity references must also be readable within the frozen bounds. Expired
 memories are excluded even if a worker requests `includeExpired=true`. Reads do
-not renew memory expiry or save new memories. An accessible memory is evidence
-whose source and freshness still need review before use.
+not renew memory expiry or save new memories. Selected CLI/REST memory reads
+include `expired` and `sourceFreshness` (`current`, `changed`, or `not_applicable`).
+A current source timestamp does not prove that its conclusion is correct; review
+the evidence before use. The MCP read path reuses the same freshness result.
 
 Package reads check package status, active exact versions, mirror scope and
 storage linkage. A package manifest is metadata; workers read content through
