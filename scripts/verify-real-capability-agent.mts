@@ -286,10 +286,29 @@ try {
       await writeFile(join(profile, 'config.toml'), `model = ${JSON.stringify(model)}\nmodel_reasoning_effort = "low"\n`, { mode: 0o600 });
       receipt.requestedModel = model;
       const collector = new CodexUsageCollector();
+      const diagnosticCodes = new Set<string>();
+      let pendingEvents = '';
       result = await runCommand('codex', ['exec', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check', '--json', '--color', 'never', '-C', workspace, prompt],
         { cwd: workspace, env: { ...env, HOME: home, CODEX_HOME: profile, XDG_CONFIG_HOME: join(root, 'empty-xdg') },
-          timeoutMs: 150_000, maxOutputBytes: 256 * 1024, onStdout: chunk => collector.push(chunk) });
+          timeoutMs: 150_000, maxOutputBytes: 256 * 1024, onStdout: chunk => {
+            collector.push(chunk);
+            pendingEvents += chunk.toString('utf8');
+            const lines = pendingEvents.split('\n'); pendingEvents = lines.pop() ?? '';
+            if (pendingEvents.length > 1024 * 1024) pendingEvents = '';
+            for (const line of lines) {
+              try {
+                const event = JSON.parse(line);
+                if (event.type === 'error' || event.type === 'turn.failed') {
+                  const message = String(event.message ?? event.error?.message ?? '').toLowerCase();
+                  diagnosticCodes.add(/unauthorized|authentication|401|token/.test(message) ? 'authentication_error'
+                    : /quota|rate limit|429/.test(message) ? 'capacity_error'
+                    : /stream|connection|websocket|network/.test(message) ? 'transport_error' : 'provider_error');
+                }
+              } catch { /* Diagnostics never export raw provider messages. */ }
+            }
+          } });
       receipt.externalCodexUsage = collector.finish(result.ok);
+      receipt.providerDiagnosticCodes = [...diagnosticCodes];
     } else result = await runCommand('agy', ['--new-project', '--dangerously-skip-permissions', '--disable-slash-commands',
       '--log-file', join(root, 'agy.log'), ...(requestedModel ? ['--model', requestedModel] : []),
       '--print-timeout', '150s', '--output-format', 'json', `--print=${prompt}`],
