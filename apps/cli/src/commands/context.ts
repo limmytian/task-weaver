@@ -5,7 +5,7 @@ import { resolve, basename, relative, sep, dirname, join } from 'node:path'
 import { Command } from 'commander'
 import { get, post, patch } from '../client.js'
 import { printJson, printTable, printKv } from '../output.js'
-import { parseMcpServerArguments, type McpServerToolName } from '@task-weaver/contracts'
+import { projectCapabilityReadinessQuerySchema, projectCapabilityReadinessSchema, parseMcpServerArguments, type McpServerToolName } from '@task-weaver/contracts'
 
 async function contextTool<T>(name: McpServerToolName, input: Record<string, unknown>): Promise<T> {
   const parsed = parseMcpServerArguments(name, input)
@@ -206,6 +206,17 @@ export function registerContext(program: Command): void {
       const data = await get(`/api/v1/context/${id}`)
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)
+    })
+
+  ctx.command('readiness').description('inspect selected-project access, content candidates and API runtime readiness')
+    .requiredOption('--project <id>', 'project ID').option('--json', 'output raw JSON')
+    .action(async opts => {
+      const input = projectCapabilityReadinessQuerySchema.parse({ projectId: opts.project })
+      const data = projectCapabilityReadinessSchema.parse(await get(`/api/v1/context/readiness?projectId=${input.projectId}`))
+      if (opts.json) return printJson(data)
+      printKv({ project: data.projectId, readPermission: data.readPermission, invokePermission: data.invokePermission, hostedExecution: data.hostedExecution?.state ?? 'unknown', runtimeSource: data.runtimeSource })
+      printTable(data.inventory, ['kind', 'registered', 'contentCandidates', 'inspectionRequired'])
+      for (const step of data.checklist) console.log(`- ${step}`)
     })
 
   ctx

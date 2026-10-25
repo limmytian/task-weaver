@@ -1,6 +1,8 @@
 import { Hono, type Context } from "hono";
 import {
   createResourceServices,
+  createCapabilityReadinessService,
+  projectCapabilityReadinessQuerySchema,
   personalResourceOwnerId,
   skillPackageStorageService,
   searchContextSchema,
@@ -73,6 +75,15 @@ context.get("/search", async (c) => {
 
   const results = await createResourceServices(c.get("identity")).contextService.searchContext(db, parsed.data);
   return c.json({ items: results });
+});
+
+// API-owned runtime configuration is authoritative; metadata counts do not probe assets.
+context.get("/readiness", async c => {
+  const input = projectCapabilityReadinessQuerySchema.parse({ projectId: c.req.query("projectId") });
+  await createResourceServices(c.get("identity")).projectService.getProject(c.get("db"), input.projectId);
+  const visibleTools = (await authorizedMcpToolNames(c.get("db"), c.get("identity"))).filter(tool => isMcpServerToolAllowed(tool, c.get("mcpReadOnly") ?? false));
+  const bootstrap = await readCapabilityBootstrap(visibleTools, c.get("skillRuntimeProfiles"));
+  return c.json(await createCapabilityReadinessService(c.get("identity")).get(c.get("db"), input, visibleTools.includes("tw_skills_run") && visibleTools.includes("tw_skill_runtimes_list") ? bootstrap.capabilities.hostedExecution : null));
 });
 
 // GET /bootstrap - Get bootstrap context (minimal starting info)

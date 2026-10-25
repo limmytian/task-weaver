@@ -59,7 +59,7 @@ const ordinaryRoutes: Array<[string, RegExp]> = [
   ["PATCH", new RegExp("^/api/v1/embeddings/profiles/[0-9a-fA-F-]{36}/?$")],
   ["GET", new RegExp("^/api/v1/search/(?:documents(?:/fulltext)?|tasks|requirements|repositories|all)/?$")],
   ["POST", new RegExp("^/api/v1/search/resolve-titles/?$")],
-  ["GET", new RegExp("^/api/v1/context/(?:search|list|bootstrap)/?$")],
+  ["GET", new RegExp("^/api/v1/context/(?:search|list|bootstrap|readiness)/?$")],
   ["GET", new RegExp("^/api/v1/context/[0-9a-fA-F-]{36}/?$")],
   ["GET", new RegExp("^/api/v1/memories/search/?$")],
   ["GET", new RegExp("^/api/v1/projects/[0-9a-fA-F-]{36}/(?:stats|health|knowledge-graph|board|gantt)/?$")],
