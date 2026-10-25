@@ -51,6 +51,25 @@ an existing repository. Distinguish independent processes on one machine from
 physically independent nodes. A missing remote or node prerequisite leaves those
 acceptance cases uncovered, even when deterministic recovery tests pass.
 
+For an explicitly authorized disposable private HTTPS repository, run:
+
+```bash
+TW_ACCEPTANCE_GIT_URL=https://forge.example.test/owner/disposable.git \
+TW_ACCEPTANCE_GIT_MAIN=<observed-main-commit> \
+pnpm exec tsx scripts/verify-private-git-acceptance.mts --confirm-disposable-private-remote
+```
+
+The caller must verify privacy and ownership first. This opt-in probe uses existing
+trusted Git authentication without placing credentials in its URL or receipt.
+It operates on unique temporary branches, creates DCO-signed synthetic commits,
+fetches an advanced target, detects a real merge conflict and verifies clean abort.
+It withholds a successful real push result from a simulated controller, then checks
+the remote ref without replaying that write. This injection is not evidence of an
+actual network outage. The receipt explicitly leaves real-agent and independent
+physical-node coverage false. Temporary branches and local clones are removed in
+`finally`, and the pinned main ref is checked again. The remote repository itself
+is retained; its owner-authorized lifecycle remains the caller's responsibility.
+
 Release-specific budgets, resource names and private evidence belong in project
 planning documents, not this guide. Do not merge, publish or deploy as part of
 capability acceptance unless the owner separately authorizes those operations.
