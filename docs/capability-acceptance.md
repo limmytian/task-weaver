@@ -79,7 +79,7 @@ capability acceptance unless the owner separately authorizes those operations.
 `scripts/verify-real-capability-agent.mts --verify-fixture-only` verifies a disposable
 loopback API/database and a pinned scoped CLI launcher without starting a model.
 Use `pnpm exec tsx` to run it. It requires the existing PostgreSQL test image locally;
-it does not pull an image or install a runtime. The generated agent key grants only
+it does not pull an image or install a runtime. The independent agent key grants only
 project reads and MCP invocation, expires after ten minutes, and is revoked before
 teardown. A subsequent authentication request must fail. The launcher embeds its
 configuration directory and removes ambient TW credential/endpoint overrides;
@@ -116,3 +116,40 @@ remain in that profile after temporary fixture files and the database are remove
 This is independent-client evidence, not daemon login or physical-node failover
 certification. Preserve failed attempts and their reported usage alongside success;
 a single successful artifact does not establish an efficiency improvement.
+
+`TW_ACCEPTANCE_CASE=irrelevant` selects the arithmetic task instead of the useful
+quote. Its artifact must be correct and the harness must observe no fixture
+capability requests during model execution. Preflight discovery is kept outside
+that measurement. The option's presence is not evidence that the case was run.
+
+## Actual daemon worker
+
+`TW_ACCEPTANCE_LAUNCH_MODE=daemon-codex` selects the existing Codex profile and the
+real `tw daemon start --once` path. It uses the same explicit model-confirmation
+flag as above. The supervisor key additionally grants project writes and execution;
+the child receives the existing bounded per-run broker and an isolated HOME.
+Its pass-through CLI launcher preserves that broker environment. It never embeds
+the supervisor's configuration or key. The provider's existing `CODEX_HOME` remains
+available for its authenticated runtime; this is not an empty personal skill profile.
+
+The source document is linked to the fixture requirement before acquisition.
+Project-level parent access alone does not authorize an ordinary document inside
+the child, and an inaccessible linked entity also hides its memory. Do not loosen
+those rules to make a test pass. In daemon mode, `--verify-fixture-only` registers
+a disposable daemon, acquires a lane, issues an actual execution delegation and
+verifies exact source, memory and tool visibility before revoking and releasing it.
+No model is used by that prerequisite check.
+
+The real worker has a 150-second deadline and its supervisor a 180-second deadline.
+Success requires the exact artifact, observed source/skill/memory adoption, a
+successful external invocation, actual per-run delegation records and task status
+`done`. A clean supervisor exit or `in_review` alone is not success. Durable
+delegation audit references remain separate from HTTP response observations.
+The existing Usage summary supplies whole-process counters where reported; missing
+reports, including termination before a final provider usage event, remain unknown.
+Do not substitute another run's counters or estimate money from them.
+
+This verifies one worker on one host. It does not prove agy isolated login,
+replanning/resume, independent-node recovery, worker-managed remote Git delivery,
+all package/runtime paths or untested vendor clients. Keep those coverage gates
+open and preserve blocked/failed attempts as part of the evidence.

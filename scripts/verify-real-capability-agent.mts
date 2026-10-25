@@ -15,8 +15,12 @@ import { createCapabilityAcceptanceFixture, verifyCapabilityAcceptanceArtifact }
 
 const fixtureOnly = process.argv[2] === '--verify-fixture-only';
 assert.deepEqual(process.argv.slice(2), [fixtureOnly ? '--verify-fixture-only' : '--confirm-one-real-external-agent']);
+const daemonMode = process.env.TW_ACCEPTANCE_LAUNCH_MODE === 'daemon-codex';
+assert.ok(!process.env.TW_ACCEPTANCE_LAUNCH_MODE || daemonMode, 'Unknown launch mode');
+const scenario = process.env.TW_ACCEPTANCE_CASE ?? 'useful';
+assert.ok(['useful', 'irrelevant'].includes(scenario), 'Unknown acceptance case');
 const requireApi = createRequire(new URL('../apps/api/package.json', import.meta.url));
-const { createDb, runMigrations, authAuditEvents, mcpInvocationAudits, projectMemberships } = requireApi('@task-weaver/db');
+const { createDb, runMigrations, authAuditEvents, mcpInvocationAudits, projectMemberships, executionDelegations } = requireApi('@task-weaver/db');
 const { and, eq } = requireApi('drizzle-orm');
 const { createResourceServices, registerSkillPackageSchema, registerMcpServerSchema, skillPackageStorageService } = requireApi('@task-weaver/core');
 const { serve } = requireApi('@hono/node-server');
@@ -30,11 +34,12 @@ const workspace = join(root, 'workspace'), config = join(root, 'config'), bin = 
 const container = `tw-real-agent-${randomUUID().slice(0, 8)}`;
 const docker = (...args: string[]) => execFileSync('docker', args, { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const receipt: Record<string, unknown> = {
-  schemaVersion: 1, mode: fixtureOnly ? 'fixture-validation' : 'independent-native-profile-cli-agent', provider: 'agy', resolvedModel: null,
+  schemaVersion: 1, mode: fixtureOnly ? 'fixture-validation' : daemonMode ? 'actual-daemon-worker' : 'independent-native-profile-cli-agent',
+  provider: daemonMode ? 'codex' : 'agy', scenario, resolvedModel: null,
   sourceModules: { core: requireApi.resolve('@task-weaver/core'), db: requireApi.resolve('@task-weaver/db') },
   fixtureCanonicalSha256: createHash('sha256').update(JSON.stringify(fixture)).digest('hex'),
   artifactCorrect: false, capabilityAdoptionVerified: false, daemonVerified: false,
-  emptyWorkspace: true, emptyPersonalSkillDirectory: false, slashExpansionDisabled: true,
+  emptyWorkspace: true, emptyPersonalSkillDirectory: false, slashExpansionDisabled: !daemonMode,
   providerProfileState: 'provider_managed_records_may_remain',
   modelCost: null, passed: false, cleanup: { database: false, files: false },
 };
@@ -69,10 +74,16 @@ try {
   let clientKey: string | undefined;
   const observableReads = new Map<string, { kind: string; assetId: string }>();
   const httpObservations: Array<Record<string, unknown>> = [];
+  let modelCapabilityRequests = 0;
   handler = async (request: Request) => {
     const response = await f.app.fetch(request);
+    const fixtureClient = clientKey && request.headers.get('authorization') === `Bearer ${clientKey}`;
+    // A successful API response has already verified the scoped delegation.
+    const fixtureChild = daemonMode && stage === 'model' && /^Bearer twd_/.test(request.headers.get('authorization') ?? '');
+    if (stage === 'model' && (fixtureClient || fixtureChild)
+      && /^\/api\/v1\/(context|memories|mcp|documents)(?:\/|$)/.test(new URL(request.url).pathname)) modelCapabilityRequests++;
     const selected = observableReads.get(new URL(request.url).pathname);
-    if (selected && response.ok && request.method === 'GET' && clientKey && request.headers.get('authorization') === `Bearer ${clientKey}`) {
+    if (selected && response.ok && request.method === 'GET' && (fixtureClient || fixtureChild)) {
       const value = await response.clone().json() as { content?: unknown; version?: unknown; sourceFreshness?: unknown; items?: Array<{ id?: unknown; content?: unknown; version?: unknown; sourceFreshness?: unknown }> };
       const content = selected.kind === 'memory_search' ? value.items?.find(item => item.id === selected.assetId) : value;
       if (typeof content?.content === 'string' && Buffer.byteLength(content.content) <= 32768) httpObservations.push({
@@ -134,9 +145,9 @@ try {
   await api(`/mcp/tools/${tool.id}/authorization`, 'PATCH', { readOnly: true, targetProjectArgument: null });
   stage = 'seed-agent';
   const agent = await f.identity.createAgent(f.owner.headers, { displayName: 'Independent real agy fixture' });
-  await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: 'member', explicitPermissions: ['mcp.invoke'] });
+  await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: daemonMode ? 'maintainer' : 'member', explicitPermissions: ['mcp.invoke'] });
   const key = await f.identity.issueKey(f.owner.headers, agent.id, { name: 'Bounded independent client', expiresAt: new Date(Date.now() + 600_000).toISOString(),
-    grants: [{ scope: 'project', projectId: f.project.id, permissions: ['resource.read', 'mcp.invoke'] }] });
+    grants: [{ scope: 'project', projectId: f.project.id, permissions: daemonMode ? ['resource.read', 'resource.write', 'execution.run', 'mcp.invoke'] : ['resource.read', 'mcp.invoke'] }] });
   revokeCredential = async () => {
     await f.identity.revokeKey(f.owner.headers, agent.id, key.id);
     const denied = await f.app.request('/api/v1/auth/me', { headers: { authorization: `Bearer ${key.rawKey}` } });
@@ -146,6 +157,7 @@ try {
   clientKey = key.rawKey;
   observableReads.set(`/api/v1/documents/${source.id}`, { kind: 'source_document', assetId: source.id });
   observableReads.set(`/api/v1/context/${skill.id}`, { kind: 'skill', assetId: skill.id });
+  observableReads.set(`/api/v1/documents/${skill.id}`, { kind: 'skill', assetId: skill.id });
   observableReads.set(`/api/v1/memories/${memory.id}`, { kind: 'memory', assetId: memory.id });
   observableReads.set('/api/v1/memories/search', { kind: 'memory_search', assetId: memory.id });
   observableReads.set(`/api/v1/context/packages/${pkg.id}/read`, { kind: 'skill_package', assetId: pkg.id });
@@ -163,15 +175,63 @@ try {
   assert.ok(discovery.ok && JSON.parse(discovery.stdout).items.some((item: { id: string }) => item.id === tool.id), 'The exact client must discover the fixture tool before spending on a model');
   receipt.preflightToolDiscoverable = true;
   if (fixtureOnly) {
+    if (daemonMode) {
+      const requirement = await api(`/projects/${f.project.id}/requirements`, 'POST', { title: 'Bounded input visibility fixture', status: 'approved' });
+      const task = await api(`/projects/${f.project.id}/tasks`, 'POST', { requirementId: requirement.id, title: 'Read the declared fixture source' });
+      await api(`/requirements/${requirement.id}/document-links`, 'POST', { documentId: source.id, linkType: 'references' });
+      const parentHeaders = new Headers({ authorization: `Bearer ${key.rawKey}`, 'content-type': 'application/json' });
+      const parentApi = async (path: string, method: string, body?: unknown, headers = parentHeaders) => {
+        const response = await f.app.request(`/api/v1${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+        assert.ok(response.ok, `Bounded fixture prerequisite failed: ${method} ${path} (${response.status})`);
+        return response.json() as Promise<any>;
+      };
+      const daemonId = randomUUID();
+      await parentApi('/daemons/register', 'POST', { id: daemonId, nodeId: 'bounded-fixture-node', name: 'Bounded fixture prerequisite',
+        role: 'executor', capabilities: ['codex', 'executor:codex', 'live-plan-v1'] });
+      const lane = await parentApi(`/daemons/${daemonId}/apply-requirement`, 'POST', { projectId: f.project.id, workerIndex: 0 });
+      assert.equal(lane.requirement.id, requirement.id);
+      const access = await parentApi(`/daemons/${daemonId}/delegations`, 'POST', { requirementId: requirement.id, taskId: task.id,
+        workerIndex: 0, runId: lane.runId, leaseGeneration: lane.leaseGeneration, capabilityExecution: true });
+      const child = new Headers({ authorization: `Bearer ${access.token}` });
+      assert.equal((await parentApi(`/documents/${source.id}`, 'GET', undefined, child)).id, source.id);
+      assert.equal((await parentApi(`/memories/${memory.id}`, 'GET', undefined, child)).id, memory.id);
+      const visible = await parentApi(`/mcp/tools/search?intent=*&projectId=${f.project.id}`, 'GET', undefined, child);
+      assert.ok(visible.items.some((item: { id: string }) => item.id === tool.id));
+      await parentApi(`/daemons/${daemonId}/delegations/${access.delegation.id}`, 'DELETE');
+      await parentApi(`/requirements/${requirement.id}/release`, 'POST', { daemonId, runId: lane.runId, leaseGeneration: lane.leaseGeneration });
+      receipt.boundedFixtureReady = true;
+    }
     receipt.fixtureReady = true;
     receipt.passed = true;
   } else {
-    const prompt = `You are an independent CLI client in an isolated disposable test project ${f.project.id}. For every Task Weaver command use the absolute executable ${scopedCli}; do not use a bare tw command, another client or another configuration. That wrapper pins the scoped test configuration even when a login shell changes its environment. Do not read credentials, other projects, home-directory files, or install anything. Local slash commands and skill expansion are disabled.\nCreate quote.json in the current working directory for the project's current sample quote customer and item, quantity ${fixture.request.quantity}. Obtain current customer/source, relevant project calculation guidance and current external pricing through Task Weaver. Re-read the linked source before relying on a memory. Start with context bootstrap --json; use context search, memory search and mcp search with --project ${f.project.id} only as relevant. Inspect selected content with context get, memory get and doc get; inspect a tool with mcp tool before mcp call with --schema-hash. Use the scoped executable's focused subcommand help as needed. Return exactly these JSON fields: customer, sku, quantity, totalCents, currency, sourceRevision. Do not guess missing facts. No memory writes are requested. Verify the produced file. This project contains unrelated shipping guidance; use it only if relevant. Stop and report a blocker after two command failures; do not repeat failing commands.`;
+    const usefulPrompt = `Create quote.json in the current working directory for the project's current sample quote customer and item, quantity ${fixture.request.quantity}. Obtain current customer/source, relevant project calculation guidance and current external pricing through Task Weaver. Re-read the linked source before relying on a memory. Start with context bootstrap --json; use context search, memory search and mcp search with --project ${f.project.id} only as relevant. Inspect selected content with context get, memory get and doc get; inspect a tool with mcp tool before mcp call with --schema-hash. Use focused subcommand help as needed. Return exactly these JSON fields: customer, sku, quantity, totalCents, currency, sourceRevision. Do not guess missing facts. No memory writes are requested. Verify the produced file. This project contains unrelated shipping guidance; use it only if relevant. Stop and report a blocker after two command failures; do not repeat failing commands.`;
+    const work = scenario === 'useful' ? usefulPrompt : fixture.irrelevant.prompt;
+    const prompt = `You are an independent CLI client in an isolated disposable test project ${f.project.id}. For every Task Weaver command use the absolute executable ${scopedCli}; do not use a bare tw command, another client or another configuration. That wrapper pins the scoped test configuration even when a login shell changes its environment. Do not read credentials, other projects, home-directory files, or install anything. Local slash commands and skill expansion are disabled.\n${work}`;
     stage = 'model';
     const requestedModel = process.env.TW_ACCEPTANCE_AGY_MODEL;
     receipt.requestedModel = requestedModel ?? null;
-    receipt.freshProviderProjectRequested = true;
-    const result = await runCommand('agy', ['--new-project', '--dangerously-skip-permissions', '--disable-slash-commands',
+    receipt.freshProviderProjectRequested = !daemonMode;
+    let daemonRequirement: { id: string } | undefined;
+    let daemonTask: { id: string } | undefined;
+    let result: Awaited<ReturnType<typeof runCommand>>;
+    if (daemonMode) {
+      const workerBin = join(root, 'worker-bin');
+      await mkdir(workerBin, { mode: 0o700 });
+      // This launcher must retain the child's broker environment, never pin the supervisor key.
+      await writeFile(join(workerBin, 'tw'), `#!/bin/sh\nexec ${shellQuote(fileURLToPath(new URL('../node_modules/.bin/tsx', import.meta.url)))} ${shellQuote(fileURLToPath(new URL('../apps/cli/src/index.ts', import.meta.url)))} "$@"\n`, { mode: 0o700 });
+      daemonRequirement = await api(`/projects/${f.project.id}/requirements`, 'POST', { title: 'Actual daemon capability fixture', status: 'approved', modelTier: 'fast' });
+      daemonTask = await api(`/projects/${f.project.id}/tasks`, 'POST', { requirementId: daemonRequirement!.id, title: 'Produce the verified sample quote',
+        description: `${work}\nWrite the final ${scenario === 'useful' ? 'quote.json' : 'arithmetic.json'} artifact at ${workspace}. Use ordinary tw commands with the supplied worker broker, never another configuration. Do not read home-directory files or credentials. Do not install dependencies.` });
+      await api(`/requirements/${daemonRequirement!.id}/document-links`, 'POST', { documentId: source.id, linkType: 'references' });
+      const daemonHome = join(root, 'daemon-home');
+      await mkdir(daemonHome, { mode: 0o700 });
+      const daemonEnv = { ...env, HOME: daemonHome, CODEX_HOME: process.env.CODEX_HOME ?? join(homedir(), '.codex'),
+        PATH: `${workerBin}${delimiter}${process.env.PATH ?? ''}`, TW_DAEMON_AGENT_TIMEOUT_MS: '150000', TW_ARTIFACT_ROOT: join(root, 'artifacts') };
+      result = await runCommand(scopedCli, ['daemon', 'start', '--tools', 'codex', '--project', f.project.id,
+        '--workers', '1', '--mode', 'polling', '--think', 'fast:low', '--capability-execution', '--once'], { cwd: workspace, env: daemonEnv, timeoutMs: 180_000, maxOutputBytes: 256 * 1024 });
+      receipt.taskStatus = (await api(`/tasks/${daemonTask!.id}`)).status;
+      receipt.daemonUsage = await api(`/agent-usage/summary?projectId=${f.project.id}`);
+    } else result = await runCommand('agy', ['--new-project', '--dangerously-skip-permissions', '--disable-slash-commands',
       '--log-file', join(root, 'agy.log'), ...(requestedModel ? ['--model', requestedModel] : []),
       '--print-timeout', '150s', '--output-format', 'json', `--print=${prompt}`],
       { cwd: workspace, env, timeoutMs: 155_000, maxOutputBytes: 256 * 1024 });
@@ -187,20 +247,25 @@ try {
     receipt.reportedUsage = usage;
     stage = 'verify';
     let artifact: unknown;
-    try { artifact = JSON.parse(await readFile(join(workspace, fixture.request.output), 'utf8')); verifyCapabilityAcceptanceArtifact(fixture, artifact); receipt.artifactCorrect = true; receipt.artifact = artifact; }
+    try { artifact = JSON.parse(await readFile(join(workspace, scenario === 'useful' ? fixture.request.output : 'arithmetic.json'), 'utf8')); verifyCapabilityAcceptanceArtifact(fixture, artifact, scenario); receipt.artifactCorrect = true; receipt.artifact = artifact; }
     catch { receipt.artifactCorrect = false; }
     const audits = await database.select().from(authAuditEvents);
-    const capabilityAudits = audits.filter((row: any) => row.metadata?.credentialId === key.id && row.metadata?.capabilityEvidenceVersion === 1);
-    const invocations = (await database.select().from(mcpInvocationAudits)).filter((row: any) => row.credentialId === key.id && row.toolId === tool.id);
+    const delegations = daemonMode ? await database.select().from(executionDelegations).where(eq(executionDelegations.parentCredentialId, key.id)) : [];
+    const delegationIds = new Set(delegations.map((row: { id: string }) => row.id));
+    const capabilityAudits = audits.filter((row: any) => row.metadata?.capabilityEvidenceVersion === 1 && (row.metadata?.credentialId === key.id || (daemonMode && row.metadata?.requirementId === daemonRequirement?.id && row.action.startsWith('delegation.'))));
+    const invocations = (await database.select().from(mcpInvocationAudits)).filter((row: any) => (row.credentialId === key.id || delegationIds.has(row.credentialId)) && row.toolId === tool.id);
     receipt.observations = capabilityAudits.map((row: any) => ({ auditId: row.id, kind: row.metadata.capabilityKind,
       assetId: row.metadata.assetId, action: row.metadata.capabilityAction, outcome: row.metadata.capabilityOutcome, hash: row.metadata.assetSha256 ?? null }));
     receipt.externalToolCalls = actualCalls;
     receipt.httpReadObservations = httpObservations;
+    receipt.modelCapabilityHttpRequests = modelCapabilityRequests;
     receipt.successfulInvocationAudits = invocations.filter((row: any) => row.outcome === 'success').length;
     const read = (id: string) => httpObservations.some(row => row.assetId === id)
       || capabilityAudits.some((row: any) => row.metadata.assetId === id && row.metadata.capabilityAction === 'read' && ['read', 'returned'].includes(row.metadata.capabilityOutcome));
     receipt.capabilityAdoptionVerified = read(source.id) && read(memory.id) && (read(skill.id) || read(pkg.id)) && actualCalls > 0 && invocations.some((row: any) => row.outcome === 'success');
-    receipt.passed = result.ok && receipt.artifactCorrect === true && receipt.capabilityAdoptionVerified === true;
+    receipt.noObservedFixtureCapabilityUse = modelCapabilityRequests === 0 && actualCalls === 0 && capabilityAudits.length === 0;
+    receipt.daemonVerified = daemonMode && receipt.taskStatus === 'done' && delegations.length > 0 && receipt.artifactCorrect === true && receipt.capabilityAdoptionVerified === true;
+    receipt.passed = result.ok && receipt.artifactCorrect === true && (scenario === 'useful' ? receipt.capabilityAdoptionVerified === true : receipt.noObservedFixtureCapabilityUse === true) && (!daemonMode || receipt.daemonVerified === true);
     if (!receipt.passed) process.exitCode = 1;
   }
 } catch (error) {
