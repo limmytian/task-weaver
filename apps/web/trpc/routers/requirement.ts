@@ -2,6 +2,7 @@ import { z } from "zod";
 import { router, ordinaryResourceProcedure as resourceProcedure } from "../init";
 import {
   createResourceServices,
+  createExecutionRecoveryViewService,
   createRequirementSchema,
   updateRequirementSchema,
   listRequirementsSchema,
@@ -15,6 +16,8 @@ import {
 } from "@task-weaver/core";
 
 export const requirementRouter = router({
+  recoveryState: resourceProcedure.input(z.object({ id: z.string().uuid() }))
+    .query(async ({ ctx, input }) => createExecutionRecoveryViewService(ctx.identity).get(ctx.db, input.id)),
   addWorkflowInput: resourceProcedure.input(z.object({ requirementId: z.string().uuid(), data: addWorkflowInputSchema }))
     .mutation(async ({ ctx, input }) => createResourceServices(ctx.identity).requirementService.addWorkflowInput(ctx.db, input.requirementId, input.data, ctx.actor)),
   list: resourceProcedure

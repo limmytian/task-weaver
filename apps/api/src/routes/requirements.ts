@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import {
   createResourceServices,
   createExecutionControlService,
+  createExecutionRecoveryViewService,
   executionRevalidationSchema,
   createRequirementSchema,
   updateRequirementSchema,
@@ -26,6 +27,8 @@ import {
 import type { Env } from "../middleware/actor.js";
 
 const requirements = new Hono<Env>();
+
+requirements.get("/requirements/:id/execution-recovery-state", async c => c.json(await createExecutionRecoveryViewService(c.get("identity")).get(c.get("db"), c.req.param("id"))));
 
 requirements.post("/requirements/:id/execution-recovery", async c => c.json(await createExecutionControlService(c.get("identity")).authorizeRecovery(c.get("db"), c.req.param("id"), await c.req.json())));
 

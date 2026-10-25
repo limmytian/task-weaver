@@ -22,6 +22,7 @@ const ordinaryRoutes: Array<[string, RegExp]> = [
   ["POST", new RegExp("^/api/v1/daemons/[0-9a-fA-F-]{36}/execution-controls/[0-9a-fA-F-]{36}/(?:ack|resume)/?$")],
   ["POST", new RegExp("^/api/v1/daemons/[0-9a-fA-F-]{36}/(?:execution-authority|git-synchronization)/?$")],
   ["POST", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/(?:execution-revalidation|execution-recovery)/?$")],
+  ["GET", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/execution-recovery-state/?$")],
   ["POST", new RegExp("^/api/v1/daemons/register/?$")],
   ["POST", new RegExp("^/api/v1/daemons/[0-9a-fA-F-]{36}/(?:heartbeat|status|control|apply-task|apply-requirement|apply-review|apply-merge|progress|reconcile)/?$")],
   ["GET", new RegExp("^/api/v1/observability/(?:overview|metrics|history|logs)/?$")],

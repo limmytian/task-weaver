@@ -12,3 +12,4 @@ export * from "./sse";
 export * from "./schemas/execution-controls";
 
 export { inputJsonSchema } from "./json-schema";
+export * from "./schemas/recovery-view";
