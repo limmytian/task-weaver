@@ -20,6 +20,11 @@ const daemonMode = process.env.TW_ACCEPTANCE_LAUNCH_MODE === 'daemon-codex';
 const emptyExternal = process.env.TW_ACCEPTANCE_LAUNCH_MODE === 'external-codex-empty';
 assert.ok(!process.env.TW_ACCEPTANCE_LAUNCH_MODE || daemonMode || emptyExternal, 'Unknown launch mode');
 const scenario = process.env.TW_ACCEPTANCE_CASE ?? 'useful';
+const gitRemote = process.env.TW_ACCEPTANCE_GIT_URL ? new URL(process.env.TW_ACCEPTANCE_GIT_URL) : undefined;
+assert.ok(!gitRemote || (daemonMode && scenario === 'useful' && gitRemote.protocol === 'https:' && !gitRemote.username && !gitRemote.password && !gitRemote.search && !gitRemote.hash), 'Remote Git requires explicitly authorized private HTTPS daemon useful case');
+const gitMain = process.env.TW_ACCEPTANCE_GIT_MAIN;
+if (gitRemote) assert.match(gitMain ?? '', /^[a-f0-9]{40,64}$/);
+const gitBranch = `acceptance/worker-${randomUUID()}`;
 assert.ok(['useful', 'irrelevant', 'replan'].includes(scenario), 'Unknown acceptance case');
 assert.ok(scenario !== 'replan' || daemonMode, 'Replan requires the actual daemon');
 const requireApi = createRequire(new URL('../apps/api/package.json', import.meta.url));
@@ -51,6 +56,12 @@ let database: ReturnType<typeof createDb> | undefined;
 let apiServer: any, toolServer: any, registeredServerId: string | undefined;
 let revokeCredential: (() => Promise<void>) | undefined;
 let createdContainer = false;
+let gitCleanupNeeded = false;
+const trustedGit = async (args: string[]) => {
+  const result = await runCommand('git', args, { env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, timeoutMs: 30_000, maxOutputBytes: 65536 });
+  assert.ok(result.ok && !result.outputTruncated, 'Trusted remote Git verification failed');
+  return result.stdout.trim();
+};
 const previousStorage = process.env.SKILL_PACKAGE_STORAGE_DIR;
 let stage = 'prepare';
 try {
@@ -158,7 +169,8 @@ try {
   const agent = await f.identity.createAgent(f.owner.headers, { displayName: 'Independent real agy fixture' });
   await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: daemonMode ? 'maintainer' : 'member', explicitPermissions: ['mcp.invoke'] });
   const key = await f.identity.issueKey(f.owner.headers, agent.id, { name: 'Bounded independent client', expiresAt: new Date(Date.now() + 600_000).toISOString(),
-    grants: [{ scope: 'project', projectId: f.project.id, permissions: daemonMode ? ['resource.read', 'resource.write', 'execution.run', 'mcp.invoke'] : ['resource.read', 'mcp.invoke'] }] });
+    grants: [{ scope: 'project', projectId: f.project.id, permissions: daemonMode ? ['resource.read', 'resource.write', 'execution.run', 'mcp.invoke'] : ['resource.read', 'mcp.invoke'] },
+      ...(gitRemote ? [{ scope: 'personal', actorId: f.owner.context.actor.id, permissions: ['resource.read'] }] : [])] });
   revokeCredential = async () => {
     await f.identity.revokeKey(f.owner.headers, agent.id, key.id);
     const denied = await f.app.request('/api/v1/auth/me', { headers: { authorization: `Bearer ${key.rawKey}` } });
@@ -235,10 +247,23 @@ try {
       await mkdir(workerBin, { mode: 0o700 });
       // This launcher must retain the child's broker environment, never pin the supervisor key.
       await writeFile(join(workerBin, 'tw'), `#!/bin/sh\nexec ${shellQuote(fileURLToPath(new URL('../node_modules/.bin/tsx', import.meta.url)))} ${shellQuote(fileURLToPath(new URL('../apps/cli/src/index.ts', import.meta.url)))} "$@"\n`, { mode: 0o700 });
-      daemonRequirement = await api(`/projects/${f.project.id}/requirements`, 'POST', { title: 'Actual daemon capability fixture', status: 'approved', modelTier: 'fast' });
+      daemonRequirement = await api(`/projects/${f.project.id}/requirements`, 'POST', { title: 'Actual daemon capability fixture', status: 'approved', modelTier: 'fast', ...(gitRemote ? { workflowPreset: 'git_branch' } : {}) });
       daemonTask = await api(`/projects/${f.project.id}/tasks`, 'POST', { requirementId: daemonRequirement!.id, title: 'Produce the verified sample quote',
         description: `${work}\nWrite the final ${scenario !== 'irrelevant' ? 'quote.json' : 'arithmetic.json'} artifact at ${workspace}. Use ordinary tw commands with the supplied worker broker, never another configuration. Do not read home-directory files or credentials. Do not install dependencies.` });
       await api(`/requirements/${daemonRequirement!.id}/document-links`, 'POST', { documentId: source.id, linkType: 'references' });
+      let repository: { id: string } | undefined;
+      if (gitRemote) {
+        assert.equal((await trustedGit(['ls-remote', gitRemote.href, 'refs/heads/main'])).split(/\s/)[0], gitMain);
+        const path = gitRemote.pathname.replace(/^\//, '').replace(/\.git$/, '').split('/');
+        assert.equal(path.length, 2);
+        repository = await api('/repositories', 'POST', { provider: 'generic', host: gitRemote.host, namespace: path[0], name: path[1],
+          httpsCloneUrl: gitRemote.href, defaultBranch: 'main', visibility: 'private', ownerId: f.owner.context.actor.id, ownerType: 'human',
+          authPolicy: { allowedTransports: ['https'], preferredTransport: 'https', allowedOperations: ['read', 'push'], allowNativeDefault: true } });
+        await api(`/requirements/${daemonRequirement!.id}/repositories`, 'POST', { repositoryId: repository!.id, baseBranch: 'main', workingBranch: gitBranch });
+        const current = await api(`/tasks/${daemonTask!.id}`);
+        await api(`/tasks/${daemonTask!.id}`, 'PATCH', { expectedVersion: current.version, description: `${current.description}\nAlso write the same verified quote.json inside the linked repository worktree. Use the frozen manifest to find its path and use tw execution git fetch/verify for that repository before substantive edits and before completion. Do not push or commit; the trusted daemon owns signed commit and push. Do not change main.` });
+        gitCleanupNeeded = true;
+      }
       if (scenario === 'replan') changeObservedSource = async authorization => {
         const customer = `${fixture.expected.customer}-replanned`;
         fixture.tool.result.unitCents += 7;
@@ -266,10 +291,53 @@ try {
       await mkdir(daemonHome, { mode: 0o700 });
       const daemonEnv = { ...env, HOME: daemonHome, CODEX_HOME: process.env.CODEX_HOME ?? join(homedir(), '.codex'),
         PATH: `${workerBin}${delimiter}${process.env.PATH ?? ''}`, TW_DAEMON_AGENT_TIMEOUT_MS: '150000', TW_ARTIFACT_ROOT: join(root, 'artifacts') };
+      if (gitRemote) {
+        // Trusted supervisor only; buildAiEnvironment resets these settings for its child.
+        const credentialText = execFileSync('git', ['-c', 'credential.useHttpPath=false', 'credential', 'fill'], {
+          input: `protocol=https\nhost=${gitRemote.host}\n\n`, encoding: 'utf8', timeout: 15_000,
+          env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        const fields = Object.fromEntries(credentialText.trim().split('\n').map(line => {
+          const index = line.indexOf('='); return [line.slice(0, index), line.slice(index + 1)];
+        }));
+        assert.ok(fields.username && fields.password, 'Existing Git credential is unavailable');
+        const secretPath = join(root, 'trusted-git-credential.json'), helper = join(root, 'trusted-git-helper.cjs');
+        await writeFile(secretPath, JSON.stringify({ username: fields.username, password: fields.password }), { mode: 0o600 });
+        await writeFile(helper, `const fs=require('node:fs');if(process.argv[2]!=='get')process.exit(0);const input=Object.fromEntries(fs.readFileSync(0,'utf8').trim().split('\\n').map(x=>{const i=x.indexOf('=');return [x.slice(0,i),x.slice(i+1)]}));if(input.protocol!=='https'||input.host!==${JSON.stringify(gitRemote.host)}||(input.path||'').toLowerCase()!==${JSON.stringify(gitRemote.pathname.slice(1).toLowerCase())})process.exit(0);const c=JSON.parse(fs.readFileSync(${JSON.stringify(secretPath)},'utf8'));process.stdout.write('username='+c.username+'\\npassword='+c.password+'\\n');\n`, { mode: 0o600 });
+        for (const input of [`protocol=https\nhost=${gitRemote.host}\npath=unrelated/repository.git\n\n`,
+          `protocol=https\nhost=example.invalid\npath=${gitRemote.pathname.slice(1)}\n\n`,
+          `protocol=http\nhost=${gitRemote.host}\npath=${gitRemote.pathname.slice(1)}\n\n`]) {
+          assert.equal(execFileSync(process.execPath, [helper, 'get'], { input, encoding: 'utf8', timeout: 5000 }), '');
+        }
+        const trustedConfig = join(root, 'trusted-gitconfig');
+        await writeFile(trustedConfig, `[credential]\nhelper = ${JSON.stringify(`!${shellQuote(process.execPath)} ${shellQuote(helper)}`)}\n`, { mode: 0o600 });
+        daemonEnv.GIT_CONFIG_GLOBAL = trustedConfig;
+        receipt.exactRepositoryCredentialBridge = true;
+        Object.assign(daemonEnv, { GIT_CONFIG_COUNT: '0', GIT_AUTHOR_NAME: 'Task Weaver Acceptance', GIT_AUTHOR_EMAIL: 'acceptance@example.test',
+          GIT_COMMITTER_NAME: 'Task Weaver Acceptance', GIT_COMMITTER_EMAIL: 'acceptance@example.test' });
+      }
       result = await runCommand(scopedCli, ['daemon', 'start', '--tools', 'codex', '--project', f.project.id,
         '--workers', '1', '--mode', 'polling', '--think', 'fast:low', '--capability-execution', '--once'], { cwd: workspace, env: daemonEnv, timeoutMs: scenario === 'replan' ? 330_000 : 180_000, maxOutputBytes: 256 * 1024 });
+      receipt.process = { exitCode: result.status, durationMs: result.durationMs, timedOut: result.timedOut, outputTruncated: result.outputTruncated };
+      if (!result.ok) {
+        const diagnostic = (result.stdout + result.stderr).toLowerCase();
+        receipt.daemonDiagnosticCategories = ['credential', 'permission', 'repository', 'clone', 'fetch', 'git_helper', 'identity', 'worktree', '403', '404']
+          .filter(category => diagnostic.includes(category));
+      }
       receipt.taskStatus = (await api(`/tasks/${daemonTask!.id}`)).status;
       receipt.daemonUsage = await api(`/agent-usage/summary?projectId=${f.project.id}`);
+      if (gitRemote) {
+        const remoteTip = (await trustedGit(['ls-remote', gitRemote.href, `refs/heads/${gitBranch}`])).split(/\s/)[0];
+        assert.match(remoteTip, /^[a-f0-9]{40,64}$/);
+        const clone = join(root, 'remote-verification');
+        await trustedGit(['clone', '--no-tags', '--single-branch', '--branch', gitBranch, gitRemote.href, clone]);
+        verifyCapabilityAcceptanceArtifact(fixture, JSON.parse(await readFile(join(clone, 'quote.json'), 'utf8')));
+        const message = await trustedGit(['-C', clone, 'log', '-1', '--format=%B']);
+        receipt.workerRemoteGitVerified = /^Signed-off-by:/m.test(message);
+        receipt.remoteHeadCommit = remoteTip;
+        const links = await api(`/requirements/${daemonRequirement!.id}/repositories`);
+        receipt.repositoryDelivery = (Array.isArray(links) ? links : links.items ?? []).map((row: any) => ({ repositoryId: row.repositoryId, deliveryStatus: row.deliveryStatus, pushStatus: row.pushStatus, headCommit: row.headCommit }));
+      }
     } else if (emptyExternal) {
       const nativeProfile = process.env.CODEX_HOME ?? join(homedir(), '.codex');
       const profile = join(root, 'empty-codex-profile'), home = join(root, 'external-home');
@@ -354,6 +422,7 @@ try {
     }
     receipt.passed = result.ok && receipt.artifactCorrect === true && (scenario !== 'irrelevant' ? receipt.capabilityAdoptionVerified === true : receipt.noObservedFixtureCapabilityUse === true)
       && (!daemonMode || receipt.daemonVerified === true) && (scenario !== 'replan' || receipt.replanVerified === true);
+    if (gitRemote && receipt.workerRemoteGitVerified !== true) receipt.passed = false;
     if (!receipt.passed) process.exitCode = 1;
   }
 } catch (error) {
@@ -364,6 +433,15 @@ try {
   receipt.failureCode = typeof code === 'string' && /^[A-Z0-9]{5}$/.test(code) ? code : null;
   process.exitCode = 1;
 } finally {
+  if (gitRemote && gitCleanupNeeded) {
+    try {
+      const refs = await trustedGit(['ls-remote', gitRemote.href, `refs/heads/${gitBranch}`]);
+      if (refs) await trustedGit(['push', gitRemote.href, '--delete', gitBranch]);
+      assert.equal(await trustedGit(['ls-remote', gitRemote.href, `refs/heads/${gitBranch}`]), '');
+      assert.equal((await trustedGit(['ls-remote', gitRemote.href, 'refs/heads/main'])).split(/\s/)[0], gitMain);
+      receipt.remoteBranchRemoved = true; receipt.remoteMainUnchanged = true;
+    } catch { receipt.passed = false; process.exitCode = 1; receipt.remoteCleanupFailed = true; }
+  }
   if (revokeCredential) {
     try { await revokeCredential(); receipt.credentialRevoked = true; }
     catch { receipt.credentialRevoked = false; receipt.passed = false; process.exitCode = 1; }

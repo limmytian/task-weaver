@@ -183,3 +183,28 @@ The temporary HOME/profile is removed during teardown. The Task Weaver credentia
 remains the separate short-lived project key. This is not a filesystem sandbox or
 proof that this client can authenticate successfully; require actual artifact and
 invocation evidence before marking the probe passed. Failed probes stay uncovered.
+
+## Worker-managed private Git
+
+The useful daemon case optionally accepts `TW_ACCEPTANCE_GIT_URL` and a pinned
+`TW_ACCEPTANCE_GIT_MAIN` for an explicitly owner-authorized disposable private
+HTTPS repository. The fixture uses `git_branch` delivery with no PR or integration.
+The catalog remains human-owned; the temporary supervisor may read that owner's
+catalog, while its child receives only the frozen linked repository manifest.
+The worker must fetch/verify through the broker and write the verified quote into
+its worktree. The trusted daemon owns DCO commit and branch push.
+
+Existing host-only keychain credentials may not satisfy the controlled Git path's
+mandatory `credential.useHttpPath=true`. The fixture creates a temporary trusted
+helper restricted to the exact authorized HTTPS host and repository path, using
+the existing credential. It returns no secret for a different host, path or
+protocol. It never writes a broader keychain entry or disables path checks. Its
+mode-0600 credential/config files are outside the child's environment; worker Git
+helpers remain disabled. This is a trusted process boundary, not a claim that a
+same-user unsandboxed process cannot read arbitrary files.
+
+Success additionally requires cloning the actual pushed branch independently,
+verifying its artifact and DCO trailer, and recording the remote commit. The unique
+test branch is deleted in teardown and the pinned main is checked again. The
+disposable repository itself remains reserved. Native transport/conflict tests,
+worker delivery and independent-node failover are separate evidence categories.
