@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { randomUUID, createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
@@ -28,7 +28,7 @@ const gitBranch = `acceptance/worker-${randomUUID()}`;
 assert.ok(['useful', 'irrelevant', 'replan'].includes(scenario), 'Unknown acceptance case');
 assert.ok(scenario !== 'replan' || daemonMode, 'Replan requires the actual daemon');
 const requireApi = createRequire(new URL('../apps/api/package.json', import.meta.url));
-const { createDb, runMigrations, authAuditEvents, mcpInvocationAudits, projectMemberships, executionDelegations, executionControls } = requireApi('@task-weaver/db');
+const { createDb, runMigrations, authAuditEvents, mcpInvocationAudits, projectMemberships, executionDelegations, executionControls, daemons, requirementClaims } = requireApi('@task-weaver/db');
 const { and, eq } = requireApi('drizzle-orm');
 const { createResourceServices, registerSkillPackageSchema, registerMcpServerSchema, skillPackageStorageService } = requireApi('@task-weaver/core');
 const { serve } = requireApi('@hono/node-server');
@@ -56,6 +56,7 @@ let database: ReturnType<typeof createDb> | undefined;
 let apiServer: any, toolServer: any, registeredServerId: string | undefined;
 let revokeCredential: (() => Promise<void>) | undefined;
 let createdContainer = false;
+const nodeContainers: string[] = [];
 let gitCleanupNeeded = false;
 let trustedGitConfig: string | undefined;
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -257,6 +258,64 @@ try {
       await parentApi(`/daemons/${daemonId}/delegations/${access.delegation.id}`, 'DELETE');
       await parentApi(`/requirements/${requirement.id}/release`, 'POST', { daemonId, runId: lane.runId, leaseGeneration: lane.leaseGeneration });
       receipt.boundedFixtureReady = true;
+      if (process.env.TW_ACCEPTANCE_CONTAINER_NODES === '1') {
+        await api(`/requirements/${requirement.id}`, 'PATCH', { status: 'cancelled' });
+        const nodeImage = 'task-weaver-api:ce-candidate-arm64';
+        const image = JSON.parse(docker('image', 'inspect', nodeImage))[0].Id;
+        for (const suffix of ['a', 'b']) {
+          const name = `${container}-node-${suffix}`;
+          docker('run', '--pull', 'never', '-d', '--name', name, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+            '--tmpfs', '/work:rw,noexec,nosuid,size=1m', '--entrypoint', 'node', image, '-e', 'setInterval(()=>{},1000)');
+          nodeContainers.push(name);
+        }
+        const nodeRequest = async (node: string, path: string, method = 'GET', body?: unknown, token = key.rawKey): Promise<any> => {
+          const text = await new Promise<string>((resolve, reject) => {
+            const child = execFile('docker', ['exec', '-i', node, 'node', '-e',
+            "let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',async()=>{try{const x=JSON.parse(s);const r=await fetch(x.url,{method:x.method,headers:{authorization:'Bearer '+x.token,'content-type':'application/json'},body:x.body===undefined?undefined:JSON.stringify(x.body),redirect:'error'});let data;try{data=await r.json()}catch{};process.stdout.write(JSON.stringify({status:r.status,data}));}catch{process.stdout.write(JSON.stringify({status:0}));process.exitCode=1}})"],
+          { encoding: 'utf8', timeout: 15_000 }, (error, stdout) => error ? reject(new Error('Container request transport failed')) : resolve(stdout));
+            child.stdin!.end(JSON.stringify({ url: apiUrl.replace('127.0.0.1', 'host.docker.internal') + '/api/v1' + path, method, body, token }));
+          });
+          return JSON.parse(text);
+        };
+        const nodeA = randomUUID(), nodeB = randomUUID();
+        for (const [name, id, nodeId] of [[nodeContainers[0], nodeA, 'container-node-a'], [nodeContainers[1], nodeB, 'container-node-b']]) {
+          assert.equal((await nodeRequest(name!, '/daemons/register', 'POST', { id, nodeId, name: nodeId, role: 'executor', capabilities: ['codex', 'executor:codex', 'live-plan-v1'] })).status, 201);
+        }
+        const recoverable = await api(`/projects/${f.project.id}/requirements`, 'POST', { title: 'Two container recovery fixture', status: 'approved',
+          recoveryPolicy: { retrySafe: true, graceMs: 1000, maxAttempts: 1 } });
+        const activeTask = await api(`/projects/${f.project.id}/tasks`, 'POST', { requirementId: recoverable.id, title: 'Reconstruct from durable synthetic input' });
+        const acquired = await nodeRequest(nodeContainers[0]!, `/daemons/${nodeA}/apply-requirement`, 'POST', { projectId: f.project.id, workerIndex: 0 });
+        assert.equal(acquired.status, 200);
+        const oldLane = acquired.data;
+        assert.equal(oldLane.requirement.id, recoverable.id);
+        const issued = await nodeRequest(nodeContainers[0]!, `/daemons/${nodeA}/delegations`, 'POST', { requirementId: recoverable.id, taskId: activeTask.id,
+          workerIndex: 0, runId: oldLane.runId, leaseGeneration: oldLane.leaseGeneration });
+        assert.equal(issued.status, 201);
+        assert.equal((await nodeRequest(nodeContainers[0]!, '/auth/me', 'GET', undefined, issued.data.token)).status, 200);
+        docker('stop', '--time', '1', nodeContainers[0]!);
+        // Explicit fixture clock acceleration after observing real container stop.
+        // This does not claim elapsed production lease timing or a host power failure.
+        await database.update(daemons).set({ lastHeartbeatAt: new Date(Date.now() - 5000) }).where(eq(daemons.id, nodeA));
+        await database.update(requirementClaims).set({ heartbeatAt: new Date(Date.now() - 5000), expiresAt: new Date(Date.now() - 1000) })
+          .where(eq(requirementClaims.id, oldLane.runId));
+        await api(`/requirements/${recoverable.id}/claim`);
+        const replacement = await nodeRequest(nodeContainers[1]!, `/daemons/${nodeB}/apply-requirement`, 'POST', { projectId: f.project.id, workerIndex: 0 });
+        assert.equal(replacement.status, 200);
+        assert.equal(replacement.data.requirement.id, recoverable.id);
+        assert.notEqual(replacement.data.runId, oldLane.runId);
+        assert.ok(replacement.data.leaseGeneration > oldLane.leaseGeneration);
+        docker('start', nodeContainers[0]!);
+        assert.equal((await nodeRequest(nodeContainers[0]!, '/auth/me', 'GET', undefined, issued.data.token)).status, 401);
+        assert.notEqual((await nodeRequest(nodeContainers[0]!, `/daemons/${nodeA}/execution-authority`, 'POST', { requirementId: recoverable.id,
+          runId: oldLane.runId, leaseGeneration: oldLane.leaseGeneration })).status, 200);
+        assert.notEqual((await nodeRequest(nodeContainers[0]!, `/tasks/${activeTask.id}/status`, 'PATCH', { status: 'done', reason: 'Stale container must be fenced' }, issued.data.token)).status, 200);
+        assert.equal((await nodeRequest(nodeContainers[1]!, `/daemons/${nodeB}/execution-authority`, 'POST', { requirementId: recoverable.id,
+          runId: replacement.data.runId, leaseGeneration: replacement.data.leaseGeneration })).status, 200);
+        await parentApi(`/requirements/${recoverable.id}/release`, 'POST', { daemonId: nodeB, runId: replacement.data.runId, leaseGeneration: replacement.data.leaseGeneration });
+        receipt.containerNodeRecovery = { passed: true, nodes: 2, samePhysicalHost: true, fixtureClockAccelerated: true,
+          image, stoppedContainerReturned: true, replacementAuthorityVerified: true, staleCredentialAndCompletionRejected: true,
+          actualModelOnContainerNodes: false, physicalHostFailureVerified: false };
+      }
     }
     receipt.fixtureReady = true;
     receipt.passed = true;
@@ -447,6 +506,8 @@ try {
   receipt.failureCode = typeof code === 'string' && /^[A-Z0-9]{5}$/.test(code) ? code : null;
   process.exitCode = 1;
 } finally {
+  for (const name of nodeContainers) docker('rm', '-f', name);
+  if (nodeContainers.length) receipt.nodeContainersRemoved = true;
   if (gitRemote && gitCleanupNeeded) {
     try {
       const refs = await trustedGit(['ls-remote', gitRemote.href, `refs/heads/${gitBranch}`]);

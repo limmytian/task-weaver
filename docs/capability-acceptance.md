@@ -208,3 +208,34 @@ verifying its artifact and DCO trailer, and recording the remote commit. The uni
 test branch is deleted in teardown and the pinned main is checked again. The
 disposable repository itself remains reserved. Native transport/conflict tests,
 worker delivery and independent-node failover are separate evidence categories.
+
+The same exact helper is also used for the harness's independent remote reads,
+verification clone and branch deletion. These commands must not fall back to an
+ambient keychain helper that may block while storing credentials. The helper
+ignores `store` and `erase`; it does not change the native credential. Verify its
+exact-path remote read before starting a model. A prior timeout caused by a test
+fixture or keychain operation remains a failed attempt even after a later success.
+
+## Two-container recovery protocol
+
+`TW_ACCEPTANCE_CONTAINER_NODES=1` with daemon mode and `--verify-fixture-only`
+starts two independent read-only containers from an already present local API
+image, pinned to its inspected image ID. It never pulls or publishes an image.
+Each container submits its own authenticated daemon protocol requests over HTTP;
+requests are asynchronous so the local API can continue serving them. Credentials
+are sent through subprocess stdin, not command-line arguments or exported receipts.
+The containers have distinct node identities, dropped capabilities, separate
+temporary filesystems and no mounted provider authentication or host workspace.
+
+The test acquires a lane/delegation on A and confirms its authority, actually stops
+A, then explicitly accelerates the fixture's heartbeat/lease clock in its disposable
+database. B acquires a replacement run with a higher generation. After A returns,
+its old delegation and completion/authority requests must fail while B's current
+authority succeeds. Both nodes and the database are removed afterward.
+
+The receipt labels same-physical-host execution, fixture clock acceleration and
+absence of a model process inside these protocol nodes. This is real container
+stop/return and API fencing evidence; it is not a complete containerized daemon
+worker/model restart, natural production lease-duration measurement, host power
+failure, physical cross-host networking or recovery of unpushed local work. Keep
+those limits separate from a real daemon's model-and-remote-Git delivery result.
