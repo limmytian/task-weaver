@@ -239,3 +239,43 @@ stop/return and API fencing evidence; it is not a complete containerized daemon
 worker/model restart, natural production lease-duration measurement, host power
 failure, physical cross-host networking or recovery of unpushed local work. Keep
 those limits separate from a real daemon's model-and-remote-Git delivery result.
+
+## Full model workers inside two containers
+
+After explicit owner authorization to prepare any missing provider runtime, use
+`TW_ACCEPTANCE_FULL_CONTAINER_RUNTIME=/absolute/prepared/runtime` with daemon mode
+and `--confirm-two-container-workers`. This is a separate model-spending opt-in:
+`--verify-fixture-only` rejects that environment variable and never starts this case.
+Do not combine it with the protocol-only container option.
+
+Prepare the runtime outside the source checkout. It needs `tw.mjs` bundled from the
+candidate source with existing local dependencies, its required JavaScript modules,
+and `bin/tw` preserving the child's broker environment. The provider runtime requires
+both `bin/codex` and the adjacent `bin/codex-code-mode-host` from the same explicitly
+pinned official release. A successful main binary version probe alone does not
+establish execution-tool readiness. Verify downloaded archive digests against that
+release's metadata before execution; record executable and candidate bundle hashes.
+The harness never downloads these files, installs packages or publishes images.
+
+Each read-only container gets its own writable node directory and a minimal provider
+profile containing only an existing ChatGPT authentication copy and model setting.
+No personal skills/history, host repository, Git credential or other node directory
+is mounted. The prepared runtime is mounted read-only. Use the absolute test `tw`
+launcher: login shells can reset PATH. Model turns and supervisors have bounded
+deadlines. This uses the existing CLI daemon, delegated broker and current API.
+
+The first actual worker must write a readiness marker before a deliberate pause.
+The harness observes that file, stops the entire container, expires only its test
+database lease clock, and starts the second full daemon. The replacement must finish
+the exact artifact, read memory/instructions, re-read the source and invoke the
+current schema-pinned MCP tool with matching audits. Local work is not copied to
+the replacement. When the first container returns, stale authority and task writes
+must be rejected and the completed replacement task must remain done.
+
+This covers full model-worker restart across separate container process/filesystem
+boundaries on one host. It does not cover host power loss, physical cross-host
+networking, naturally elapsed production lease duration or arbitrary unpushed-work
+recovery. Retain those limits and failed runtime-preparation attempts in the evidence.
+Unknown per-process usage stays unknown. The caller must delete any newly authorized
+download/runtime directory after testing; the harness removes its node containers,
+temporary authentication copies and fixture database/workspaces.

@@ -11,12 +11,18 @@ import { resourcePostgresFixture } from '../apps/api/src/resource-postgres-fixtu
 import { mcpPool } from '../apps/api/src/mcp-pool';
 import { runCommand } from '../apps/cli/src/async-command';
 import { CodexUsageCollector } from '../apps/cli/src/agent-usage';
+import { verifyContainerWorkers } from './container-worker-acceptance.mts';
 import { buildAiEnvironment } from '../apps/cli/src/repository-credentials';
 import { createCapabilityAcceptanceFixture, verifyCapabilityAcceptanceArtifact } from './capability-acceptance-fixture.mjs';
 
-const fixtureOnly = process.argv[2] === '--verify-fixture-only';
-assert.deepEqual(process.argv.slice(2), [fixtureOnly ? '--verify-fixture-only' : '--confirm-one-real-external-agent']);
+const fullContainerWorkers = process.argv[2] === '--confirm-two-container-workers';
+const fixtureOnly = process.argv[2] === '--verify-fixture-only' || fullContainerWorkers;
+assert.deepEqual(process.argv.slice(2), [fullContainerWorkers ? '--confirm-two-container-workers' : fixtureOnly ? '--verify-fixture-only' : '--confirm-one-real-external-agent']);
+assert.ok(!process.env.TW_ACCEPTANCE_FULL_CONTAINER_RUNTIME || fullContainerWorkers, 'Full container model execution requires its explicit confirmation flag');
+assert.ok(!fullContainerWorkers || process.env.TW_ACCEPTANCE_FULL_CONTAINER_RUNTIME, 'An explicitly prepared container runtime is required');
 const daemonMode = process.env.TW_ACCEPTANCE_LAUNCH_MODE === 'daemon-codex';
+assert.ok(!fullContainerWorkers || daemonMode, 'Full container workers require daemon mode');
+assert.ok(!fullContainerWorkers || process.env.TW_ACCEPTANCE_CONTAINER_NODES !== '1', 'Select full workers or protocol-only containers separately');
 const emptyExternal = process.env.TW_ACCEPTANCE_LAUNCH_MODE === 'external-codex-empty';
 assert.ok(!process.env.TW_ACCEPTANCE_LAUNCH_MODE || daemonMode || emptyExternal, 'Unknown launch mode');
 const scenario = process.env.TW_ACCEPTANCE_CASE ?? 'useful';
@@ -258,6 +264,13 @@ try {
       await parentApi(`/daemons/${daemonId}/delegations/${access.delegation.id}`, 'DELETE');
       await parentApi(`/requirements/${requirement.id}/release`, 'POST', { daemonId, runId: lane.runId, leaseGeneration: lane.leaseGeneration });
       receipt.boundedFixtureReady = true;
+      if (process.env.TW_ACCEPTANCE_FULL_CONTAINER_RUNTIME) {
+        await api(`/requirements/${requirement.id}`, 'PATCH', { status: 'cancelled' });
+        stage = 'model';
+        receipt.fullContainerWorkerRecovery = await verifyContainerWorkers({ root, runtime: process.env.TW_ACCEPTANCE_FULL_CONTAINER_RUNTIME,
+          apiUrl, projectId: f.project.id, sourceId: source.id, fixture, toolId: tool.id,
+          sourceObserved: () => httpObservations.some(row => row.assetId === source.id), key: key.rawKey, db: database, api });
+      }
       if (process.env.TW_ACCEPTANCE_CONTAINER_NODES === '1') {
         await api(`/requirements/${requirement.id}`, 'PATCH', { status: 'cancelled' });
         const nodeImage = 'task-weaver-api:ce-candidate-arm64';
@@ -318,7 +331,8 @@ try {
       }
     }
     receipt.fixtureReady = true;
-    receipt.passed = true;
+    receipt.passed = receipt.fullContainerWorkerRecovery ? (receipt.fullContainerWorkerRecovery as { passed: boolean }).passed : true;
+    if (!receipt.passed) process.exitCode = 1;
   } else {
     const usefulPrompt = `Create quote.json in the current working directory for the project's current sample quote customer and item, quantity ${fixture.request.quantity}. Obtain current customer/source, relevant project calculation guidance and current external pricing through Task Weaver. Re-read the linked source before relying on a memory. Start with context bootstrap --json; use context search, memory search and mcp search with --project ${f.project.id} only as relevant. Inspect selected content with context get, memory get and doc get; inspect a tool with mcp tool before mcp call with --schema-hash. Use focused subcommand help as needed. Return exactly these JSON fields: customer, sku, quantity, totalCents, currency, sourceRevision. Do not guess missing facts. No memory writes are requested. Verify the produced file. This project contains unrelated shipping guidance; use it only if relevant. Stop and report a blocker after two command failures; do not repeat failing commands.`;
     const work = scenario !== 'irrelevant' ? usefulPrompt : fixture.irrelevant.prompt;
