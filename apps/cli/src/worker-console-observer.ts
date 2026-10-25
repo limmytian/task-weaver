@@ -6,9 +6,11 @@ export function createWorkerConsoleObserver(options: {
   target: ConsoleTarget; daemonId: string; buffer: WorkerConsoleBuffer;
   get: (path: string) => Promise<{ items: unknown[] }>;
   post: (path: string, body: unknown) => Promise<unknown>;
-  now?: () => number;
+  now?: () => number; signal?: AbortSignal;
 }) {
   let closed = false; let polling = false; let offset = 0;
+  const close = () => { closed = true; options.buffer.close(); options.signal?.removeEventListener('abort', close); };
+  if (options.signal?.aborted) close(); else options.signal?.addEventListener('abort', close, { once: true });
   const tick = async () => {
     if (closed || polling) return;
     polling = true;
@@ -29,5 +31,5 @@ export function createWorkerConsoleObserver(options: {
     } catch { /* No bodies, errors or credentials may enter operational logs. */ }
     finally { polling = false; }
   };
-  return { tick, close() { closed = true; options.buffer.close(); } };
+  return { tick, close };
 }

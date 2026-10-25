@@ -57,3 +57,11 @@ test('observation transport failures do not affect a real managed process', asyn
   assert(result.ok); assert(failed > 0); assert(buffer.snapshot(0, 0).frames.some(f => f.text.includes('diagnostic 5')));
   observer.close();
 });
+
+test('authority abort immediately clears retained output and prevents another request', async () => {
+  const controller = new AbortController(); let reads = 0;
+  const buffer = new WorkerConsoleBuffer('codex', () => []); buffer.push('stderr', Buffer.from('private diagnostic'));
+  const observer = createWorkerConsoleObserver({ target: { requirementId: randomUUID(), taskId: randomUUID(), runId: randomUUID(), workerIndex: 0, leaseGeneration: 1 }, daemonId: randomUUID(), buffer, signal: controller.signal, get: async () => { reads++; return { items: [] }; }, post: async () => undefined });
+  controller.abort(); await observer.tick();
+  assert.equal(reads, 0); assert.equal(buffer.snapshot(0, 0).frames.length, 0); observer.close();
+});

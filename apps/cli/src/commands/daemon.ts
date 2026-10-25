@@ -1153,7 +1153,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         const access = await createTaskWorkerAccess({ config: cliConfig, daemonId, requirementId: requirement.id, taskId: task.id, sharedCapabilityReads: opts.sharedCapabilityReads, capabilityExecution: opts.capabilityExecution, runId: lane.runId, workerIndex: w.index, leaseGeneration: lane.leaseGeneration, signal: executionSignal, controlledGit }).catch(error => { controlMonitor.close(); throw error })
         const consoleBuffer = new WorkerConsoleBuffer(toolCmd, access.consoleSecrets)
         consoleObserver = createWorkerConsoleObserver({
-          target: { requirementId: requirement.id, taskId: task.id, runId: lane.runId!, workerIndex: w.index, leaseGeneration: lane.leaseGeneration! }, daemonId, buffer: consoleBuffer,
+          target: { requirementId: requirement.id, taskId: task.id, runId: lane.runId!, workerIndex: w.index, leaseGeneration: lane.leaseGeneration! }, daemonId, buffer: consoleBuffer, signal: access.signal,
           get: path => request('GET', path, undefined, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal: AbortSignal.timeout(2500) }),
           post: (path, body) => request('POST', path, body, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal: AbortSignal.timeout(2500) }),
         })
