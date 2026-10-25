@@ -135,3 +135,9 @@ Read access does not assert that useful assets exist or that a runtime or local
 bridge is configured. An unavailable optional runtime does not prevent reading
 instructions. No runtime image, dependency, local credential or bridge is installed
 or borrowed automatically.
+
+Live Skill document revisions advance on edits and reverts so a previously
+observed `expectedVersion` cannot silently read changed instructions. Reverting
+content creates a fresh live revision. Cached manifests from implementations
+that reused revisions must be refreshed; retain exact content/graph hash checks.
+Document history snapshots and the live Skill edit revision are separate values.

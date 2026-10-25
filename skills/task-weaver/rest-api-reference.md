@@ -2487,3 +2487,27 @@ This is separate from the outbound `/api/v1/mcp/*` Registry. See the
 ## Execution control and recovery
 
 See [the normative execution recovery contract](../../docs/live-planning-recovery.md#interfaces-and-compatibility) for durable control listing/acknowledgment/resume, run-authority verification, synchronization records, explicit evidence revalidation and human recovery decisions. Daemon mutation fences include `runId` in addition to `daemonId` and `leaseGeneration`; lane heartbeat alone never restores an invalidated run. Delegated Git fetch/verify is available only through the local supervisor broker at `POST /api/v1/execution/git`, with `{ "operation": "fetch" | "verify", "repositoryId": "<uuid>" }`. This local endpoint is not an unrestricted server Git executor.
+
+
+## Capability diagnostics
+
+- `GET /api/v1/context/readiness?projectId=<uuid>`: selected-project read/invoke
+  permission, registered/content-candidate metadata and API runtime observation.
+  Missing tool/runtime catalog permission yields unknown/null values. Counts do
+  not probe package storage, memory source freshness or exact external execution
+  readiness. Personal/shared inventories are not implicitly merged.
+- `GET /api/v1/context/evidence?projectId=<uuid>&days=7&limit=20&offset=0`:
+  current project read/audit permission plus current per-asset visibility. Window
+  is 1–7 days, page size 1–20 and offset 0–10000. Current asset/version/related-entity
+  access is checked before grouping, pagination and counts. Execution-bound
+  credentials do not gain these aggregate surfaces.
+
+Evidence groups by run or independent credential, asset/action/version/hash-kind
+and normalized outcome. Nested successful layers collapse; these are not exact
+API-call totals. Only delegation audit origins attribute a run. Report references
+are separately task-authorized and do not verify capability use. Raw bodies,
+arguments, reasoning, report text and parent-credential metadata are not returned.
+Discovery/retention coverage, usefulness and per-capability model/context cost
+remain unknown where not measured. API duration, when present, is one observation.
+Review actual artifacts and use the existing process-level Usage commands for
+measured counters. Zero visible references does not establish zero actual use.

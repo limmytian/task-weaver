@@ -398,8 +398,14 @@ export async function updateDocument(
     if (input.expectedVersion === undefined || input.expectedVersion !== current.version) throw new ConflictError("Document version changed; refresh and supply expectedVersion", current.version);
     if (input.content !== undefined || input.docType === "skill") throw new ValidationError("Attachment content cannot be edited as Markdown or converted into a Skill");
   }
+  const skillRevision = current.form === "markdown" && (current.docType === "skill" || input.docType === "skill");
+  if (skillRevision) {
+    const [locked] = await db.select().from(documents).where(eq(documents.id, id)).for("update");
+    current = locked!;
+    if (input.expectedVersion !== undefined && input.expectedVersion !== current.version) throw new ConflictError("Skill version changed; refresh the live instruction", current.version);
+  }
   const { expectedVersion: _version, ...patch } = input;
-  const updates: Record<string, unknown> = { ...patch, updatedAt: new Date(), ...(current.form === "attachment" ? { version: current.version + 1 } : {}) };
+  const updates: Record<string, unknown> = { ...patch, updatedAt: new Date(), ...(current.form === "attachment" || skillRevision ? { version: current.version + 1 } : {}) };
 
   // Normalize markdown and recompute reading time if content changed
   if (input.content) {
@@ -800,6 +806,7 @@ export async function revertDocument(
       summary: targetVersion.summary,
       keywords: targetVersion.keywords,
       docType: targetVersion.docType as any,
+      ...((current.docType === "skill" || targetVersion.docType === "skill") ? { version: current.version + 1 } : {}),
       readingTimeMin: estimateReadingTimeMin(normalizedContent),
       updatedAt: new Date(),
     })

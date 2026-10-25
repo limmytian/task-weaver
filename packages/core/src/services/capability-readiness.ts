@@ -1,5 +1,5 @@
-import { and, count, eq, exists, gt, sql } from 'drizzle-orm';
-import { documents, memories, mcpServers, mcpTools, skillPackages, skillPackageVersions, skillPackageFiles, type Database } from '@task-weaver/db';
+import { and, count, eq, exists, gt, inArray, sql } from 'drizzle-orm';
+import { documents, memories, mcpServers, mcpTools, mcpInvocationPolicies, skillPackages, skillPackageVersions, skillPackageFiles, type Database } from '@task-weaver/db';
 import { AuthorizationError, projectCapabilityReadinessQuerySchema, projectCapabilityReadinessSchema, type CapabilityAvailability, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { lockIdentityLifecycle } from './auth-security';
 import { canAccessResource, memoryResourcePredicate, requireResource, resourceAuthority, resourcePredicate } from './resource-authorization';
@@ -26,6 +26,8 @@ export function createCapabilityReadinessService(context: VerifiedRequestContext
         const packageEntry = tx.select({ id: skillPackageFiles.id }).from(skillPackageVersions).innerJoin(skillPackageFiles, eq(skillPackageFiles.packageVersionId, skillPackageVersions.id))
           .where(and(eq(skillPackageVersions.packageId, skillPackages.id), eq(skillPackageVersions.status, 'active'), eq(skillPackageFiles.path, skillPackageVersions.entryPath), eq(skillPackageFiles.isReadableText, true), gt(skillPackageFiles.sizeBytes, 0), sql`${skillPackageFiles.sizeBytes} <= 32768`));
         const invokeAllowed = canAccessResource(authority, { projectId: input.projectId }, 'mcp.invoke');
+        const deniedRuntime = await tx.select({ id: mcpInvocationPolicies.id }).from(mcpInvocationPolicies).where(and(eq(mcpInvocationPolicies.scopeKey, `project:${input.projectId}`), eq(mcpInvocationPolicies.mode, 'deny'), inArray(mcpInvocationPolicies.toolId, ['*', 'tw_skill_runtimes_list', 'tw_skills_run']))).limit(1);
+        const currentRuntime = invokeAllowed && canAccessResource(authority, { projectId: input.projectId }, 'resource.write') && deniedRuntime.length === 0 ? hostedExecution : null;
         const toolScope = and(eq(mcpServers.projectId, input.projectId), mcpInvocationPredicate(authority, context), mcpToolInvocationPredicate(authority));
         const [skills] = await tx.select({ registered: count(), contentCandidates: sql<number>`count(*) FILTER (WHERE ${readableText(documents.content)})`.mapWith(Number) }).from(documents).where(skillScope);
         const [memory] = await tx.select({ registered: count(), contentCandidates: sql<number>`count(*) FILTER (WHERE ${readableText(memories.content)} AND (${memories.expiresAt} IS NULL OR ${memories.expiresAt} > ${now.toISOString()}))`.mapWith(Number) }).from(memories).where(memoryScope);
@@ -35,7 +37,7 @@ export function createCapabilityReadinessService(context: VerifiedRequestContext
           schemaVersion: 1, projectId: input.projectId, observedAt: now.toISOString(), scope: 'selected_project_only', readPermission: 'granted',
           invokePermission: invokeAllowed ? 'granted' : 'missing',
           inventory: [{ kind: 'skill', access: 'granted', ...skills, inspectionRequired: true }, { kind: 'skill_package', access: 'granted', ...packages, inspectionRequired: true }, { kind: 'memory', access: 'granted', ...memory, inspectionRequired: true }, { kind: 'mcp_tool', access: invokeAllowed ? 'granted' : 'missing', registered: invokeAllowed ? tools?.registered : null, contentCandidates: invokeAllowed ? tools?.contentCandidates : null, inspectionRequired: true }],
-          hostedExecution, runtimeSource: 'api', runtimeObservation: hostedExecution ? 'api_profile_state' : 'not_observed_for_current_permissions', checklist: [
+          hostedExecution: currentRuntime, runtimeSource: 'api', runtimeObservation: currentRuntime ? 'api_profile_state' : 'not_observed_for_current_permissions', checklist: [
             'Check relevance to the current task before discovering or loading content. Empty inventory or a trivial task can justify abstention.',
             'Inspect a selected exact instruction/package version or memory source. Candidate metadata does not prove readable storage, fresh sources or complete dependencies.',
             'Before invoking, inspect the exact schema/hash or graph/runtime pins, current grants, bridge and approval requirements. A registered tool or configured profile does not authorize this asset.',

@@ -68,3 +68,40 @@ memory-save quota contributes to a usefulness score. Queries have a bounded
 window/page and a three-second per-statement database budget; unavailable evidence
 is not substituted with an empty success result. Large-instance performance and
 retention coverage still need their own measurements.
+
+## Usefulness rubric
+
+Evaluate the actual artifact, not the quantity of calls or reports. For each
+item record **met**, **not met** or **unknown**, with a concise artifact/source
+reference in the existing task/review evidence:
+
+| Dimension | Evidence needed |
+| --- | --- |
+| Task correctness | Produced artifact and a check establishing the requested behavior |
+| Instruction adherence | Task-specific behavior against the selected exact instruction/package version |
+| Relevant recall | A factual dependency that affected the result, including distracting recall |
+| Source freshness | A current source check at memory reuse; historical freshness is insufficient |
+| External correctness | Inspected schema/graph/runtime pins, scope/approval and verified external outcome |
+| Cost and latency | Supported process/provider counters and measured latency, with explicit coverage |
+| Useful abstention | Correct no-call/no-save behavior for irrelevant, empty or optional-unavailable cases |
+
+Unknown is neither zero nor a passing result. Do not add overlapping cache/token
+counters or assign whole-process token use to individual retrievals. The view
+does not calculate monetary cost or automatically grade task usefulness. There is
+no second scoring registry or call/memory quota. Actual-model baseline comparison
+and private remote Git/node recovery remain separately scoped acceptance work.
+
+Run `pnpm test:capability-diagnostics-postgres` for isolated API/Web protocol,
+actual captured facade-read, current permission/lifecycle, deduplication and
+privacy checks. No real model provider, external MCP server or production instance is
+contacted by those fixtures. Native-browser interactions, large-instance query
+performance and usefulness/cost improvements are not certified by these tests.
+
+Live Skill instruction revisions advance on edits, conversion to/from Skill and
+reverts. A supplied stale `expectedVersion` is rejected; restoring old content
+creates a new live revision rather than reviving its old pin. This live revision
+is distinct from the document-history snapshot sequence. Refresh cached manifests
+when upgrading from an implementation that reused a live revision, and compare
+exact content/graph hashes; the change cannot reconstruct missing historical
+revision information. Package/version/status and execution graph/hash checks
+remain in force.

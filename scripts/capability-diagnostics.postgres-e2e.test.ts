@@ -15,7 +15,7 @@ const { fetchRequestHandler } = webRequire('@trpc/server/adapters/fetch');
 const superjson = webRequire('superjson').default;
 const databaseUrl = process.env.TW_CAPABILITY_DIAGNOSTICS_E2E_DATABASE_URL;
 
-test('project readiness separates current permission, content candidates and API runtime without payload leakage', { skip: !databaseUrl, timeout: 120_000 }, async t => {
+test('project readiness and capability evidence enforce current scopes, attribution and lifecycle', { skip: !databaseUrl, timeout: 120_000 }, async t => {
   const url = new URL(databaseUrl!);
   assert.equal(url.hostname, '127.0.0.1');
   assert.equal(url.pathname, '/tw_capability_diagnostics_e2e');
@@ -57,6 +57,8 @@ test('project readiness separates current permission, content candidates and API
   const populated = await read();
   assert.deepEqual(populated.inventory.map((item: any) => [item.kind, item.registered, item.contentCandidates]), [['skill', 1, 1], ['skill_package', 1, 1], ['memory', 2, 1], ['mcp_tool', 1, 1]]);
   assert.ok(populated.inventory.every((item: any) => item.inspectionRequired));
+  assert.equal(populated.runtimeObservation, 'api_profile_state');
+  assert.equal(populated.hostedExecution.state, 'unavailable');
   assert.doesNotMatch(JSON.stringify(populated), /private-skill-body|private-memory-body|private-schema-body|foreign-body|personal-body|shared-body|never-contact|hidden-linked-memory/);
   const key = await f.identity.issueKey(f.owner.headers, actorId, { name: 'Read-only diagnostics fixture', expiresAt: null, grants: [{ scope: 'project', projectId: f.project.id, permissions: ['resource.read'] }] });
   const headers = new Headers({ authorization: `Bearer ${key.rawKey}` });
@@ -131,5 +133,66 @@ test('project readiness separates current permission, content candidates and API
   assert.equal(afterRevoke.totalVisibleReferences, 3);
   assert.equal(afterRevoke.items.length, 1, 'pagination applies after current version visibility');
   assert.ok(afterRevoke.items.every((item: any) => item.assetId !== pkg.id));
+  // Capture a real facade read, not merely a test-seeded evidence row.
+  const browserFacade = await f.app.request(`${f.configuration.baseURL}/api/v1/mcp-server/tools/tw_context_get`, { method: 'POST', headers: f.owner.headers, body: JSON.stringify({ id: seededDocuments[0].id }) });
+  assert.equal(browserFacade.status, 401, 'inbound MCP keeps its API-key client boundary');
+  const readKey = await f.identity.issueKey(f.owner.headers, actorId, { name: 'Actual facade read fixture', expiresAt: null, grants: [{ scope: 'project', projectId: f.project.id, permissions: ['resource.read'] }] });
+  const actualRead = await f.app.request(`${f.configuration.baseURL}/api/v1/mcp-server/tools/tw_context_get`, { method: 'POST', headers: new Headers({ authorization: `Bearer ${readKey.rawKey}`, 'content-type': 'application/json' }), body: JSON.stringify({ id: seededDocuments[0].id }) });
+  assert.equal(actualRead.status, 200, await actualRead.clone().text());
+  const readReceipt: any = await actualRead.json();
+  assert.equal(readReceipt.structuredContent.ok, true);
+  assert.equal(readReceipt.structuredContent.data.id, seededDocuments[0].id);
+  assert.equal(readReceipt.structuredContent.data.content, 'private-skill-body');
+  const captured = await ownerClient.skill.evidence.query({ projectId: f.project.id });
+  assert.equal(captured.totalVisibleReferences, 4);
+  const actualReference = captured.items.find((item: any) => item.assetId === seededDocuments[0].id && item.attribution === 'credential');
+  assert.ok(actualReference);
+  assert.match(actualReference.assetSha256, /^[a-f0-9]{64}$/);
+  assert.equal(actualReference.assetHashKind, 'content');
+  assert.equal(actualReference.runId, null);
+  assert.equal(typeof actualReference.durationMs, 'number');
+  assert.ok(actualReference.durationMs >= 0);
+  assert.equal(captured.coverage.contextTokens, null);
+  assert.equal(captured.coverage.taskUsefulness, 'not_measured');
+  assert.doesNotMatch(JSON.stringify(captured), /private-skill-body|must-not-project|Raw report/);
+  await db.update(projectMemberships).set({ explicitPermissions: [] }).where(and(eq(projectMemberships.projectId, f.project.id), eq(projectMemberships.actorId, actorId)));
+  const narrowed = await ownerClient.skill.evidence.query({ projectId: f.project.id });
+  assert.equal(narrowed.totalVisibleReferences, 3, 'current MCP discovery revocation filters its historical reference before totals');
+  assert.equal((await read()).hostedExecution, null, 'runtime observation is suppressed when current project invocation access narrows');
+  assert.ok(narrowed.items.every((item: any) => item.assetId !== tool.id));
+  await db.update(memories).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(memories.id, seededMemories[1].id));
+  assert.equal((await ownerClient.skill.evidence.query({ projectId: f.project.id })).totalVisibleReferences, 2);
+  await db.update(documents).set({ projectId: foreign.id }).where(eq(documents.id, seededDocuments[0].id));
+  const hidden = await ownerClient.skill.evidence.query({ projectId: f.project.id, limit: 1 });
+  assert.equal(hidden.totalVisibleReferences, 0);
+  assert.deepEqual(hidden.items, []);
+  assert.equal(hidden.reportedProgressReferences, 1, 'progress reporting remains separate from current verified references');
+  assert.equal(hidden.coverage.complete, false, 'zero visible references cannot become a zero-use assertion');
+  await t.test('live skill revision advances on edits and reverts and rejects obsolete pins', async () => {
+    const [instruction] = await db.insert(documents).values({ projectId: f.project.id, docType: 'skill', title: 'Pinned instruction fixture', content: 'Original exact instruction', createdBy: actorId }).returning();
+    const update = (body: unknown) => f.app.request(`/api/v1/documents/${instruction.id}`, { method: 'PATCH', headers: f.owner.headers, body: JSON.stringify(body) });
+    const edited = await update({ content: 'Changed exact instruction', expectedVersion: instruction.version });
+    assert.equal(edited.status, 200, await edited.clone().text());
+    const revision: any = await edited.json();
+    assert.equal(revision.version, instruction.version + 1);
+    assert.equal((await update({ content: 'Stale write must not replace instructions', expectedVersion: instruction.version })).status, 409);
+    const pinnedRead = async (expectedVersion: number) => {
+      const response = await f.app.request(`${f.configuration.baseURL}/api/v1/mcp-server/tools/tw_context_get`, { method: 'POST', headers: new Headers({ authorization: `Bearer ${readKey.rawKey}`, 'content-type': 'application/json' }), body: JSON.stringify({ id: instruction.id, expectedVersion }) });
+      assert.equal(response.status, 200);
+      return response.json() as Promise<any>;
+    };
+    assert.equal((await pinnedRead(instruction.version)).structuredContent.ok, false);
+    assert.equal((await pinnedRead(revision.version)).structuredContent.data.content, 'Changed exact instruction');
+    const reverted = await f.app.request(`/api/v1/documents/${instruction.id}/revert`, { method: 'POST', headers: f.owner.headers, body: JSON.stringify({ version: 1, changeDescription: 'Restore fixture content under a new live revision' }) });
+    assert.equal(reverted.status, 200, await reverted.clone().text());
+    const restored: any = await reverted.json();
+    assert.equal(restored.version, revision.version + 1);
+    assert.equal(restored.content, 'Original exact instruction');
+    assert.equal((await pinnedRead(instruction.version)).structuredContent.ok, false);
+    assert.equal((await pinnedRead(revision.version)).structuredContent.ok, false);
+    assert.equal((await pinnedRead(restored.version)).structuredContent.data.content, 'Original exact instruction');
+  });
+
+
 
 });

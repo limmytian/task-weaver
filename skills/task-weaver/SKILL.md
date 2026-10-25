@@ -2,7 +2,7 @@
 name: task-weaver-overview
 description: Core platform knowledge — data model, authentication, conventions, and quick start guide for Task Weaver.
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
   source-repository: "limmytian/task-weaver"
   source-path: "skills/task-weaver"
   keywords: ["project management", "data model", "authentication", "conventions", "quick start", "task tracking"]
@@ -689,6 +689,25 @@ This inbound Server is separate from the outbound Registry commands above.
 OAuth-only onboarding, resources, prompts, attachments, daemon controls, registry
 management and release actions are not part of this catalog. See the
 [MCP Server guide](../../docs/mcp-server.md) for credentials, limits and setup.
+
+## Capability Diagnostics
+
+Interactive CLI/REST clients can inspect selected-project readiness with
+`tw context readiness --project <id> --json`. Permission, registered content,
+metadata candidates and API runtime observations are separate. Missing discovery
+or runtime access is unknown, not an empty inventory or absent configuration.
+Inspect selected exact content, source freshness and schemas/graphs before use;
+optional unavailable execution can degrade to instructions.
+
+`tw context evidence --project <id> --json` additionally requires current project
+read/audit access and rechecks current asset visibility before counts/pagination.
+It shows unique visible references and separate progress reports, not call totals,
+proof of task usefulness or inferred model cost. Whole-process token reports stay
+in the existing Usage commands. Daemon children keep their bounded launch
+bootstrap; do not seek broader aggregate audit grants to improve their prompts.
+See [Capability diagnostics](rest-api-reference.md#capability-diagnostics) for
+coverage and input details. Installed copies require the existing staged/versioned
+refresh workflow; remote registration is a separate authorized action.
 
 ## Live Planning and Recovery
 

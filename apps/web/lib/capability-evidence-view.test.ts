@@ -15,7 +15,8 @@ test("evidence UI separates visible references, progress reports and unknown use
   assert.match(empty, /zero visible count does not prove no use/);
   assert.match(empty, /not API-call totals or a measure of task quality/);
   assert.match(empty, /context tokens and model cost remain unknown/);
-  const content = renderToStaticMarkup(React.createElement(CapabilityEvidenceViewContent, { data: { ...data, totalVisibleReferences: 1, items: [{ id: "observation", kind: "memory", assetId: "memory", action: "read", outcome: "observed", runId: null, attribution: "credential", recordedAt: data.observedAt, assetVersion: "1", assetSha256: null, assetHashKind: null, sourceFreshness: "changed", durationMs: null }] } }));
+  const content = renderToStaticMarkup(React.createElement(CapabilityEvidenceViewContent, { data: { ...data, totalVisibleReferences: 1, summary: [{ action: "read", outcome: "observed", references: 1 }], items: [{ id: "observation", kind: "memory", assetId: "memory", action: "read", outcome: "observed", runId: null, attribution: "credential", recordedAt: data.observedAt, assetVersion: "1", assetSha256: null, assetHashKind: null, sourceFreshness: "changed", durationMs: null }] } }));
+  assert.match(content, /Reference groups by observed action\/outcome, not call totals/);
   assert.match(content, /no daemon run is inferred/);
   assert.match(content, /task outcome unverified/);
   assert.match(content, /source freshness at observation: changed/);
