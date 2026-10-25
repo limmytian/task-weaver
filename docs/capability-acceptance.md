@@ -153,3 +153,33 @@ This verifies one worker on one host. It does not prove agy isolated login,
 replanning/resume, independent-node recovery, worker-managed remote Git delivery,
 all package/runtime paths or untested vendor clients. Keep those coverage gates
 open and preserve blocked/failed attempts as part of the evidence.
+
+## Replanning and clean-client probes
+
+`TW_ACCEPTANCE_CASE=replan` requires daemon mode. After a successful old-run source
+read, the harness updates the synthetic customer and pricing and explicitly edits
+the task's acceptance text. A document reference link grants visibility; it is not
+itself a frozen workflow-input declaration. Editing an ordinary referenced document
+alone is not used as evidence of execution invalidation.
+
+The probe verifies rejection of the old credential and its stale completion request,
+two distinct execution run IDs, a resumed recovery control, a fresh source hash,
+the unchanged memory's `changed` freshness observation and the revised exact artifact.
+It does not save memory automatically or claim physical-node failover. Its supervisor
+deadline is 330 seconds, allowing one interrupted worker and one replacement with
+the existing 150-second per-worker ceiling. Missing usage remains unknown.
+
+Instruction evidence accepts either the standalone Skill or the registered package's
+actual primary indexed document. A package index is an existing Skill resource;
+reading it must not be mistaken for abstention merely because its UUID differs from
+the independently seeded Skill. The harness retains that actual asset reference.
+
+`TW_ACCEPTANCE_LAUNCH_MODE=external-codex-empty` is a separate opt-in clean-profile
+probe. It supports an existing ChatGPT-authenticated default OpenAI profile only.
+It copies that provider's authentication into a mode-0600 temporary profile and
+copies only the selected model setting, with low reasoning effort. It does not
+copy personal skills, plugins, conversation history or arbitrary provider settings.
+The temporary HOME/profile is removed during teardown. The Task Weaver credential
+remains the separate short-lived project key. This is not a filesystem sandbox or
+proof that this client can authenticate successfully; require actual artifact and
+invocation evidence before marking the probe passed. Failed probes stay uncovered.

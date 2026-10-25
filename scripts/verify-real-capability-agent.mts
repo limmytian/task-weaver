@@ -10,17 +10,20 @@ import { fileURLToPath } from 'node:url';
 import { resourcePostgresFixture } from '../apps/api/src/resource-postgres-fixture';
 import { mcpPool } from '../apps/api/src/mcp-pool';
 import { runCommand } from '../apps/cli/src/async-command';
+import { CodexUsageCollector } from '../apps/cli/src/agent-usage';
 import { buildAiEnvironment } from '../apps/cli/src/repository-credentials';
 import { createCapabilityAcceptanceFixture, verifyCapabilityAcceptanceArtifact } from './capability-acceptance-fixture.mjs';
 
 const fixtureOnly = process.argv[2] === '--verify-fixture-only';
 assert.deepEqual(process.argv.slice(2), [fixtureOnly ? '--verify-fixture-only' : '--confirm-one-real-external-agent']);
 const daemonMode = process.env.TW_ACCEPTANCE_LAUNCH_MODE === 'daemon-codex';
-assert.ok(!process.env.TW_ACCEPTANCE_LAUNCH_MODE || daemonMode, 'Unknown launch mode');
+const emptyExternal = process.env.TW_ACCEPTANCE_LAUNCH_MODE === 'external-codex-empty';
+assert.ok(!process.env.TW_ACCEPTANCE_LAUNCH_MODE || daemonMode || emptyExternal, 'Unknown launch mode');
 const scenario = process.env.TW_ACCEPTANCE_CASE ?? 'useful';
-assert.ok(['useful', 'irrelevant'].includes(scenario), 'Unknown acceptance case');
+assert.ok(['useful', 'irrelevant', 'replan'].includes(scenario), 'Unknown acceptance case');
+assert.ok(scenario !== 'replan' || daemonMode, 'Replan requires the actual daemon');
 const requireApi = createRequire(new URL('../apps/api/package.json', import.meta.url));
-const { createDb, runMigrations, authAuditEvents, mcpInvocationAudits, projectMemberships, executionDelegations } = requireApi('@task-weaver/db');
+const { createDb, runMigrations, authAuditEvents, mcpInvocationAudits, projectMemberships, executionDelegations, executionControls } = requireApi('@task-weaver/db');
 const { and, eq } = requireApi('drizzle-orm');
 const { createResourceServices, registerSkillPackageSchema, registerMcpServerSchema, skillPackageStorageService } = requireApi('@task-weaver/core');
 const { serve } = requireApi('@hono/node-server');
@@ -35,11 +38,12 @@ const container = `tw-real-agent-${randomUUID().slice(0, 8)}`;
 const docker = (...args: string[]) => execFileSync('docker', args, { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const receipt: Record<string, unknown> = {
   schemaVersion: 1, mode: fixtureOnly ? 'fixture-validation' : daemonMode ? 'actual-daemon-worker' : 'independent-native-profile-cli-agent',
-  provider: daemonMode ? 'codex' : 'agy', scenario, resolvedModel: null,
+  provider: daemonMode || emptyExternal ? 'codex' : 'agy', scenario, resolvedModel: null,
   sourceModules: { core: requireApi.resolve('@task-weaver/core'), db: requireApi.resolve('@task-weaver/db') },
   fixtureCanonicalSha256: createHash('sha256').update(JSON.stringify(fixture)).digest('hex'),
   artifactCorrect: false, capabilityAdoptionVerified: false, daemonVerified: false,
-  emptyWorkspace: true, emptyPersonalSkillDirectory: false, slashExpansionDisabled: !daemonMode,
+  emptyWorkspace: true, emptyPersonalSkillDirectory: emptyExternal, slashExpansionDisabled: !daemonMode && !emptyExternal,
+  providerAuthenticationCopied: emptyExternal,
   providerProfileState: 'provider_managed_records_may_remain',
   modelCost: null, passed: false, cleanup: { database: false, files: false },
 };
@@ -74,6 +78,9 @@ try {
   let clientKey: string | undefined;
   const observableReads = new Map<string, { kind: string; assetId: string }>();
   const httpObservations: Array<Record<string, unknown>> = [];
+  let changeObservedSource: ((token: string) => Promise<void>) | undefined;
+  let replanned = false;
+  let revisedSourceHash: string | undefined;
   let modelCapabilityRequests = 0;
   handler = async (request: Request) => {
     const response = await f.app.fetch(request);
@@ -93,6 +100,10 @@ try {
         version: typeof content.version === 'string' || typeof content.version === 'number' ? content.version : null,
         sourceFreshness: ['current', 'changed', 'not_applicable'].includes(String(content.sourceFreshness)) ? content.sourceFreshness : null,
       });
+    }
+    if (scenario === 'replan' && fixtureChild && response.ok && selected?.kind === 'source_document' && !replanned && changeObservedSource) {
+      replanned = true;
+      await changeObservedSource(request.headers.get('authorization')!);
     }
     return response;
   };
@@ -158,6 +169,10 @@ try {
   observableReads.set(`/api/v1/documents/${source.id}`, { kind: 'source_document', assetId: source.id });
   observableReads.set(`/api/v1/context/${skill.id}`, { kind: 'skill', assetId: skill.id });
   observableReads.set(`/api/v1/documents/${skill.id}`, { kind: 'skill', assetId: skill.id });
+  if (pkg.primaryDocumentId) {
+    observableReads.set(`/api/v1/context/${pkg.primaryDocumentId}`, { kind: 'skill', assetId: pkg.primaryDocumentId });
+    observableReads.set(`/api/v1/documents/${pkg.primaryDocumentId}`, { kind: 'skill', assetId: pkg.primaryDocumentId });
+  }
   observableReads.set(`/api/v1/memories/${memory.id}`, { kind: 'memory', assetId: memory.id });
   observableReads.set('/api/v1/memories/search', { kind: 'memory_search', assetId: memory.id });
   observableReads.set(`/api/v1/context/packages/${pkg.id}/read`, { kind: 'skill_package', assetId: pkg.id });
@@ -205,12 +220,13 @@ try {
     receipt.passed = true;
   } else {
     const usefulPrompt = `Create quote.json in the current working directory for the project's current sample quote customer and item, quantity ${fixture.request.quantity}. Obtain current customer/source, relevant project calculation guidance and current external pricing through Task Weaver. Re-read the linked source before relying on a memory. Start with context bootstrap --json; use context search, memory search and mcp search with --project ${f.project.id} only as relevant. Inspect selected content with context get, memory get and doc get; inspect a tool with mcp tool before mcp call with --schema-hash. Use focused subcommand help as needed. Return exactly these JSON fields: customer, sku, quantity, totalCents, currency, sourceRevision. Do not guess missing facts. No memory writes are requested. Verify the produced file. This project contains unrelated shipping guidance; use it only if relevant. Stop and report a blocker after two command failures; do not repeat failing commands.`;
-    const work = scenario === 'useful' ? usefulPrompt : fixture.irrelevant.prompt;
-    const prompt = `You are an independent CLI client in an isolated disposable test project ${f.project.id}. For every Task Weaver command use the absolute executable ${scopedCli}; do not use a bare tw command, another client or another configuration. That wrapper pins the scoped test configuration even when a login shell changes its environment. Do not read credentials, other projects, home-directory files, or install anything. Local slash commands and skill expansion are disabled.\n${work}`;
+    const work = scenario !== 'irrelevant' ? usefulPrompt : fixture.irrelevant.prompt;
+    const clientGuidance = emptyExternal ? 'Personal skill directories start empty; no personal guides, plugins or history were copied.' : 'Local slash commands and skill expansion are disabled.';
+    const prompt = `You are an independent CLI client in an isolated disposable test project ${f.project.id}. For every Task Weaver command use the absolute executable ${scopedCli}; do not use a bare tw command, another client or another configuration. That wrapper pins the scoped test configuration even when a login shell changes its environment. Do not read credentials, other projects, home-directory files, or install anything. ${clientGuidance}\n${work}`;
     stage = 'model';
     const requestedModel = process.env.TW_ACCEPTANCE_AGY_MODEL;
     receipt.requestedModel = requestedModel ?? null;
-    receipt.freshProviderProjectRequested = !daemonMode;
+    receipt.freshProviderProjectRequested = !daemonMode && !emptyExternal;
     let daemonRequirement: { id: string } | undefined;
     let daemonTask: { id: string } | undefined;
     let result: Awaited<ReturnType<typeof runCommand>>;
@@ -221,16 +237,59 @@ try {
       await writeFile(join(workerBin, 'tw'), `#!/bin/sh\nexec ${shellQuote(fileURLToPath(new URL('../node_modules/.bin/tsx', import.meta.url)))} ${shellQuote(fileURLToPath(new URL('../apps/cli/src/index.ts', import.meta.url)))} "$@"\n`, { mode: 0o700 });
       daemonRequirement = await api(`/projects/${f.project.id}/requirements`, 'POST', { title: 'Actual daemon capability fixture', status: 'approved', modelTier: 'fast' });
       daemonTask = await api(`/projects/${f.project.id}/tasks`, 'POST', { requirementId: daemonRequirement!.id, title: 'Produce the verified sample quote',
-        description: `${work}\nWrite the final ${scenario === 'useful' ? 'quote.json' : 'arithmetic.json'} artifact at ${workspace}. Use ordinary tw commands with the supplied worker broker, never another configuration. Do not read home-directory files or credentials. Do not install dependencies.` });
+        description: `${work}\nWrite the final ${scenario !== 'irrelevant' ? 'quote.json' : 'arithmetic.json'} artifact at ${workspace}. Use ordinary tw commands with the supplied worker broker, never another configuration. Do not read home-directory files or credentials. Do not install dependencies.` });
       await api(`/requirements/${daemonRequirement!.id}/document-links`, 'POST', { documentId: source.id, linkType: 'references' });
+      if (scenario === 'replan') changeObservedSource = async authorization => {
+        const customer = `${fixture.expected.customer}-replanned`;
+        fixture.tool.result.unitCents += 7;
+        fixture.expected.customer = customer;
+        fixture.expected.totalCents = fixture.expected.quantity * fixture.tool.result.unitCents + fixture.tool.result.feeCents;
+        const content = `The current sample quote customer is ${customer}. The requested item is ${fixture.expected.sku}.`;
+        revisedSourceHash = createHash('sha256').update(content).digest('hex');
+        await api(`/documents/${source.id}`, 'PATCH', { content, expectedVersion: source.version });
+        // A reference link grants visibility, not a frozen workflow-input contract.
+        // Explicitly revise task acceptance to exercise the existing planning fence.
+        const currentTask = await api(`/tasks/${daemonTask!.id}`);
+        await api(`/tasks/${daemonTask!.id}`, 'PATCH', { expectedVersion: currentTask.version,
+          description: `${currentTask.description}\nReplanned acceptance: the linked source and current pricing changed. Re-read the current source even when the previous memory differs. Verify the new quote before completion; do not update memory automatically.` });
+        const headers = new Headers({ authorization, 'content-type': 'application/json' });
+        const oldIdentity = await f.app.request('/api/v1/auth/me', { headers });
+        receipt.replanOldAuthorityRejected = oldIdentity.status === 401;
+        assert.equal(oldIdentity.status, 401);
+        const oldCompletion = await f.app.request(`/api/v1/tasks/${daemonTask!.id}/status`, { method: 'PATCH', headers,
+          body: JSON.stringify({ status: 'done', reason: 'Stale fixture completion must be rejected' }) });
+        receipt.replanStaleCompletionRejected = !oldCompletion.ok;
+        assert.ok(!oldCompletion.ok);
+        receipt.replannedFixtureCanonicalSha256 = createHash('sha256').update(JSON.stringify(fixture)).digest('hex');
+      };
       const daemonHome = join(root, 'daemon-home');
       await mkdir(daemonHome, { mode: 0o700 });
       const daemonEnv = { ...env, HOME: daemonHome, CODEX_HOME: process.env.CODEX_HOME ?? join(homedir(), '.codex'),
         PATH: `${workerBin}${delimiter}${process.env.PATH ?? ''}`, TW_DAEMON_AGENT_TIMEOUT_MS: '150000', TW_ARTIFACT_ROOT: join(root, 'artifacts') };
       result = await runCommand(scopedCli, ['daemon', 'start', '--tools', 'codex', '--project', f.project.id,
-        '--workers', '1', '--mode', 'polling', '--think', 'fast:low', '--capability-execution', '--once'], { cwd: workspace, env: daemonEnv, timeoutMs: 180_000, maxOutputBytes: 256 * 1024 });
+        '--workers', '1', '--mode', 'polling', '--think', 'fast:low', '--capability-execution', '--once'], { cwd: workspace, env: daemonEnv, timeoutMs: scenario === 'replan' ? 330_000 : 180_000, maxOutputBytes: 256 * 1024 });
       receipt.taskStatus = (await api(`/tasks/${daemonTask!.id}`)).status;
       receipt.daemonUsage = await api(`/agent-usage/summary?projectId=${f.project.id}`);
+    } else if (emptyExternal) {
+      const nativeProfile = process.env.CODEX_HOME ?? join(homedir(), '.codex');
+      const profile = join(root, 'empty-codex-profile'), home = join(root, 'external-home');
+      await mkdir(profile, { mode: 0o700 });
+      await mkdir(home, { mode: 0o700 });
+      const auth = await readFile(join(nativeProfile, 'auth.json'));
+      assert.equal(JSON.parse(auth.toString('utf8')).auth_mode, 'chatgpt', 'This fixture supports only the existing ChatGPT-authenticated profile');
+      await writeFile(join(profile, 'auth.json'), auth, { mode: 0o600 });
+      const settings = await readFile(join(nativeProfile, 'config.toml'), 'utf8');
+      const provider = settings.match(/^model_provider\s*=\s*"([^"\n]+)"/m)?.[1];
+      assert.ok(!provider || provider === 'openai', 'Custom provider configuration is not copied into the empty profile');
+      const model = settings.match(/^model\s*=\s*"([^"\n]+)"/m)?.[1];
+      assert.ok(model && /^[a-zA-Z0-9._/-]+$/.test(model));
+      await writeFile(join(profile, 'config.toml'), `model = ${JSON.stringify(model)}\nmodel_reasoning_effort = "low"\n`, { mode: 0o600 });
+      receipt.requestedModel = model;
+      const collector = new CodexUsageCollector();
+      result = await runCommand('codex', ['exec', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check', '--json', '--color', 'never', '-C', workspace, prompt],
+        { cwd: workspace, env: { ...env, HOME: home, CODEX_HOME: profile, XDG_CONFIG_HOME: join(root, 'empty-xdg') },
+          timeoutMs: 150_000, maxOutputBytes: 256 * 1024, onStdout: chunk => collector.push(chunk) });
+      receipt.externalCodexUsage = collector.finish(result.ok);
     } else result = await runCommand('agy', ['--new-project', '--dangerously-skip-permissions', '--disable-slash-commands',
       '--log-file', join(root, 'agy.log'), ...(requestedModel ? ['--model', requestedModel] : []),
       '--print-timeout', '150s', '--output-format', 'json', `--print=${prompt}`],
@@ -247,7 +306,7 @@ try {
     receipt.reportedUsage = usage;
     stage = 'verify';
     let artifact: unknown;
-    try { artifact = JSON.parse(await readFile(join(workspace, scenario === 'useful' ? fixture.request.output : 'arithmetic.json'), 'utf8')); verifyCapabilityAcceptanceArtifact(fixture, artifact, scenario); receipt.artifactCorrect = true; receipt.artifact = artifact; }
+    try { artifact = JSON.parse(await readFile(join(workspace, scenario !== 'irrelevant' ? fixture.request.output : 'arithmetic.json'), 'utf8')); verifyCapabilityAcceptanceArtifact(fixture, artifact, scenario === 'replan' ? 'useful' : scenario); receipt.artifactCorrect = true; receipt.artifact = artifact; }
     catch { receipt.artifactCorrect = false; }
     const audits = await database.select().from(authAuditEvents);
     const delegations = daemonMode ? await database.select().from(executionDelegations).where(eq(executionDelegations.parentCredentialId, key.id)) : [];
@@ -262,10 +321,20 @@ try {
     receipt.successfulInvocationAudits = invocations.filter((row: any) => row.outcome === 'success').length;
     const read = (id: string) => httpObservations.some(row => row.assetId === id)
       || capabilityAudits.some((row: any) => row.metadata.assetId === id && row.metadata.capabilityAction === 'read' && ['read', 'returned'].includes(row.metadata.capabilityOutcome));
-    receipt.capabilityAdoptionVerified = read(source.id) && read(memory.id) && (read(skill.id) || read(pkg.id)) && actualCalls > 0 && invocations.some((row: any) => row.outcome === 'success');
+    receipt.capabilityAdoptionVerified = read(source.id) && read(memory.id) && (read(skill.id) || read(pkg.id) || (pkg.primaryDocumentId && read(pkg.primaryDocumentId))) && actualCalls > 0 && invocations.some((row: any) => row.outcome === 'success');
     receipt.noObservedFixtureCapabilityUse = modelCapabilityRequests === 0 && actualCalls === 0 && capabilityAudits.length === 0;
     receipt.daemonVerified = daemonMode && receipt.taskStatus === 'done' && delegations.length > 0 && receipt.artifactCorrect === true && receipt.capabilityAdoptionVerified === true;
-    receipt.passed = result.ok && receipt.artifactCorrect === true && (scenario === 'useful' ? receipt.capabilityAdoptionVerified === true : receipt.noObservedFixtureCapabilityUse === true) && (!daemonMode || receipt.daemonVerified === true);
+    if (scenario === 'replan') {
+      const controls = await database.select().from(executionControls).where(eq(executionControls.requirementId, daemonRequirement!.id));
+      receipt.recoveryControls = controls.map((row: any) => ({ id: row.id, runId: row.runId, phase: row.phase, revision: row.revision }));
+      receipt.executionRunIds = [...new Set(delegations.map((row: any) => row.runId))];
+      receipt.replanVerified = replanned && receipt.replanOldAuthorityRejected === true && receipt.replanStaleCompletionRejected === true
+        && (receipt.executionRunIds as unknown[]).length === 2 && controls.some((row: any) => row.phase === 'resumed')
+        && httpObservations.some(row => row.assetId === source.id && row.contentSha256 === revisedSourceHash)
+        && httpObservations.some(row => row.kind === 'memory' && row.sourceFreshness === 'changed');
+    }
+    receipt.passed = result.ok && receipt.artifactCorrect === true && (scenario !== 'irrelevant' ? receipt.capabilityAdoptionVerified === true : receipt.noObservedFixtureCapabilityUse === true)
+      && (!daemonMode || receipt.daemonVerified === true) && (scenario !== 'replan' || receipt.replanVerified === true);
     if (!receipt.passed) process.exitCode = 1;
   }
 } catch (error) {
