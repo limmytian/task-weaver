@@ -9,7 +9,7 @@ import { requireDaemonLease } from './daemon-lease-authorization';
 import { createTiExecutionService, isTiExecutionOperation } from './ti-execution';
 import { inArray, and, eq, isNull, sql, desc } from "drizzle-orm";
 import {
-  apiKeyProjectCreations, apiKeys, projectPreferences, type Database, daemons, requirementClaims, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
+  startDatabasePhase, apiKeyProjectCreations, apiKeys, projectPreferences, type Database, daemons, requirementClaims, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
   mcpServers, mcpTools, mcpLocalRequests, requirementRepositories, skillPackages, skillPackageVersions, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
   documentRequirementLinks, projectMemberships, activityLog, executionDelegations, taskComments, workflowOutputs,
 } from "@task-weaver/db";
@@ -119,7 +119,10 @@ function bindServices(context?: VerifiedRequestContext) {
         if (group === "ti" && isTiExecutionOperation(name)) return createTiExecutionService(context).invoke(db, name, args.slice(1));
         if (group === "mcp" && name === "syncTools") return synchronizeAuthorizedMcpTools(db, context, args[1], args[2]);
         if (group === "mcp" && name === "callTool") return invokeMcpTool(db, context, args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
+        const entered = startDatabasePhase("transactionEntry");
+        const finished = startDatabasePhase("resourceTransaction");
         return db.transaction(async tx => {
+          entered();
           // Serialize policy mutations with resource operations, including reads and nested relations.
           await lockIdentityLifecycle(tx);
           const txDb = tx as unknown as Database;
@@ -255,7 +258,7 @@ function bindServices(context?: VerifiedRequestContext) {
           const visible = await pruneRelations(txDb, authority, result);
           if (authority.bounds && authority.bounds.expiresAt <= new Date()) throw new AuthenticationError("credential_expired");
           return visible;
-        });
+        }).finally(() => { entered(); finished(); });
       }];
     })) as T;
   }

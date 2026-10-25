@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { measureDatabaseWork } from "@task-weaver/db";
 import {
   AuthenticationError,
   AuthorizationError,
@@ -8,7 +9,30 @@ import {
 import {
   createCsrfPolicy,
   guardAuthenticationOperations,
+  lockIdentityLifecycle,
 } from "./auth-security";
+
+test("measurement preserves the exclusive lifecycle query and its failure", async () => {
+  const modes: string[] = [];
+  const state = { id: "instance" };
+  let reject = false;
+  const fixture = { select: () => ({ from: () => ({ where: () => ({ for: async (mode: string) => {
+    modes.push(mode);
+    if (reject) throw new Error("private database error");
+    return [state];
+  } }) }) }) };
+  assert.equal(await lockIdentityLifecycle(fixture as never), state);
+  const measured = await measureDatabaseWork(() => lockIdentityLifecycle(fixture as never));
+  assert.equal(measured.value, state);
+  assert.deepEqual(modes, ["update", "update"]);
+  assert.equal(measured.measurement.phases.identityLock.count, 1);
+  reject = true;
+  const failed = await measureDatabaseWork(async () => {
+    await assert.rejects(lockIdentityLifecycle(fixture as never), { message: "private database error" });
+  });
+  assert.equal(failed.measurement.phases.identityLock.count, 1);
+  assert.ok(!JSON.stringify(failed.measurement).includes("private"));
+});
 
 test("CSRF challenges are origin-bound, finite and reject tampered or duplicate cookies", () => {
   const csrf = createCsrfPolicy(

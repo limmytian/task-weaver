@@ -4,12 +4,13 @@ import postgres from "postgres";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import * as schema from "./schema/index";
+import { countDatabaseQuery } from "./measurement";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export function createDb(
   connectionString: string,
-  options: { maxConnections?: number } = {},
+  options: { maxConnections?: number; measureQueries?: boolean } = {},
 ) {
   const max = options.maxConnections ?? 10;
   if (!Number.isInteger(max) || max <= 0)
@@ -18,7 +19,7 @@ export function createDb(
     max,
     connection: { search_path: "task_weaver,public" },
   });
-  return drizzle(client, { schema });
+  return drizzle(client, { schema, ...(options.measureQueries ? { logger: { logQuery: countDatabaseQuery } } : {}) });
 }
 
 export async function runMigrations(connectionString: string) {
