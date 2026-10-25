@@ -57,8 +57,10 @@ let apiServer: any, toolServer: any, registeredServerId: string | undefined;
 let revokeCredential: (() => Promise<void>) | undefined;
 let createdContainer = false;
 let gitCleanupNeeded = false;
+let trustedGitConfig: string | undefined;
+const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const trustedGit = async (args: string[]) => {
-  const result = await runCommand('git', args, { env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, timeoutMs: 30_000, maxOutputBytes: 65536 });
+  const result = await runCommand('git', args, { env: { ...process.env, ...(trustedGitConfig ? { GIT_CONFIG_GLOBAL: trustedGitConfig, GIT_CONFIG_SYSTEM: '/dev/null', GIT_CONFIG_COUNT: '0' } : {}), GIT_TERMINAL_PROMPT: '0' }, timeoutMs: 30_000, maxOutputBytes: 65536 });
   assert.ok(result.ok && !result.outputTruncated, 'Trusted remote Git verification failed');
   return result.stdout.trim();
 };
@@ -66,6 +68,35 @@ const previousStorage = process.env.SKILL_PACKAGE_STORAGE_DIR;
 let stage = 'prepare';
 try {
   for (const dir of [workspace, config, bin]) await mkdir(dir, { mode: 0o700 });
+  if (gitRemote) {
+    const credentialText = execFileSync('git', ['-c', 'credential.useHttpPath=false', 'credential', 'fill'], {
+      input: `protocol=https\nhost=${gitRemote.host}\n\n`, encoding: 'utf8', timeout: 15_000,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const fields = Object.fromEntries(credentialText.trim().split('\n').map(line => {
+      const index = line.indexOf('='); return [line.slice(0, index), line.slice(index + 1)];
+    }));
+    assert.ok(fields.username && fields.password, 'Existing Git credential is unavailable');
+    const secretPath = join(root, 'trusted-git-credential.json'), helper = join(root, 'trusted-git-helper.cjs');
+    await writeFile(secretPath, JSON.stringify({ username: fields.username, password: fields.password }), { mode: 0o600 });
+    await writeFile(helper, `const fs=require('node:fs');if(process.argv[2]!=='get')process.exit(0);const input=Object.fromEntries(fs.readFileSync(0,'utf8').trim().split('\\n').map(x=>{const i=x.indexOf('=');return [x.slice(0,i),x.slice(i+1)]}));if(input.protocol!=='https'||input.host!==${JSON.stringify(gitRemote.host)}||(input.path||'').toLowerCase()!==${JSON.stringify(gitRemote.pathname.slice(1).toLowerCase())})process.exit(0);const c=JSON.parse(fs.readFileSync(${JSON.stringify(secretPath)},'utf8'));process.stdout.write('username='+c.username+'\\npassword='+c.password+'\\n');\n`, { mode: 0o600 });
+    for (const input of [`protocol=https\nhost=${gitRemote.host}\npath=unrelated/repository.git\n\n`,
+      `protocol=https\nhost=example.invalid\npath=${gitRemote.pathname.slice(1)}\n\n`,
+      `protocol=http\nhost=${gitRemote.host}\npath=${gitRemote.pathname.slice(1)}\n\n`]) {
+      assert.equal(execFileSync(process.execPath, [helper, 'get'], { input, encoding: 'utf8', timeout: 5000 }), '');
+    }
+    for (const action of ['store', 'erase']) {
+      assert.equal(execFileSync(process.execPath, [helper, action], { input: '', encoding: 'utf8', timeout: 5000 }), '');
+    }
+    receipt.credentialBridgeRejectsOtherResources = true;
+    receipt.credentialBridgeIgnoresWrites = true;
+    const trustedConfig = join(root, 'trusted-gitconfig');
+    await writeFile(trustedConfig, `[credential]\nuseHttpPath = true\nhelper = ${JSON.stringify(`!${shellQuote(process.execPath)} ${shellQuote(helper)}`)}\n`, { mode: 0o600 });
+    trustedGitConfig = trustedConfig;
+    receipt.exactRepositoryCredentialBridge = true;
+    assert.equal((await trustedGit(['ls-remote', gitRemote.href, 'refs/heads/main'])).split(/\s/)[0], gitMain);
+    receipt.exactCredentialRemoteReadVerified = true;
+  }
   process.env.SKILL_PACKAGE_STORAGE_DIR = join(root, 'packages');
   docker('image', 'inspect', 'pgvector/pgvector:0.8.6-pg16-bookworm');
   docker('run', '--rm', '-d', '--name', container, '-e', 'POSTGRES_DB=tw_real_capability_agent_e2e', '-e', 'POSTGRES_USER=fixture', '-e', 'POSTGRES_PASSWORD=fixture-only', '-p', '127.0.0.1::5432', 'pgvector/pgvector:0.8.6-pg16-bookworm');
@@ -189,7 +220,6 @@ try {
   observableReads.set('/api/v1/memories/search', { kind: 'memory_search', assetId: memory.id });
   observableReads.set(`/api/v1/context/packages/${pkg.id}/read`, { kind: 'skill_package', assetId: pkg.id });
   await writeFile(join(config, 'config.json'), JSON.stringify({ apiUrl, apiKey: key.rawKey, actorId: agent.id, clientId: `fixture-${randomUUID()}`, nodeId: `fixture-${randomUUID()}` }), { mode: 0o600 });
-  const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
   const scopedCli = join(bin, 'tw');
   const tsconfig = process.env.TSX_TSCONFIG_PATH;
   await writeFile(scopedCli, `#!/bin/sh\nunset TW_API_KEY TW_API_URL TW_CLIENT_ID TW_NODE_ID\nexport TW_CONFIG_DIR=${shellQuote(config)}\n${tsconfig ? `export TSX_TSCONFIG_PATH=${shellQuote(tsconfig)}\n` : ''}exec ${shellQuote(fileURLToPath(new URL('../node_modules/.bin/tsx', import.meta.url)))} ${shellQuote(fileURLToPath(new URL('../apps/cli/src/index.ts', import.meta.url)))} "$@"\n`, { mode: 0o700 });
@@ -293,26 +323,7 @@ try {
         PATH: `${workerBin}${delimiter}${process.env.PATH ?? ''}`, TW_DAEMON_AGENT_TIMEOUT_MS: '150000', TW_ARTIFACT_ROOT: join(root, 'artifacts') };
       if (gitRemote) {
         // Trusted supervisor only; buildAiEnvironment resets these settings for its child.
-        const credentialText = execFileSync('git', ['-c', 'credential.useHttpPath=false', 'credential', 'fill'], {
-          input: `protocol=https\nhost=${gitRemote.host}\n\n`, encoding: 'utf8', timeout: 15_000,
-          env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, stdio: ['pipe', 'pipe', 'pipe'],
-        });
-        const fields = Object.fromEntries(credentialText.trim().split('\n').map(line => {
-          const index = line.indexOf('='); return [line.slice(0, index), line.slice(index + 1)];
-        }));
-        assert.ok(fields.username && fields.password, 'Existing Git credential is unavailable');
-        const secretPath = join(root, 'trusted-git-credential.json'), helper = join(root, 'trusted-git-helper.cjs');
-        await writeFile(secretPath, JSON.stringify({ username: fields.username, password: fields.password }), { mode: 0o600 });
-        await writeFile(helper, `const fs=require('node:fs');if(process.argv[2]!=='get')process.exit(0);const input=Object.fromEntries(fs.readFileSync(0,'utf8').trim().split('\\n').map(x=>{const i=x.indexOf('=');return [x.slice(0,i),x.slice(i+1)]}));if(input.protocol!=='https'||input.host!==${JSON.stringify(gitRemote.host)}||(input.path||'').toLowerCase()!==${JSON.stringify(gitRemote.pathname.slice(1).toLowerCase())})process.exit(0);const c=JSON.parse(fs.readFileSync(${JSON.stringify(secretPath)},'utf8'));process.stdout.write('username='+c.username+'\\npassword='+c.password+'\\n');\n`, { mode: 0o600 });
-        for (const input of [`protocol=https\nhost=${gitRemote.host}\npath=unrelated/repository.git\n\n`,
-          `protocol=https\nhost=example.invalid\npath=${gitRemote.pathname.slice(1)}\n\n`,
-          `protocol=http\nhost=${gitRemote.host}\npath=${gitRemote.pathname.slice(1)}\n\n`]) {
-          assert.equal(execFileSync(process.execPath, [helper, 'get'], { input, encoding: 'utf8', timeout: 5000 }), '');
-        }
-        const trustedConfig = join(root, 'trusted-gitconfig');
-        await writeFile(trustedConfig, `[credential]\nhelper = ${JSON.stringify(`!${shellQuote(process.execPath)} ${shellQuote(helper)}`)}\n`, { mode: 0o600 });
-        daemonEnv.GIT_CONFIG_GLOBAL = trustedConfig;
-        receipt.exactRepositoryCredentialBridge = true;
+        daemonEnv.GIT_CONFIG_GLOBAL = trustedGitConfig!;
         Object.assign(daemonEnv, { GIT_CONFIG_COUNT: '0', GIT_AUTHOR_NAME: 'Task Weaver Acceptance', GIT_AUTHOR_EMAIL: 'acceptance@example.test',
           GIT_COMMITTER_NAME: 'Task Weaver Acceptance', GIT_COMMITTER_EMAIL: 'acceptance@example.test' });
       }
@@ -336,7 +347,10 @@ try {
         receipt.workerRemoteGitVerified = /^Signed-off-by:/m.test(message);
         receipt.remoteHeadCommit = remoteTip;
         const links = await api(`/requirements/${daemonRequirement!.id}/repositories`);
-        receipt.repositoryDelivery = (Array.isArray(links) ? links : links.items ?? []).map((row: any) => ({ repositoryId: row.repositoryId, deliveryStatus: row.deliveryStatus, pushStatus: row.pushStatus, headCommit: row.headCommit }));
+        receipt.repositoryDelivery = (Array.isArray(links) ? links : links.items ?? []).map((entry: any) => {
+          const row = entry.link ?? entry;
+          return { repositoryId: row.repositoryId, deliveryStatus: row.deliveryStatus, pushStatus: row.pushStatus, headCommit: row.headCommit };
+        });
       }
     } else if (emptyExternal) {
       const nativeProfile = process.env.CODEX_HOME ?? join(homedir(), '.codex');
