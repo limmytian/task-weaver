@@ -19,7 +19,7 @@ export async function createTaskWorkerAccess(options: {
   leaseGeneration: number
   controlledGit?: (input: { operation: 'fetch' | 'verify'; repositoryId: string }) => Promise<unknown>
   signal?: AbortSignal
-}): Promise<{ environment: NodeJS.ProcessEnv; signal: AbortSignal; redact: (value: string) => string; close: () => Promise<void> }> {
+}): Promise<{ environment: NodeJS.ProcessEnv; signal: AbortSignal; redact: (value: string) => string; consoleSecrets: () => readonly string[]; close: () => Promise<void> }> {
   if (!options.config.apiKey) throw new Error('Task worker requires an authenticated supervisor')
   const credential = { apiUrl: options.config.apiUrl, apiKey: options.config.apiKey }
   const endpoint = `/api/v1/daemons/${options.daemonId}/delegations`
@@ -61,7 +61,7 @@ export async function createTaskWorkerAccess(options: {
       TW_REQUIREMENT_LEASE_GENERATION: String(options.leaseGeneration),
       CI: process.env.CI ?? '1', NO_COLOR: '1', TERM: 'xterm-256color',
     })
-    return { environment, signal: controller.signal,
+    return { environment, signal: controller.signal, consoleSecrets: () => [...secrets],
       redact: (value: string) => {
         for (const secret of secrets) value = value.split(secret).join('[redacted]')
         return redactSensitiveOutput(value)

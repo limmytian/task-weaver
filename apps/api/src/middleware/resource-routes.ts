@@ -1,5 +1,7 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
+  ["POST", /^\/api\/v1\/worker-console\/(?:open|[a-z0-9_-]{1,32}\/[a-z0-9_.-]{1,160}\/(?:read|cancel|response))$/],
+  ["GET", /^\/api\/v1\/worker-console\/(?:[a-z0-9_-]{1,32}\/)?demands\/[0-9a-f-]{36}$/],
   ["GET", /^\/api\/v1\/mcp\/(?:audit|approvals\/[0-9a-f-]{36})\/?$/],
   ["POST", /^\/api\/v1\/mcp\/(?:policy|audit\/cleanup|approvals\/[0-9a-f-]{36}\/approve)\/?$/],
   ["PATCH", /^\/api\/v1\/mcp\/tools\/[0-9a-f-]{36}\/authorization\/?$/],

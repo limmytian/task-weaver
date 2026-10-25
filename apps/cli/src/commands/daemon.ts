@@ -1,3 +1,5 @@
+import { WorkerConsoleBuffer } from '../worker-console-buffer.js'
+import { createWorkerConsoleObserver } from '../worker-console-observer.js'
 import { recordLocalExecution, clearLocalExecution, reconcileLocalExecution, observedLocalStop, localExecutionInventory } from "../local-execution-inventory.js";
 import { createControlledGit } from "../controlled-git.js";
 import { monitorExecutionControl, type ExecutionControl } from "../execution-control-monitor.js";
@@ -1138,7 +1140,8 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         const executionController = new AbortController()
         const executionSignal = AbortSignal.any([signal, executionController.signal])
         const controlEndpoint = `/api/v1/daemons/${daemonId}/execution-controls`
-        const readControls = async () => (await daemonGet<{ items: ExecutionControl[] }>(controlEndpoint)).items
+        let consoleObserver: ReturnType<typeof createWorkerConsoleObserver> | undefined
+        const readControls = async () => { void consoleObserver?.tick(); return (await daemonGet<{ items: ExecutionControl[] }>(controlEndpoint)).items }
         const controlMonitor = monitorExecutionControl({ runId: lane.runId, list: readControls,
           acknowledge: (control, phase) => daemonPost(`${controlEndpoint}/${control.id}/ack`, { phase, revision: control.revision }),
           stop: () => executionController.abort(new Error('Execution invalidated by a planning change')),
@@ -1148,6 +1151,12 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           record: input => daemonPost(`/api/v1/daemons/${daemonId}/git-synchronization`, { ...input, requirementId: requirement.id, ...leaseFence }),
         })
         const access = await createTaskWorkerAccess({ config: cliConfig, daemonId, requirementId: requirement.id, taskId: task.id, sharedCapabilityReads: opts.sharedCapabilityReads, capabilityExecution: opts.capabilityExecution, runId: lane.runId, workerIndex: w.index, leaseGeneration: lane.leaseGeneration, signal: executionSignal, controlledGit }).catch(error => { controlMonitor.close(); throw error })
+        const consoleBuffer = new WorkerConsoleBuffer(toolCmd, access.consoleSecrets)
+        consoleObserver = createWorkerConsoleObserver({
+          target: { requirementId: requirement.id, taskId: task.id, runId: lane.runId!, workerIndex: w.index, leaseGeneration: lane.leaseGeneration! }, daemonId, buffer: consoleBuffer,
+          get: path => request('GET', path, undefined, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal: AbortSignal.timeout(2500) }),
+          post: (path, body) => request('POST', path, body, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal: AbortSignal.timeout(2500) }),
+        })
         let childResult: Awaited<ReturnType<typeof runMeteredAgent>>
         try {
         const bootstrapText = await loadWorkerCapabilityBootstrap({ apiUrl: access.environment.TW_API_URL!, apiKey: access.environment.TW_API_KEY! }, access.signal, requirement.projectId)
@@ -1175,14 +1184,11 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
               ? configuredAgentTimeout
               : 60 * 60_000,
             killGraceMs: 5_000,
-            maxOutputBytes: 20 * 1024 * 1024,
+            maxOutputBytes: 0,
             signal: access.signal,
             redact: access.redact,
-            onOutput: ({ stream, chunk }) => {
-              for (const line of chunk.split(/\r?\n/)) {
-                if (line.trim()) console.log(`[Daemon] Worker ${w.index} ${stream}: ${line}`)
-              }
-            },
+            onStdout: chunk => consoleBuffer.push('stdout', chunk),
+            onStderr: chunk => consoleBuffer.push('stderr', chunk),
           },
           { daemonId, runId: lane.runId, leaseGeneration: lane.leaseGeneration, workerIndex: w.index, projectId: requirement.projectId, requirementId: requirement.id, agent: toolCmd, phase: initialWorkspaceSnapshot.workspaceState === 'dirty' ? 'rework' : 'execution' },
           undefined, executorStatus.observer(toolCmd),
@@ -1191,7 +1197,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           if (!(error instanceof ExecutorResourceBlocked)) throw error
           childResult = { ok: false, status: null, stdout: '', stderr: '', command: 'executor-preflight', signal: null,
             timedOut: false, cancelled: false, outputTruncated: false, durationMs: 0, resourceInterruption: error.observation }
-        } finally { controlMonitor.close(); await access.close(); await clearLocalExecution(requirement.id, lane.runId) }
+        } finally { consoleObserver?.close(); controlMonitor.close(); await access.close(); await clearLocalExecution(requirement.id, lane.runId) }
         // runMeteredAgent has observed managed process exit. Keep the lane heartbeat while inspecting.
         let control = (await readControls()).find(row => row.runId === lane.runId)
         if (control) {

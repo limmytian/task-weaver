@@ -3,3 +3,4 @@ export * from "./services/index";
 export { createExecutionRecoveryViewService } from "./services/execution-recovery-view";
 export { createCapabilityReadinessService } from "./services/capability-readiness";
 export { createCapabilityEvidenceViewService } from "./services/capability-evidence-view";
+export { WorkerConsoleService } from './services/worker-console';

@@ -1,5 +1,6 @@
 "use client";
 
+import { WorkerConsole } from "./worker-console";
 import { ExecutorProfiles } from "./executor-profiles";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -138,6 +139,7 @@ type DaemonRoadmapTask = {
 };
 
 type DaemonWorkerView = {
+  runId?: string | null;
   index: number;
   status: string;
   requirementId?: string | null;
@@ -971,6 +973,8 @@ function WorkerCard({
           <span>{worker.lastLeaseError}</span>
         </div>
       )}
+
+      {worker.requirementId && worker.taskId && worker.runId && leaseGeneration != null && <WorkerConsole key={worker.runId} target={{ requirementId: worker.requirementId, taskId: worker.taskId, runId: worker.runId, workerIndex: worker.index, leaseGeneration }} />}
 
       {worker.progress && (
         <div className="mt-2 space-y-1 rounded border bg-background/70 p-2 text-[11px] text-muted-foreground">
