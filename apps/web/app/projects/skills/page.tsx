@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import { trpc } from "@/trpc/client";
 import type { AppRouter } from "@/trpc/routers/_app";
+import { CapabilityEvidencePanel } from "@/components/capability-evidence-panel";
 import { CapabilityReadinessPanel } from "@/components/capability-readiness-panel";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
@@ -324,7 +325,7 @@ export default function SkillsPage() {
       </header>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {selectedProjectId !== "__all__" && selectedProjectId !== "__global__" ? <CapabilityReadinessPanel key={selectedProjectId} projectId={selectedProjectId} /> : <p className="text-sm text-muted-foreground">Select a project to inspect its capability permissions, content candidates and API runtime readiness.</p>}
+        {selectedProjectId !== "__all__" && selectedProjectId !== "__global__" ? <div className="space-y-4" key={selectedProjectId}><CapabilityReadinessPanel projectId={selectedProjectId} /><CapabilityEvidencePanel projectId={selectedProjectId} /></div> : <p className="text-sm text-muted-foreground">Select a project to inspect its capability permissions, content candidates and API runtime readiness.</p>}
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative flex-1 min-w-[260px]">

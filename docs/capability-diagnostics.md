@@ -36,3 +36,35 @@ Without that access, tool counts are null/unknown rather than a fabricated zero.
 Runtime catalog restrictions likewise produce null profile state instead of
 misdiagnosing absent configuration. Memory entity visibility is filtered before
 counts, including memories linked to an inaccessible document/task/requirement.
+
+## Currently visible use references
+
+`tw context evidence --project <id> --json` and the selected-project Web panel
+require current project `resource.read` and `audit.read`. Execution-bound
+credentials do not gain a project-wide audit surface. The core projection filters
+each asset using current document/memory/package-version/MCP discovery rules in
+SQL before grouping, counts and pagination. Related private memory entities,
+archived package versions, disconnected/denied tools and another credential's
+local bridge cannot consume result slots or inflate visible totals.
+
+The bounded last-seven-days view groups references by run (or independent
+credential), asset, action, version, hash/kind and normalized outcome. Nested
+read/returned success layers collapse; these are reference groups, not exact call
+counts. Only delegation audit origins can attribute a daemon run. Independent
+credential observations do not acquire a run from an incidental metadata field.
+Parent credential identifiers and arbitrary audit metadata are never returned.
+
+Progress-report references are counted separately only while the related task
+remains readable. Their bodies are not loaded or projected, and they do not prove
+capability adoption. Unattributed discovery events, missing/retained-away audit
+coverage, inaccessible references and unmeasured model/context costs stay unknown.
+Zero currently visible references does not establish zero actual use.
+
+When a retained invocation audit supplies a duration, the view identifies it as
+one API observation, not model latency or total task time. Whole-process token
+reports, where available, remain in the existing Usage view/CLI and cannot be
+apportioned to individual capabilities from these reference records. No call or
+memory-save quota contributes to a usefulness score. Queries have a bounded
+window/page and a three-second per-statement database budget; unavailable evidence
+is not substituted with an empty success result. Large-instance performance and
+retention coverage still need their own measurements.

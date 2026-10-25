@@ -6,6 +6,8 @@ import {
   skillPackageStorageService,
   importSkillSchema,
   projectCapabilityReadinessQuerySchema,
+  capabilityEvidenceQuerySchema,
+  createCapabilityEvidenceViewService,
   registerSkillPackageSchema,
   listSkillPackagesSchema,
   getSkillPackageSchema,
@@ -30,6 +32,8 @@ function createSkillPackageStorage() {
 }
 
 export const skillRouter = router({
+  evidence: ordinaryResourceProcedure.input(capabilityEvidenceQuerySchema)
+    .query(async ({ ctx, input }) => createCapabilityEvidenceViewService(ctx.identity).get(ctx.db, input)),
   readiness: ordinaryResourceProcedure.input(projectCapabilityReadinessQuerySchema)
     .query(async ({ ctx, input }) => readProjectCapabilityReadiness(ctx.req, input.projectId)),
   list: ordinaryResourceProcedure

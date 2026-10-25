@@ -2,6 +2,7 @@ import { Hono, type Context } from "hono";
 import {
   createResourceServices,
   createCapabilityReadinessService,
+  createCapabilityEvidenceViewService,
   projectCapabilityReadinessQuerySchema,
   personalResourceOwnerId,
   skillPackageStorageService,
@@ -76,6 +77,8 @@ context.get("/search", async (c) => {
   const results = await createResourceServices(c.get("identity")).contextService.searchContext(db, parsed.data);
   return c.json({ items: results });
 });
+
+context.get("/evidence", async c => c.json(await createCapabilityEvidenceViewService(c.get("identity")).get(c.get("db"), c.req.query())));
 
 // API-owned runtime configuration is authoritative; metadata counts do not probe assets.
 context.get("/readiness", async c => {
