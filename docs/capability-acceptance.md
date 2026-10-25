@@ -73,3 +73,46 @@ is retained; its owner-authorized lifecycle remains the caller's responsibility.
 Release-specific budgets, resource names and private evidence belong in project
 planning documents, not this guide. Do not merge, publish or deploy as part of
 capability acceptance unless the owner separately authorizes those operations.
+
+## Actual independent CLI agent
+
+`scripts/verify-real-capability-agent.mts --verify-fixture-only` verifies a disposable
+loopback API/database and a pinned scoped CLI launcher without starting a model.
+Use `pnpm exec tsx` to run it. It requires the existing PostgreSQL test image locally;
+it does not pull an image or install a runtime. The generated agent key grants only
+project reads and MCP invocation, expires after ten minutes, and is revoked before
+teardown. A subsequent authentication request must fail. The launcher embeds its
+configuration directory and removes ambient TW credential/endpoint overrides;
+login-shell PATH changes cannot select another Task Weaver profile.
+
+With explicit owner authorization for the configured agy profile and its spend,
+replace that flag with `--confirm-one-real-external-agent`. An optional
+`TW_ACCEPTANCE_AGY_MODEL` names an already available model. The script starts one
+fresh provider project and bounds its model process to 150 seconds, with a
+155-second managed deadline. `TW_ACCEPTANCE_FIXTURE_FILE` reuses a privately saved
+synthetic fixture. Its canonical JSON digest is distinct from a file-byte digest.
+
+The source-backed memory is saved by the fixture owner with explicit reviewed-source
+confirmation. The pricing server is read-only, and its tool receives a separate
+trusted read-only declaration through the existing authorization endpoint. Remote
+schema synchronization deliberately does not grant that declaration. The exact
+client must discover the tool before any model spend; an empty registration or a
+hidden tool is not readiness.
+
+A successful useful-task receipt requires exact artifact validation, current-source
+and relevant instruction/memory HTTP response observations, an actual external tool
+call, and a successful invocation audit attributed to that client's credential.
+Returning selected memory content through search counts as content delivery; an
+extra get call is not required merely to increase tool counts. These bounded
+response hashes are labeled `harness_http_response`, separate from durable platform
+audits. Ordinary independent REST reads do not acquire a fabricated daemon run or
+an inbound-MCP read audit. No model reasoning, raw HTTP bodies, credentials or tool
+arguments are exported in the receipt.
+
+This mode deliberately uses the operator's native provider configuration. An empty
+test workspace and disabled slash expansion do not imply an empty personal skill
+directory or filesystem sandbox. Provider-managed project/conversation records may
+remain in that profile after temporary fixture files and the database are removed.
+This is independent-client evidence, not daemon login or physical-node failover
+certification. Preserve failed attempts and their reported usage alongside success;
+a single successful artifact does not establish an efficiency improvement.
