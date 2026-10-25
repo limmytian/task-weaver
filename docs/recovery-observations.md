@@ -37,3 +37,23 @@ from manual decisions. An expired recovery deadline is an observation requiring
 inspection, not permission to retry uncertain external operations. Real node
 health, cross-node failover, private Git state and business acceptance still need
 their own authorized validation.
+
+## Web operator actions
+
+The Web panel refreshes on reconnect/focus, polls the authorized durable state,
+and hides previous data when reads fail or access changes. Technical identifiers
+are available on demand. It does not reconstruct a phase history from SSE events.
+
+Evidence review requires an explicit review confirmation and a bounded reason.
+Manual recovery requires explicit outcome, durable-input, preserved-file/Git and
+unconfirmed-termination review. The Web mutation sends the observed plan revision,
+control update time and phase. Changes to those observations or permissions reset
+confirmation; a decision failure clears the form and refreshes state. Mutations
+have no automatic retry. If a response is lost, reconcile the durable observation
+before reviewing another decision rather than assuming the write failed.
+
+The shared REST recovery schema retains optional control timestamp/phase guards
+for existing clients; Web requires both. Core still serializes all decisions and
+rejects historical/already-resolved controls, replacement-owned lanes and closed
+requirements. A late old-node acknowledgment cannot reopen a resolved control.
+These checks do not force completion, force-push Git or undo an external call.

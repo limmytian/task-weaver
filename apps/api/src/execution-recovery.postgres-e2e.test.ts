@@ -158,7 +158,14 @@ test('live planning fences old runs, preserves healthy leases and releases depen
   const unsafeControl = (await db.query.executionControls.findFirst({ where: eq(executionControls.runId, unsafeLane.runId) }))!;
   const inspected = await json(await api(`/requirements/${unsafe.id}`));
   assert.equal((await api(`/requirements/${unsafe.id}/execution-recovery`, 'POST', { controlId: unsafeControl.id, expectedPlanRevision: inspected.planRevision, reason: 'Verified external action did not occur; durable inputs remain available' }, agentHeaders)).status, 403);
-  await json(await api(`/requirements/${unsafe.id}/execution-recovery`, 'POST', { controlId: unsafeControl.id, expectedPlanRevision: inspected.planRevision, reason: 'Verified external action did not occur; durable inputs remain available' }));
+  const guardedDecision = { controlId: unsafeControl.id, expectedPlanRevision: inspected.planRevision, expectedControlUpdatedAt: unsafeControl.updatedAt, expectedControlPhase: unsafeControl.phase, reason: 'Verified external action did not occur; durable inputs remain available' };
+  assert.equal((await api(`/requirements/${unsafe.id}/execution-recovery`, 'POST', { ...guardedDecision, expectedControlUpdatedAt: new Date(unsafeControl.updatedAt.getTime() - 1).toISOString() })).status, 409);
+  assert.equal((await api(`/requirements/${unsafe.id}/execution-recovery`, 'POST', { ...guardedDecision, expectedControlPhase: 'received' })).status, 409);
+  const decisions = await Promise.all([0, 1].map(() => api(`/requirements/${unsafe.id}/execution-recovery`, 'POST', guardedDecision)));
+  assert.deepEqual(decisions.map(response => response.status).sort(), [200, 409], 'only one concurrent operator decision may authorize the control');
+  const oldNodeReport = await json(await api(`/daemons/${daemonB}/execution-controls/${unsafeControl.id}/ack`, 'POST', { phase: 'manual', revision: unsafeControl.revision }, agentHeaders));
+  assert.equal(oldNodeReport.phase, 'resumed', 'returning old node cannot reopen a resolved control');
+
   const manualRestart = await json(await acquire());
   assert.equal(manualRestart.requirement.id, unsafe.id);
   const currentFence = { daemonId: daemonA, runId: manualRestart.runId, leaseGeneration: manualRestart.leaseGeneration };
