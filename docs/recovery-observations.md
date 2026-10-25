@@ -57,3 +57,14 @@ for existing clients; Web requires both. Core still serializes all decisions and
 rejects historical/already-resolved controls, replacement-owned lanes and closed
 requirements. A late old-node acknowledgment cannot reopen a resolved control.
 These checks do not force completion, force-push Git or undo an external call.
+
+## Verification coverage
+
+`pnpm test:execution-recovery-postgres` runs both the existing daemon/REST
+PostgreSQL scenario and a Web tRPC client/HTTP-adapter scenario against a disposable
+local database. It covers scope narrowing and key revocation, stale plan/control
+observations, historical controls, replacement-owned lanes, concurrent human
+decisions, one audit authorization, late old-node reports and dependency-wait
+capacity release. Render/decision-state fixtures run with the Web test suite.
+This is source/protocol coverage, not native-browser interaction, actual remote
+node failover, provider execution or private remote Git acceptance.

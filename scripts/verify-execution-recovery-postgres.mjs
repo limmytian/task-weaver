@@ -14,10 +14,12 @@ try {
   }
   assert.ok(ready, "Disposable PostgreSQL did not become ready");
   const port = JSON.parse(docker("inspect", name))[0].NetworkSettings.Ports["5432/tcp"][0].HostPort;
-  const result = spawnSync("pnpm", ["--filter", "@task-weaver/api", "exec", "tsx", "--test", "src/execution-recovery.postgres-e2e.test.ts"], {
-    encoding: "utf8", timeout: 150_000, maxBuffer: 4 * 1024 * 1024,
-    env: { ...process.env, TW_DAEMON_MODE: "sse", PGOPTIONS: "-c client_min_messages=warning", TW_EXECUTION_RECOVERY_E2E_DATABASE_URL: `postgres://fixture:fixture-only@127.0.0.1:${port}/tw_execution_recovery_e2e` },
-  });
-  process.stdout.write(`${result.stdout ?? ""}${result.stderr ?? ""}`);
-  assert.equal(result.status, 0, "Execution recovery PostgreSQL verification failed");
+  for (const args of [["--filter", "@task-weaver/api", "exec", "tsx", "--test", "src/execution-recovery.postgres-e2e.test.ts"], ["exec", "tsx", "--test", "scripts/recovery-operator.postgres-e2e.test.ts"]]) {
+    const result = spawnSync("pnpm", args, {
+      encoding: "utf8", timeout: 150_000, maxBuffer: 4 * 1024 * 1024,
+      env: { ...process.env, TW_DAEMON_MODE: "sse", PGOPTIONS: "-c client_min_messages=warning", TW_EXECUTION_RECOVERY_E2E_DATABASE_URL: `postgres://fixture:fixture-only@127.0.0.1:${port}/tw_execution_recovery_e2e` },
+    });
+    process.stdout.write(`${result.stdout ?? ""}${result.stderr ?? ""}`);
+    assert.equal(result.status, 0, "Execution recovery PostgreSQL verification failed");
+  }
 } finally { docker("rm", "-f", name); }
