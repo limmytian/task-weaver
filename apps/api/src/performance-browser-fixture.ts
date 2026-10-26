@@ -3,12 +3,12 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:net";
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
-import { writeFileSync, readFileSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { serve } from "@hono/node-server";
 import { sql } from "drizzle-orm";
-import { createDb, runMigrations, requirements, tasks, documents, taskDependencies, documentTaskLinks, documentRequirementLinks } from "@task-weaver/db";
+import { createDb, runMigrations, requirements, tasks, documents, taskDependencies, documentTaskLinks, documentRequirementLinks, measureDatabaseWork } from "@task-weaver/db";
 import { performanceFixture, performanceBatches } from "./performance-fixture";
 import { checkPerformanceBoard } from "./performance-board-checks";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
@@ -22,7 +22,7 @@ let directory = process.env.TW_PERFORMANCE_BROWSER_BUILD!;
 const compareDirectory = process.env.TW_PERFORMANCE_BROWSER_COMPARE_BUILD;
 assert.ok(!compareDirectory || /^\.next-perf-[a-z0-9-]+$/.test(compareDirectory));
 const profile = process.env.TW_PERFORMANCE_BROWSER_PROFILE ?? "mixed";
-assert.ok(profile === "mixed" || profile === "selector");
+assert.ok(profile === "mixed" || profile === "selector" || profile === "document");
 const url = new URL(databaseUrl);
 assert.equal(url.hostname, "127.0.0.1"); assert.equal(url.pathname, "/tw_performance");
 assert.ok(readyFile && /^\.next-perf-[a-z0-9-]+$/.test(directory));
@@ -50,9 +50,14 @@ try {
   const fixtureHash = profile === "mixed" ? generated.hash : createHash("sha256").update(JSON.stringify({
     baseFixtureHash: generated.hash, profile, ownerTasks: "All 5000 tasks are done; default Board excludes terminal history",
   })).digest("hex");
+  const browserDocuments = profile === "document" ? generated.documentRows.map((row, index) => index === 0
+    ? { ...row, content: Array.from({ length: 96 }, (_, section) => `## Synthetic section ${section}\n\nA fixed paragraph with **bold**, *emphasis*, \`inline code\` and [[Synthetic document 1]].\n\n| Column | Value |\n| --- | --- |\n| Example | ${section} |\n\n- First item\n- Second item\n`).join("\n") } : row) : generated.documentRows;
+  if (profile === "document") assert.ok(Buffer.byteLength(browserDocuments[0]!.content) <= 32 * 1024);
+  const effectiveFixtureHash = profile === "document" ? createHash("sha256").update(JSON.stringify({ baseFixtureHash: generated.hash,
+    profile, content: browserDocuments[0]!.content })).digest("hex") : fixtureHash;
   for (const batch of performanceBatches(generated.requirementRows)) await db.insert(requirements).values(batch);
   for (const batch of performanceBatches(browserTasks)) await db.insert(tasks).values(batch);
-  await db.insert(documents).values(generated.documentRows);
+  await db.insert(documents).values(browserDocuments);
   for (const batch of performanceBatches(generated.dependencies)) await db.insert(taskDependencies).values(batch);
   await db.insert(documentTaskLinks).values(generated.taskLinks); await db.insert(documentRequirementLinks).values(generated.requirementLinks);
   await db.execute(sql`ANALYZE`);
@@ -62,6 +67,22 @@ try {
       && row.status !== "done" && row.status !== "cancelled").map(row => row.id),
       generated.requirementRows.find(row => row.projectId === other.id)!.id);
     writeFileSync(`${readyFile}.board-audit.json`, JSON.stringify(audit), { mode: 0o600 });
+  }
+  if (profile === "document") {
+    const samples = [];
+    for (const query of ["", "&view=summary&page=1&pageSize=10"]) {
+      const { value, measurement } = await measureDatabaseWork(async () => {
+        const response = await f.app.request(`/api/v1/documents?projectId=${f.project.id}&includeGlobal=true${query}`, { headers: f.owner.headers });
+        assert.equal(response.status, 200);
+        const text = await response.text();
+        const body = JSON.parse(text);
+        assert.equal(query ? body.items.length : body.length, query ? 10 : 50);
+        if (query) { assert.equal(body.total, 50); assert.ok(body.items.every((item: object) => !("content" in item))); }
+        return { bytes: Buffer.byteLength(text), rows: query ? body.items.length : body.length };
+      });
+      samples.push({ view: query ? "summary10" : "legacy-full", ...value, database: measurement });
+    }
+    writeFileSync(`${readyFile}.document-audit.json`, JSON.stringify({ samples, bodiesNotRetained: true }), { mode: 0o600 });
   }
   api = serve({ hostname: "127.0.0.1", port: apiPort, fetch: f.app.fetch });
   const require = createRequire(resolve("apps/web/package.json"));
@@ -92,7 +113,7 @@ try {
     await delay(200);
   }
   assert.ok(available, "Isolated browser server failed to start");
-  writeFileSync(readyFile, JSON.stringify({ webOrigin, apiOrigin, projectId: f.project.id, fixtureHash,
+  writeFileSync(readyFile, JSON.stringify({ webOrigin, apiOrigin, projectId: f.project.id, fixtureHash: effectiveFixtureHash, documentId: browserDocuments[0]!.id, documentBytes: Buffer.byteLength(browserDocuments[0]!.content),
     profile, baseFixtureHash: generated.hash,
     fixedRequirementId: generated.requirementRows[0]!.id,
     buildDirectory: directory, buildId: readFileSync(join(resolve("apps/web"), directory, "BUILD_ID"), "utf8").trim(),
@@ -102,7 +123,24 @@ try {
   console.log("TW_PERFORMANCE_BROWSER_READY");
   // Sequential phases reuse rows/auth/ports. Never run both Web builds concurrently.
   let switched = false;
+  let paused = false;
   while (!existsSync(`${readyFile}.done`)) {
+    if (!paused && existsSync(`${readyFile}.pause`)) {
+      paused = true;
+      rmSync(`${readyFile}.pause`);
+      await stopWeb();
+      writeFileSync(`${readyFile}.paused`, "owned Web process stopped");
+    }
+    if (paused && !switched && existsSync(`${readyFile}.next-build`)) {
+      const requested = readFileSync(`${readyFile}.next-build`, "utf8").trim();
+      assert.ok(/^\.next-perf-[a-z0-9-]+$/.test(requested));
+      assert.ok(existsSync(join(resolve("apps/web"), requested, "BUILD_ID")));
+      directory = requested;
+      switched = true;
+      paused = false;
+      await startWeb();
+      console.log("TW_PERFORMANCE_BROWSER_SWITCHED");
+    }
     if (compareDirectory && !switched && existsSync(`${readyFile}.next`)) {
       switched = true;
       await stopWeb();
@@ -112,7 +150,7 @@ try {
     }
     await delay(200);
   }
-  console.log("TW_PERFORMANCE_RECEIPT " + JSON.stringify({ browserFixture: true, fixtureHash, profile, baseFixtureHash: generated.hash,
+  console.log("TW_PERFORMANCE_RECEIPT " + JSON.stringify({ browserFixture: true, fixtureHash: effectiveFixtureHash, profile, baseFixtureHash: generated.hash,
     tasks: generated.counts.tasks, requirements: generated.counts.requirements, directory,
     buildId: readFileSync(join(resolve("apps/web"), directory, "BUILD_ID"), "utf8").trim() }));
 } catch (error) {

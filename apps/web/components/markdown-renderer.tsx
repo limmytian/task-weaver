@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, memo, type ComponentProps } from "react";
+import { useEffect, useId, useRef, useMemo, memo, type ComponentProps } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useRouter } from "next/navigation";
@@ -11,30 +11,30 @@ interface MarkdownRendererProps {
   className?: string;
 }
 
-export function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
-  const wikiLinkTitles = extractWikiLinkTitles(content);
+export const MarkdownRenderer = memo(function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
+  const wikiLinkTitles = useMemo(() => extractWikiLinkTitles(content), [content]);
   const { data: resolved } = trpc.document.resolveWikiLinks.useQuery(
     { titles: wikiLinkTitles },
     { enabled: wikiLinkTitles.length > 0 },
   );
-  const titleToId = new Map(resolved?.map((d) => [d.title, d.id]) ?? []);
+  const titleToId = useMemo(() => new Map(resolved?.map(d => [d.title, d.id]) ?? []), [resolved]);
 
-  const preprocessed = preprocessWikiLinks(content, titleToId);
+  const preprocessed = useMemo(() => preprocessWikiLinks(content, titleToId), [content, titleToId]);
 
   return (
     <div className={className}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          code: CodeBlockRenderer,
-          a: WikiLinkAwareLink,
-        }}
+        remarkPlugins={MARKDOWN_PLUGINS}
+        components={MARKDOWN_COMPONENTS}
       >
         {preprocessed}
       </ReactMarkdown>
     </div>
   );
-}
+});
+
+const MARKDOWN_PLUGINS = [remarkGfm];
+const MARKDOWN_COMPONENTS = { code: CodeBlockRenderer, a: WikiLinkAwareLink };
 
 const WIKI_LINK_RE = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useState, useRef } from "react";
+import { z } from "zod";
+import { useCallback, useMemo, memo, useState, useRef } from "react";
 import CodeMirror, {
   type ReactCodeMirrorRef,
 } from "@uiw/react-codemirror";
@@ -46,7 +47,16 @@ interface MarkdownEditorProps {
   minHeight?: string;
 }
 
-export function MarkdownEditor({
+const COMPLETION_PAGE = z.object({
+  items: z.array(z.object({ id: z.string().uuid(), title: z.string() })).max(10),
+});
+
+const EDITOR_BASIC_SETUP = {
+  lineNumbers: false, foldGutter: false, highlightActiveLine: true,
+  bracketMatching: true, indentOnInput: true,
+};
+
+export const MarkdownEditor = memo(function MarkdownEditor({
   content,
   onChange,
   placeholder = "Start writing Markdown... (type [[ for wiki-links)",
@@ -83,8 +93,9 @@ export function MarkdownEditor({
           const docs = await utils.document.list.fetch({
             projectId,
             includeGlobal: true,
+            view: "summary", page: 1, pageSize: 10,
           });
-          items = docs.slice(0, 10).map((d) => ({
+          items = COMPLETION_PAGE.parse(docs).items.map((d) => ({
             id: d.id,
             title: d.title,
           }));
@@ -259,66 +270,32 @@ export function MarkdownEditor({
         </Tabs>
       </div>
 
-      {viewMode === "edit" && (
-        <CodeMirror
-          ref={editorRef}
-          value={content}
-          onChange={onChange}
-          extensions={extensions}
-          placeholder={placeholder}
-          basicSetup={{
-            lineNumbers: false,
-            foldGutter: false,
-            highlightActiveLine: true,
-            bracketMatching: true,
-            indentOnInput: true,
-          }}
-          className="text-sm"
-        />
-      )}
-
-      {viewMode === "preview" && (
-        <div
-          className="prose prose-neutral dark:prose-invert prose-sm max-w-none px-4 py-3"
-          style={{ minHeight }}
-        >
-          {content ? (
-            <MarkdownRenderer content={content} />
-          ) : (
-            <p className="text-muted-foreground italic">{placeholder}</p>
-          )}
-        </div>
-      )}
-
-      {viewMode === "split" && (
-        <div className="grid grid-cols-1 divide-y md:grid-cols-2 md:divide-x md:divide-y-0" style={{ minHeight }}>
+      <div className={viewMode === "split" ? "grid grid-cols-1 divide-y md:grid-cols-2 md:divide-x md:divide-y-0" : undefined}
+        style={viewMode === "split" ? { minHeight } : undefined}>
+        {/* One mounted editor retains selection, scroll and undo across presentation modes. */}
+        <div hidden={viewMode === "preview"}>
           <CodeMirror
             ref={editorRef}
             value={content}
             onChange={onChange}
             extensions={extensions}
             placeholder={placeholder}
-            basicSetup={{
-              lineNumbers: false,
-              foldGutter: false,
-              highlightActiveLine: true,
-              bracketMatching: true,
-              indentOnInput: true,
-            }}
+            basicSetup={EDITOR_BASIC_SETUP}
             className="text-sm"
           />
-          <div className="prose prose-neutral dark:prose-invert prose-sm max-w-none overflow-auto px-4 py-3">
-            {content ? (
-              <MarkdownRenderer content={content} />
-            ) : (
+        </div>
+        {viewMode !== "edit" && (
+          <div className="prose prose-neutral dark:prose-invert prose-sm max-w-none overflow-auto px-4 py-3"
+            style={{ minHeight }}>
+            {content ? <MarkdownRenderer content={content} /> : (
               <p className="text-muted-foreground italic">{placeholder}</p>
             )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
-}
+});
 
 function ToolbarBtn({
   onClick,
