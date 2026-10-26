@@ -8,18 +8,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { QueryStatePanel } from "@/components/query-state-panel";
 
 /** Mounted only while a free-choice task dialog is open; every matching page remains reachable. */
-export function RequirementPicker({ projectId, value, onValueChange, invalid }: {
+export function RequirementPicker({ projectId, value, onValueChange, invalid, allowAll = false, includeCancelled = false }: {
   projectId: string;
   value: string;
   onValueChange: (id: string) => void;
   invalid: boolean;
+  allowAll?: boolean;
+  includeCancelled?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<{ id: string; title: string } | null>(null);
   const result = trpc.requirement.listSummary.useQuery({ projectId, query: query || undefined,
-    excludeStatus: "cancelled", page, pageSize: 20 });
+    excludeStatus: includeCancelled ? undefined : "cancelled", page, pageSize: 20 });
   const pageCount = Math.max(1, result.data?.pageCount ?? 1);
   // A realtime deletion/filter change can shrink the last page; retain the task draft and selection.
   if (result.data && page > pageCount) setPage(pageCount);
@@ -51,6 +53,7 @@ export function RequirementPicker({ projectId, value, onValueChange, invalid }: 
           <SelectValue placeholder={result.isPending ? "Loading requirements..." : "Select a requirement..."} />
         </SelectTrigger>
         <SelectContent>
+          {allowAll && <SelectItem value="__all__">All Requirements</SelectItem>}
           {options.map(item => <SelectItem key={item.id} value={item.id}>
             {item.title}{pinnedSelection?.id === item.id ? " (selected)" : ""}
           </SelectItem>)}

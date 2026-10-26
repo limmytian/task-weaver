@@ -148,6 +148,17 @@ export const listTasksSchema = z.object({
 
 
 
+/** Explicit bounded Board contract; the legacy full Board remains compatible. */
+export const boardPageSchema = z.object({
+  projectId: z.string().uuid(),
+  requirementId: z.string().uuid().optional(),
+  includeTerminal: z.boolean().default(false),
+  completedWithinDays: z.coerce.number<number>().int().min(0).default(14),
+  page: z.coerce.number<number>().int().min(1).default(1),
+  pageSize: z.coerce.number<number>().int().min(1).max(50).default(50),
+});
+export type BoardPageInput = z.input<typeof boardPageSchema>;
+
 export const createTaskCommentSchema = z.object({
   content: z.string().min(1),
 });

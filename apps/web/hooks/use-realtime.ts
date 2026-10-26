@@ -80,6 +80,7 @@ export function useRealtime() {
           const data = accepted.data as { projectId?: string; taskId?: string };
           if (data.projectId) {
             utils.task.board.invalidate({ projectId: data.projectId });
+            utils.task.boardPage.invalidate({ projectId: data.projectId });
             utils.task.list.invalidate({ projectId: data.projectId });
           }
           if (!data.projectId) utils.task.list.invalidate();

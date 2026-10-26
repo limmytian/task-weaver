@@ -7,6 +7,7 @@ import {
   updateTaskSchema,
   updateTaskStatusSchema,
   listTasksSchema,
+  boardPageSchema,
   createTaskCommentSchema,
   createTaskNoteSchema,
   createTaskDependencySchema,
@@ -129,6 +130,10 @@ export const taskRouter = router({
         completedWithinDays: input.completedWithinDays,
       });
     }),
+
+  boardPage: resourceProcedure
+    .input(boardPageSchema)
+    .query(async ({ ctx, input }) => createResourceServices(ctx.identity).taskService.getKanbanBoardPage(ctx.db, input.projectId, input)),
 
   gantt: resourceProcedure
     .input(z.object({ projectId: z.string().uuid() }))

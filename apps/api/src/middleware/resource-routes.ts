@@ -64,7 +64,7 @@ const ordinaryRoutes: Array<[string, RegExp]> = [
   ["GET", new RegExp("^/api/v1/context/(?:search|list|bootstrap|readiness|evidence)/?$")],
   ["GET", new RegExp("^/api/v1/context/[0-9a-fA-F-]{36}/?$")],
   ["GET", new RegExp("^/api/v1/memories/search/?$")],
-  ["GET", new RegExp("^/api/v1/projects/[0-9a-fA-F-]{36}/(?:stats|health|knowledge-graph|board|gantt)/?$")],
+  ["GET", new RegExp("^/api/v1/projects/[0-9a-fA-F-]{36}/(?:stats|health|knowledge-graph|board|board-page|gantt)/?$")],
   ["GET", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/(?:burndown|task-dependency-graph)/?$")],
   ["GET", new RegExp("^/api/v1/projects/[0-9a-fA-F-]{36}/requirements/heatmap/?$")],
   ["GET", new RegExp("^/api/v1/(?:tasks|documents)/[0-9a-fA-F-]{36}/recommendations/?$")],

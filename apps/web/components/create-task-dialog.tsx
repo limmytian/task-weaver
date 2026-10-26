@@ -77,6 +77,7 @@ export function CreateTaskDialog({
   const createTask = trpc.task.create.useMutation({
     onSuccess: () => {
       utils.task.board.invalidate({ projectId });
+      utils.task.boardPage.invalidate({ projectId });
       utils.task.list.invalidate();
       utils.requirement.list.invalidate({ projectId });
       utils.requirement.listSummary.invalidate({ projectId });

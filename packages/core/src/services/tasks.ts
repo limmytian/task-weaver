@@ -21,6 +21,7 @@ import type {
   CreateTaskInput,
   UpdateTaskInput,
   ListTasksInput,
+  BoardPageInput,
   TaskStatus,
   BatchCreateTasksInput,
   BatchUpdateTasksInput,
@@ -1025,6 +1026,47 @@ export async function getKanbanBoard(
         count: columnTasks.length,
       };
     }),
+  };
+}
+
+/** Apply the live task predicate to both count and rows before bounding the result. */
+export async function getKanbanBoardPage(
+  db: Database,
+  projectId: string,
+  options: Omit<BoardPageInput, "projectId"> = {},
+  authorizedPredicate?: SQL,
+) {
+  const conditions = [eq(tasks.scope, "project"), eq(tasks.projectId, projectId), authorizedPredicate];
+  if (options.requirementId) conditions.push(eq(tasks.requirementId, options.requirementId));
+  if (!options.includeTerminal) {
+    conditions.push(sql`${tasks.status} NOT IN ('done', 'cancelled')`);
+  } else if ((options.completedWithinDays ?? DEFAULT_COMPLETED_WITHIN_DAYS) > 0) {
+    const cutoff = new Date(Date.now() - (options.completedWithinDays ?? DEFAULT_COMPLETED_WITHIN_DAYS) * 86_400_000);
+    conditions.push(sql`(${tasks.status} NOT IN ('done', 'cancelled') OR COALESCE(${tasks.completedAt}, ${tasks.updatedAt}) >= ${cutoff.toISOString()})`);
+  }
+  const where = and(...conditions);
+  const page = options.page ?? 1;
+  const pageSize = options.pageSize ?? 50;
+  const [rows, counts] = await Promise.all([
+    db.query.tasks.findMany({
+      where,
+      columns: { id: true, scope: true, projectId: true, requirementId: true, title: true,
+        status: true, priority: true, assignee: true, tags: true, expectedAt: true },
+      extras: { description: sql<string | null>`left(${tasks.description}, 320)`.as("description_preview") },
+      with: {
+        requirement: { columns: { id: true, projectId: true, title: true, status: true } },
+        repositories: { with: { repository: true } },
+      },
+      orderBy: (t, { asc }) => [asc(t.createdAt), asc(t.id)],
+      limit: pageSize,
+      offset: (page - 1) * pageSize,
+    }),
+    db.select({ count: sql<number>`count(*)::int` }).from(tasks).where(where),
+  ]);
+  const total = counts[0]?.count ?? 0;
+  return { projectId, page, pageSize, total, pageCount: Math.ceil(total / pageSize),
+    items: rows.map(row => ({ ...row, requirementTitle: row.requirement?.title ?? "",
+      requirementStatus: row.requirement?.status ?? null })),
   };
 }
 

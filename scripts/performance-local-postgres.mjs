@@ -11,6 +11,8 @@ const tierArgument = args.find(value => value.startsWith("--tier="));
 const tier = tierArgument === "--tier=medium" ? "medium" : "small";
 const browserArgument = args.find(value => value.startsWith("--browser-build="));
 const browserBuild = browserArgument?.slice("--browser-build=".length);
+const compareArgument = args.find(value => value.startsWith("--browser-compare-build="));
+const compareBuild = compareArgument?.slice("--browser-compare-build=".length);
 const browserProfileArgument = args.find(value => value.startsWith("--browser-profile="));
 const browserProfile = browserProfileArgument?.slice("--browser-profile=".length) ?? "mixed";
 const concurrencyContract = args.includes("--concurrency-contract");
@@ -18,16 +20,17 @@ const healthProfile = args.includes("--health-profile");
 const indexProfile = args.includes("--index-profile");
 const connectionBudget = args.includes("--connection-budget");
 if (args.length === 1 && args[0] === "--help") {
-  console.log("Use installed PostgreSQL/pgvector in one temporary loopback-only cluster. Limits: normal macOS memory pressure, >=2 GiB reclaimable headroom, <=1536 MiB DB RSS, <=4 GiB added RSS, <=120 DB CPU seconds, <=15 minutes; small fixture at10 offered RPS, then conditionally 20 RPS only after no skipped base-rate arrivals. Use --tier=medium for the approved10,000-task tier (2 RPS smoke, then at most10 RPS). Optional --browser-build=.next-perf-ID serves the medium fixture for one browser session; --browser-profile=selector retains all owner tasks as terminal history to isolate requirement selection from the known Board rendering failure. Use --concurrency-contract alone for deterministic four-connection lock/authority cases instead of load. Use --tier=medium --health-profile for a bounded project-health read profile. Use --index-profile with --tier=small or --tier=medium for actual authorized-plan and temporary-index diagnostics. Use --connection-budget alone for bounded two-process driver/realtime connection accounting. No installations or existing cluster access.");
+  console.log("Use installed PostgreSQL/pgvector in one temporary loopback-only cluster. Limits: normal macOS memory pressure, >=2 GiB reclaimable headroom, <=1536 MiB DB RSS, <=4 GiB added RSS, <=120 DB CPU seconds, <=15 minutes; small fixture at10 offered RPS, then conditionally 20 RPS only after no skipped base-rate arrivals. Use --tier=medium for the approved10,000-task tier (2 RPS smoke, then at most10 RPS). Optional --browser-build=.next-perf-ID serves the medium fixture for one browser session; --browser-compare-build=.next-perf-ID permits one sequential owned-server switch on the same fixture via the ready-file .next marker, under the same total15-minute guard; --browser-profile=selector retains all owner tasks as terminal history to isolate requirement selection from the known Board rendering failure. Use --concurrency-contract alone for deterministic four-connection lock/authority cases instead of load. Use --tier=medium --health-profile for a bounded project-health read profile. Use --index-profile with --tier=small or --tier=medium for actual authorized-plan and temporary-index diagnostics. Use --connection-budget alone for bounded two-process driver/realtime connection accounting. No installations or existing cluster access.");
   process.exit(0);
 }
-if (args.some(value => !["--tier=small", "--tier=medium", "--concurrency-contract", "--health-profile", "--index-profile", "--connection-budget"].includes(value) && value !== browserArgument && value !== browserProfileArgument)
-    || args.length !== Number(Boolean(tierArgument)) + Number(Boolean(browserArgument)) + Number(Boolean(browserProfileArgument)) + Number(concurrencyContract) + Number(healthProfile) + Number(indexProfile) + Number(connectionBudget)
+if (args.some(value => !["--tier=small", "--tier=medium", "--concurrency-contract", "--health-profile", "--index-profile", "--connection-budget"].includes(value) && value !== browserArgument && value !== browserProfileArgument && value !== compareArgument)
+    || args.length !== Number(Boolean(tierArgument)) + Number(Boolean(browserArgument)) + Number(Boolean(browserProfileArgument)) + Number(Boolean(compareArgument)) + Number(concurrencyContract) + Number(healthProfile) + Number(indexProfile) + Number(connectionBudget)
     || concurrencyContract && Boolean(tierArgument || browserArgument || browserProfileArgument || healthProfile || indexProfile || connectionBudget)
     || connectionBudget && Boolean(tierArgument || concurrencyContract || indexProfile || healthProfile || browserArgument || browserProfileArgument)
     || indexProfile && Boolean(concurrencyContract || healthProfile || browserArgument || browserProfileArgument)
     || healthProfile && (tier !== "medium" || Boolean(browserArgument || browserProfileArgument))
     || browserProfileArgument !== undefined && (!browserBuild || browserProfile !== "selector")
+    || compareArgument !== undefined && (!browserBuild || !/^\.next-perf-[a-z0-9][a-z0-9-]{0,63}$/.test(compareBuild) || compareBuild === browserBuild)
     || browserArgument !== undefined && (tier !== "medium" || !/^\.next-perf-[a-z0-9][a-z0-9-]{0,63}$/.test(browserBuild))) {
   console.error("Unsupported local baseline arguments"); process.exit(1);
 }
@@ -71,6 +74,7 @@ const interrupt = () => { clearInterval(monitor); cleanupSafely(); process.exit(
 for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, interrupt);
 const watchdog = setTimeout(interrupt, 15 * 60_000);
 try {
+  if (compareBuild && !existsSync(join("apps/web", compareBuild, "BUILD_ID"))) throw new Error("Comparison build unavailable");
   if (browserBuild && !existsSync(join("apps/web", browserBuild, "BUILD_ID"))) throw new Error("Performance build unavailable");
   if (headroom() < 2 * 1024 ** 3) throw new Error("Resource gate");
   stage = "runtime preflight";
@@ -106,7 +110,7 @@ try {
   stage = "worker execution";
   child = spawn("pnpm", ["exec", "tsx", concurrencyContract ? "apps/api/src/performance-concurrency-contract.ts" : healthProfile ? "apps/api/src/performance-health.ts" : indexProfile ? "apps/api/src/performance-indexes.ts" : connectionBudget ? "apps/api/src/performance-connections.ts" : browserBuild ? "apps/api/src/performance-browser-fixture.ts" : "apps/api/src/performance-baseline.ts"], { detached: true, stdio: ["ignore", "pipe", "pipe"],
     env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_OPTIONS: "--max-old-space-size=1024", PGOPTIONS: "-c client_min_messages=warning", TW_PERFORMANCE_TIER: tier,
-      TW_PERFORMANCE_BROWSER_BUILD: browserBuild ?? "", TW_PERFORMANCE_BROWSER_READY_FILE: join(root, "browser-ready.json"),
+      TW_PERFORMANCE_BROWSER_BUILD: browserBuild ?? "", TW_PERFORMANCE_BROWSER_COMPARE_BUILD: compareBuild ?? "", TW_PERFORMANCE_BROWSER_READY_FILE: join(root, "browser-ready.json"),
       TW_PERFORMANCE_BROWSER_PROFILE: browserProfile,
       TW_PERFORMANCE_DATABASE_URL: `postgres://fixture:${password}@127.0.0.1:${port}/tw_performance` } });
   let output = "";

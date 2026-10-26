@@ -29,6 +29,9 @@ import {
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { DeferredTaskDetailSheet as TaskDetailSheet } from "./deferred-task-detail-sheet";
+import { Button } from "@/components/ui/button";
+import { QueryStatePanel } from "@/components/query-state-panel";
+import { RequirementPicker } from "./requirement-picker";
 import { RepositoryChips } from "./repository-links";
 
 const priorityColors: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -193,13 +196,19 @@ export function KanbanBoard({
   const [scopeReqId, setScopeReqId] = useState<string>("__all__");
   const [showAllCompleted, setShowAllCompleted] = useState(false);
   const [showTerminalColumns, setShowTerminalColumns] = useState(false);
+  const [page, setPage] = useState(1);
+  const [filterOpen, setFilterOpen] = useState(false);
   const isMobile = useIsMobile();
   const boardQueryInput = useMemo(() => ({
     projectId,
+    page, pageSize: 50, requirementId: scopeReqId === "__all__" ? undefined : scopeReqId,
     includeTerminal: showTerminalColumns,
     completedWithinDays: showTerminalColumns && showAllCompleted ? 0 : undefined,
-  }), [projectId, showAllCompleted, showTerminalColumns]);
-  const { data: board, isLoading } = trpc.task.board.useQuery(boardQueryInput);
+  }), [projectId, page, scopeReqId, showAllCompleted, showTerminalColumns]);
+  const result = trpc.task.boardPage.useQuery(boardQueryInput);
+  const board = result.isError ? undefined : result.data;
+  const pageCount = Math.max(1, board?.pageCount ?? 1);
+  if (board && page > pageCount) setPage(pageCount);
   const utils = trpc.useUtils();
 
   const handleTaskClick = externalOnTaskClick ?? ((id: string) => setSelectedTaskId(id));
@@ -207,33 +216,22 @@ export function KanbanBoard({
 
   const updateStatus = trpc.task.updateStatus.useMutation({
     onMutate: async ({ id, status: newStatus }) => {
-      await utils.task.board.cancel(boardQueryInput);
-      const prev = utils.task.board.getData(boardQueryInput);
+      await utils.task.boardPage.cancel(boardQueryInput);
+      const prev = utils.task.boardPage.getData(boardQueryInput);
       if (prev) {
-        utils.task.board.setData(boardQueryInput, {
-          ...prev,
-          columns: prev.columns.map((col) => ({
-            ...col,
-            tasks: col.status === newStatus
-              ? [...col.tasks, ...prev.columns
-                  .flatMap((c) => c.tasks)
-                  .filter((t) => t.id === id)
-                  .map((t) => ({ ...t, status: newStatus }))]
-              : col.tasks.filter((t) => t.id !== id),
-            count: col.status === newStatus
-              ? col.count + (prev.columns.some((c) => c.tasks.some((t) => t.id === id && c.status !== newStatus)) ? 1 : 0)
-              : col.tasks.some((t) => t.id === id) ? col.count - 1 : col.count,
-          })),
+        utils.task.boardPage.setData(boardQueryInput, { ...prev,
+          items: prev.items.map(task => task.id === id ? { ...task, status: newStatus } : task),
         });
       }
       return { prev };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prev) utils.task.board.setData(boardQueryInput, ctx.prev);
+      if (ctx?.prev) utils.task.boardPage.setData(boardQueryInput, ctx.prev);
       toast.error("Failed to update task status");
     },
     onSettled: () => {
       utils.task.board.invalidate({ projectId });
+      utils.task.boardPage.invalidate({ projectId });
       utils.requirement.list.invalidate({ projectId });
       utils.requirement.listSummary.invalidate({ projectId });
       utils.task.gantt.invalidate({ projectId });
@@ -242,7 +240,7 @@ export function KanbanBoard({
 
   const allTasks = useMemo(() => {
     if (!board) return [];
-    return board.columns.flatMap((col) => col.tasks) as BoardTask[];
+    return board.items as BoardTask[];
   }, [board]);
 
   const requirements = useMemo(() => {
@@ -309,23 +307,11 @@ export function KanbanBoard({
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex gap-3 overflow-hidden sm:gap-4">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton key={i} className="h-96 w-[calc(100vw-3rem)] max-w-72 shrink-0 rounded-xl sm:w-64" />
-        ))}
-      </div>
-    );
-  }
-
-  if (!board) return null;
-
   return (
     <>
       <div className="mb-3 grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap sm:gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="text-xs text-muted-foreground">Group by</span>
+          <span className="text-xs text-muted-foreground">Group page by</span>
           <Select value={groupBy} onValueChange={(v) => setGroupBy(v as GroupBy)}>
             <SelectTrigger className="h-10 min-w-0 flex-1 text-xs sm:h-7 sm:w-32 sm:flex-none">
               <SelectValue />
@@ -338,27 +324,17 @@ export function KanbanBoard({
           </Select>
         </div>
 
-        {requirements.length > 1 && (
-          <div className="col-span-2 flex min-w-0 items-center gap-2 sm:col-auto">
-            <Filter className="h-3 w-3 text-muted-foreground" />
-            <Select value={scopeReqId} onValueChange={setScopeReqId}>
-              <SelectTrigger className="h-10 min-w-0 flex-1 text-xs sm:h-7 sm:w-48 sm:flex-none">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">All Requirements</SelectItem>
-                {requirements.map((r) => (
-                  <SelectItem key={r.id} value={r.id}>
-                    {r.title}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+        <div className="col-span-2 min-w-0 space-y-2 sm:col-auto sm:max-w-sm">
+          <Button type="button" variant="outline" size="sm" aria-expanded={filterOpen}
+            onClick={() => setFilterOpen(open => !open)}>
+            <Filter className="mr-1 h-3 w-3" />{scopeReqId === "__all__" ? "All Requirements" : "Requirement filter active"}
+          </Button>
+          {filterOpen && <RequirementPicker key={projectId} projectId={projectId} value={scopeReqId}
+            invalid={false} allowAll includeCancelled onValueChange={id => { setScopeReqId(id); setPage(1); }} />}
+        </div>
 
         <button
-          onClick={() => setShowTerminalColumns((v) => !v)}
+          onClick={() => { setShowTerminalColumns(v => !v); setPage(1); }}
           className={cn(
             "flex min-h-10 items-center justify-center gap-1 rounded-md px-2 py-1 text-xs transition-colors sm:min-h-7",
             showTerminalColumns
@@ -373,7 +349,7 @@ export function KanbanBoard({
 
         {showTerminalColumns && (
           <button
-            onClick={() => setShowAllCompleted((v) => !v)}
+            onClick={() => { setShowAllCompleted(v => !v); setPage(1); }}
             className={cn(
               "flex min-h-10 items-center justify-center gap-1 rounded-md px-2 py-1 text-xs transition-colors sm:ml-auto sm:min-h-7",
               showAllCompleted
@@ -387,7 +363,7 @@ export function KanbanBoard({
         )}
 
         <span className="text-right text-xs text-muted-foreground tabular-nums sm:text-left">
-          {filteredTasks.length} task{filteredTasks.length !== 1 ? "s" : ""}
+          {board ? `${board.total} matching tasks · ${filteredTasks.length} on this page` : "Loading tasks..."}
         </span>
         {isMobile && groupBy === "status" && (
           <span className="col-span-2 text-xs text-muted-foreground">
@@ -396,6 +372,15 @@ export function KanbanBoard({
         )}
       </div>
 
+      <nav aria-label="Board task pages" className="mb-3 flex items-center justify-between gap-2 text-sm">
+        <Button type="button" variant="outline" size="sm" disabled={page <= 1 || result.isFetching}
+          onClick={() => setPage(current => current - 1)}>Previous tasks</Button>
+        <span aria-live="polite">{board ? `Page ${page} of ${pageCount}` : result.isError ? `Page ${page} unavailable` : `Loading page ${page}...`}</span>
+        <Button type="button" variant="outline" size="sm" disabled={!board || page >= pageCount || result.isFetching}
+          onClick={() => setPage(current => current + 1)}>Next tasks</Button>
+      </nav>
+      {result.isError && <QueryStatePanel title="Board could not be loaded" onAction={() => result.refetch()} />}
+      {result.isPending && <Skeleton className="h-96 w-full rounded-xl" />}
       <DndContext
         sensors={sensors}
         onDragStart={handleDragStart}

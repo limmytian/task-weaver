@@ -639,6 +639,7 @@ function ExecutionSlicesPanel({
     utils.requirement.get.invalidate({ id: requirementId });
     utils.task.gantt.invalidate({ projectId });
     utils.task.board.invalidate({ projectId });
+    utils.task.boardPage.invalidate({ projectId });
   };
 
   const createSlice = trpc.requirement.createSlice.useMutation({

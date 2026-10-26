@@ -10,6 +10,7 @@ import { serve } from "@hono/node-server";
 import { sql } from "drizzle-orm";
 import { createDb, runMigrations, requirements, tasks, documents, taskDependencies, documentTaskLinks, documentRequirementLinks } from "@task-weaver/db";
 import { performanceFixture, performanceBatches } from "./performance-fixture";
+import { checkPerformanceBoard } from "./performance-board-checks";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 
 // Public, disposable fixture credentials only. They never authenticate to an existing instance.
@@ -17,13 +18,15 @@ const email = "performance-owner@example.test";
 const password = "fixture-only-browser-performance-20261026";
 const databaseUrl = process.env.TW_PERFORMANCE_DATABASE_URL!;
 const readyFile = process.env.TW_PERFORMANCE_BROWSER_READY_FILE!;
-const directory = process.env.TW_PERFORMANCE_BROWSER_BUILD!;
+let directory = process.env.TW_PERFORMANCE_BROWSER_BUILD!;
+const compareDirectory = process.env.TW_PERFORMANCE_BROWSER_COMPARE_BUILD;
+assert.ok(!compareDirectory || /^\.next-perf-[a-z0-9-]+$/.test(compareDirectory));
 const profile = process.env.TW_PERFORMANCE_BROWSER_PROFILE ?? "mixed";
 assert.ok(profile === "mixed" || profile === "selector");
 const url = new URL(databaseUrl);
 assert.equal(url.hostname, "127.0.0.1"); assert.equal(url.pathname, "/tw_performance");
 assert.ok(readyFile && /^\.next-perf-[a-z0-9-]+$/.test(directory));
-const db = createDb(databaseUrl, { maxConnections: 1 });
+const db = createDb(databaseUrl, { maxConnections: 1, measureQueries: true });
 let api: ReturnType<typeof serve> | undefined, web: ReturnType<typeof spawn> | undefined;
 const freePort = async (host = "127.0.0.1") => {
   const socket = createServer(); await new Promise<void>(resolve => socket.listen(0, host, resolve));
@@ -53,9 +56,26 @@ try {
   for (const batch of performanceBatches(generated.dependencies)) await db.insert(taskDependencies).values(batch);
   await db.insert(documentTaskLinks).values(generated.taskLinks); await db.insert(documentRequirementLinks).values(generated.requirementLinks);
   await db.execute(sql`ANALYZE`);
+  console.log("TW_PERFORMANCE_STAGE fixture");
+  if (compareDirectory && profile === "mixed") {
+    const audit = await checkPerformanceBoard(f, browserTasks.filter(row => row.projectId === f.project.id
+      && row.status !== "done" && row.status !== "cancelled").map(row => row.id),
+      generated.requirementRows.find(row => row.projectId === other.id)!.id);
+    writeFileSync(`${readyFile}.board-audit.json`, JSON.stringify(audit), { mode: 0o600 });
+  }
   api = serve({ hostname: "127.0.0.1", port: apiPort, fetch: f.app.fetch });
   const require = createRequire(resolve("apps/web/package.json"));
-  web = spawn(process.execPath, [require.resolve("next/dist/bin/next"), "start", "-H", "::1", "-p", String(webPort)], {
+  const stopWeb = async () => {
+    if (!web || web.exitCode !== null) return;
+    const current = web;
+    current.kill("SIGTERM");
+    await new Promise<void>(resolve => {
+      const timer = setTimeout(() => { current.kill("SIGKILL"); resolve(); }, 3000);
+      current.once("exit", () => { clearTimeout(timer); resolve(); });
+    });
+  };
+  const startWeb = async () => {
+    web = spawn(process.execPath, [require.resolve("next/dist/bin/next"), "start", "-H", "::1", "-p", String(webPort)], {
     cwd: resolve("apps/web"), stdio: "ignore",
     env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_OPTIONS: "--max-old-space-size=1024",
       NEXT_TELEMETRY_DISABLED: "1", TW_PERFORMANCE_WEB_DIST_DIR: directory, DATABASE_URL: databaseUrl,
@@ -77,15 +97,32 @@ try {
     fixedRequirementId: generated.requirementRows[0]!.id,
     buildDirectory: directory, buildId: readFileSync(join(resolve("apps/web"), directory, "BUILD_ID"), "utf8").trim(),
     tasks: generated.counts.tasks, requirements: generated.counts.requirements, apiPoolMax: 1, webPoolMax: 10, realtimePoolMax: 2 }), { mode: 0o600 });
+  };
+  await startWeb();
   console.log("TW_PERFORMANCE_BROWSER_READY");
-  await new Promise<void>(resolve => {
-    const timer = setInterval(() => { if (existsSync(`${readyFile}.done`)) { clearInterval(timer); resolve(); } }, 200);
-    const stop = () => { clearInterval(timer); resolve(); };
-    process.once("SIGTERM", stop); process.once("SIGINT", stop);
-  });
+  // Sequential phases reuse rows/auth/ports. Never run both Web builds concurrently.
+  let switched = false;
+  while (!existsSync(`${readyFile}.done`)) {
+    if (compareDirectory && !switched && existsSync(`${readyFile}.next`)) {
+      switched = true;
+      await stopWeb();
+      directory = compareDirectory;
+      await startWeb();
+      console.log("TW_PERFORMANCE_BROWSER_SWITCHED");
+    }
+    await delay(200);
+  }
   console.log("TW_PERFORMANCE_RECEIPT " + JSON.stringify({ browserFixture: true, fixtureHash, profile, baseFixtureHash: generated.hash,
     tasks: generated.counts.tasks, requirements: generated.counts.requirements, directory,
     buildId: readFileSync(join(resolve("apps/web"), directory, "BUILD_ID"), "utf8").trim() }));
+} catch (error) {
+  const failure = error as { code?: unknown; operator?: unknown; actual?: unknown; expected?: unknown };
+  console.log("TW_PERFORMANCE_PARTIAL " + JSON.stringify({ browserSetupFailed: true,
+    category: error instanceof assert.AssertionError ? "assertion" : error instanceof Error ? error.name : "unknown",
+    code: typeof failure.code === "string" && /^[A-Z0-9_]{1,40}$/.test(failure.code) ? failure.code : undefined,
+    actual: typeof failure.actual === "number" ? failure.actual : undefined,
+    expected: typeof failure.expected === "number" ? failure.expected : undefined }));
+  throw new Error("Isolated browser fixture failed");
 } finally {
   if (web?.pid && web.exitCode === null) {
     web.kill("SIGTERM");

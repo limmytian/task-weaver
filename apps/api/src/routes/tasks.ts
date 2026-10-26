@@ -7,6 +7,7 @@ import {
   updateTaskSchema,
   updateTaskStatusSchema,
   listTasksSchema,
+  boardPageSchema,
   createTaskCommentSchema,
   createTaskNoteSchema,
   createTaskDependencySchema,
@@ -153,6 +154,15 @@ tasks.get("/projects/:projectId/board", async (c) => {
 
   const board = await createResourceServices(c.get("identity")).taskService.getKanbanBoard(db, projectId, { includeTerminal, completedWithinDays });
   return c.json(board);
+});
+
+// GET /projects/:projectId/board-page - Bounded Board summaries and matching total.
+tasks.get("/projects/:projectId/board-page", async (c) => {
+  const query = c.req.query();
+  const parsed = boardPageSchema.safeParse({ ...query, projectId: c.req.param("projectId"),
+    includeTerminal: query.includeTerminal === "true" || query.includeTerminal === "1" });
+  if (!parsed.success) throw new ValidationError(parsed.error.message);
+  return c.json(await createResourceServices(c.get("identity")).taskService.getKanbanBoardPage(c.get("db"), parsed.data.projectId, parsed.data));
 });
 
 // GET /projects/:projectId/gantt - Get gantt chart data
