@@ -15,6 +15,7 @@ import { createResourceServices } from "@task-weaver/core";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 import { runPerformanceWave } from "./performance-workload";
 import { readPerformanceJson, verifyPerformancePagination } from "./performance-pagination";
+import { measurePerformanceQueryPlans } from "./performance-query-plans";
 import { PERFORMANCE_SEED as seed, performanceId as id, performanceFixture, performanceBatches, type PerformanceTier } from "./performance-fixture";
 
 const tierInput = process.env.TW_PERFORMANCE_TIER ?? "small";
@@ -27,7 +28,7 @@ assert.equal(url.hostname, "127.0.0.1");
 assert.equal(url.pathname, "/tw_performance");
 function sourceProvenance() {
   const implementationHash = createHash("sha256");
-  for (const file of ["apps/api/src/performance-baseline.ts", "apps/api/src/performance-workload.ts", "apps/api/src/performance-fixture.ts", "apps/api/src/performance-pagination.ts", "apps/api/src/resource-postgres-fixture.ts", "scripts/performance-baseline.mjs", "scripts/performance-local-postgres.mjs", "scripts/performance-resources.mjs", "packages/db/src/measurement.ts", "packages/db/src/client.ts", "packages/core/src/services/auth-security.ts", "packages/core/src/services/resource-services.ts"]) {
+  for (const file of ["apps/api/src/performance-baseline.ts", "apps/api/src/performance-workload.ts", "apps/api/src/performance-fixture.ts", "apps/api/src/performance-pagination.ts", "apps/api/src/performance-query-plans.ts", "apps/api/src/resource-postgres-fixture.ts", "scripts/performance-baseline.mjs", "scripts/performance-local-postgres.mjs", "scripts/performance-resources.mjs", "packages/db/src/measurement.ts", "packages/db/src/client.ts", "packages/core/src/services/auth-security.ts", "packages/core/src/services/resource-services.ts"]) {
     implementationHash.update(file).update(readFileSync(file));
   }
   return {
@@ -273,10 +274,12 @@ try {
   try { await request("legacyRequirements", 0); }
   catch (error) { if (tier === "small") throw error; compatibilityOutcome = "deadline_or_validation_failure"; }
   measured = false;
+  const compatibilityElapsedMs = performance.now() - compatibilityStarted;
+  const queryPlans = await measurePerformanceQueryPlans(db, fixture.project.id, generated.counts.tasks / 2, generated.counts.requirements / 2);
   console.log("TW_PERFORMANCE_RECEIPT " + JSON.stringify({ source: sourceProvenance(), seed, fixtureHash,
     fixture: { tier, projects: 2, requirements: generated.counts.requirements, tasks: generated.counts.tasks, documents: generated.counts.documents, documentBytes: 4096, taskDependencies: generated.counts.dependencies, documentLinks: 200, progressHistory: 0, identityProfile: "Reads rotate owner/member/viewer/agent/narrowed key; writes rotate owner/member/agent; revoked and outsider probes excluded from successful throughput" },
     runtime: { node: process.version, cpu: cpus()[0]?.model, cpuCount: cpus().length, hostMemoryBytes: totalmem(), apiProcesses: 1, apiPoolMax: 10, monitorPoolMax: 1, realtimeStarted: false, transport: "loopback HTTP; API and load generator share one process" },
-    coldTaskSummaryMs, cases, skippedProfiles, pagination,
+    coldTaskSummaryMs, cases, skippedProfiles, pagination, queryPlans,
     profiles: [...profileSamples.entries()].map(([profile, aggregate]) => ({ profile, elapsedMs: aggregate.elapsedMs,
       operations: [...new Set(mix)].map(operation => {
         const selected = aggregate.samples.filter(sample => sample.operation === operation);
@@ -286,8 +289,8 @@ try {
           sufficientInitialSamples: selected.length >= 200 };
       }) })),
     legacyRequirements: samples.map(({ database, ...s }) => ({ ...s, queryCount: database!.queryCount })),
-    compatibilityProbe: { outcome: compatibilityOutcome, elapsedMs: performance.now() - compatibilityStarted, deadlineMs: 5000, isolatedReadOnlyProbe: true },
-    unknown: ["independent pool wait", "identity lock wait separate from lock-query execution", "per-query elapsed time and returned/scanned rows", "SQL plans", "browser journeys", "worker/progress/console profiles", "second API process", "monitoring overhead comparison", "saturation above the tested offered rate"],
+    compatibilityProbe: { outcome: compatibilityOutcome, elapsedMs: compatibilityElapsedMs, deadlineMs: 5000, isolatedReadOnlyProbe: true },
+    unknown: ["independent pool wait", "identity lock wait separate from lock-query execution", "per-query elapsed time and returned/scanned rows beyond representative leaf plans", "authorization and relation-pruning SQL plans", "browser journeys", "worker/progress/console profiles", "second API process", "monitoring overhead comparison", "saturation above the tested offered rate"],
     limits: ["Approved small/medium synthetic fixture only", "SQL count is ORM statements, excluding driver BEGIN/COMMIT", "Resource transaction duration includes entry, lock query and commit", "Each case resets task versions/titles/timestamps, requirement revisions and mutation/outbox history before identical warmup", "Table counters are interval aggregates with asynchronous flush, not per-query row counts", "One-second lock sampling can miss short waits", "No production SLA or optimization claim", "Repeated samples support initial tails; stable p99 is not established", "No browser or model process started"] }));
 } catch (error) {
   const message = error instanceof Error ? error.message : "";
