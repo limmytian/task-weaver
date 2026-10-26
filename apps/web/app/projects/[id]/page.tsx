@@ -1,6 +1,6 @@
 "use client";
 
-import { ProjectWorkflowSettings } from "@/components/project-workflow-settings";
+import { deferView } from "@/components/deferred-view";
 
 import { use, useMemo, useState } from "react";
 import Link from "next/link";
@@ -43,17 +43,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CreateTaskDialog } from "@/components/create-task-dialog";
 import { CreateRequirementDialog } from "@/components/create-requirement-dialog";
-import { TaskDetailSheet } from "@/components/task-detail-sheet";
+import { DeferredTaskDetailSheet as TaskDetailSheet } from "@/components/deferred-task-detail-sheet";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { HealthDashboard } from "@/components/health-dashboard";
-import { GanttChart } from "@/components/gantt-chart";
-import { RequirementsHeatmap } from "@/components/requirements-heatmap";
-import { KnowledgeGraph } from "@/components/knowledge-graph";
 import { KanbanBoard } from "@/components/kanban-board";
-import { DependencyDag, type DependencyDagEdge, type DependencyDagNode } from "@/components/dependency-dag";
+import type { DependencyDagEdge, DependencyDagNode } from "@/components/dependency-dag";
 import { AssistantDialog } from "@/components/assistant-dialog";
 import { ProjectWorkspaceLinks, WorkspaceBreadcrumbs } from "@/components/project-navigation";
 import { RepositoryChips } from "@/components/repository-links";
+
+const HealthDashboard = deferView(() => import("@/components/health-dashboard").then(module => module.HealthDashboard));
+const GanttChart = deferView(() => import("@/components/gantt-chart").then(module => module.GanttChart));
+const RequirementsHeatmap = deferView(() => import("@/components/requirements-heatmap").then(module => module.RequirementsHeatmap));
+const KnowledgeGraph = deferView(() => import("@/components/knowledge-graph").then(module => module.KnowledgeGraph));
+const DependencyDag = deferView(() => import("@/components/dependency-dag").then(module => module.DependencyDag));
+const ProjectWorkflowSettings = deferView(() => import("@/components/project-workflow-settings").then(module => module.ProjectWorkflowSettings));
 
 const reqStatusColors: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   draft: "secondary",

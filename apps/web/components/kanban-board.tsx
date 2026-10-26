@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { TaskDetailSheet } from "./task-detail-sheet";
+import { DeferredTaskDetailSheet as TaskDetailSheet } from "./deferred-task-detail-sheet";
 import { RepositoryChips } from "./repository-links";
 
 const priorityColors: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
