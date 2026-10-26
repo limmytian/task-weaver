@@ -8,7 +8,7 @@ import { macMemoryHeadroom, processSnapshot, processTree } from "./performance-r
 
 if (process.argv.length > 2) {
   if (process.argv.length === 3 && process.argv[2] === "--help") {
-    console.log("Use installed PostgreSQL/pgvector in one temporary loopback-only cluster. Limits: normal macOS memory pressure, >=2 GiB reclaimable headroom, <=1536 MiB DB RSS, <=4 GiB added RSS, <=120 DB CPU seconds, <=15 minutes; fixed small fixture at 10 offered RPS. No installations or existing cluster access.");
+    console.log("Use installed PostgreSQL/pgvector in one temporary loopback-only cluster. Limits: normal macOS memory pressure, >=2 GiB reclaimable headroom, <=1536 MiB DB RSS, <=4 GiB added RSS, <=120 DB CPU seconds, <=15 minutes; small fixture at 10 offered RPS, then conditionally 20 RPS only after no skipped base-rate arrivals. No installations or existing cluster access.");
     process.exit(0);
   }
   console.error("Unsupported local baseline arguments"); process.exit(1);

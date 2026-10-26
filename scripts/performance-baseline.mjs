@@ -5,7 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 if (process.argv.length > 2) {
   if (process.argv.length === 3 && process.argv[2] === "--help") {
-    console.log("Run a disposable small synthetic HTTP baseline using an installed pgvector image. Limits: 2 DB CPUs, 1536 MiB DB memory, 4 GiB added memory, 2 GiB free host memory, 15 minutes, 1/2/4 clients at 10 offered RPS. No production URL, image pull, model, or load-size override is accepted. Browser/worker/SQL-plan coverage remains separate.");
+    console.log("Run a disposable small synthetic HTTP baseline using an installed pgvector image. Limits: 2 DB CPUs, 1536 MiB DB memory, 4 GiB added memory, 2 GiB free host memory, 15 minutes, 1/2/4 clients at 10 offered RPS, then conditionally 20 RPS only after no skipped base-rate arrivals. No production URL, image pull, model, or load-size override is accepted. Browser/worker/SQL-plan coverage remains separate.");
     process.exit(0);
   }
   console.error("Unsupported baseline arguments; use --help");

@@ -13,6 +13,10 @@ test("help and unsupported arguments never reach Docker or echo supplied secrets
   const help = invoke([runner.pathname, "--help"]);
   assert.equal(help.status, 0);
   assert.match(help.stdout, /2 GiB free host memory/);
+  assert.match(help.stdout, /conditionally 20 RPS/);
+  const localHelp = invoke([new URL("./performance-local-postgres.mjs", import.meta.url).pathname, "--help"]);
+  assert.equal(localHelp.status, 0);
+  assert.match(localHelp.stdout, /conditionally 20 RPS/);
   const invalid = invoke([runner.pathname, "--database-url=private-value"]);
   assert.equal(invalid.status, 1);
   assert.match(invalid.stderr, /Unsupported baseline arguments/);
