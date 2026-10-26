@@ -21,6 +21,17 @@ test("help and unsupported arguments never reach Docker or echo supplied secrets
   const unsupportedTier = invoke([new URL("./performance-local-postgres.mjs", import.meta.url).pathname, "--tier=large"]);
   assert.equal(unsupportedTier.status, 1);
   assert.match(unsupportedTier.stderr, /Unsupported local baseline arguments/);
+  for (const args of [
+    ["--tier=medium", "--browser-build="],
+    ["--tier=small", "--browser-build=.next-perf-fixture"],
+    ["--tier=medium", "--browser-build=../private-value"],
+    ["--tier=medium", "--tier=medium"],
+  ]) {
+    const result = invoke([new URL("./performance-local-postgres.mjs", import.meta.url).pathname, ...args]);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Unsupported local baseline arguments/);
+    assert.ok(!result.stderr.includes("private-value"));
+  }
   const invalid = invoke([runner.pathname, "--database-url=private-value"]);
   assert.equal(invalid.status, 1);
   assert.match(invalid.stderr, /Unsupported baseline arguments/);

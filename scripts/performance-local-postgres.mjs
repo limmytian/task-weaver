@@ -6,13 +6,18 @@ import { createServer } from "node:net";
 import { randomBytes } from "node:crypto";
 import { macMemoryHeadroom, processSnapshot, processTree } from "./performance-resources.mjs";
 
-const tierArguments = process.argv.slice(2);
-const tier = tierArguments[0] === "--tier=medium" ? "medium" : "small";
-if (tierArguments.length && !(tierArguments.length === 1 && ["--tier=small", "--tier=medium"].includes(tierArguments[0]))) {
-  if (process.argv.length === 3 && process.argv[2] === "--help") {
-    console.log("Use installed PostgreSQL/pgvector in one temporary loopback-only cluster. Limits: normal macOS memory pressure, >=2 GiB reclaimable headroom, <=1536 MiB DB RSS, <=4 GiB added RSS, <=120 DB CPU seconds, <=15 minutes; small fixture at 10 offered RPS, then conditionally 20 RPS only after no skipped base-rate arrivals. Use --tier=medium for the approved 10,000-task tier (2 RPS smoke, then at most 10 RPS); default is small. No installations or existing cluster access.");
-    process.exit(0);
-  }
+const args = process.argv.slice(2);
+const tierArgument = args.find(value => value.startsWith("--tier="));
+const tier = tierArgument === "--tier=medium" ? "medium" : "small";
+const browserArgument = args.find(value => value.startsWith("--browser-build="));
+const browserBuild = browserArgument?.slice("--browser-build=".length);
+if (args.length === 1 && args[0] === "--help") {
+  console.log("Use installed PostgreSQL/pgvector in one temporary loopback-only cluster. Limits: normal macOS memory pressure, >=2 GiB reclaimable headroom, <=1536 MiB DB RSS, <=4 GiB added RSS, <=120 DB CPU seconds, <=15 minutes; small fixture at10 offered RPS, then conditionally 20 RPS only after no skipped base-rate arrivals. Use --tier=medium for the approved10,000-task tier (2 RPS smoke, then at most10 RPS). Optional --browser-build=.next-perf-ID serves the medium fixture for one browser session. No installations or existing cluster access.");
+  process.exit(0);
+}
+if (args.some(value => !["--tier=small", "--tier=medium"].includes(value) && value !== browserArgument)
+    || args.length !== Number(Boolean(tierArgument)) + Number(Boolean(browserArgument))
+    || browserArgument !== undefined && (tier !== "medium" || !/^\.next-perf-[a-z0-9][a-z0-9-]{0,63}$/.test(browserBuild))) {
   console.error("Unsupported local baseline arguments"); process.exit(1);
 }
 const exec = (command, args) => execFileSync(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 20_000 }).trim();
@@ -55,6 +60,7 @@ const interrupt = () => { clearInterval(monitor); cleanupSafely(); process.exit(
 for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, interrupt);
 const watchdog = setTimeout(interrupt, 15 * 60_000);
 try {
+  if (browserBuild && !existsSync(join("apps/web", browserBuild, "BUILD_ID"))) throw new Error("Performance build unavailable");
   if (headroom() < 2 * 1024 ** 3) throw new Error("Resource gate");
   stage = "runtime preflight";
   const postgresVersion = exec("postgres", ["--version"]);
@@ -87,11 +93,20 @@ try {
   databasePid = Number(readFileSync(join(root, "data", "postmaster.pid"), "utf8").split("\n")[0]);
   exec("createdb", ["-h", root, "-p", String(port), "-U", "fixture", "tw_performance"]);
   stage = "worker execution";
-  child = spawn("pnpm", ["exec", "tsx", "apps/api/src/performance-baseline.ts"], { detached: true, stdio: ["ignore", "pipe", "pipe"],
+  child = spawn("pnpm", ["exec", "tsx", browserBuild ? "apps/api/src/performance-browser-fixture.ts" : "apps/api/src/performance-baseline.ts"], { detached: true, stdio: ["ignore", "pipe", "pipe"],
     env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_OPTIONS: "--max-old-space-size=1024", PGOPTIONS: "-c client_min_messages=warning", TW_PERFORMANCE_TIER: tier,
+      TW_PERFORMANCE_BROWSER_BUILD: browserBuild ?? "", TW_PERFORMANCE_BROWSER_READY_FILE: join(root, "browser-ready.json"),
       TW_PERFORMANCE_DATABASE_URL: `postgres://fixture:${password}@127.0.0.1:${port}/tw_performance` } });
   let output = "";
-  child.stdout.on("data", chunk => { output += chunk; if (output.length > 2_000_000) { stopReason = "output ceiling"; stopChild(); } });
+  let browserReadyPublished = false;
+  child.stdout.on("data", chunk => {
+    output += chunk;
+    if (browserBuild && !browserReadyPublished && output.includes("TW_PERFORMANCE_BROWSER_READY\n")) {
+      const ready = JSON.parse(readFileSync(join(root, "browser-ready.json"), "utf8"));
+      console.log(JSON.stringify({ browserReady: true, ...ready, readyFile: join(root, "browser-ready.json") }));
+      browserReadyPublished = true;
+    }
+    if (output.length > 2_000_000) { stopReason = "output ceiling"; stopChild(); } });
   child.stderr.resume();
   monitor = setInterval(() => {
     try {
@@ -105,7 +120,7 @@ try {
       const dbRss = database.reduce((sum, row) => sum + row.rssBytes, 0);
       const added = dbRss + api.reduce((sum, row) => sum + row.rssBytes, 0) + (snapshot.find(row => row.pid === process.pid)?.rssBytes ?? 0);
       peakDbRssBytes = Math.max(peakDbRssBytes, dbRss); peakAddedRssBytes = Math.max(peakAddedRssBytes, added); samples++;
-      if (headroom() < 2 * 1024 ** 3 || dbRss > 1536 * 1024 ** 2 || added > 4 * 1024 ** 3 || dbCpuSeconds > 120) throw new Error("Resource ceiling");
+      if (headroom() < 2 * 1024 ** 3 || dbRss > 1536 * 1024 ** 2 || added > (browserBuild ? 3 : 4) * 1024 ** 3 || dbCpuSeconds > 120) throw new Error("Resource ceiling");
     } catch { stopReason = "resource ceiling or monitor unavailable"; stopChild(); }
   }, 1000);
   const code = await new Promise(resolve => { child.once("exit", resolve); child.once("error", () => resolve(-1)); });

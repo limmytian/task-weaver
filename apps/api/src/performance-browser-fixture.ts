@@ -1,0 +1,88 @@
+import assert from "node:assert/strict";
+import { createServer } from "node:net";
+import { createRequire } from "node:module";
+import { spawn } from "node:child_process";
+import { writeFileSync, readFileSync, existsSync } from "node:fs";
+import { resolve, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { serve } from "@hono/node-server";
+import { sql } from "drizzle-orm";
+import { createDb, runMigrations, requirements, tasks, documents, taskDependencies, documentTaskLinks, documentRequirementLinks } from "@task-weaver/db";
+import { performanceFixture, performanceBatches } from "./performance-fixture";
+import { resourcePostgresFixture } from "./resource-postgres-fixture";
+
+// Public, disposable fixture credentials only. They never authenticate to an existing instance.
+const email = "performance-owner@example.test";
+const password = "fixture-only-browser-performance-20261026";
+const databaseUrl = process.env.TW_PERFORMANCE_DATABASE_URL!;
+const readyFile = process.env.TW_PERFORMANCE_BROWSER_READY_FILE!;
+const directory = process.env.TW_PERFORMANCE_BROWSER_BUILD!;
+const url = new URL(databaseUrl);
+assert.equal(url.hostname, "127.0.0.1"); assert.equal(url.pathname, "/tw_performance");
+assert.ok(readyFile && /^\.next-perf-[a-z0-9-]+$/.test(directory));
+const db = createDb(databaseUrl, { maxConnections: 1 });
+let api: ReturnType<typeof serve> | undefined, web: ReturnType<typeof spawn> | undefined;
+const freePort = async (host = "127.0.0.1") => {
+  const socket = createServer(); await new Promise<void>(resolve => socket.listen(0, host, resolve));
+  const address = socket.address(); assert.ok(address && typeof address !== "string");
+  await new Promise<void>(resolve => socket.close(() => resolve())); return address.port;
+};
+try {
+  const tables = await db.execute<{ count: string }>(sql`select count(*) as count from pg_class c
+    join pg_namespace n on n.oid=c.relnamespace where n.nspname not like 'pg_%'
+    and n.nspname <> 'information_schema' and c.relkind in ('r','p','v','m','S','f')`);
+  assert.equal(Number(tables[0]?.count), 0, "Browser fixture requires an empty database");
+  await runMigrations(databaseUrl);
+  const apiPort = await freePort(), webPort = await freePort("::1");
+  const apiOrigin = `http://127.0.0.1:${apiPort}`, webOrigin = `http://[::1]:${webPort}`;
+  const f = await resourcePostgresFixture(db, databaseUrl, { password, ownerEmail: email, apiOrigin, webOrigin });
+  const other = await f.identity.createProject(f.outsider.headers, { name: "Other synthetic project" });
+  const generated = performanceFixture([f.project.id, other.id], [f.owner.context.actor.id, f.outsider.context.actor.id], "medium");
+  for (const batch of performanceBatches(generated.requirementRows)) await db.insert(requirements).values(batch);
+  for (const batch of performanceBatches(generated.taskRows)) await db.insert(tasks).values(batch);
+  await db.insert(documents).values(generated.documentRows);
+  for (const batch of performanceBatches(generated.dependencies)) await db.insert(taskDependencies).values(batch);
+  await db.insert(documentTaskLinks).values(generated.taskLinks); await db.insert(documentRequirementLinks).values(generated.requirementLinks);
+  await db.execute(sql`ANALYZE`);
+  api = serve({ hostname: "127.0.0.1", port: apiPort, fetch: f.app.fetch });
+  const require = createRequire(resolve("apps/web/package.json"));
+  web = spawn(process.execPath, [require.resolve("next/dist/bin/next"), "start", "-H", "::1", "-p", String(webPort)], {
+    cwd: resolve("apps/web"), stdio: "ignore",
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_OPTIONS: "--max-old-space-size=1024",
+      NEXT_TELEMETRY_DISABLED: "1", TW_PERFORMANCE_WEB_DIST_DIR: directory, DATABASE_URL: databaseUrl,
+      TW_AUTH_SECRET: f.configuration.secret, TW_AUTH_BASE_URL: apiOrigin, TW_AUTH_TRUSTED_ORIGINS: webOrigin,
+      TW_API_URL: apiOrigin, TW_PRESET_SKILLS_SYNC: "disabled" },
+  });
+  let available = false;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (web.exitCode !== null) break;
+    try {
+      const response = await fetch(`${webOrigin}/login`, { signal: AbortSignal.timeout(2000) });
+      await response.arrayBuffer(); if (response.ok) { available = true; break; }
+    } catch { /* Wait for the owned server only. */ }
+    await delay(200);
+  }
+  assert.ok(available, "Isolated browser server failed to start");
+  writeFileSync(readyFile, JSON.stringify({ webOrigin, apiOrigin, projectId: f.project.id, fixtureHash: generated.hash,
+    buildDirectory: directory, buildId: readFileSync(join(resolve("apps/web"), directory, "BUILD_ID"), "utf8").trim(),
+    tasks: generated.counts.tasks, requirements: generated.counts.requirements, apiPoolMax: 1, webPoolMax: 10, realtimePoolMax: 2 }), { mode: 0o600 });
+  console.log("TW_PERFORMANCE_BROWSER_READY");
+  await new Promise<void>(resolve => {
+    const timer = setInterval(() => { if (existsSync(`${readyFile}.done`)) { clearInterval(timer); resolve(); } }, 200);
+    const stop = () => { clearInterval(timer); resolve(); };
+    process.once("SIGTERM", stop); process.once("SIGINT", stop);
+  });
+  console.log("TW_PERFORMANCE_RECEIPT " + JSON.stringify({ browserFixture: true, fixtureHash: generated.hash,
+    tasks: generated.counts.tasks, requirements: generated.counts.requirements, directory,
+    buildId: readFileSync(join(resolve("apps/web"), directory, "BUILD_ID"), "utf8").trim() }));
+} finally {
+  if (web?.pid && web.exitCode === null) {
+    web.kill("SIGTERM");
+    await new Promise<void>(resolve => {
+      const timer = setTimeout(() => { web!.kill("SIGKILL"); resolve(); }, 3000);
+      web!.once("exit", () => { clearTimeout(timer); resolve(); });
+    });
+  }
+  if (api) await new Promise<void>(resolve => { api!.close(() => resolve()); if ("closeAllConnections" in api!) api!.closeAllConnections(); });
+  await db.$client.end({ timeout: 2 });
+}
