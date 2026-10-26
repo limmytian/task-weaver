@@ -96,6 +96,7 @@ export function useRealtime() {
           if (!accepted) return;
           const data = accepted.data as { documentId?: string };
           utils.document.list.invalidate();
+          utils.document.resolveWikiLinks.invalidate();
           if (data.documentId) utils.document.get.invalidate({ id: data.documentId });
           utils.activity.list.invalidate();
         });

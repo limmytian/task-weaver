@@ -641,16 +641,20 @@ export async function listDaemonControlPlaneQueues(db: Database, scope?: Metadat
   const [requirementRows, daemonRows] = await Promise.all([
     db.query.requirements.findMany({
       where: and(not(inArray(requirements.status, ["done", "cancelled", "archived"])), scope?.requirement),
+      columns: { id: true, projectId: true, title: true, status: true, priority: true, tags: true,
+        updatedAt: true, workflow: true, workflowState: true, workflowRevision: true },
       with: {
-        project: true,
-        claim: true,
-        dependencies: { with: { dependsOn: true } },
+        project: { columns: { id: true, name: true } },
+        claim: { columns: { claimedBy: true, expiresAt: true, generation: true } },
+        dependencies: { columns: { type: true }, with: { dependsOn: { columns: { id: true, title: true, status: true } } } },
         executionSlices: {
+          columns: { id: true, title: true, orderIndex: true, allowParallel: true, status: true },
           orderBy: (slice, { asc }) => [asc(slice.orderIndex), asc(slice.createdAt)],
         },
         tasks: {
+          columns: { id: true, title: true, status: true, tags: true, executionSliceId: true },
           with: {
-            dependencies: { with: { dependsOn: true } },
+            dependencies: { columns: { type: true }, with: { dependsOn: { columns: { id: true, title: true, status: true } } } },
           },
           orderBy: (task, { asc }) => [asc(task.createdAt)],
         },

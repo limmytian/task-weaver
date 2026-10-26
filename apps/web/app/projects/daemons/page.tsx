@@ -23,7 +23,7 @@ import {
   UserRoundCog,
 } from "lucide-react";
 import { trpc } from "@/trpc/client";
-import { useRealtime } from "@/hooks/use-realtime";
+import { useRealtimeStatus } from "@/components/realtime-provider";
 import { QueryStatePanel } from "@/components/query-state-panel";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
@@ -249,7 +249,7 @@ const queueViews = [
 ] as const;
 
 export default function DaemonsPage() {
-  const realtime = useRealtime();
+  const realtime = useRealtimeStatus();
   const utils = trpc.useUtils();
   const daemonQuery = trpc.daemon.list.useQuery(undefined, { refetchInterval: 30_000 });
   const queueQuery = trpc.daemon.queues.useQuery(undefined, { refetchInterval: 30_000 });

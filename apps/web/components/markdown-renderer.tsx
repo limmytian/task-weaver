@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useId, useRef, useMemo, memo, type ComponentProps } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { getQueryKey } from "@trpc/react-query";
+import { resolveWikiLinkBatches } from "@/lib/wiki-link-batches";
+import { Button } from "@/components/ui/button";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useRouter } from "next/navigation";
@@ -13,16 +17,25 @@ interface MarkdownRendererProps {
 
 export const MarkdownRenderer = memo(function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
   const wikiLinkTitles = useMemo(() => extractWikiLinkTitles(content), [content]);
-  const { data: resolved } = trpc.document.resolveWikiLinks.useQuery(
-    { titles: wikiLinkTitles },
-    { enabled: wikiLinkTitles.length > 0 },
-  );
+  const utils = trpc.useUtils();
+  const resolution = useQuery({
+    queryKey: getQueryKey(trpc.document.resolveWikiLinks, { titles: wikiLinkTitles }, "query"),
+    queryFn: ({ signal }) => resolveWikiLinkBatches(wikiLinkTitles,
+      (titles, signal) => utils.client.document.resolveWikiLinks.query({ titles }, { signal }), signal),
+    enabled: wikiLinkTitles.length > 0,
+  });
+  const resolved = resolution.isError ? undefined : resolution.data;
   const titleToId = useMemo(() => new Map(resolved?.map(d => [d.title, d.id]) ?? []), [resolved]);
 
   const preprocessed = useMemo(() => preprocessWikiLinks(content, titleToId), [content, titleToId]);
 
   return (
     <div className={className}>
+      {resolution.isError && <div role="alert" className="mb-3 text-sm text-muted-foreground">
+        Wiki links could not be resolved. <Button type="button" size="sm" variant="outline"
+          onClick={() => resolution.refetch()}>Retry links</Button>
+      </div>}
+      {resolution.isPending && wikiLinkTitles.length > 0 && <p role="status" className="text-sm text-muted-foreground">Resolving wiki links...</p>}
       <ReactMarkdown
         remarkPlugins={MARKDOWN_PLUGINS}
         components={MARKDOWN_COMPONENTS}

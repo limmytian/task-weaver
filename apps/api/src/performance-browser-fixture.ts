@@ -51,7 +51,7 @@ try {
     baseFixtureHash: generated.hash, profile, ownerTasks: "All 5000 tasks are done; default Board excludes terminal history",
   })).digest("hex");
   const browserDocuments = profile === "document" ? generated.documentRows.map((row, index) => index === 0
-    ? { ...row, content: Array.from({ length: 96 }, (_, section) => `## Synthetic section ${section}\n\nA fixed paragraph with **bold**, *emphasis*, \`inline code\` and [[Synthetic document 1]].\n\n| Column | Value |\n| --- | --- |\n| Example | ${section} |\n\n- First item\n- Second item\n`).join("\n") } : row) : generated.documentRows;
+    ? { ...row, content: Array.from({ length: 96 }, (_, section) => `## Synthetic section ${section}\n\nA fixed paragraph with **bold**, *emphasis*, \`inline code\` and [[${section % 51 === 50 ? "Synthetic document 0" : section % 51 === 49 ? "Missing synthetic title" : `Synthetic document ${section % 51 + 1}`}]].\n\n| Column | Value |\n| --- | --- |\n| Example | ${section} |\n\n- First item\n- Second item\n`).join("\n") } : row) : generated.documentRows;
   if (profile === "document") assert.ok(Buffer.byteLength(browserDocuments[0]!.content) <= 32 * 1024);
   const effectiveFixtureHash = profile === "document" ? createHash("sha256").update(JSON.stringify({ baseFixtureHash: generated.hash,
     profile, content: browserDocuments[0]!.content })).digest("hex") : fixtureHash;
