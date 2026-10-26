@@ -6,6 +6,7 @@ import { summarizePerformancePlan } from "./performance-query-plans";
 /** Structural labels only; query text and bindings never enter a receipt or retained plan. */
 export function performancePlanShape(text: string): string | undefined {
   if (/for\s+(update|share|no key update|key share)/i.test(text)) return;
+  if (text.includes('"requirements_workflowInputs"') && text.includes('"requirements_tasks"')) return "daemonQueue";
   if (/jsonb_agg\(/.test(text)) return "healthTasks";
   if (/group by "requirements"\."id"/.test(text)) return "healthCoverage";
   if (/^select count\(\*\).*from "activity_log"/s.test(text)) return "healthActivity";

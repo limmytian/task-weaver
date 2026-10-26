@@ -7,6 +7,8 @@ import { sql } from "drizzle-orm";
 import { createDb, runMigrations, measureDatabaseWork, requirements, tasks, documents } from "@task-weaver/db";
 import { createResourceServices, AuthorizationError } from "@task-weaver/core";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
+import { authorizedPerformancePlans } from "./performance-authorized-plans";
+import { compareMixedControl } from "./performance-mixed-control";
 import { performanceFixture, performanceBatches } from "./performance-fixture";
 
 const databaseUrl = process.env.TW_PERFORMANCE_DATABASE_URL!;
@@ -70,10 +72,16 @@ try {
   transactionMock.mock.restore();
   const outsider = await createResourceServices(f.outsider.context).daemonService.listDaemonControlPlaneQueues(db);
   assert.ok(outsider.items.every(item => item.projectId === other.id));
+  const planProbe = authorizedPerformancePlans(db);
+  const planCapture = await planProbe.capture(() => service.listDaemonControlPlaneQueues(planProbe.db));
+  assert.ok(planCapture.plans.some(plan => plan.shape === "daemonQueue"));
+  assert.equal(createHash("sha256").update(JSON.stringify(planCapture.value.items)).digest("hex"), oracle);
+  const mixed = process.env.TW_PERFORMANCE_CONTROL_PLANS_ONLY === "true" ? undefined
+    : await compareMixedControl(db, databaseUrl, f, generated.taskRows.find(row => row.projectId === other.id)!.id, oracle!);
   console.log("TW_PERFORMANCE_RECEIPT " + JSON.stringify({ controlProfile: true, fixtureHash: generated.hash,
-    counts: generated.counts, responseItemsSha256: oracle, cases,
+    counts: generated.counts, authorizedPlans: planCapture.plans, responseItemsSha256: oracle, cases, mixed,
     correctness: { identicalClassifications: true, privateProjectsIsolated: true, legacyFleetReadRemainsClosed: true },
-    limits: ["Single sequential authorized queue reads,not saturation", "Application materialized JSON bytes,not PostgreSQL wire bytes",
+    limits: ["Projection cases are sequential;optional mixed cases report offered/completed load separately", "Application materialized JSON bytes,not PostgreSQL wire bytes",
       "Legacy projection restored by bounded test interception only;no alternate public auth path", "No active daemon/provider/model process executed"] }));
 } catch {
   console.log("TW_PERFORMANCE_FAILURE workload_error");

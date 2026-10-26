@@ -10,6 +10,7 @@ import { serve } from "@hono/node-server";
 import { sql } from "drizzle-orm";
 import { createDb, runMigrations, requirements, tasks, documents, taskDependencies, documentTaskLinks, documentRequirementLinks, measureDatabaseWork } from "@task-weaver/db";
 import { performanceFixture, performanceBatches } from "./performance-fixture";
+import { checkPerformanceWorkspace } from "./performance-workspace-checks";
 import { checkPerformanceBoard } from "./performance-board-checks";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 
@@ -22,7 +23,7 @@ let directory = process.env.TW_PERFORMANCE_BROWSER_BUILD!;
 const compareDirectory = process.env.TW_PERFORMANCE_BROWSER_COMPARE_BUILD;
 assert.ok(!compareDirectory || /^\.next-perf-[a-z0-9-]+$/.test(compareDirectory));
 const profile = process.env.TW_PERFORMANCE_BROWSER_PROFILE ?? "mixed";
-assert.ok(profile === "mixed" || profile === "selector" || profile === "document");
+assert.ok(profile === "mixed" || profile === "selector" || profile === "document" || profile === "document-large");
 const url = new URL(databaseUrl);
 assert.equal(url.hostname, "127.0.0.1"); assert.equal(url.pathname, "/tw_performance");
 assert.ok(readyFile && /^\.next-perf-[a-z0-9-]+$/.test(directory));
@@ -50,10 +51,10 @@ try {
   const fixtureHash = profile === "mixed" ? generated.hash : createHash("sha256").update(JSON.stringify({
     baseFixtureHash: generated.hash, profile, ownerTasks: "All 5000 tasks are done; default Board excludes terminal history",
   })).digest("hex");
-  const browserDocuments = profile === "document" ? generated.documentRows.map((row, index) => index === 0
-    ? { ...row, content: Array.from({ length: 96 }, (_, section) => `## Synthetic section ${section}\n\nA fixed paragraph with **bold**, *emphasis*, \`inline code\` and [[${section % 51 === 50 ? "Synthetic document 0" : section % 51 === 49 ? "Missing synthetic title" : `Synthetic document ${section % 51 + 1}`}]].\n\n| Column | Value |\n| --- | --- |\n| Example | ${section} |\n\n- First item\n- Second item\n`).join("\n") } : row) : generated.documentRows;
-  if (profile === "document") assert.ok(Buffer.byteLength(browserDocuments[0]!.content) <= 32 * 1024);
-  const effectiveFixtureHash = profile === "document" ? createHash("sha256").update(JSON.stringify({ baseFixtureHash: generated.hash,
+  const browserDocuments = profile.startsWith("document") ? generated.documentRows.map((row, index) => index === 0
+    ? { ...row, content: Array.from({ length: profile === "document-large" ? 384 : 96 }, (_, section) => `## Synthetic section ${section}\n\nA fixed paragraph with **bold**, *emphasis*, \`inline code\` and [[${section % 51 === 50 ? "Synthetic document 0" : section % 51 === 49 ? "Missing synthetic title" : `Synthetic document ${section % 51 + 1}`}]].\n\n| Column | Value |\n| --- | --- |\n| Example | ${section} |\n\n- First item\n- Second item\n`).join("\n") } : row) : generated.documentRows;
+  if (profile.startsWith("document")) assert.ok(Buffer.byteLength(browserDocuments[0]!.content) <= (profile === "document-large" ? 96 : 32) * 1024);
+  const effectiveFixtureHash = profile.startsWith("document") ? createHash("sha256").update(JSON.stringify({ baseFixtureHash: generated.hash,
     profile, content: browserDocuments[0]!.content })).digest("hex") : fixtureHash;
   for (const batch of performanceBatches(generated.requirementRows)) await db.insert(requirements).values(batch);
   for (const batch of performanceBatches(browserTasks)) await db.insert(tasks).values(batch);
@@ -68,7 +69,7 @@ try {
       generated.requirementRows.find(row => row.projectId === other.id)!.id);
     writeFileSync(`${readyFile}.board-audit.json`, JSON.stringify(audit), { mode: 0o600 });
   }
-  if (profile === "document") {
+  if (profile.startsWith("document")) {
     const samples = [];
     for (const query of ["", "&view=summary&page=1&pageSize=10"]) {
       const { value, measurement } = await measureDatabaseWork(async () => {
@@ -84,6 +85,8 @@ try {
     }
     writeFileSync(`${readyFile}.document-audit.json`, JSON.stringify({ samples, bodiesNotRetained: true }), { mode: 0o600 });
   }
+  const workspaceAudit = await checkPerformanceWorkspace(db, f);
+  writeFileSync(`${readyFile}.workspace-audit.json`, JSON.stringify(workspaceAudit), { mode: 0o600 });
   api = serve({ hostname: "127.0.0.1", port: apiPort, fetch: f.app.fetch });
   const require = createRequire(resolve("apps/web/package.json"));
   const stopWeb = async () => {
@@ -124,6 +127,7 @@ try {
   // Sequential phases reuse rows/auth/ports. Never run both Web builds concurrently.
   let switched = false;
   let paused = false;
+  let viewer: Awaited<ReturnType<typeof f.createHuman>> | undefined;
   while (!existsSync(`${readyFile}.done`)) {
     if (!paused && existsSync(`${readyFile}.pause`)) {
       paused = true;
@@ -147,6 +151,16 @@ try {
       directory = compareDirectory;
       await startWeb();
       console.log("TW_PERFORMANCE_BROWSER_SWITCHED");
+    }
+    const actionFile = `${readyFile}.viewer-action`;
+    if (existsSync(actionFile)) {
+      const action = readFileSync(actionFile, "utf8").trim(); rmSync(actionFile);
+      assert.ok(["create", "revoke", "restore"].includes(action));
+      if (action === "create") { assert.ok(!viewer); viewer = await f.createHuman(); }
+      assert.ok(viewer);
+      if (action === "revoke") await f.identity.removeMembership(f.owner.headers, f.project.id, viewer.context.actor.id);
+      else await f.identity.setMembership(f.owner.headers, f.project.id, viewer.context.actor.id, { role: "viewer" });
+      writeFileSync(`${readyFile}.viewer-state.json`, JSON.stringify({ email: viewer.account.email, state: action }), { mode: 0o600 });
     }
     await delay(200);
   }
