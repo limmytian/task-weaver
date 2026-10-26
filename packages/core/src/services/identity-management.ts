@@ -239,9 +239,10 @@ export function createIdentityManagementService(
       return { actor: authority.actor, grants: authority.grants };
     },
     async listAssignees(headers: Headers, projectId?: string) {
+      // The provider uses the original pool; resolve before reserving a transaction connection.
+      const context = await authentication.resolve(headers);
       return db.transaction(async tx => {
         await lockIdentityLifecycle(tx);
-        const context = await authentication.resolve(headers);
         if (context.credential.kind === "delegation") throw new AuthorizationError();
         const authority = await getLiveRequestAuthority(tx, context);
         let actorIds: string[];

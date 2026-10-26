@@ -27,6 +27,8 @@ test("help and unsupported arguments never reach Docker or echo supplied secrets
     ["--tier=medium", "--browser-build=../private-value"],
     ["--tier=medium", "--tier=medium"],
     ["--browser-profile=selector"],
+    ["--concurrency-contract", "--tier=medium"],
+    ["--concurrency-contract", "--concurrency-contract"],
     ["--tier=medium", "--browser-build=.next-perf-fixture", "--browser-profile=private-value"],
   ]) {
     const result = invoke([new URL("./performance-local-postgres.mjs", import.meta.url).pathname, ...args]);
