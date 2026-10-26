@@ -25,6 +25,35 @@ administrator or provider assistance. The application account must be able to
 run the bundled schema, table, index, function, and trigger migrations. Never
 commit credentials; percent encode reserved URL characters in passwords.
 
+## Database connection budgets
+
+API and Web accept the server-only `TW_DATABASE_POOL_MAX` setting for their
+business pools. Supported values are integers from `1` to `10`; leaving it unset
+preserves the existing maximum of `10`. Invalid values fail without echoing their
+contents. Compose forwards the setting to both services. Other deployment systems
+must provide it in each server process's environment. It is never a browser
+`NEXT_PUBLIC_` setting.
+
+Count every process and independently loaded runtime pool, including replicas,
+workers and overlapping instances during a rollout. Each initialized realtime
+transport can use two publishing connections plus one separate LISTEN connection;
+the installed driver creates the listener outside the publishing pool limit.
+Migrations use a separate one-connection client for each concurrent migration
+runner. Include maintenance, other applications and operational headroom:
+
+```text
+sum(business pool caps + realtime transport caps)
+  + concurrent migration clients + other clients + headroom
+  <= connection slots available to the application role
+```
+
+Use the database/provider and role limits after reserved slots when calculating
+available capacity. Containers alone are not a reliable pool count. Reducing a
+cap can add admission queuing, so verify authentication, resource and background
+paths at the selected value before rollout. The setting does not change live
+permission checks or transaction locking. Increasing connection counts cannot
+remove serialization at a shared database lock.
+
 ## Start
 
 Copy the example without putting real credentials in a tracked file. Set the

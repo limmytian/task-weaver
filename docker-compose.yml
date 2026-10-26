@@ -13,6 +13,7 @@ services:
       - "127.0.0.1:${API_PORT:-3001}:3001"
     environment:
       DATABASE_URL: ${DATABASE_URL:?Configure an external PostgreSQL connection}
+      TW_DATABASE_POOL_MAX: ${TW_DATABASE_POOL_MAX-10}
       TW_AUTH_SECRET: ${TW_AUTH_SECRET:?Set TW_AUTH_SECRET in .env}
       TW_AUTH_BASE_URL: ${TW_AUTH_BASE_URL:?Set TW_AUTH_BASE_URL in .env}
       TW_AUTH_TRUSTED_ORIGINS: ${TW_AUTH_TRUSTED_ORIGINS:?Set TW_AUTH_TRUSTED_ORIGINS in .env}
@@ -44,6 +45,7 @@ services:
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
     environment:
       DATABASE_URL: ${DATABASE_URL:?Configure an external PostgreSQL connection}
+      TW_DATABASE_POOL_MAX: ${TW_DATABASE_POOL_MAX-10}
       TW_AUTH_SECRET: ${TW_AUTH_SECRET:?Set TW_AUTH_SECRET in .env}
       TW_AUTH_BASE_URL: ${TW_AUTH_BASE_URL:?Set TW_AUTH_BASE_URL in .env}
       TW_AUTH_TRUSTED_ORIGINS: ${TW_AUTH_TRUSTED_ORIGINS:?Set TW_AUTH_TRUSTED_ORIGINS in .env}

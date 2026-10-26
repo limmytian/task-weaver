@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { createDb, runMigrations } from "@task-weaver/db";
+import { createDb, databasePoolOptions, runMigrations } from "@task-weaver/db";
 import { createApiApplication } from "./application.js";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -8,7 +8,7 @@ if (!databaseUrl) {
 }
 
 const application = createApiApplication({
-  db: createDb(databaseUrl),
+  db: createDb(databaseUrl, databasePoolOptions(process.env)),
   databaseUrl,
 });
 
