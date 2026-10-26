@@ -14,8 +14,12 @@ import {
 import { createResourceServices } from "@task-weaver/core";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 import { runPerformanceWave } from "./performance-workload";
-import { PERFORMANCE_SEED as seed, performanceId as id, performanceFixture } from "./performance-fixture";
+import { readPerformanceJson, verifyPerformancePagination } from "./performance-pagination";
+import { PERFORMANCE_SEED as seed, performanceId as id, performanceFixture, performanceBatches, type PerformanceTier } from "./performance-fixture";
 
+const tierInput = process.env.TW_PERFORMANCE_TIER ?? "small";
+assert.ok(tierInput === "small" || tierInput === "medium", "Unsupported performance tier");
+const tier: PerformanceTier = tierInput;
 const databaseUrl = process.env.TW_PERFORMANCE_DATABASE_URL;
 assert.ok(databaseUrl, "A disposable database is required");
 const url = new URL(databaseUrl);
@@ -23,7 +27,7 @@ assert.equal(url.hostname, "127.0.0.1");
 assert.equal(url.pathname, "/tw_performance");
 function sourceProvenance() {
   const implementationHash = createHash("sha256");
-  for (const file of ["apps/api/src/performance-baseline.ts", "apps/api/src/performance-workload.ts", "apps/api/src/performance-fixture.ts", "apps/api/src/resource-postgres-fixture.ts", "scripts/performance-baseline.mjs", "scripts/performance-local-postgres.mjs", "scripts/performance-resources.mjs", "packages/db/src/measurement.ts", "packages/db/src/client.ts", "packages/core/src/services/auth-security.ts", "packages/core/src/services/resource-services.ts"]) {
+  for (const file of ["apps/api/src/performance-baseline.ts", "apps/api/src/performance-workload.ts", "apps/api/src/performance-fixture.ts", "apps/api/src/performance-pagination.ts", "apps/api/src/resource-postgres-fixture.ts", "scripts/performance-baseline.mjs", "scripts/performance-local-postgres.mjs", "scripts/performance-resources.mjs", "packages/db/src/measurement.ts", "packages/db/src/client.ts", "packages/core/src/services/auth-security.ts", "packages/core/src/services/resource-services.ts"]) {
     implementationHash.update(file).update(readFileSync(file));
   }
   return {
@@ -65,18 +69,18 @@ try {
   const services = createResourceServices(fixture.owner.context);
   const other = await fixture.identity.createProject(fixture.outsider.headers, { name: "Other synthetic project" });
   const projectIds: [string, string] = [fixture.project.id, other.id];
-  const generated = performanceFixture(projectIds, [owner.id, fixture.outsider.context.actor.id]);
+  const generated = performanceFixture(projectIds, [owner.id, fixture.outsider.context.actor.id], tier);
   const { requirementRows, taskRows, documentRows, hash: fixtureHash } = generated;
-  await db.insert(requirements).values(requirementRows);
-  await db.insert(tasks).values(taskRows);
+  for (const batch of performanceBatches(requirementRows)) await db.insert(requirements).values(batch);
+  for (const batch of performanceBatches(taskRows)) await db.insert(tasks).values(batch);
   await db.insert(documents).values(documentRows);
-  await db.insert(taskDependencies).values(generated.dependencies);
+  for (const batch of performanceBatches(generated.dependencies)) await db.insert(taskDependencies).values(batch);
   await db.insert(documentTaskLinks).values(generated.taskLinks);
   await db.insert(documentRequirementLinks).values(generated.requirementLinks);
   // Setup and reset writes bypass services only inside the preflight-verified disposable database.
   async function resetCase() {
     await db.transaction(async tx => {
-      await tx.insert(tasks).values(taskRows).onConflictDoUpdate({ target: tasks.id,
+      await tx.insert(tasks).values(taskRows.slice(0, 40)).onConflictDoUpdate({ target: tasks.id,
         set: { title: sql`excluded.title`, version: 1, updatedAt: sql`excluded.updated_at` } });
       await tx.update(requirements).set({ planRevision: 0, evidenceNeedsReview: false })
         .where(inArray(requirements.id, requirementRows.map(row => row.id)));
@@ -125,18 +129,22 @@ try {
   const versions = new Map<string, number>();
   async function request(operation: Operation, index: number) {
     const taskId = id("task", index % 40);
-    const path = operation === "taskUpdate" ? `/tasks/${taskId}` : `/projects/${fixture.project.id}/${operation === "taskSummary" ? "tasks" : "requirements"}${operation === "legacyRequirements" ? "" : "?view=summary&pageSize=20&completedWithinDays=36500"}`;
+    const total = operation === "taskSummary" ? generated.counts.tasks / 2 : generated.counts.requirements / 2;
+    const pageCount = Math.ceil(total / 20);
+    const page = tier === "medium" ? [1, Math.ceil(pageCount / 2), pageCount][index % 3]! : 1;
+    const path = operation === "taskUpdate" ? `/tasks/${taskId}` : `/projects/${fixture.project.id}/${operation === "taskSummary" ? "tasks" : "requirements"}${operation === "legacyRequirements" ? "" : `?view=summary&page=${page}&pageSize=20&completedWithinDays=36500`}`;
     const selectedIdentity = operation === "taskUpdate" ? writeIdentities[index % writeIdentities.length]! : readIdentities[index % readIdentities.length]!;
     const response = await fetch(base + path, { headers: selectedIdentity, method: operation === "taskUpdate" ? "PATCH" : "GET", signal: AbortSignal.timeout(5000), ...(operation === "taskUpdate" ? { body: JSON.stringify({ title: `Synthetic update ${index}`, expectedVersion: versions.get(taskId) ?? 1 }) } : {}) });
-    const result = await response.json() as { version?: number; items?: Array<{ projectId?: string }>; total?: number };
+    const { value, bytes } = await readPerformanceJson(response);
+    const result = value as { version?: number; items?: Array<{ projectId?: string }>; total?: number };
     assert.equal(response.status, 200, "Baseline operation failed");
     if (operation === "taskUpdate") { assert.ok(result.version); versions.set(taskId, result.version); }
     if (operation === "taskSummary" || operation === "requirementSummary") {
-      assert.equal(result.items?.length, 20);
-      assert.equal(result.total, operation === "taskSummary" ? 500 : 50);
+      assert.equal(result.items?.length, Math.min(20, total - (page - 1) * 20));
+      assert.equal(result.total, total);
       assert.ok(result.items!.every(row => row.projectId === fixture.project.id));
     }
-    return { operation, bytes: Number(response.headers.get("content-length") ?? 0) };
+    return { operation, bytes };
   }
   // Verify isolation before collecting successful-throughput measurements.
   console.log("TW_PERFORMANCE_STAGE isolation");
@@ -159,6 +167,23 @@ try {
   await services.taskService.getTask(db, id("task", 0));
   const coldStarted = performance.now(); await request("taskSummary", 0);
   const coldTaskSummaryMs = performance.now() - coldStarted;
+  const pagination = [];
+  if (tier === "medium") {
+    for (const kind of ["tasks", "requirements"] as const) {
+      const rows = kind === "tasks" ? taskRows : requirementRows;
+      const expectedIds = rows.filter(row => row.projectId === fixture.project.id).map(row => row.id);
+      const result = await verifyPerformancePagination({ expectedIds, readPage: async (page, signal) => {
+        const response = await fetch(`${base}/projects/${fixture.project.id}/${kind}?view=summary&page=${page}&pageSize=20&completedWithinDays=36500`, { headers, signal });
+        const bytes = await response.arrayBuffer();
+        assert.equal(response.status, 200, "Pagination API probe failed");
+        const body = JSON.parse(Buffer.from(bytes).toString("utf8")) as { items: Array<{ id: string; projectId: string; [key: string]: unknown }>; total: number; pageCount: number };
+        assert.ok(body.items.every(row => row.projectId === fixture.project.id), "Pagination crossed project scope");
+        assert.ok(body.items.every(row => !["description", "content", "tasks", "repositories"].some(key => key in row)), "Summary projection included heavy bodies or relations");
+        return { ...body, bytes: bytes.byteLength };
+      } });
+      pagination.push({ kind, ...result });
+    }
+  }
   const cases = completedCases;
   const skippedProfiles: Array<{ concurrency: number; offeredRps: number; reason: string }> = [];
   let skippedAtBaseRate = false;
@@ -174,12 +199,17 @@ try {
   }
   // 40/30/30 mix: progress writes are excluded until a fenced worker fixture exists.
   const mix: Operation[] = ["taskSummary", "taskSummary", "taskSummary", "taskSummary", "requirementSummary", "requirementSummary", "requirementSummary", "taskUpdate", "taskUpdate", "taskUpdate"];
-  for (const { concurrency, offeredRps } of [{ concurrency: 1, offeredRps: 10 }, { concurrency: 2, offeredRps: 10 }, { concurrency: 4, offeredRps: 10 }, { concurrency: 4, offeredRps: 20 }]) {
+  const profiles = tier === "medium"
+    ? [{ concurrency: 1, offeredRps: 2, repetitions: 1, requestCount: 60 }, ...[1, 2, 4].map(concurrency => ({ concurrency, offeredRps: 10, repetitions: 3, requestCount: 300 }))]
+    : [{ concurrency: 1, offeredRps: 10 }, { concurrency: 2, offeredRps: 10 }, { concurrency: 4, offeredRps: 10 }, { concurrency: 4, offeredRps: 20 }].map(profile => ({ ...profile, repetitions: 3, requestCount: 300 }));
+  let smokePassed = true;
+  for (const { concurrency, offeredRps, repetitions, requestCount } of profiles) {
+  if (!smokePassed) { skippedProfiles.push({ concurrency, offeredRps, reason: "Low-rate smoke skipped arrivals; do not raise load" }); continue; }
   if (offeredRps === 20 && skippedAtBaseRate) {
     skippedProfiles.push({ concurrency, offeredRps, reason: "Base-rate arrivals were skipped; do not raise load" });
     continue;
   }
-  for (const repetition of [1, 2, 3]) {
+  for (let repetition = 1; repetition <= repetitions; repetition++) {
     console.log(`TW_PERFORMANCE_STAGE wave${concurrency}`);
     await resetCase();
     for (let i = 0; i < 10; i++) await request(mix[i]!, i);
@@ -199,8 +229,9 @@ try {
     samples.length = 0; maximumActive = 0;
     const cpu = process.cpuUsage();
     measured = true;
-    const { successfulDurations: clients, elapsedMs, skipped, lateOffers, failures } = await runPerformanceWave({ count: 300, intervalMs: 1000 / offeredRps, concurrency, request: i => request(mix[i % 10]!, i) });
+    const { successfulDurations: clients, elapsedMs, skipped, lateOffers, failures } = await runPerformanceWave({ count: requestCount, intervalMs: 1000 / offeredRps, concurrency, request: i => request(mix[i % 10]!, i) });
     measured = false;
+    if (offeredRps === 2 && skipped > 0) smokePassed = false;
     if (offeredRps === 10 && skipped > 0) skippedAtBaseRate = true;
     clearInterval(lockMonitor); lockMonitor = undefined; await pendingMonitor;
     assert.equal(failures, 0, "Mixed workload contained failed operations");
@@ -222,12 +253,12 @@ try {
     assert.ok(memory.rss < 2.5 * 1024 ** 3, "Resource ceiling reached");
     const size = await db.execute<{ bytes: string }>(sql`select pg_database_size(current_database()) as bytes`);
     assert.ok(size[0] && Number(size[0].bytes) < 1024 ** 3, "Fixture storage ceiling reached");
-    cases.push({ concurrency, offeredRps, repetition, offered: 300, skipped, lateOffers, completed: clients.length, successfulRps: clients.length / (elapsedMs / 1000), elapsedMs, clientP95Ms: percentile(clients, .95), maximumActive, cpuMs: (usage.user + usage.system) / 1000, rssBytes: memory.rss,
+    cases.push({ concurrency, offeredRps, repetition, offered: requestCount, skipped, lateOffers, completed: clients.length, successfulRps: clients.length / (elapsedMs / 1000), elapsedMs, clientP95Ms: percentile(clients, .95), maximumActive, cpuMs: (usage.user + usage.system) / 1000, rssBytes: memory.rss,
       tableWork, lockSampling: { samples: lockSamples, peakLockWaiters, peakActiveConnections, failures: monitorFailures },
       operations: mix.filter((o, i) => mix.indexOf(o) === i).map(operation => {
         const selected = samples.filter(s => s.operation === operation);
         const values = selected.map(s => s.milliseconds);
-        const offered = mix.filter(value => value === operation).length * 30;
+        const offered = mix.filter(value => value === operation).length * (requestCount / mix.length);
         return { operation, offered, skipped: offered - selected.length, samples: selected.length, successfulRps: selected.filter(s => s.status === 200).length / (elapsedMs / 1000), errors: selected.filter(s => s.status !== 200).length, p50Ms: percentile(values, .5), p95Ms: percentile(values, .95), p99Ms: percentile(values, .99), meanBytes: selected.reduce((sum, s) => sum + s.bytes, 0) / selected.length,
           meanQueryCount: selected.reduce((sum, s) => sum + s.database!.queryCount, 0) / selected.length,
           meanIdentityLockQueryMs: selected.reduce((sum, s) => sum + s.database!.phases.identityLock.milliseconds, 0) / selected.length,
@@ -236,11 +267,16 @@ try {
       }) });
   }
   }
-  samples.length = 0; measured = true; await request("legacyRequirements", 0); measured = false;
+  samples.length = 0; measured = true;
+  const compatibilityStarted = performance.now();
+  let compatibilityOutcome = "completed";
+  try { await request("legacyRequirements", 0); }
+  catch (error) { if (tier === "small") throw error; compatibilityOutcome = "deadline_or_validation_failure"; }
+  measured = false;
   console.log("TW_PERFORMANCE_RECEIPT " + JSON.stringify({ source: sourceProvenance(), seed, fixtureHash,
-    fixture: { projects: 2, requirements: 100, tasks: 1000, documents: 100, documentBytes: 4096, taskDependencies: 200, documentLinks: 200, progressHistory: 0, identityProfile: "Reads rotate owner/member/viewer/agent/narrowed key; writes rotate owner/member/agent; revoked and outsider probes excluded from successful throughput" },
+    fixture: { tier, projects: 2, requirements: generated.counts.requirements, tasks: generated.counts.tasks, documents: generated.counts.documents, documentBytes: 4096, taskDependencies: generated.counts.dependencies, documentLinks: 200, progressHistory: 0, identityProfile: "Reads rotate owner/member/viewer/agent/narrowed key; writes rotate owner/member/agent; revoked and outsider probes excluded from successful throughput" },
     runtime: { node: process.version, cpu: cpus()[0]?.model, cpuCount: cpus().length, hostMemoryBytes: totalmem(), apiProcesses: 1, apiPoolMax: 10, monitorPoolMax: 1, realtimeStarted: false, transport: "loopback HTTP; API and load generator share one process" },
-    coldTaskSummaryMs, cases, skippedProfiles,
+    coldTaskSummaryMs, cases, skippedProfiles, pagination,
     profiles: [...profileSamples.entries()].map(([profile, aggregate]) => ({ profile, elapsedMs: aggregate.elapsedMs,
       operations: [...new Set(mix)].map(operation => {
         const selected = aggregate.samples.filter(sample => sample.operation === operation);
@@ -250,8 +286,9 @@ try {
           sufficientInitialSamples: selected.length >= 200 };
       }) })),
     legacyRequirements: samples.map(({ database, ...s }) => ({ ...s, queryCount: database!.queryCount })),
+    compatibilityProbe: { outcome: compatibilityOutcome, elapsedMs: performance.now() - compatibilityStarted, deadlineMs: 5000, isolatedReadOnlyProbe: true },
     unknown: ["independent pool wait", "identity lock wait separate from lock-query execution", "per-query elapsed time and returned/scanned rows", "SQL plans", "browser journeys", "worker/progress/console profiles", "second API process", "monitoring overhead comparison", "saturation above the tested offered rate"],
-    limits: ["Small synthetic fixture only", "SQL count is ORM statements, excluding driver BEGIN/COMMIT", "Resource transaction duration includes entry, lock query and commit", "Each case resets task versions/titles/timestamps, requirement revisions and mutation/outbox history before identical warmup", "Table counters are interval aggregates with asynchronous flush, not per-query row counts", "One-second lock sampling can miss short waits", "No production SLA or optimization claim", "Repeated samples support initial tails; stable p99 is not established", "No browser or model process started"] }));
+    limits: ["Approved small/medium synthetic fixture only", "SQL count is ORM statements, excluding driver BEGIN/COMMIT", "Resource transaction duration includes entry, lock query and commit", "Each case resets task versions/titles/timestamps, requirement revisions and mutation/outbox history before identical warmup", "Table counters are interval aggregates with asynchronous flush, not per-query row counts", "One-second lock sampling can miss short waits", "No production SLA or optimization claim", "Repeated samples support initial tails; stable p99 is not established", "No browser or model process started"] }));
 } catch (error) {
   const message = error instanceof Error ? error.message : "";
   const reason = message.startsWith("Mixed workload contained failed operations") ? "workload_error"

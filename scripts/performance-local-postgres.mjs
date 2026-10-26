@@ -6,9 +6,11 @@ import { createServer } from "node:net";
 import { randomBytes } from "node:crypto";
 import { macMemoryHeadroom, processSnapshot, processTree } from "./performance-resources.mjs";
 
-if (process.argv.length > 2) {
+const tierArguments = process.argv.slice(2);
+const tier = tierArguments[0] === "--tier=medium" ? "medium" : "small";
+if (tierArguments.length && !(tierArguments.length === 1 && ["--tier=small", "--tier=medium"].includes(tierArguments[0]))) {
   if (process.argv.length === 3 && process.argv[2] === "--help") {
-    console.log("Use installed PostgreSQL/pgvector in one temporary loopback-only cluster. Limits: normal macOS memory pressure, >=2 GiB reclaimable headroom, <=1536 MiB DB RSS, <=4 GiB added RSS, <=120 DB CPU seconds, <=15 minutes; small fixture at 10 offered RPS, then conditionally 20 RPS only after no skipped base-rate arrivals. No installations or existing cluster access.");
+    console.log("Use installed PostgreSQL/pgvector in one temporary loopback-only cluster. Limits: normal macOS memory pressure, >=2 GiB reclaimable headroom, <=1536 MiB DB RSS, <=4 GiB added RSS, <=120 DB CPU seconds, <=15 minutes; small fixture at 10 offered RPS, then conditionally 20 RPS only after no skipped base-rate arrivals. Use --tier=medium for the approved 10,000-task tier (2 RPS smoke, then at most 10 RPS); default is small. No installations or existing cluster access.");
     process.exit(0);
   }
   console.error("Unsupported local baseline arguments"); process.exit(1);
@@ -86,7 +88,7 @@ try {
   exec("createdb", ["-h", root, "-p", String(port), "-U", "fixture", "tw_performance"]);
   stage = "worker execution";
   child = spawn("pnpm", ["exec", "tsx", "apps/api/src/performance-baseline.ts"], { detached: true, stdio: ["ignore", "pipe", "pipe"],
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_OPTIONS: "--max-old-space-size=1024", PGOPTIONS: "-c client_min_messages=warning",
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_OPTIONS: "--max-old-space-size=1024", PGOPTIONS: "-c client_min_messages=warning", TW_PERFORMANCE_TIER: tier,
       TW_PERFORMANCE_DATABASE_URL: `postgres://fixture:${password}@127.0.0.1:${port}/tw_performance` } });
   let output = "";
   child.stdout.on("data", chunk => { output += chunk; if (output.length > 2_000_000) { stopReason = "output ceiling"; stopChild(); } });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { performanceFixture } from "./performance-fixture";
+import { performanceBatches, performanceFixture } from "./performance-fixture";
 
 test("fixture manifest is deterministic across fresh principals and covers every relationship", () => {
   const f = performanceFixture(["project-a", "project-b"], ["actor-a", "actor-b"]);
@@ -21,6 +21,25 @@ test("fixture manifest is deterministic across fresh principals and covers every
   for (const link of f.requirementLinks) assert.equal(documents.get(link.documentId)?.projectId, requirements.get(link.requirementId)?.projectId);
   assert.equal(f.dependencies.length, 200); assert.equal(f.taskLinks.length, 100); assert.equal(f.requirementLinks.length, 100);
   assert.ok(f.documentRows.every(row => Buffer.byteLength(row.content) === 4096));
+});
+
+test("medium fixture stays scoped and can be inserted without oversized statements", () => {
+  const f = performanceFixture(["a", "b"], ["owner", "outsider"], "medium");
+  assert.equal(f.taskRows.length, 10_000); assert.equal(f.requirementRows.length, 1000);
+  assert.equal(f.dependencies.length, 2000); assert.equal(f.documentRows.length, 100);
+  const requirements = new Map(f.requirementRows.map(row => [row.id, row]));
+  const tasks = new Map(f.taskRows.map(row => [row.id, row]));
+  for (const task of tasks.values()) assert.equal(task.projectId, requirements.get(task.requirementId)?.projectId);
+  for (const edge of f.dependencies) assert.equal(tasks.get(edge.taskId)?.projectId, tasks.get(edge.dependsOnTaskId)?.projectId);
+  for (const link of f.requirementLinks) {
+    const doc = f.documentRows.find(row => row.id === link.documentId)!;
+    assert.equal(doc.projectId, requirements.get(link.requirementId)?.projectId);
+  }
+  const batches = [...performanceBatches(f.taskRows)];
+  assert.equal(batches.length, 20); assert.ok(batches.every(batch => batch.length <= 500));
+  assert.equal(new Set(batches.flat().map(row => row.id)).size, 10_000);
+  assert.equal(f.hash, performanceFixture(["new-a", "new-b"], ["new-owner", "new-outsider"], "medium").hash);
+  assert.notEqual(f.hash, performanceFixture(["a", "b"], ["owner", "outsider"]).hash);
 });
 
 test("fixture status distribution and ordering are fixed independently in each project", () => {
