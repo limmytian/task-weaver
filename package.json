@@ -39,7 +39,8 @@
     "test:workflow-postgres": "node scripts/verify-workflow-postgres.mjs",
     "test:execution-recovery-postgres": "node scripts/verify-execution-recovery-postgres.mjs",
     "test:capability-diagnostics-postgres": "node scripts/verify-capability-diagnostics-postgres.mjs",
-    "measure:performance": "node scripts/performance-baseline.mjs"
+    "measure:performance": "node scripts/performance-baseline.mjs",
+    "measure:performance:local": "node scripts/performance-local-postgres.mjs"
   },
   "devDependencies": {
     "dotenv-cli": "^11.0.0",

@@ -7,28 +7,32 @@ export async function runPerformanceWave(options: {
   intervalMs: number;
   concurrency: number;
   request(index: number): Promise<unknown>;
-}) {
+}, timing = { now: () => performance.now(), wait: (milliseconds: number) => delay(milliseconds) }) {
   const { count, intervalMs, concurrency, request } = options;
   if (!Number.isInteger(count) || count < 1 || count > 10_000 ||
       !Number.isInteger(concurrency) || concurrency < 1 || concurrency > 32 ||
       !Number.isFinite(intervalMs) || intervalMs <= 0) throw new Error("Invalid bounded workload");
-  const started = performance.now();
+  const started = timing.now();
   const successfulDurations: number[] = [];
   const inFlight = new Set<Promise<void>>();
-  let skipped = 0, failures = 0, maximumInFlight = 0;
+  let skipped = 0, lateOffers = 0, failures = 0, maximumInFlight = 0;
   for (let i = 0; i < count; i++) {
-    await delay(Math.max(0, started + i * intervalMs - performance.now()));
+    const due = started + i * intervalMs;
+    await timing.wait(Math.max(0, due - timing.now()));
+    // A stalled generator cannot catch up by sending a burst of overdue arrivals.
+    if (timing.now() - due >= intervalMs) { skipped++; lateOffers++; continue; }
     if (inFlight.size >= concurrency) { skipped++; continue; }
-    const callStarted = performance.now();
+    const callStarted = timing.now();
     // Promise.resolve also captures a synchronous request failure without losing the arrival.
     const call = Promise.resolve().then(() => request(i)).then(
-      () => { successfulDurations.push(performance.now() - callStarted); },
+      () => { successfulDurations.push(timing.now() - callStarted); },
       () => { failures++; },
     );
     inFlight.add(call);
     maximumInFlight = Math.max(maximumInFlight, inFlight.size);
     void call.then(() => inFlight.delete(call));
   }
+  await timing.wait(Math.max(0, started + count * intervalMs - timing.now()));
   await Promise.all(inFlight);
-  return { offered: count, skipped, failures, successfulDurations, maximumInFlight, elapsedMs: performance.now() - started };
+  return { offered: count, skipped, lateOffers, failures, successfulDurations, maximumInFlight, elapsedMs: timing.now() - started };
 }
