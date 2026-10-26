@@ -1,5 +1,5 @@
 import { WorkerConsoleBuffer } from '../worker-console-buffer.js'
-import { createWorkerConsoleObserver } from '../worker-console-observer.js'
+import { createWorkerConsoleCoordinator } from '../worker-console-coordinator.js'
 import { recordLocalExecution, clearLocalExecution, reconcileLocalExecution, observedLocalStop, localExecutionInventory } from "../local-execution-inventory.js";
 import { createControlledGit } from "../controlled-git.js";
 import { monitorExecutionControl, type ExecutionControl } from "../execution-control-monitor.js";
@@ -719,6 +719,10 @@ export function registerDaemon(program: Command): void {
         pollingBackoffMax: 60_000,
       }
 
+      const consoleCoordinator = createWorkerConsoleCoordinator({ daemonId,
+        get: path => request('GET', path, undefined, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal: AbortSignal.timeout(2500) }),
+        post: (path, body) => request('POST', path, body, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal: AbortSignal.timeout(2500) }),
+      })
       const executorStatus = new ExecutorStatusClient(daemonId, tools)
       await executorStatus.refresh()
       const effectiveMode = opts.mode ?? serverConfig.mode
@@ -1140,8 +1144,8 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         const executionController = new AbortController()
         const executionSignal = AbortSignal.any([signal, executionController.signal])
         const controlEndpoint = `/api/v1/daemons/${daemonId}/execution-controls`
-        let consoleObserver: ReturnType<typeof createWorkerConsoleObserver> | undefined
-        const readControls = async () => { void consoleObserver?.tick(); return (await daemonGet<{ items: ExecutionControl[] }>(controlEndpoint)).items }
+        let consoleObserver: ReturnType<typeof consoleCoordinator.observe> | undefined
+        const readControls = async () => (await daemonGet<{ items: ExecutionControl[] }>(controlEndpoint)).items
         const controlMonitor = monitorExecutionControl({ runId: lane.runId, list: readControls,
           acknowledge: (control, phase) => daemonPost(`${controlEndpoint}/${control.id}/ack`, { phase, revision: control.revision }),
           stop: () => executionController.abort(new Error('Execution invalidated by a planning change')),
@@ -1152,10 +1156,8 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         })
         const access = await createTaskWorkerAccess({ config: cliConfig, daemonId, requirementId: requirement.id, taskId: task.id, sharedCapabilityReads: opts.sharedCapabilityReads, capabilityExecution: opts.capabilityExecution, runId: lane.runId, workerIndex: w.index, leaseGeneration: lane.leaseGeneration, signal: executionSignal, controlledGit }).catch(error => { controlMonitor.close(); throw error })
         const consoleBuffer = new WorkerConsoleBuffer(toolCmd, access.consoleSecrets)
-        consoleObserver = createWorkerConsoleObserver({
-          target: { requirementId: requirement.id, taskId: task.id, runId: lane.runId!, workerIndex: w.index, leaseGeneration: lane.leaseGeneration! }, daemonId, buffer: consoleBuffer, signal: access.signal,
-          get: path => request('GET', path, undefined, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal: AbortSignal.timeout(2500) }),
-          post: (path, body) => request('POST', path, body, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal: AbortSignal.timeout(2500) }),
+        consoleObserver = consoleCoordinator.observe({
+          target: { requirementId: requirement.id, taskId: task.id, runId: lane.runId!, workerIndex: w.index, leaseGeneration: lane.leaseGeneration! }, buffer: consoleBuffer, signal: access.signal,
         })
         let childResult: Awaited<ReturnType<typeof runMeteredAgent>>
         try {
