@@ -80,7 +80,7 @@ const readById: Record<string, ResourceKind> = {
 };
 // Explicit read allowlist: new operations must opt in before seeing archived resources.
 const archivedReadOperations = new Set([
-  ...Object.keys(readById), "listProjects", "getProjectCounts", "listTasks", "listRequirements", "listDocuments",
+  ...Object.keys(readById), "listProjects", "getProjectCounts", "listTasks", "listRequirements", "getRequirementWorkspace", "listDocuments",
   "listTaskComments", "listTaskNotes", "listDocumentVersions", "compareDocumentVersions",
   "listActivityLog", "exportActivityLog", "listSchedules", "getSchedule", "listScheduleRuns", "listRuns", "getRun",
   "getProjectReviewPolicy", "getEffectiveReviewPolicy", "listRequirementReviewRuns",
@@ -715,6 +715,11 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     if (name === "listPinnedProjects") call[1] = predicate;
     else { if (name === "listProjects") call[1] ??= {}; call[2] = predicate; }
     if (name === "getProjectCounts") call[3] = taskResourcePredicate(authority, true);
+    return;
+  }
+  if (name === "getRequirementWorkspace") {
+    await requireResource(db, authority, "project", call[1].projectId);
+    call[2] = { requirements: resourcePredicate(authority, requirements), tasks: taskResourcePredicate(authority), repositories: repositoryPredicate(authority) };
     return;
   }
   if (["listTasks", "listRequirements", "listDocuments", "listMemories"].includes(name)) {

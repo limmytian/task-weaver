@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useMemo, memo, type ComponentProps } from "react";
+import { useEffect, useId, useRef, useMemo, useState, memo, type ComponentProps } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getQueryKey } from "@trpc/react-query";
 import { resolveWikiLinkBatches } from "@/lib/wiki-link-batches";
@@ -15,7 +15,29 @@ interface MarkdownRendererProps {
   className?: string;
 }
 
-export const MarkdownRenderer = memo(function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
+const EAGER_PREVIEW_CHARACTERS = 64 * 1024;
+
+/** Large bodies stay complete and readable without eagerly constructing an unbounded preview DOM. */
+export const MarkdownRenderer = memo(function MarkdownRenderer(props: MarkdownRendererProps) {
+  const [preview, setPreview] = useState({ content: props.content, enabled: false });
+  if (preview.content !== props.content) setPreview({ content: props.content, enabled: false });
+  const large = props.content.length > EAGER_PREVIEW_CHARACTERS;
+  const enabled = preview.content === props.content && preview.enabled;
+  if (large && !enabled) return <div className={props.className}>
+    <p className="mb-2 text-sm text-muted-foreground">Large document preview is loaded on demand. The complete Markdown source remains available.</p>
+    <Button type="button" variant="outline" className="mb-3"
+      onClick={() => setPreview({ content: props.content, enabled: true })}>Render full preview</Button>
+    <textarea aria-label="Complete Markdown source" readOnly value={props.content} rows={16}
+      className="block w-full resize-y rounded-md border bg-background p-3 font-mono text-sm" />
+  </div>;
+  return <div>
+    {large && <Button type="button" variant="outline" className="mb-3"
+      onClick={() => setPreview({ content: props.content, enabled: false })}>Pause full preview</Button>}
+    <ParsedMarkdownRenderer {...props} />
+  </div>;
+});
+
+const ParsedMarkdownRenderer = memo(function ParsedMarkdownRenderer({ content, className }: MarkdownRendererProps) {
   const wikiLinkTitles = useMemo(() => extractWikiLinkTitles(content), [content]);
   const utils = trpc.useUtils();
   const resolution = useQuery({

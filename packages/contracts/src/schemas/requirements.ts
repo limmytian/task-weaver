@@ -86,6 +86,18 @@ export const listRequirementsSchema = z.object({
     ),
 });
 
+export const requirementWorkspaceSchema = z.object({
+  projectId: z.string().uuid(),
+  completedWithinDays: z.number().int().min(0).optional(),
+  archived: z.boolean().default(false),
+  tag: z.string().optional(),
+  sortBy: z.enum(["created", "priority", "expected", "status"]).default("created"),
+  reverse: z.boolean().default(false),
+  page: z.number().int().min(1).default(1),
+  pageSize: z.number().int().min(1).max(50).default(50),
+  graph: z.boolean().default(false),
+});
+
 
 
 export const linkDocumentToRequirementSchema = z.object({

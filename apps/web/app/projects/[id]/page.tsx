@@ -46,7 +46,6 @@ import { CreateRequirementDialog } from "@/components/create-requirement-dialog"
 import { DeferredTaskDetailSheet as TaskDetailSheet } from "@/components/deferred-task-detail-sheet";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { KanbanBoard } from "@/components/kanban-board";
-import type { DependencyDagEdge, DependencyDagNode } from "@/components/dependency-dag";
 import { AssistantDialog } from "@/components/assistant-dialog";
 import { ProjectWorkspaceLinks, WorkspaceBreadcrumbs } from "@/components/project-navigation";
 import { RepositoryChips } from "@/components/repository-links";
@@ -313,53 +312,12 @@ function AnalyticsTab({ projectId }: { projectId: string }) {
 }
 
 function ProjectRequirementDag({ projectId }: { projectId: string }) {
-  const { data: requirements, isLoading } = trpc.requirement.list.useQuery({ projectId });
-
-  const graph = useMemo(() => {
-    if (!requirements) return { nodes: [], edges: [] };
-
-    const nodeMap = new Map<string, DependencyDagNode>();
-    const edges: DependencyDagEdge[] = [];
-
-    for (const req of requirements) {
-      type ReqTask = { id: string; status: string };
-      const tasks: ReqTask[] = (req as typeof req & { tasks?: ReqTask[] }).tasks ?? [];
-      const done = tasks.filter((task) => task.status === "done").length;
-      const taskMeta = tasks.length > 0 ? `${done}/${tasks.length} tasks done` : "No tasks";
-      nodeMap.set(req.id, {
-        id: req.id,
-        title: req.title,
-        status: req.status,
-        priority: req.priority,
-        href: `/projects/${projectId}/requirements/${req.id}`,
-        meta: taskMeta,
-      });
-    }
-
-    for (const req of requirements) {
-      for (const dep of req.dependencies ?? []) {
-        if (!nodeMap.has(dep.dependsOnRequirementId) && dep.dependsOn) {
-          nodeMap.set(dep.dependsOnRequirementId, {
-            id: dep.dependsOnRequirementId,
-            title: dep.dependsOn.title,
-            status: dep.dependsOn.status,
-            href: `/projects/${projectId}/requirements/${dep.dependsOnRequirementId}`,
-            external: true,
-            meta: "Outside recent activity",
-          });
-        }
-
-        edges.push({
-          id: dep.id,
-          source: dep.dependsOnRequirementId,
-          target: req.id,
-          type: dep.type,
-        });
-      }
-    }
-
-    return { nodes: Array.from(nodeMap.values()), edges };
-  }, [projectId, requirements]);
+  const { data, isLoading } = trpc.requirement.workspace.useQuery({ projectId, graph: true });
+  const graph = useMemo(() => ({ nodes: (data?.graph?.nodes ?? []).map(row => ({
+    id: row.id, title: row.title, status: row.status, priority: row.priority, external: row.external,
+    href: `/projects/${projectId}/requirements/${row.id}`,
+    meta: row.external ? "Outside recent activity" : `${row.taskCounts.done}/${row.taskCounts.total} tasks done`,
+  })), edges: (data?.graph?.edges ?? []).map(row => ({ id: row.id, source: row.dependsOnRequirementId, target: row.requirementId, type: row.type })) }), [data, projectId]);
 
   return (
     <div className="space-y-3">
@@ -379,8 +337,6 @@ function ProjectRequirementDag({ projectId }: { projectId: string }) {
   );
 }
 
-const PRIORITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-const STATUS_ORDER: Record<string, number> = { in_progress: 0, in_review: 1, ready_to_merge: 2, approved: 3, draft: 4, done: 5, cancelled: 6, archived: 7 };
 
 function RequirementsTab({
   projectId,
@@ -397,70 +353,15 @@ function RequirementsTab({
   const [sortBy, setSortBy] = useState<"created" | "priority" | "expected" | "status">("created");
   const [sortAsc, setSortAsc] = useState(false);
   const [tagFilter, setTagFilter] = useState<string>("__all__");
-  const { data: requirements, isLoading } =
-    trpc.requirement.list.useQuery({
-      projectId,
-      completedWithinDays: showAllCompleted ? 0 : undefined,
-    });
-
-  const allTags = useMemo(() => {
-    const tagSet = new Set<string>();
-    requirements?.forEach((r) => r.tags?.forEach((t) => tagSet.add(t)));
-    return Array.from(tagSet).sort();
-  }, [requirements]);
-
-  const filtered = useMemo(() => {
-    let list = requirements?.filter((r) =>
-      showArchived ? r.status === "archived" : r.status !== "archived"
-    );
-    if (list && tagFilter !== "__all__") {
-      list = list.filter((r) => r.tags?.includes(tagFilter));
-    }
-    if (!list) return list;
-    const sorted = [...list].sort((a, b) => {
-      if (sortBy === "priority") {
-        return (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9);
-      }
-      if (sortBy === "status") {
-        return (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9);
-      }
-      if (sortBy === "expected") {
-        const aDate = a.expectedAt ? new Date(a.expectedAt).getTime() : Infinity;
-        const bDate = b.expectedAt ? new Date(b.expectedAt).getTime() : Infinity;
-        return aDate - bDate;
-      }
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
-    return sortAsc ? sorted.reverse() : sorted;
-  }, [requirements, showArchived, sortBy, sortAsc, tagFilter]);
-
-  const summary = useMemo(() => {
-    const list = requirements ?? [];
-    const active = list.filter((r) => !["archived", "cancelled", "done"].includes(r.status)).length;
-    const done = list.filter((r) => r.status === "done").length;
-    const now = new Date();
-    const weekFromNow = new Date(now.getTime() + 7 * 86_400_000);
-    const dueSoon = list.filter((r) => {
-      if (!r.expectedAt || ["archived", "cancelled", "done"].includes(r.status)) return false;
-      const expected = new Date(r.expectedAt);
-      return expected >= now && expected <= weekFromNow;
-    }).length;
-    const tasks = list.flatMap((r) => {
-      type TaskEntry = { id: string; status: string };
-      return ((r as typeof r & { tasks?: TaskEntry[] }).tasks ?? []);
-    });
-    const completedTasks = tasks.filter((task) => task.status === "done").length;
-    const repositoryCount = new Set(
-      list.flatMap((requirement) => requirement.repositories.map((link) => link.repository.id)),
-    ).size;
-    return {
-      active,
-      done,
-      dueSoon,
-      repositoryCount,
-      taskProgress: tasks.length > 0 ? `${completedTasks}/${tasks.length}` : "0/0",
-    };
-  }, [requirements]);
+  const [page, setPage] = useState(1);
+  const { data, isLoading, isError, refetch } = trpc.requirement.workspace.useQuery({
+    projectId, completedWithinDays: showAllCompleted ? 0 : undefined, archived: showArchived,
+    tag: tagFilter === "__all__" ? undefined : tagFilter, sortBy, reverse: sortAsc, page, pageSize: 50,
+  });
+  const requirements = data?.items;
+  const filtered = requirements;
+  const allTags = data?.tags ?? [];
+  const summary = data?.summary ?? { active: 0, done: 0, dueSoon: 0, repositoryCount: 0, taskProgress: "0/0" };
 
   if (isLoading) {
     return (
@@ -472,18 +373,9 @@ function RequirementsTab({
     );
   }
 
-  const archivedCount = requirements?.filter((r) => r.status === "archived").length ?? 0;
+  const archivedCount = data?.archivedCount ?? 0;
+  if (isError) return <Button variant="outline" onClick={() => void refetch()}>Retry requirements</Button>;
 
-  if (!requirements || requirements.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <ClipboardList className="mb-3 h-10 w-10 text-muted-foreground/40" />
-        <p className="text-sm text-muted-foreground">
-          No requirements yet. Create one to get started.
-        </p>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-3">
@@ -500,13 +392,13 @@ function RequirementsTab({
           <>
             <button
               className={`text-xs px-2 py-1 rounded-md transition-colors ${!showArchived ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => setShowArchived(false)}
+              onClick={() => { setShowArchived(false); setPage(1); }}
             >
               Active
             </button>
             <button
               className={`text-xs px-2 py-1 rounded-md transition-colors ${showArchived ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => setShowArchived(true)}
+              onClick={() => { setShowArchived(true); setPage(1); }}
             >
               Archived ({archivedCount})
             </button>
@@ -514,7 +406,7 @@ function RequirementsTab({
           </>
         )}
         <button
-          onClick={() => setShowAllCompleted((v) => !v)}
+          onClick={() => { setShowAllCompleted((v) => !v); setPage(1); }}
           className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors ${showAllCompleted ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
         >
           <Clock className="h-3 w-3" />
@@ -522,7 +414,7 @@ function RequirementsTab({
         </button>
         <div className="grid w-full grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-1 sm:ml-auto sm:flex sm:w-auto">
           {allTags.length > 0 && (
-            <Select value={tagFilter} onValueChange={setTagFilter}>
+            <Select value={tagFilter} onValueChange={(value) => { setTagFilter(value); setPage(1); }}>
               <SelectTrigger className="h-10 w-full min-w-0 text-xs sm:h-7 sm:w-[120px]">
                 <Tag className="mr-1 h-3 w-3 text-muted-foreground" />
                 <SelectValue />
@@ -535,7 +427,7 @@ function RequirementsTab({
               </SelectContent>
             </Select>
           )}
-          <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
+          <Select value={sortBy} onValueChange={(v) => { setSortBy(v as typeof sortBy); setPage(1); }}>
             <SelectTrigger className="h-10 w-full min-w-0 text-xs sm:h-7 sm:w-[140px]">
               <ArrowUpDown className="mr-1 h-3 w-3 text-muted-foreground" />
               <SelectValue />
@@ -551,7 +443,7 @@ function RequirementsTab({
             variant="ghost"
             size="icon"
             className="size-10 sm:size-7"
-            onClick={() => setSortAsc((prev) => !prev)}
+            onClick={() => { setSortAsc((prev) => !prev); setPage(1); }}
             title={sortAsc ? "Ascending" : "Descending"}
           >
             {sortAsc ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
@@ -568,13 +460,15 @@ function RequirementsTab({
         </div>
       )}
 
+      <div className="flex items-center justify-between gap-2 text-sm" aria-label="Requirements pagination">
+        <span>{data?.total ?? 0} matching requirements · Page {data?.page ?? 1} of {Math.max(1, data?.pageCount ?? 0)}</span>
+        <div className="flex gap-2">
+          <Button variant="outline" disabled={(data?.page ?? 1) <= 1} onClick={() => setPage((data?.page ?? 1) - 1)}>Previous</Button>
+          <Button variant="outline" disabled={!data || data.page >= data.pageCount} onClick={() => setPage(data!.page + 1)}>Next</Button>
+        </div>
+      </div>
       {(filtered ?? []).map((req) => {
-        type TaskEntry = { id: string; status: string };
-        const tasks: TaskEntry[] = (req as typeof req & { tasks?: TaskEntry[] }).tasks ?? [];
-        const total = tasks.length;
-        const done = tasks.filter((t) => t.status === "done").length;
-        const inProgress = tasks.filter((t) => t.status === "in_progress").length;
-        const inReview = tasks.filter((t) => t.status === "in_review").length;
+        const { total, done, inProgress, inReview } = req.taskCounts;
         const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
         return (

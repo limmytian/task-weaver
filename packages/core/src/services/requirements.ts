@@ -1440,3 +1440,6 @@ export async function listRequirementDependenciesPage(db: Database, requirementI
   ]);
   return { items: rows.map(row => row.link), meta: { ...page, total: total[0]!.count, nextPage: page.page * page.pageSize < total[0]!.count ? page.page + 1 : null } };
 }
+
+
+export { getRequirementWorkspace } from "./requirement-workspace";

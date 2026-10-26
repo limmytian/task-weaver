@@ -16,6 +16,7 @@ import {
   Plus,
   ClipboardList,
 } from "lucide-react";
+import { resourceAccessLost } from "@/lib/resource-access";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -48,7 +49,9 @@ export default function DocumentDetailPage({
   const [tags, setTags] = useState("");
   const utils = trpc.useUtils();
 
-  const { data: doc, isLoading } = trpc.document.get.useQuery({ id });
+  const documentQuery = trpc.document.get.useQuery({ id });
+  const doc = resourceAccessLost(documentQuery.error) ? undefined : documentQuery.data;
+  const isLoading = documentQuery.isLoading;
 
   useEffect(() => {
     if (doc && !editing) {
@@ -138,6 +141,8 @@ export default function DocumentDetailPage({
     return (
       <div className="flex flex-col items-center justify-center py-20">
         <p className="text-muted-foreground">Document not found</p>
+        {documentQuery.isError && <Button variant="outline" className="mt-4" disabled={documentQuery.isFetching}
+          onClick={() => documentQuery.refetch()}>Retry document</Button>}
         <Button
           variant="outline"
           className="mt-4"

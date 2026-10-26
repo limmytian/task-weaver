@@ -9,6 +9,7 @@ import {
   createRequirementSchema,
   updateRequirementSchema,
   listRequirementsSchema,
+  requirementWorkspaceSchema,
   linkDocumentToRequirementSchema,
   createRequirementDependencySchema,
   createExecutionSliceSchema,
@@ -32,6 +33,9 @@ export const requirementRouter = router({
     .query(async ({ ctx, input }) => {
       return createResourceServices(ctx.identity).requirementService.listRequirements(ctx.db, input);
     }),
+
+  workspace: resourceProcedure.input(requirementWorkspaceSchema)
+    .query(async ({ ctx, input }) => createResourceServices(ctx.identity).requirementService.getRequirementWorkspace(ctx.db, input)),
 
   listSummary: resourceProcedure
     .input(listRequirementsSchema.extend({ view: z.literal("summary").default("summary") }))

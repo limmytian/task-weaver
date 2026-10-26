@@ -79,6 +79,7 @@ export function useRealtime() {
           if (!accepted) return;
           const data = accepted.data as { projectId?: string; taskId?: string };
           if (data.projectId) {
+            utils.requirement.workspace.invalidate({ projectId: data.projectId });
             utils.task.board.invalidate({ projectId: data.projectId });
             utils.task.boardPage.invalidate({ projectId: data.projectId });
             utils.task.list.invalidate({ projectId: data.projectId });
@@ -110,6 +111,7 @@ export function useRealtime() {
           if (data.projectId) {
             utils.requirement.list.invalidate({ projectId: data.projectId });
             utils.requirement.listSummary.invalidate({ projectId: data.projectId });
+            utils.requirement.workspace.invalidate({ projectId: data.projectId });
           }
           if (data.requirementId) utils.requirement.get.invalidate({ id: data.requirementId });
           scheduleDaemonRefresh();
