@@ -74,6 +74,7 @@ export function CreateRequirementDialog({
   const createReq = trpc.requirement.create.useMutation({
     onSuccess: () => {
       utils.requirement.list.invalidate({ projectId });
+      utils.requirement.listSummary.invalidate({ projectId });
       resetForm();
       onOpenChange(false);
       toast.success("Requirement created");

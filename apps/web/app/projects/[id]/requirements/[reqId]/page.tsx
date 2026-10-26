@@ -202,6 +202,7 @@ export default function RequirementDetailPage({
     onSuccess: () => {
       utils.requirement.get.invalidate({ id: reqId });
       utils.requirement.list.invalidate({ projectId });
+      utils.requirement.listSummary.invalidate({ projectId });
       setEditSubmitAttempted(false);
       setEditing(false);
       toast.success("Requirement updated");
@@ -212,6 +213,7 @@ export default function RequirementDetailPage({
   const deleteReq = trpc.requirement.delete.useMutation({
     onSuccess: () => {
       utils.requirement.list.invalidate({ projectId });
+      utils.requirement.listSummary.invalidate({ projectId });
       router.push(`/projects/${projectId}`);
       toast.success("Requirement cancelled");
     },
@@ -1273,6 +1275,7 @@ function RequirementSidebar({
     onSuccess: () => {
       utils.requirement.get.invalidate({ id: requirement.id });
       utils.requirement.list.invalidate({ projectId });
+      utils.requirement.listSummary.invalidate({ projectId });
       setAddingDependency(false);
       setSelectedRequirementId("");
       setDependencyType("blocks");
@@ -1284,6 +1287,7 @@ function RequirementSidebar({
     onSuccess: () => {
       utils.requirement.get.invalidate({ id: requirement.id });
       utils.requirement.list.invalidate({ projectId });
+      utils.requirement.listSummary.invalidate({ projectId });
     },
     onError: (err) => toast.error("Failed to remove dependency", { description: err.message }),
   });

@@ -29,6 +29,7 @@ test("direct callers cannot supply actor authority or bypass protected tRPC defa
   for (const operation of [
     () => caller.auth.current(),
     () => caller.project.list(),
+    () => caller.requirement.listSummary({ projectId: "00000000-0000-4000-8000-000000000001" }),
     () => caller.apiKey.list(),
   ]) {
     await assert.rejects(operation, (error: unknown) => {

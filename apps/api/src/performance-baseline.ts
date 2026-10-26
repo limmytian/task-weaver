@@ -28,7 +28,7 @@ assert.equal(url.hostname, "127.0.0.1");
 assert.equal(url.pathname, "/tw_performance");
 function sourceProvenance() {
   const implementationHash = createHash("sha256");
-  for (const file of ["apps/api/src/performance-baseline.ts", "apps/api/src/performance-workload.ts", "apps/api/src/performance-fixture.ts", "apps/api/src/performance-pagination.ts", "apps/api/src/performance-query-plans.ts", "apps/api/src/resource-postgres-fixture.ts", "scripts/performance-baseline.mjs", "scripts/performance-local-postgres.mjs", "scripts/performance-resources.mjs", "packages/db/src/measurement.ts", "packages/db/src/client.ts", "packages/core/src/services/auth-security.ts", "packages/core/src/services/resource-services.ts"]) {
+  for (const file of ["apps/api/src/performance-baseline.ts", "apps/api/src/performance-workload.ts", "apps/api/src/performance-fixture.ts", "apps/api/src/performance-pagination.ts", "apps/api/src/performance-query-plans.ts", "apps/api/src/resource-postgres-fixture.ts", "scripts/performance-baseline.mjs", "scripts/performance-local-postgres.mjs", "scripts/performance-resources.mjs", "packages/db/src/measurement.ts", "packages/db/src/client.ts", "packages/core/src/services/auth-security.ts", "packages/core/src/services/resource-services.ts", "packages/core/src/services/requirements.ts", "packages/contracts/src/schemas/requirements.ts", "apps/web/trpc/routers/requirement.ts", "apps/web/components/create-task-dialog.tsx", "apps/web/components/requirement-picker.tsx"]) {
     implementationHash.update(file).update(readFileSync(file));
   }
   return {
@@ -37,6 +37,7 @@ function sourceProvenance() {
     implementationSha256: implementationHash.digest("hex"),
   };
 }
+const initialSource = sourceProvenance();
 const completedCases: Array<{ concurrency: number; offeredRps: number; repetition: number; [key: string]: unknown }> = [];
 const percentile = (values: number[], fraction: number) => {
   const sorted = [...values].sort((a, b) => a - b);
@@ -275,11 +276,68 @@ try {
   catch (error) { if (tier === "small") throw error; compatibilityOutcome = "deadline_or_validation_failure"; }
   measured = false;
   const compatibilityElapsedMs = performance.now() - compatibilityStarted;
+  const legacyRequirements = samples.map(({ database, ...sample }) => ({ ...sample, queryCount: database!.queryCount }));
   const queryPlans = await measurePerformanceQueryPlans(db, fixture.project.id, generated.counts.tasks / 2, generated.counts.requirements / 2);
-  console.log("TW_PERFORMANCE_RECEIPT " + JSON.stringify({ source: sourceProvenance(), seed, fixtureHash,
+  const selectorProbes = [];
+  async function selectorPage(page: number, subject = headers, query?: string, signal = AbortSignal.timeout(5000)) {
+    const params = new URLSearchParams({ view: "summary", excludeStatus: "cancelled", page: String(page), pageSize: "20" });
+    if (query) params.set("q", query);
+    const response = await fetch(`${base}/projects/${fixture.project.id}/requirements?${params}`, {
+      headers: subject, signal,
+    });
+    const { value, bytes } = await readPerformanceJson(response, 16 * 1024);
+    assert.equal(response.status, 200, "Requirement selector probe failed");
+    const body = value as { items: Array<{ id: string; projectId: string; status: string; [key: string]: unknown }>; total: number; pageCount: number };
+    assert.ok(body.items.every(row => row.projectId === fixture.project.id && row.status !== "cancelled"));
+    assert.ok(body.items.every(row => !["description", "tasks", "dependencies", "repositories"].some(key => key in row)));
+    return { ...body, bytes };
+  }
+  for (const page of [1, Math.ceil(generated.counts.requirements / 2 / 20)]) {
+    samples.length = 0; measured = true;
+    const result = await selectorPage(page);
+    measured = false;
+    assert.equal(result.total, generated.counts.requirements / 2);
+    assert.equal(samples.length, 1);
+    selectorProbes.push({ page, rows: result.items.length, bytes: result.bytes,
+      milliseconds: samples[0]!.milliseconds, queryCount: samples[0]!.database!.queryCount });
+  }
+  // Post-measurement correctness phase only: create ties and cancelled rows in this disposable DB.
+  const ownerRequirements = requirementRows.filter(row => row.projectId === fixture.project.id);
+  const cancelledIds = ownerRequirements.slice(0, 20).map(row => row.id);
+  await db.update(requirements).set({ updatedAt: new Date("2026-10-26T00:00:00Z") })
+    .where(inArray(requirements.id, ownerRequirements.map(row => row.id)));
+  await db.update(requirements).set({ status: "cancelled" }).where(inArray(requirements.id, cancelledIds));
+  const expectedSelectorIds = ownerRequirements.filter(row => !cancelledIds.includes(row.id)).map(row => row.id).sort().reverse();
+  const tiedSelectorTraversal = await verifyPerformancePagination({ expectedIds: expectedSelectorIds, readPage: async (page, signal) => {
+    const result = await selectorPage(page, headers, undefined, signal);
+    assert.deepEqual(result.items.map(row => row.id), expectedSelectorIds.slice((page - 1) * 20, page * 20), "Tied selector ordering is unstable");
+    return result;
+  } });
+  const target = ownerRequirements.at(-1)!;
+  const searchResult = await selectorPage(1, viewer.headers, target.title);
+  assert.equal(searchResult.total, 1, "Requirement selector search/count mismatch");
+  assert.equal(searchResult.items[0]?.id, target.id);
+  const cancelledResult = await selectorPage(1, headers, ownerRequirements[0]!.title);
+  assert.equal(cancelledResult.total, 0, "Cancelled filtering must precede search counts");
+  const fullResponse = await fetch(`${base}/projects/${fixture.project.id}/requirements?view=full&excludeStatus=cancelled&pageSize=5`,
+    { headers, signal: AbortSignal.timeout(5000) });
+  const full = (await readPerformanceJson(fullResponse)).value as { items: Array<{ id: string }>; total: number };
+  assert.equal(fullResponse.status, 200); assert.equal(full.total, expectedSelectorIds.length);
+  assert.deepEqual(full.items.map(row => row.id), expectedSelectorIds.slice(0, 5));
+  const outsider = await fetch(`${base}/projects/${fixture.project.id}/requirements?view=summary&excludeStatus=cancelled`, {
+    headers: fixture.outsider.headers, signal: AbortSignal.timeout(5000),
+  });
+  assert.ok([403, 404].includes(outsider.status)); await outsider.arrayBuffer();
+  const selector = { probes: selectorProbes, tiedSelectorTraversal, excludedCancelled: cancelledIds.length,
+    searchAndViewer: true, outsiderDenied: true, fullViewTies: true,
+    limits: "REST contract probes reuse the same protected service as tRPC; not browser timing or a concurrent snapshot guarantee" };
+  const finalSource = sourceProvenance();
+  assert.equal(finalSource.implementationSha256, initialSource.implementationSha256, "Measured source changed during execution");
+  assert.equal(finalSource.commit, initialSource.commit, "Measured commit changed during execution");
+  console.log("TW_PERFORMANCE_RECEIPT " + JSON.stringify({ source: initialSource, seed, fixtureHash,
     fixture: { tier, projects: 2, requirements: generated.counts.requirements, tasks: generated.counts.tasks, documents: generated.counts.documents, documentBytes: 4096, taskDependencies: generated.counts.dependencies, documentLinks: 200, progressHistory: 0, identityProfile: "Reads rotate owner/member/viewer/agent/narrowed key; writes rotate owner/member/agent; revoked and outsider probes excluded from successful throughput" },
     runtime: { node: process.version, cpu: cpus()[0]?.model, cpuCount: cpus().length, hostMemoryBytes: totalmem(), apiProcesses: 1, apiPoolMax: 10, monitorPoolMax: 1, realtimeStarted: false, transport: "loopback HTTP; API and load generator share one process" },
-    coldTaskSummaryMs, cases, skippedProfiles, pagination, queryPlans,
+    coldTaskSummaryMs, cases, skippedProfiles, pagination, queryPlans, selector,
     profiles: [...profileSamples.entries()].map(([profile, aggregate]) => ({ profile, elapsedMs: aggregate.elapsedMs,
       operations: [...new Set(mix)].map(operation => {
         const selected = aggregate.samples.filter(sample => sample.operation === operation);
@@ -288,7 +346,7 @@ try {
           p50Ms: percentile(timings, .5), p95Ms: percentile(timings, .95), p99Ms: percentile(timings, .99),
           sufficientInitialSamples: selected.length >= 200 };
       }) })),
-    legacyRequirements: samples.map(({ database, ...s }) => ({ ...s, queryCount: database!.queryCount })),
+    legacyRequirements,
     compatibilityProbe: { outcome: compatibilityOutcome, elapsedMs: compatibilityElapsedMs, deadlineMs: 5000, isolatedReadOnlyProbe: true },
     unknown: ["independent pool wait", "identity lock wait separate from lock-query execution", "per-query elapsed time and returned/scanned rows beyond representative leaf plans", "authorization and relation-pruning SQL plans", "browser journeys", "worker/progress/console profiles", "second API process", "monitoring overhead comparison", "saturation above the tested offered rate"],
     limits: ["Approved small/medium synthetic fixture only", "SQL count is ORM statements, excluding driver BEGIN/COMMIT", "Resource transaction duration includes entry, lock query and commit", "Each case resets task versions/titles/timestamps, requirement revisions and mutation/outbox history before identical warmup", "Table counters are interval aggregates with asynchronous flush, not per-query row counts", "One-second lock sampling can miss short waits", "No production SLA or optimization claim", "Repeated samples support initial tails; stable p99 is not established", "No browser or model process started"] }));

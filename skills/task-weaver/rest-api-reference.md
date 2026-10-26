@@ -666,6 +666,7 @@ the legacy full array response for API compatibility.
 | `pageSize` | integer | 1–50 items per page. Default `20` for summary and `5` for full. |
 | `q` | string | Case-insensitive search in requirement title and description |
 | `status` | enum | `draft` \| `approved` \| `in_progress` \| `in_review` \| `ready_to_merge` \| `done` \| `cancelled` \| `archived` |
+| `excludeStatus` | string | Exclude one requirement status before pagination and counts; optional, for example `cancelled`. |
 | `completedWithinDays` | number | Only return done/cancelled/archived requirements completed within this many days. Default `14`. Set `0` for all. Ignored when `status` is explicitly a terminal status. |
 | `priority` | enum | `low` \| `medium` \| `high` \| `critical` |
 

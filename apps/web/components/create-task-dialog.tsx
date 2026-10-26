@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { RequirementPicker } from "@/components/requirement-picker";
 
 function defaultTaskDate() {
   return new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
@@ -51,12 +52,6 @@ export function CreateTaskDialog({
   const [expectedAt, setExpectedAt] = useState(defaultTaskDate);
   const utils = trpc.useUtils();
 
-  const { data: requirements, isLoading: requirementsLoading } = trpc.requirement.list.useQuery(
-    { projectId },
-    { enabled: open },
-  );
-
-  const activeRequirements = requirements?.filter((r) => r.status !== "cancelled") ?? [];
   const defaultReq = defaultRequirementId ?? "";
 
   const resetForm = () => {
@@ -84,6 +79,7 @@ export function CreateTaskDialog({
       utils.task.board.invalidate({ projectId });
       utils.task.list.invalidate();
       utils.requirement.list.invalidate({ projectId });
+      utils.requirement.listSummary.invalidate({ projectId });
       utils.task.gantt.invalidate({ projectId });
       utils.project.stats.invalidate({ id: projectId });
       resetForm();
@@ -138,24 +134,8 @@ export function CreateTaskDialog({
                   <label className="mb-1.5 block text-sm font-medium">
                     Requirement <span className="text-destructive">*</span>
                   </label>
-                  <Select value={requirementId} onValueChange={setRequirementId}>
-                    <SelectTrigger aria-invalid={Boolean(requirementError)}>
-                      <SelectValue placeholder={requirementsLoading ? "Loading requirements..." : "Select a requirement..."} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {activeRequirements.length === 0 ? (
-                        <div className="px-2 py-3 text-center text-sm text-muted-foreground">
-                          No requirements yet. Create one first.
-                        </div>
-                      ) : (
-                        activeRequirements.map((r) => (
-                          <SelectItem key={r.id} value={r.id}>
-                            {r.title}
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
+                  {open && <RequirementPicker key={projectId} projectId={projectId} value={requirementId}
+                    onValueChange={setRequirementId} invalid={Boolean(requirementError)} />}
                   {requirementError && (
                     <p className="mt-1 text-xs text-destructive">{requirementError}</p>
                   )}

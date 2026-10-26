@@ -11,12 +11,15 @@ const tierArgument = args.find(value => value.startsWith("--tier="));
 const tier = tierArgument === "--tier=medium" ? "medium" : "small";
 const browserArgument = args.find(value => value.startsWith("--browser-build="));
 const browserBuild = browserArgument?.slice("--browser-build=".length);
+const browserProfileArgument = args.find(value => value.startsWith("--browser-profile="));
+const browserProfile = browserProfileArgument?.slice("--browser-profile=".length) ?? "mixed";
 if (args.length === 1 && args[0] === "--help") {
-  console.log("Use installed PostgreSQL/pgvector in one temporary loopback-only cluster. Limits: normal macOS memory pressure, >=2 GiB reclaimable headroom, <=1536 MiB DB RSS, <=4 GiB added RSS, <=120 DB CPU seconds, <=15 minutes; small fixture at10 offered RPS, then conditionally 20 RPS only after no skipped base-rate arrivals. Use --tier=medium for the approved10,000-task tier (2 RPS smoke, then at most10 RPS). Optional --browser-build=.next-perf-ID serves the medium fixture for one browser session. No installations or existing cluster access.");
+  console.log("Use installed PostgreSQL/pgvector in one temporary loopback-only cluster. Limits: normal macOS memory pressure, >=2 GiB reclaimable headroom, <=1536 MiB DB RSS, <=4 GiB added RSS, <=120 DB CPU seconds, <=15 minutes; small fixture at10 offered RPS, then conditionally 20 RPS only after no skipped base-rate arrivals. Use --tier=medium for the approved10,000-task tier (2 RPS smoke, then at most10 RPS). Optional --browser-build=.next-perf-ID serves the medium fixture for one browser session; --browser-profile=selector retains all owner tasks as terminal history to isolate requirement selection from the known Board rendering failure. No installations or existing cluster access.");
   process.exit(0);
 }
-if (args.some(value => !["--tier=small", "--tier=medium"].includes(value) && value !== browserArgument)
-    || args.length !== Number(Boolean(tierArgument)) + Number(Boolean(browserArgument))
+if (args.some(value => !["--tier=small", "--tier=medium"].includes(value) && value !== browserArgument && value !== browserProfileArgument)
+    || args.length !== Number(Boolean(tierArgument)) + Number(Boolean(browserArgument)) + Number(Boolean(browserProfileArgument))
+    || browserProfileArgument !== undefined && (!browserBuild || browserProfile !== "selector")
     || browserArgument !== undefined && (tier !== "medium" || !/^\.next-perf-[a-z0-9][a-z0-9-]{0,63}$/.test(browserBuild))) {
   console.error("Unsupported local baseline arguments"); process.exit(1);
 }
@@ -96,6 +99,7 @@ try {
   child = spawn("pnpm", ["exec", "tsx", browserBuild ? "apps/api/src/performance-browser-fixture.ts" : "apps/api/src/performance-baseline.ts"], { detached: true, stdio: ["ignore", "pipe", "pipe"],
     env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_OPTIONS: "--max-old-space-size=1024", PGOPTIONS: "-c client_min_messages=warning", TW_PERFORMANCE_TIER: tier,
       TW_PERFORMANCE_BROWSER_BUILD: browserBuild ?? "", TW_PERFORMANCE_BROWSER_READY_FILE: join(root, "browser-ready.json"),
+      TW_PERFORMANCE_BROWSER_PROFILE: browserProfile,
       TW_PERFORMANCE_DATABASE_URL: `postgres://fixture:${password}@127.0.0.1:${port}/tw_performance` } });
   let output = "";
   let browserReadyPublished = false;

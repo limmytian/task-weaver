@@ -92,6 +92,7 @@ export function TaskDetailSheet({
     if (effectiveProjectId) {
       utils.task.board.invalidate({ projectId: effectiveProjectId });
       utils.requirement.list.invalidate({ projectId: effectiveProjectId });
+      utils.requirement.listSummary.invalidate({ projectId: effectiveProjectId });
       utils.task.gantt.invalidate({ projectId: effectiveProjectId });
     }
     utils.task.list.invalidate();

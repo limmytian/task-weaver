@@ -105,7 +105,10 @@ export function useRealtime() {
           const accepted = acceptEvent(event);
           if (!accepted) return;
           const data = accepted.data as { projectId?: string; requirementId?: string };
-          if (data.projectId) utils.requirement.list.invalidate({ projectId: data.projectId });
+          if (data.projectId) {
+            utils.requirement.list.invalidate({ projectId: data.projectId });
+            utils.requirement.listSummary.invalidate({ projectId: data.projectId });
+          }
           if (data.requirementId) utils.requirement.get.invalidate({ id: data.requirementId });
           scheduleDaemonRefresh();
           utils.activity.list.invalidate();

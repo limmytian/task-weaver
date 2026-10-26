@@ -69,6 +69,7 @@ export const updateRequirementSchema = z.object({
 export const listRequirementsSchema = z.object({
   projectId: z.string().uuid(),
   status: requirementStatusSchema.optional(),
+  excludeStatus: requirementStatusSchema.optional(),
   priority: requirementPrioritySchema.optional(),
   tag: z.string().optional(),
   query: z.string().trim().min(1).max(500).optional(),

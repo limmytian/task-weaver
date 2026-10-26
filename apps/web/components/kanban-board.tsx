@@ -235,6 +235,7 @@ export function KanbanBoard({
     onSettled: () => {
       utils.task.board.invalidate({ projectId });
       utils.requirement.list.invalidate({ projectId });
+      utils.requirement.listSummary.invalidate({ projectId });
       utils.task.gantt.invalidate({ projectId });
     },
   });

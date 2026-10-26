@@ -33,6 +33,12 @@ export const requirementRouter = router({
       return createResourceServices(ctx.identity).requirementService.listRequirements(ctx.db, input);
     }),
 
+  listSummary: resourceProcedure
+    .input(listRequirementsSchema.extend({ view: z.literal("summary").default("summary") }))
+    .query(async ({ ctx, input }) => {
+      return createResourceServices(ctx.identity).requirementService.listRequirements(ctx.db, input);
+    }),
+
   get: resourceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createServer } from "node:net";
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
@@ -17,6 +18,8 @@ const password = "fixture-only-browser-performance-20261026";
 const databaseUrl = process.env.TW_PERFORMANCE_DATABASE_URL!;
 const readyFile = process.env.TW_PERFORMANCE_BROWSER_READY_FILE!;
 const directory = process.env.TW_PERFORMANCE_BROWSER_BUILD!;
+const profile = process.env.TW_PERFORMANCE_BROWSER_PROFILE ?? "mixed";
+assert.ok(profile === "mixed" || profile === "selector");
 const url = new URL(databaseUrl);
 assert.equal(url.hostname, "127.0.0.1"); assert.equal(url.pathname, "/tw_performance");
 assert.ok(readyFile && /^\.next-perf-[a-z0-9-]+$/.test(directory));
@@ -38,8 +41,14 @@ try {
   const f = await resourcePostgresFixture(db, databaseUrl, { password, ownerEmail: email, apiOrigin, webOrigin });
   const other = await f.identity.createProject(f.outsider.headers, { name: "Other synthetic project" });
   const generated = performanceFixture([f.project.id, other.id], [f.owner.context.actor.id, f.outsider.context.actor.id], "medium");
+  // Isolate selector work from the already-known unbounded Board: retain all tasks as terminal history.
+  const browserTasks = profile === "selector" ? generated.taskRows.map(row => row.projectId === f.project.id
+    ? { ...row, status: "done" as const, completedAt: row.updatedAt } : row) : generated.taskRows;
+  const fixtureHash = profile === "mixed" ? generated.hash : createHash("sha256").update(JSON.stringify({
+    baseFixtureHash: generated.hash, profile, ownerTasks: "All 5000 tasks are done; default Board excludes terminal history",
+  })).digest("hex");
   for (const batch of performanceBatches(generated.requirementRows)) await db.insert(requirements).values(batch);
-  for (const batch of performanceBatches(generated.taskRows)) await db.insert(tasks).values(batch);
+  for (const batch of performanceBatches(browserTasks)) await db.insert(tasks).values(batch);
   await db.insert(documents).values(generated.documentRows);
   for (const batch of performanceBatches(generated.dependencies)) await db.insert(taskDependencies).values(batch);
   await db.insert(documentTaskLinks).values(generated.taskLinks); await db.insert(documentRequirementLinks).values(generated.requirementLinks);
@@ -63,7 +72,9 @@ try {
     await delay(200);
   }
   assert.ok(available, "Isolated browser server failed to start");
-  writeFileSync(readyFile, JSON.stringify({ webOrigin, apiOrigin, projectId: f.project.id, fixtureHash: generated.hash,
+  writeFileSync(readyFile, JSON.stringify({ webOrigin, apiOrigin, projectId: f.project.id, fixtureHash,
+    profile, baseFixtureHash: generated.hash,
+    fixedRequirementId: generated.requirementRows[0]!.id,
     buildDirectory: directory, buildId: readFileSync(join(resolve("apps/web"), directory, "BUILD_ID"), "utf8").trim(),
     tasks: generated.counts.tasks, requirements: generated.counts.requirements, apiPoolMax: 1, webPoolMax: 10, realtimePoolMax: 2 }), { mode: 0o600 });
   console.log("TW_PERFORMANCE_BROWSER_READY");
@@ -72,7 +83,7 @@ try {
     const stop = () => { clearInterval(timer); resolve(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
-  console.log("TW_PERFORMANCE_RECEIPT " + JSON.stringify({ browserFixture: true, fixtureHash: generated.hash,
+  console.log("TW_PERFORMANCE_RECEIPT " + JSON.stringify({ browserFixture: true, fixtureHash, profile, baseFixtureHash: generated.hash,
     tasks: generated.counts.tasks, requirements: generated.counts.requirements, directory,
     buildId: readFileSync(join(resolve("apps/web"), directory, "BUILD_ID"), "utf8").trim() }));
 } finally {

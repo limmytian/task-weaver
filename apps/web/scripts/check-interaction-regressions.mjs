@@ -67,9 +67,20 @@ const checks = [
     patterns: [
       /ConfirmDialog/,
       /aria-invalid=\{Boolean\(titleError\)\}/,
-      /aria-invalid=\{Boolean\(requirementError\)\}/,
+      /invalid=\{Boolean\(requirementError\)\}/,
       /disabled=\{!canSubmit\}/,
       /Discard task draft/,
+    ],
+  },
+  {
+    file: "components/requirement-picker.tsx",
+    label: "Bounded requirement selection feedback and keyboard access",
+    patterns: [
+      /aria-invalid=\{invalid\}/,
+      /aria-label="Search requirements"/,
+      /aria-label="Requirement pages"/,
+      /nativeEvent\.isComposing/,
+      /Requirements could not be loaded/,
     ],
   },
   {
