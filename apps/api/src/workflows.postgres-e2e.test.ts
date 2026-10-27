@@ -160,6 +160,13 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   const download = await evidenceApi(`/${remote.requestId}/content`);
   assert.equal(download.status, 200); assert.equal(download.headers.get("x-content-type-options"), "nosniff");
   assert.deepEqual(Buffer.from(await download.arrayBuffer()), content);
+  const previewRequest = await json(await evidenceApi("/open", "POST", { requirementId: boundRequirement.id, outputId: boundOutput.id, purpose: "preview" }), 201);
+  const previewDemand = (await json(await evidenceApi(`/demands/${evidenceDaemon}`, "GET", undefined, agentHeaders))).items.find((item: { requestId: string }) => item.requestId === previewRequest.requestId);
+  const previewProof = sign(null, Buffer.from(evidenceDemandPayload(previewDemand)), pair.privateKey).toString("base64");
+  await json(await evidenceApi(`/${previewRequest.requestId}/claim`, "POST", { daemonId: evidenceDaemon, signature: previewProof }, agentHeaders));
+  await json(await evidenceApi(`/${previewRequest.requestId}/chunk`, "POST", { daemonId: evidenceDaemon, sequence: 0, contentBase64: content.toString("base64") }, agentHeaders));
+  await json(await evidenceApi(`/${previewRequest.requestId}/finish`, "POST", { daemonId: evidenceDaemon, sequence: 1 }, agentHeaders));
+  assert.deepEqual(Buffer.from(await (await evidenceApi(`/${previewRequest.requestId}/content`)).arrayBuffer()), content);
   await fixture.identity.setMembership(fixture.owner.headers, fixture.project.id, fixture.outsider.context.actor.id, { role: "viewer", explicitPermissions: [] });
   assert.notEqual((await evidenceApi("/open", "POST", { requirementId: boundRequirement.id, outputId: boundOutput.id, purpose: "promotion" }, fixture.outsider.headers)).status, 201);
   const promotions = await Promise.all([1, 2].map(async () => json(await evidenceApi("/open", "POST", { requirementId: boundRequirement.id, outputId: boundOutput.id, purpose: "promotion" }), 201)));

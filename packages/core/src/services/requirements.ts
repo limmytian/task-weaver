@@ -1,4 +1,5 @@
 import { verifyEvidenceRegistration } from "./evidence-proof";
+import { evidenceAttachmentMetadata } from "./evidence-metadata";
 import { executionControls, executionSynchronizations } from "@task-weaver/db";
 import { evidenceLimits, RequirementCompletionError } from "@task-weaver/contracts";
 import type { RetrievalPredicates } from "./retrieval-predicates";
@@ -139,7 +140,7 @@ export async function describeWorkflowEvidence(db: Database, requirementId: stri
       : !online.length ? "offline" as const
       : !online.some(daemon => daemon.capabilities?.includes("evidence-read-v1")) ? "unsupported" as const
       : "available" as const;
-    return { ...base, kind: "local" as const, availability, nodeId: output.nodeId, sizeBytes: output.sizeBytes, sha256: output.sha256 };
+    return { ...base, kind: "local" as const, availability, nodeId: output.nodeId, sizeBytes: output.sizeBytes, sha256: output.sha256, ...evidenceAttachmentMetadata(output.relativePath) };
   }
   if (output.type === "attachment" && output.referenceId && output.attachmentFileVersionId) {
     const file = await db.query.documentFileVersions.findFirst({ where: and(eq(documentFileVersions.id, output.attachmentFileVersionId), eq(documentFileVersions.documentId, output.referenceId)) });

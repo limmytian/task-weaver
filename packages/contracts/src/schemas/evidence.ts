@@ -27,7 +27,7 @@ const base = {
 /** Public descriptors contain identities, never node paths or arbitrary URLs. */
 export const evidenceDescriptorSchema = z.discriminatedUnion("kind", [
   z.object({ ...base, kind: z.literal("unsupported"), availability: z.enum(["unsupported", "retired"]) }).strict(),
-  z.object({ ...base, kind: z.literal("local"), nodeId: z.string().min(1).max(255), sizeBytes: z.number().int().nonnegative().safe(), sha256 }).strict(),
+  z.object({ ...base, kind: z.literal("local"), nodeId: z.string().min(1).max(255), sizeBytes: z.number().int().nonnegative().safe(), sha256, originalFilename: z.string().max(255).optional(), mimeType: z.string().max(255).optional() }).strict(),
   z.object({ ...base, kind: z.literal("attachment"), documentId: id, fileVersionId: id, fileVersion: z.number().int().positive(), mimeType: z.string().max(255), originalFilename: z.string().max(255), sizeBytes: z.number().int().nonnegative().safe(), sha256 }).strict(),
   z.object({ ...base, kind: z.literal("git"), requirementRepositoryId: id, headCommit: oid }).strict(),
 ]);

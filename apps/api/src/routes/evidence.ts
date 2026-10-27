@@ -14,7 +14,7 @@ export function createEvidenceRoutes(enabled: boolean) {
     return service ??= new EvidenceSessionService(db);
   };
   const id = z.string().uuid();
-  const request = z.object({ requirementId: id, outputId: id, purpose: z.enum(['download', 'promotion']) }).strict();
+  const request = z.object({ requirementId: id, outputId: id, purpose: z.enum(['preview', 'download', 'promotion']) }).strict();
   const producer = z.object({ daemonId: id }).strict();
   const claim = producer.extend({ signature: z.string().max(128) }).strict();
   const chunk = producer.extend({ sequence: z.number().int().nonnegative(), contentBase64: z.string().max(Math.ceil(evidenceLimits.chunkBytes / 3) * 4).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/) }).strict();

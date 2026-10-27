@@ -99,11 +99,13 @@ function EvidenceMetadata({ requirementId, outputId }: { requirementId: string; 
   const [open, setOpen] = useState(false);
   const [state, setState] = useState("");
   const [controller, setController] = useState<AbortController | null>(null);
+  const [localPreview, setLocalPreview] = useState<{ url: string; kind: string; filename: string; truncated: boolean } | null>(null);
   const activeDownload = useRef<AbortController | null>(null);
   useEffect(() => () => activeDownload.current?.abort(), []);
+  useEffect(() => () => { if (localPreview) URL.revokeObjectURL(localPreview.url); }, [localPreview]);
   const evidence = trpc.requirement.evidence.useQuery({ requirementId, outputId }, { enabled: open, retry: false });
   const capabilities = trpc.plan.capabilities.useQuery({ projectId: evidence.data?.projectId ?? '' }, { enabled: open && Boolean(evidence.data?.projectId), retry: false });
-  const transfer = async (purpose: 'download' | 'promotion') => {
+  const transfer = async (purpose: 'preview' | 'download' | 'promotion') => {
     const abort = new AbortController(); activeDownload.current = abort; setController(abort); let requestId: string | undefined;
     try {
       const csrf = await fetch('/api/auth/csrf', { credentials: 'same-origin', cache: 'no-store', signal: abort.signal });
@@ -127,6 +129,23 @@ function EvidenceMetadata({ requirementId, outputId }: { requirementId: string; 
             if (!result.ok) throw new Error('Evidence promotion failed');
             requestId = undefined; await evidence.refetch(); setState('Verified evidence saved as an attachment.'); return;
           }
+          if (purpose === 'preview' && evidence.data?.kind === 'local') {
+            const kind = evidencePreviewKind(evidence.data.mimeType, evidence.data.sizeBytes);
+            if (kind === 'download') throw new Error('Preview is unavailable for this file');
+            setState('Reading a verified preview…');
+            const result = await fetch(`/api/evidence/${requestId}/content`, { credentials: 'same-origin', cache: 'no-store', signal: abort.signal });
+            if (!result.ok || !result.body) throw new Error('Evidence preview failed');
+            const limit = ['text', 'csv', 'tsv'].includes(kind) ? 256 * 1024 : 10 * 1024 * 1024;
+            const reader = result.body.getReader(); const parts: ArrayBuffer[] = []; let size = 0;
+            try {
+              while (size < limit) { const item = await reader.read(); if (item.done) break; const piece = item.value.subarray(0, limit - size); parts.push(piece.slice().buffer); size += piece.length; }
+              await reader.cancel();
+            } finally { reader.releaseLock(); }
+            requestId = undefined;
+            const url = URL.createObjectURL(new Blob(parts, { type: evidence.data.mimeType }));
+            setLocalPreview({ url, kind, filename: evidence.data.originalFilename, truncated: size < evidence.data.sizeBytes });
+            setState('Verified preview ready.'); return;
+          }
           setState('Downloading verified bytes…');
           const result = await fetch(`/api/evidence/${requestId}/content`, { credentials: 'same-origin', cache: 'no-store', signal: abort.signal });
           if (!result.ok) throw new Error('Evidence download failed');
@@ -148,13 +167,25 @@ function EvidenceMetadata({ requirementId, outputId }: { requirementId: string; 
     {open && evidence.isLoading && <p>Loading evidence…</p>}
     {open && evidence.error && <p role="alert">Evidence is unavailable or access is denied.</p>}
     {open && evidence.data && <div className="space-y-1 text-xs"><p>Source: {evidence.data.kind} · {evidence.data.availability}</p>
-      {evidence.data.kind === "local" && evidence.data.availability !== "retired" && <><p>Size: {evidence.data.sizeBytes} bytes</p><p>SHA-256: {evidence.data.sha256}</p><p>Node download requires a connected compatible producer and an enabled evidence service.</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('download'); }}>Download original</Button>{capabilities.data?.canWrite && <Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('promotion'); }}>Save as attachment</Button>}{controller && <Button size="sm" variant="ghost" onClick={() => controller.abort()}>Cancel request</Button>}</div></>}
+      {evidence.data.kind === "local" && evidence.data.availability !== "retired" && <><p>{evidence.data.originalFilename} · {evidence.data.sizeBytes} bytes</p><p>SHA-256: {evidence.data.sha256}</p><p>Preview transfers and verifies the entire file from its node before displaying a bounded sample. A connected compatible producer and enabled evidence service are required.</p><div className="flex flex-wrap gap-2">{evidencePreviewKind(evidence.data.mimeType, evidence.data.sizeBytes) !== 'download' && <Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('preview'); }}>Preview</Button>}<Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('download'); }}>Download original</Button>{capabilities.data?.canWrite && <Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('promotion'); }}>Save as attachment</Button>}{controller && <Button size="sm" variant="ghost" onClick={() => controller.abort()}>Cancel request</Button>}</div>{localPreview && <LocalEvidencePreview preview={localPreview} />}</>}
       {evidence.data.kind === "attachment" && evidence.data.availability !== "retired" && <PinnedAttachmentEvidence file={evidence.data} />}
       {evidence.data.availability === "retired" && <p>This output has been retired.</p>}
       {evidence.data.kind === "git" && <GitEvidence requirementId={requirementId} outputId={outputId} headCommit={evidence.data.headCommit} />}
       {evidence.data.kind === "unsupported" && <p>This output does not have a supported immutable evidence identity.</p>}
       {state && <p role="status">{state}</p>}
     </div>}
+  </div>;
+}
+
+function LocalEvidencePreview({ preview }: { preview: { url: string; kind: string; filename: string; truncated: boolean } }) {
+  return <div className="space-y-2">{preview.truncated && <p>Preview is truncated; download the original for the complete file.</p>}
+    {preview.kind === 'text' && <TextAttachmentPreview src={preview.url} filename={preview.filename} maximumBytes={256 * 1024} />}
+    {(preview.kind === 'csv' || preview.kind === 'tsv') && <EvidenceTablePreview src={preview.url} filename={preview.filename} sizeBytes={preview.truncated ? 256 * 1024 + 1 : 0} delimiter={preview.kind === 'csv' ? ',' : '\t'} />}
+    {preview.kind === 'pdf' && <PdfAttachmentPreview src={preview.url} filename={preview.filename} />}
+    {preview.kind === 'audio' && <audio controls preload="metadata" src={preview.url}>Audio preview is not supported by this browser.</audio>}
+    {preview.kind === 'video' && <video controls preload="metadata" className="max-h-96 max-w-full" src={preview.url}>Video preview is not supported by this browser.</video>}
+    {/* eslint-disable-next-line @next/next/no-img-element */}
+    {preview.kind === 'image' && <img src={preview.url} alt={preview.filename} className="max-h-96 max-w-full object-contain" />}
   </div>;
 }
 
