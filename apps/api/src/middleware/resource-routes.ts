@@ -1,6 +1,6 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
-  ["POST", /^\/api\/v1\/evidence\/(?:open|[0-9a-fA-F-]{36}\/(?:claim|chunk|finish|cancel|fail))\/?$/],
+  ["POST", /^\/api\/v1\/evidence\/(?:open|[0-9a-fA-F-]{36}\/(?:claim|chunk|finish|cancel|fail|promote))\/?$/],
   ["GET", /^\/api\/v1\/evidence\/(?:demands\/[0-9a-fA-F-]{36}|[0-9a-fA-F-]{36}\/(?:status|content))\/?$/],
   ["POST", /^\/api\/v1\/worker-console\/(?:open|[a-z0-9_-]{1,32}\/[a-z0-9_.-]{1,160}\/(?:read|cancel|response))$/],
   ["GET", /^\/api\/v1\/worker-console\/(?:[a-z0-9_-]{1,32}\/)?demands\/[0-9a-f-]{36}$/],

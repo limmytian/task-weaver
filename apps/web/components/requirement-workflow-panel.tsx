@@ -102,7 +102,8 @@ function EvidenceMetadata({ requirementId, outputId }: { requirementId: string; 
   const activeDownload = useRef<AbortController | null>(null);
   useEffect(() => () => activeDownload.current?.abort(), []);
   const evidence = trpc.requirement.evidence.useQuery({ requirementId, outputId }, { enabled: open, retry: false });
-  const download = async () => {
+  const capabilities = trpc.plan.capabilities.useQuery({ projectId: evidence.data?.projectId ?? '' }, { enabled: open && Boolean(evidence.data?.projectId), retry: false });
+  const transfer = async (purpose: 'download' | 'promotion') => {
     const abort = new AbortController(); activeDownload.current = abort; setController(abort); let requestId: string | undefined;
     try {
       const csrf = await fetch('/api/auth/csrf', { credentials: 'same-origin', cache: 'no-store', signal: abort.signal });
@@ -110,7 +111,7 @@ function EvidenceMetadata({ requirementId, outputId }: { requirementId: string; 
       const token = (await csrf.json()).csrfToken as string;
       const post = (path: string, data: unknown) => fetch(`/api/evidence/${path}`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-csrf-token': token }, body: JSON.stringify(data), signal: abort.signal });
       setState('Requesting evidence from the producing node…');
-      const opened = await post('open', { requirementId, outputId, purpose: 'download' });
+      const opened = await post('open', { requirementId, outputId, purpose });
       if (!opened.ok) throw new Error('Evidence producer is unavailable or access is denied');
       requestId = (await opened.json()).requestId;
       const deadline = Date.now() + 30_000;
@@ -120,6 +121,12 @@ function EvidenceMetadata({ requirementId, outputId }: { requirementId: string; 
         const status = await response.json() as { state: string; failure: string | null };
         if (status.state === 'failed') throw new Error(`Evidence is ${status.failure ?? 'unavailable'}`);
         if (status.state === 'verified') {
+          if (purpose === 'promotion') {
+            setState('Saving verified evidence as an attachment…');
+            const result = await post(`${requestId}/promote`, {});
+            if (!result.ok) throw new Error('Evidence promotion failed');
+            requestId = undefined; await evidence.refetch(); setState('Verified evidence saved as an attachment.'); return;
+          }
           setState('Downloading verified bytes…');
           const result = await fetch(`/api/evidence/${requestId}/content`, { credentials: 'same-origin', cache: 'no-store', signal: abort.signal });
           if (!result.ok) throw new Error('Evidence download failed');
@@ -141,10 +148,12 @@ function EvidenceMetadata({ requirementId, outputId }: { requirementId: string; 
     {open && evidence.isLoading && <p>Loading evidence…</p>}
     {open && evidence.error && <p role="alert">Evidence is unavailable or access is denied.</p>}
     {open && evidence.data && <div className="space-y-1 text-xs"><p>Source: {evidence.data.kind} · {evidence.data.availability}</p>
-      {evidence.data.kind === "local" && <><p>Size: {evidence.data.sizeBytes} bytes</p><p>SHA-256: {evidence.data.sha256}</p><p>Node download requires a connected compatible producer and an enabled evidence service.</p><Button size="sm" variant="outline" disabled={Boolean(controller)} onClick={() => { void download(); }}>Download original</Button>{controller && <Button size="sm" variant="ghost" onClick={() => controller.abort()}>Cancel download</Button>}{state && <p role="status">{state}</p>}</>}
-      {evidence.data.kind === "attachment" && <PinnedAttachmentEvidence file={evidence.data} />}
+      {evidence.data.kind === "local" && evidence.data.availability !== "retired" && <><p>Size: {evidence.data.sizeBytes} bytes</p><p>SHA-256: {evidence.data.sha256}</p><p>Node download requires a connected compatible producer and an enabled evidence service.</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={Boolean(controller)} onClick={() => { void transfer('download'); }}>Download original</Button>{capabilities.data?.canWrite && <Button size="sm" variant="outline" disabled={Boolean(controller)} onClick={() => { void transfer('promotion'); }}>Save as attachment</Button>}{controller && <Button size="sm" variant="ghost" onClick={() => controller.abort()}>Cancel request</Button>}</div></>}
+      {evidence.data.kind === "attachment" && evidence.data.availability !== "retired" && <PinnedAttachmentEvidence file={evidence.data} />}
+      {evidence.data.availability === "retired" && <p>This output has been retired.</p>}
       {evidence.data.kind === "git" && <><p>Commit: {evidence.data.headCommit}</p><p>Comparison viewer is not yet available.</p></>}
       {evidence.data.kind === "unsupported" && <p>This output does not have a supported immutable evidence identity.</p>}
+      {state && <p role="status">{state}</p>}
     </div>}
   </div>;
 }

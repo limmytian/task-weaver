@@ -125,6 +125,12 @@ export async function describeWorkflowEvidence(db: Database, requirementId: stri
   const output = await db.query.workflowOutputs.findFirst({ where: and(eq(workflowOutputs.requirementId, requirementId), eq(workflowOutputs.id, outputId)) });
   if (!output) throw new NotFoundError("Output not found");
   const base = { outputId: output.id, projectId: requirement.projectId, requirementId, availability: output.availability };
+  if (output.type === "local" && output.promotedDocumentId && output.attachmentFileVersionId) {
+    const file = await db.query.documentFileVersions.findFirst({ where: and(eq(documentFileVersions.id, output.attachmentFileVersionId), eq(documentFileVersions.documentId, output.promotedDocumentId)) });
+    const doc = await db.query.documents.findFirst({ where: and(eq(documents.id, output.promotedDocumentId), eq(documents.projectId, requirement.projectId)) });
+    if (!doc || !file || file.sha256 !== output.sha256 || file.sizeBytes !== output.sizeBytes) throw new ValidationError("Promoted evidence identity does not match");
+    return { ...base, availability: output.availability === "retired" ? "retired" as const : "available" as const, kind: "attachment" as const, documentId: file.documentId, fileVersionId: file.id, fileVersion: file.version, mimeType: file.mimeType, originalFilename: file.originalFilename, sizeBytes: file.sizeBytes, sha256: file.sha256 };
+  }
   if (output.type === "local" && output.nodeId && output.sizeBytes !== null && Number.isSafeInteger(output.sizeBytes) && output.sizeBytes >= 0 && output.sha256 && /^[a-f0-9]{64}$/.test(output.sha256)) {
     const online = await db.query.daemons.findMany({ where: and(eq(daemons.nodeId, output.nodeId), ne(daemons.status, "offline"), sql`${daemons.lastHeartbeatAt} > now() - interval '90 seconds'`) });
     const availability = output.availability !== "available" ? output.availability

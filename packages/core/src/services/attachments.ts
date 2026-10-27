@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { and, desc, eq } from "drizzle-orm";
-import { documents, documentVersions, documentFileVersions, documentFileGarbage, activityLog, type Database } from "@task-weaver/db";
+import { documents, documentVersions, documentFileVersions, documentFileGarbage, workflowOutputs, requirements, activityLog, type Database } from "@task-weaver/db";
 import { attachmentMetadataSchema, attachmentFileMetadataSchema, replaceAttachmentSchema, attachmentFileQuerySchema, AuthorizationError, ConflictError, NotFoundError, ValidationError, type VerifiedRequestContext } from "@task-weaver/contracts";
 import { resourceAuthority, requireResource, requireScope } from "./resource-authorization";
 import { lockIdentityLifecycle } from "./auth-security";
@@ -60,6 +60,41 @@ export function createAttachmentService(identity: VerifiedRequestContext) {
           return { ...published!, file: publicAttachmentFile(file!) };
         });
         emit({ type: "document_created", projectId: result.projectId, documentId: result.id, title: result.title });
+        return result;
+      } catch (error) { await storage.deleteObject(objectKey).catch(() => {}); throw error; }
+    },
+    async promoteEvidence(db: Database, requirementId: string, outputId: string, body: Readable) {
+      const live = await authority(db);
+      await requireResource(db, live, "requirement", requirementId, "resource.write");
+      const before = await db.query.workflowOutputs.findFirst({ where: and(eq(workflowOutputs.id, outputId), eq(workflowOutputs.requirementId, requirementId)) });
+      if (!before || before.type !== "local" || before.availability !== "available" || before.sizeBytes === null || !before.sha256) throw new NotFoundError("Evidence is unavailable");
+      const storage = attachmentStorage(), objectKey = `attachments/${randomUUID()}/${randomUUID()}`;
+      const object = await storage.putObject({ key: objectKey, body, sha256: before.sha256 });
+      try {
+        if (object.sizeBytes !== before.sizeBytes) throw new ValidationError("Evidence fingerprint changed");
+        const result = await db.transaction(async tx => {
+          await lockIdentityLifecycle(tx);
+          const database = tx as unknown as Database;
+          const current = await authority(database);
+          await requireResource(database, current, "requirement", requirementId, "resource.write");
+          const [output] = await tx.select().from(workflowOutputs).where(and(eq(workflowOutputs.id, outputId), eq(workflowOutputs.requirementId, requirementId))).for("update");
+          const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, requirementId));
+          if (!output || !requirement || output.type !== "local" || output.availability !== "available" || output.sha256 !== before.sha256 || output.sizeBytes !== before.sizeBytes || output.nodePublicKey !== before.nodePublicKey) throw new ValidationError("Evidence changed during promotion");
+          if (output.promotedDocumentId && output.attachmentFileVersionId) {
+            const [existing] = await tx.select({ sha256: documentFileVersions.sha256, sizeBytes: documentFileVersions.sizeBytes }).from(documentFileVersions).innerJoin(documents, eq(documents.id, documentFileVersions.documentId)).where(and(eq(documentFileVersions.id, output.attachmentFileVersionId), eq(documents.id, output.promotedDocumentId), eq(documents.projectId, requirement.projectId)));
+            if (!existing || existing.sha256 !== output.sha256 || existing.sizeBytes !== output.sizeBytes) throw new ValidationError("Promoted evidence identity does not match");
+            return { documentId: output.promotedDocumentId, fileVersionId: output.attachmentFileVersionId, replayed: true, projectId: requirement.projectId };
+          }
+          const [doc] = await tx.insert(documents).values({ projectId: requirement.projectId, form: "attachment", title: `Evidence ${output.id}`, content: "", docType: "other", readingTimeMin: null, createdBy: current.actor.id }).returning();
+          const [file] = await tx.insert(documentFileVersions).values({ documentId: doc!.id, version: 1, originalFilename: "evidence.bin", mimeType: "application/octet-stream", sizeBytes: object.sizeBytes, sha256: object.sha256, objectKey, storageBackend: object.backend, createdBy: current.actor.id, createdByType: current.actor.type }).returning();
+          await tx.update(documents).set({ currentFileVersionId: file!.id }).where(eq(documents.id, doc!.id));
+          await tx.insert(documentVersions).values({ documentId: doc!.id, version: 1, title: doc!.title, content: "", docType: doc!.docType, fileVersionId: file!.id, changeType: "created", changedBy: current.actor.id, changedByType: current.actor.type });
+          await tx.update(workflowOutputs).set({ promotedDocumentId: doc!.id, attachmentFileVersionId: file!.id }).where(eq(workflowOutputs.id, output.id));
+          await tx.insert(activityLog).values({ entityType: "requirement", entityId: requirementId, action: "evidence.promoted", actorId: current.actor.id, actorType: current.actor.type, metadata: { outputId, documentId: doc!.id, fileVersionId: file!.id, sha256: file!.sha256 } });
+          return { documentId: doc!.id, fileVersionId: file!.id, replayed: false, projectId: requirement.projectId };
+        });
+        if (result.replayed) await storage.deleteObject(objectKey).catch(() => {});
+        else emit({ type: "document_created", projectId: result.projectId, documentId: result.documentId, title: `Evidence ${outputId}` });
         return result;
       } catch (error) { await storage.deleteObject(objectKey).catch(() => {}); throw error; }
     },

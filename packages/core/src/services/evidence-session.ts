@@ -1,3 +1,5 @@
+import { Readable } from 'node:stream';
+import { createAttachmentService } from './attachments';
 import { and, eq, gt, ne } from 'drizzle-orm';
 import { activityLog, daemons, requirements, workflowOutputs, type Database } from '@task-weaver/db';
 import { AuthorizationError, NotFoundError, ValidationError, type EvidenceNodeDemand, type VerifiedRequestContext } from '@task-weaver/contracts';
@@ -100,7 +102,7 @@ export class EvidenceSessionService {
     await this.handshake.recheck(producer, requestId);
     await this.buffer.finish(producer, { requestId: session.bufferId, nonce: session.bufferNonce, outputId: session.output.outputId, sequence });
     await this.audit(context, session.output, 'evidence.verified', { sizeBytes: session.output.sizeBytes });
-    session.state = 'verified'; return { verified: true };
+    session.state = 'verified'; this.handshake.release(requestId); return { verified: true };
   }
   async fail(context: VerifiedRequestContext, daemonId: string, requestId: string, failure: 'missing' | 'changed' | 'unsupported' | 'too_large') {
     const producer = await this.producer(context, daemonId); const session = this.sessions.get(requestId);
@@ -108,7 +110,7 @@ export class EvidenceSessionService {
     await this.handshake.recheck(producer, requestId);
     if (session.bufferId) await this.buffer.cancel(session.reader, session.bufferId);
     session.bufferId = undefined; session.bufferNonce = undefined;
-    session.state = 'failed'; session.failure = failure;
+    session.state = 'failed'; session.failure = failure; this.handshake.release(requestId);
     await this.audit(context, session.output, 'evidence.read_failed', { failure });
     return { recorded: true };
   }
@@ -126,11 +128,18 @@ export class EvidenceSessionService {
     try { yield* this.buffer.read(reader, session.bufferId, signal); }
     finally { this.sessions.delete(requestId); }
   }
+  async promote(context: VerifiedRequestContext, requestId: string) {
+    const reader = principal(context); this.sweep(); const session = this.sessions.get(requestId);
+    if (!session?.bufferId || session.state !== 'verified' || session.purpose !== 'promotion' || principalKey(reader) !== principalKey(session.reader)) throw new NotFoundError('Evidence request is unavailable');
+    await this.status(context, requestId);
+    const input = Readable.from(this.read(context, requestId));
+    return createAttachmentService(context).promoteEvidence(this.db, session.output.requirementId, session.output.outputId, input);
+  }
   async cancel(context: VerifiedRequestContext, requestId: string) {
     const reader = principal(context); const session = this.sessions.get(requestId);
     if (!session || principalKey(reader) !== principalKey(session.reader)) throw new NotFoundError('Evidence request is unavailable');
     this.remember(context);
-    await this.handshake.cancel(reader, requestId);
+    if (session.state === 'pending' || session.state === 'streaming') await this.handshake.cancel(reader, requestId);
     if (session.bufferId) await this.buffer.cancel(reader, session.bufferId);
     this.sessions.delete(requestId);
   }

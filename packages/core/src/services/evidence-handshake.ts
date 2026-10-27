@@ -65,5 +65,6 @@ export class EvidenceHandshake {
     if (session.reader.actorId !== reader.actorId || session.reader.credentialId !== reader.credentialId) throw new ValidationError('Evidence request is unavailable');
     await this.authorize('reader', reader, session.output, session.demand.purpose); this.sessions.delete(requestId);
   }
+  release(requestId: string) { this.sessions.delete(requestId); }
   close() { clearInterval(this.timer); this.sessions.clear(); }
 }

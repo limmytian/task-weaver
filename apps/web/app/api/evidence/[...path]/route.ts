@@ -9,7 +9,7 @@ async function transfer(request: Request, context: { params: Promise<{ path: str
     auth.assertOrigin(request.headers); await auth.verify(request.headers);
     if (request.method === 'POST') auth.authentication.assertMutation(request.headers);
     const route = (await context.params).path.join('/');
-    if (!(request.method === 'POST' && /^(?:open|[0-9a-f-]{36}\/cancel)$/.test(route) || request.method === 'GET' && /^[0-9a-f-]{36}\/(?:status|content)$/.test(route))) return Response.json({ error: 'Invalid evidence route' }, { status: 400 });
+    if (!(request.method === 'POST' && /^(?:open|[0-9a-f-]{36}\/(?:cancel|promote))$/.test(route) || request.method === 'GET' && /^[0-9a-f-]{36}\/(?:status|content)$/.test(route))) return Response.json({ error: 'Invalid evidence route' }, { status: 400 });
     let body: string | undefined;
     if (request.method === 'POST') {
       const reader = request.body?.getReader(); const chunks: Uint8Array[] = []; let size = 0;

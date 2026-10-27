@@ -3,8 +3,10 @@ import test from "node:test";
 import { randomUUID, generateKeyPairSync, sign } from "node:crypto";
 import { evidenceRegistrationPayload, evidenceDemandPayload } from "@task-weaver/contracts";
 import { eq } from "drizzle-orm";
-import { createDb, runMigrations, tasks } from "@task-weaver/db";
-import { resolve } from "node:path";
+import { createDb, runMigrations, tasks, daemons } from "@task-weaver/db";
+import { resolve, join } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createApiApplication } from "./application";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
@@ -131,6 +133,9 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   const chunks: Buffer[] = [];
   for await (const chunk of broker.read(fixture.owner.context, session.requestId)) chunks.push(chunk);
   assert.deepEqual(Buffer.concat(chunks), content);
+  const storageDir = await mkdtemp(join(tmpdir(), "tw-promotion-"));
+  const previousStorage = process.env.TW_ATTACHMENT_STORAGE_DIR; process.env.TW_ATTACHMENT_STORAGE_DIR = storageDir;
+  t.after(async () => { if (previousStorage === undefined) delete process.env.TW_ATTACHMENT_STORAGE_DIR; else process.env.TW_ATTACHMENT_STORAGE_DIR = previousStorage; await rm(storageDir, { recursive: true, force: true }); });
   const transport = createApiApplication({ db, databaseUrl: databaseUrl!, env: { TW_AUTH_SECRET: fixture.configuration.secret, TW_AUTH_BASE_URL: fixture.configuration.baseURL, TW_AUTH_TRUSTED_ORIGINS: fixture.configuration.trustedOrigins[0], TW_PRESET_SKILLS_SYNC: "disabled", TW_EVIDENCE_READ_ENABLED: "true" } });
   t.after(() => transport.stop());
   const evidenceApi = (path: string, method = "GET", body?: unknown, headers = fixture.owner.headers) => transport.app.request(`/api/v1/evidence${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -146,6 +151,25 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   assert.equal(download.status, 200); assert.equal(download.headers.get("x-content-type-options"), "nosniff");
   assert.deepEqual(Buffer.from(await download.arrayBuffer()), content);
   await fixture.identity.setMembership(fixture.owner.headers, fixture.project.id, fixture.outsider.context.actor.id, { role: "viewer", explicitPermissions: [] });
+  assert.notEqual((await evidenceApi("/open", "POST", { requirementId: boundRequirement.id, outputId: boundOutput.id, purpose: "promotion" }, fixture.outsider.headers)).status, 201);
+  const promotions = await Promise.all([1, 2].map(async () => json(await evidenceApi("/open", "POST", { requirementId: boundRequirement.id, outputId: boundOutput.id, purpose: "promotion" }), 201)));
+  const promotionDemands = (await json(await evidenceApi(`/demands/${evidenceDaemon}`, "GET", undefined, agentHeaders))).items;
+  for (const promotion of promotions) {
+    const item = promotionDemands.find((entry: { requestId: string }) => entry.requestId === promotion.requestId);
+    const proof = sign(null, Buffer.from(evidenceDemandPayload(item)), pair.privateKey).toString("base64");
+    await json(await evidenceApi(`/${promotion.requestId}/claim`, "POST", { daemonId: evidenceDaemon, signature: proof }, agentHeaders));
+    await json(await evidenceApi(`/${promotion.requestId}/chunk`, "POST", { daemonId: evidenceDaemon, sequence: 0, contentBase64: content.toString("base64") }, agentHeaders));
+    await json(await evidenceApi(`/${promotion.requestId}/finish`, "POST", { daemonId: evidenceDaemon, sequence: 1 }, agentHeaders));
+  }
+  const promoted = await Promise.all(promotions.map(async item => json(await evidenceApi(`/${item.requestId}/promote`, "POST", {}))));
+  assert.equal(promoted[0].documentId, promoted[1].documentId);
+  assert.deepEqual(promoted.map(item => item.replayed).sort(), [false, true]);
+  await db.update(daemons).set({ status: "offline" }).where(eq(daemons.id, evidenceDaemon));
+  const durableEvidence = await json(await api(`/requirements/${boundRequirement.id}/workflow-outputs/${boundOutput.id}/evidence`));
+  assert.equal(durableEvidence.kind, "attachment"); assert.equal(durableEvidence.documentId, promoted[0].documentId);
+  const savedEvidence = await api(`/documents/${durableEvidence.documentId}/file?fileVersion=${durableEvidence.fileVersion}`);
+  assert.equal(savedEvidence.status, 200); assert.deepEqual(Buffer.from(await savedEvidence.arrayBuffer()), content);
+  await db.update(daemons).set({ status: "idle" }).where(eq(daemons.id, evidenceDaemon));
   const failedSession = await json(await evidenceApi("/open", "POST", { requirementId: boundRequirement.id, outputId: boundOutput.id, purpose: "download" }), 201);
   const failedDemand = (await json(await evidenceApi(`/demands/${evidenceDaemon}`, "GET", undefined, agentHeaders))).items.find((item: { requestId: string }) => item.requestId === failedSession.requestId);
   const failedProof = sign(null, Buffer.from(evidenceDemandPayload(failedDemand)), pair.privateKey).toString("base64");

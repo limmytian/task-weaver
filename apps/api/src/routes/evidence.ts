@@ -14,7 +14,7 @@ export function createEvidenceRoutes(enabled: boolean) {
     return service ??= new EvidenceSessionService(db);
   };
   const id = z.string().uuid();
-  const request = z.object({ requirementId: id, outputId: id, purpose: z.literal('download') }).strict();
+  const request = z.object({ requirementId: id, outputId: id, purpose: z.enum(['download', 'promotion']) }).strict();
   const producer = z.object({ daemonId: id }).strict();
   const claim = producer.extend({ signature: z.string().max(128) }).strict();
   const chunk = producer.extend({ sequence: z.number().int().nonnegative(), contentBase64: z.string().max(Math.ceil(evidenceLimits.chunkBytes / 3) * 4).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/) }).strict();
@@ -51,6 +51,10 @@ export function createEvidenceRoutes(enabled: boolean) {
     const requestId = id.safeParse(c.req.param('id')); const parsed = failure.safeParse(await c.req.json());
     if (!requestId.success || !parsed.success) return c.json({ error: 'Invalid evidence request' }, 400);
     return c.json(await getService(c.get('db'))!.fail(c.get('identity'), parsed.data.daemonId, requestId.data, parsed.data.state));
+  });
+  router.post('/:id/promote', async c => {
+    const requestId = id.safeParse(c.req.param('id')); if (!requestId.success) return c.json({ error: 'Invalid evidence request' }, 400);
+    return c.json(await getService(c.get('db'))!.promote(c.get('identity'), requestId.data));
   });
   router.post('/:id/cancel', async c => {
     const requestId = id.safeParse(c.req.param('id')); if (!requestId.success) return c.json({ error: 'Invalid evidence request' }, 400);

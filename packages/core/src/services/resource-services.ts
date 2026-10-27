@@ -614,6 +614,7 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
       const output = await db.query.workflowOutputs.findFirst({ where: and(eq(workflowOutputs.id, call[2]), eq(workflowOutputs.requirementId, id)) });
       if (!output) throw new NotFoundError("Output not found");
       if (output.type === "attachment" && output.referenceId) await requireResource(db, authority, "document", output.referenceId);
+      if (output.promotedDocumentId) await requireResource(db, authority, "document", output.promotedDocumentId);
       if (output.requirementRepositoryId) {
         const link = await db.query.requirementRepositories.findFirst({ where: and(eq(requirementRepositories.id, output.requirementRepositoryId), eq(requirementRepositories.requirementId, id)) });
         if (!link) throw new NotFoundError("Output not found");

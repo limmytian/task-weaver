@@ -575,6 +575,13 @@
       "when": 1793000200000,
       "tag": "0081_evidence_attachment_binding",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1793000300000,
+      "tag": "0082_evidence_promotion",
+      "breakpoints": true
     }
   ]
 }
