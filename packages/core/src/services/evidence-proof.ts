@@ -1,14 +1,9 @@
 import { createPublicKey, verify } from 'node:crypto';
-import { evidenceNodeDemandSchema, evidenceRegistrationPayload, type EvidenceNodeDemand } from '@task-weaver/contracts';
+import { evidenceNodeDemandSchema, evidenceRegistrationPayload, evidenceDemandPayload, type EvidenceNodeDemand } from '@task-weaver/contracts';
 
 /** Canonical bytes are domain-separated from task execution and other signatures. */
 export function evidenceProofPayload(raw: EvidenceNodeDemand): Buffer {
-  const demand = evidenceNodeDemandSchema.parse(raw);
-  return Buffer.from(JSON.stringify([
-    'task-weaver:evidence-read:v1', demand.requestId, demand.outputId, demand.projectId,
-    demand.requirementId, demand.daemonId, demand.nodeId, demand.nonce, demand.purpose,
-    demand.sizeBytes, demand.sha256, demand.expiresAt,
-  ]), 'utf8');
+  return Buffer.from(evidenceDemandPayload(raw), 'utf8');
 }
 
 /** The public key is the output's trusted registration binding, not request data. */

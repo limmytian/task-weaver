@@ -1,7 +1,7 @@
 import { constants, openSync, closeSync, fstatSync, readFileSync, writeFileSync, mkdirSync, lstatSync, chmodSync } from 'node:fs';
 import { createPrivateKey, createPublicKey, generateKeyPairSync, sign } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { evidenceRegistrationPayload } from '@task-weaver/contracts';
+import { evidenceRegistrationPayload, evidenceDemandPayload, evidenceNodeDemandSchema, type EvidenceNodeDemand } from '@task-weaver/contracts';
 import { configFilePath } from './config.js';
 
 /** Private key stays in the user's protected local CLI configuration directory. */
@@ -39,4 +39,12 @@ export function signEvidenceRegistration(input: { requirementId: string; nodeId:
     nodePublicKey: createPublicKey(key).export({ type: 'spki', format: 'der' }).toString('base64'),
     nodeRegistrationProof: sign(null, Buffer.from(evidenceRegistrationPayload(input), 'utf8'), key).toString('base64'),
   };
+}
+
+/** The caller must authenticate the demand and check the output's registered binding. */
+export function signEvidenceDemand(input: EvidenceNodeDemand, expectedNodeId: string, now = Date.now()) {
+  const demand = evidenceNodeDemandSchema.parse(input);
+  const expiry = Date.parse(demand.expiresAt);
+  if (demand.nodeId !== expectedNodeId || expiry <= now || expiry > now + 30_000) throw new Error('Invalid or expired evidence demand');
+  return sign(null, Buffer.from(evidenceDemandPayload(demand), 'utf8'), localNodePrivateKey()).toString('base64');
 }

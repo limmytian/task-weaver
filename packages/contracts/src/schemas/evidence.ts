@@ -66,3 +66,8 @@ export type EvidenceNodeResult = z.infer<typeof evidenceNodeResultSchema>;
 export function evidenceRegistrationPayload(input: { requirementId: string; nodeId: string; relativePath: string; sizeBytes: number; sha256: string }): string {
   return JSON.stringify(['task-weaver:evidence-registration:v1', input.requirementId, input.nodeId, input.relativePath, input.sizeBytes, input.sha256]);
 }
+
+export function evidenceDemandPayload(raw: EvidenceNodeDemand): string {
+  const demand = evidenceNodeDemandSchema.parse(raw);
+  return JSON.stringify(['task-weaver:evidence-read:v1', demand.requestId, demand.outputId, demand.projectId, demand.requirementId, demand.daemonId, demand.nodeId, demand.nonce, demand.purpose, demand.sizeBytes, demand.sha256, demand.expiresAt]);
+}
