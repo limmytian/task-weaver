@@ -27,12 +27,17 @@ const handler = async (req: Request) => {
         req = new Request(req.url, { method: req.method, headers: req.headers, body: Buffer.concat(chunks), signal: req.signal });
       }
     }
-    return await fetchRequestHandler({
+    const response = await fetchRequestHandler({
       endpoint: "/api/trpc",
       req,
       router: appRouter,
       createContext: createTRPCContext,
     });
+    if (new URL(req.url).pathname.split("/").pop()?.split(",").some(name => ["requirement.evidence", "requirement.compareGitEvidence", "requirement.gitEvidenceFile"].includes(name))) {
+      response.headers.set("cache-control", "no-store");
+      response.headers.set("x-content-type-options", "nosniff");
+    }
+    return response;
   } catch (error) {
     const failure = authenticationFailure(error);
     return Response.json(
