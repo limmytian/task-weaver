@@ -2,7 +2,7 @@ import { constants } from 'node:fs';
 import { open, unlink, type FileHandle } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { evidenceLimits } from '@task-weaver/contracts';
 
 export class EvidenceArtifactError extends Error {
@@ -29,8 +29,14 @@ export async function openVerifiedEvidence(root: string, manifest: RegisteredArt
   const abort = () => combined.throwIfAborted();
   try {
     abort();
-    let directory = await open(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    if (!isAbsolute(root)) throw new EvidenceArtifactError('changed', 'Artifact root is invalid');
+    let directory = await open('/', constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     handles.push(directory);
+    for (const part of resolve(root).split('/').filter(Boolean)) {
+      abort();
+      directory = await open(`/proc/self/fd/${directory.fd}/${part}`, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      handles.push(directory);
+    }
     for (const part of parts.slice(0, -1)) {
       abort();
       directory = await open(`/proc/self/fd/${directory.fd}/${part}`, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);

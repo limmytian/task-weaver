@@ -22,6 +22,10 @@ test('verified snapshots are confined, immutable and fully hashed', { skip: proc
   await assert.rejects(openVerifiedEvidence(root, manifest), (error: unknown) => error instanceof EvidenceArtifactError && error.state === 'changed');
   await assert.rejects(openVerifiedEvidence(root, { ...manifest, relativePath: '../outside' }), EvidenceArtifactError);
   await assert.rejects(openVerifiedEvidence(root, { ...manifest, relativePath: 'lane/%2e%2e/file' }), EvidenceArtifactError);
+  const alias = `${root}-alias`;
+  t.after(() => rm(alias, { force: true }));
+  await symlink(root, alias);
+  await assert.rejects(openVerifiedEvidence(alias, manifest), EvidenceArtifactError);
   await symlink('/etc', join(root, 'escape'));
   await assert.rejects(openVerifiedEvidence(root, { ...manifest, relativePath: 'escape/passwd' }), EvidenceArtifactError);
   await symlink('/etc/passwd', join(root, 'lane', 'link'));
