@@ -78,6 +78,8 @@ export function CreateTaskDialog({
     onSuccess: () => {
       utils.task.board.invalidate({ projectId });
       utils.task.boardPage.invalidate({ projectId });
+      utils.task.boardColumns.invalidate({ projectId });
+      utils.task.boardColumn.invalidate({ projectId });
       utils.task.list.invalidate();
       utils.requirement.list.invalidate({ projectId });
       utils.requirement.listSummary.invalidate({ projectId });

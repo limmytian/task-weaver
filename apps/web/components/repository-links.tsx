@@ -334,6 +334,8 @@ export function TaskRepositoryScope({
       utils.task.list.invalidate(),
       utils.task.board.invalidate(),
       utils.task.boardPage.invalidate(),
+      utils.task.boardColumns.invalidate(),
+      utils.task.boardColumn.invalidate(),
       requirementId ? utils.repository.listForRequirement.invalidate({ requirementId }) : Promise.resolve(),
     ]);
   };

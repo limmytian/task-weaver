@@ -159,6 +159,15 @@ export const boardPageSchema = z.object({
 });
 export type BoardPageInput = z.input<typeof boardPageSchema>;
 
+export const boardColumnsSchema = boardPageSchema.omit({ page: true, pageSize: true }).extend({
+  groupBy: z.enum(["status", "priority", "assignee"]).default("status"),
+});
+export const boardColumnSchema = boardColumnsSchema.extend({
+  value: z.string().max(500).nullable(),
+  pageSize: z.number().int().min(1).max(50).default(20),
+  cursor: z.object({ createdAt: z.string().datetime(), id: z.string().uuid() }).nullish(),
+});
+
 export const createTaskCommentSchema = z.object({
   content: z.string().min(1),
 });

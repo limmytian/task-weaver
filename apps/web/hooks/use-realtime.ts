@@ -82,6 +82,8 @@ export function useRealtime() {
             utils.requirement.workspace.invalidate({ projectId: data.projectId });
             utils.task.board.invalidate({ projectId: data.projectId });
             utils.task.boardPage.invalidate({ projectId: data.projectId });
+            utils.task.boardColumns.invalidate({ projectId: data.projectId });
+            utils.task.boardColumn.invalidate({ projectId: data.projectId });
             utils.task.list.invalidate({ projectId: data.projectId });
           }
           if (!data.projectId) utils.task.list.invalidate();
@@ -109,6 +111,8 @@ export function useRealtime() {
           if (!accepted) return;
           const data = accepted.data as { projectId?: string; requirementId?: string };
           if (data.projectId) {
+            utils.task.boardColumns.invalidate({ projectId: data.projectId });
+            utils.task.boardColumn.invalidate({ projectId: data.projectId });
             utils.requirement.list.invalidate({ projectId: data.projectId });
             utils.requirement.listSummary.invalidate({ projectId: data.projectId });
             utils.requirement.workspace.invalidate({ projectId: data.projectId });

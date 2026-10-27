@@ -640,6 +640,8 @@ function ExecutionSlicesPanel({
     utils.task.gantt.invalidate({ projectId });
     utils.task.board.invalidate({ projectId });
     utils.task.boardPage.invalidate({ projectId });
+    utils.task.boardColumns.invalidate({ projectId });
+    utils.task.boardColumn.invalidate({ projectId });
   };
 
   const createSlice = trpc.requirement.createSlice.useMutation({

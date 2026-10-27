@@ -10,6 +10,7 @@ import { serve } from "@hono/node-server";
 import { sql } from "drizzle-orm";
 import { createDb, runMigrations, requirements, tasks, documents, taskDependencies, documentTaskLinks, documentRequirementLinks, measureDatabaseWork } from "@task-weaver/db";
 import { performanceFixture, performanceBatches } from "./performance-fixture";
+import { checkKanbanColumns } from "./performance-kanban-columns";
 import { checkPerformanceWorkspace } from "./performance-workspace-checks";
 import { checkPerformanceBoard } from "./performance-board-checks";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
@@ -85,6 +86,8 @@ try {
     }
     writeFileSync(`${readyFile}.document-audit.json`, JSON.stringify({ samples, bodiesNotRetained: true }), { mode: 0o600 });
   }
+  const columnAudit = await checkKanbanColumns(db, f);
+  writeFileSync(`${readyFile}.columns-audit.json`, JSON.stringify(columnAudit), { mode: 0o600 });
   const workspaceAudit = await checkPerformanceWorkspace(db, f);
   writeFileSync(`${readyFile}.workspace-audit.json`, JSON.stringify(workspaceAudit), { mode: 0o600 });
   api = serve({ hostname: "127.0.0.1", port: apiPort, fetch: f.app.fetch });

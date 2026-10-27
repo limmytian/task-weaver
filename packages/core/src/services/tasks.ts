@@ -1204,3 +1204,5 @@ export async function listTaskDependenciesPage(db: Database, taskId: string, pag
   ]);
   return { items: rows.map(row => row.link), meta: { ...page, total: total[0]!.count, nextPage: page.page * page.pageSize < total[0]!.count ? page.page + 1 : null } };
 }
+
+export { getKanbanBoardColumns, getKanbanBoardColumn } from "./kanban-columns";

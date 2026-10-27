@@ -74,7 +74,7 @@ const readById: Record<string, ResourceKind> = {
   listWorkflowOutputs: "requirement",
   listWorkflowInputs: "requirement",
   getWorkflowCleanupEligibility: "requirement",
-  getKanbanBoard: "project", getKanbanBoardPage: "project", getGanttChart: "project", getRequirementHeatmap: "project",
+  getKanbanBoard: "project", getKanbanBoardPage: "project", getKanbanBoardColumns: "project", getKanbanBoardColumn: "project", getGanttChart: "project", getRequirementHeatmap: "project",
   getRequirementBurndown: "requirement", getRequirementTaskDependencyGraph: "requirement",
   getDocumentRecommendations: "document", getTaskRecommendations: "task",
 };
@@ -595,7 +595,7 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     if (["getProjectStats", "getProjectHealthDashboard", "getKnowledgeGraph", "getRequirementHeatmap"].includes(name)) call[2] = predicates;
     if (["getGanttChart", "getRequirementBurndown"].includes(name)) call[2] = predicates.tasks;
     if (name === "getRequirementTaskDependencyGraph") call[2] = and(predicates.tasks, eq(tasks.projectId, scope.projectId!));
-    if (name === "getKanbanBoard" || name === "getKanbanBoardPage" || name === "listTaskDependenciesPage") call[3] = predicates.tasks;
+    if (name === "getKanbanBoard" || name === "getKanbanBoardPage" || name === "getKanbanBoardColumns" || name === "getKanbanBoardColumn" || name === "listTaskDependenciesPage") call[3] = predicates.tasks;
     if (name === "listRequirementDependenciesPage") call[3] = predicates.requirements;
     if (name === "getDocumentRecommendations" || name === "getTaskRecommendations") {
       if (call[2]?.projectId) await requireResource(db, authority, "project", call[2].projectId);
