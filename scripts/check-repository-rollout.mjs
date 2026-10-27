@@ -32,7 +32,7 @@ if (!/AI environment excludes Git and provider credentials/.test(credentialTests
 }
 
 const daemonTests = read("apps/cli/src/daemon-e2e.test.ts");
-if (!/preserves one successful repository when another push fails/.test(daemonTests)) {
+if (!/preserves one successful repository when another delivery remote becomes unavailable/.test(daemonTests)) {
   failures.push("Independent multi-repository delivery coverage is missing.");
 }
 
