@@ -146,6 +146,15 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   assert.equal(download.status, 200); assert.equal(download.headers.get("x-content-type-options"), "nosniff");
   assert.deepEqual(Buffer.from(await download.arrayBuffer()), content);
   await fixture.identity.setMembership(fixture.owner.headers, fixture.project.id, fixture.outsider.context.actor.id, { role: "viewer", explicitPermissions: [] });
+  const failedSession = await json(await evidenceApi("/open", "POST", { requirementId: boundRequirement.id, outputId: boundOutput.id, purpose: "download" }), 201);
+  const failedDemand = (await json(await evidenceApi(`/demands/${evidenceDaemon}`, "GET", undefined, agentHeaders))).items.find((item: { requestId: string }) => item.requestId === failedSession.requestId);
+  const failedProof = sign(null, Buffer.from(evidenceDemandPayload(failedDemand)), pair.privateKey).toString("base64");
+  await json(await evidenceApi(`/${failedSession.requestId}/claim`, "POST", { daemonId: evidenceDaemon, signature: failedProof }, agentHeaders));
+  await json(await evidenceApi(`/${failedSession.requestId}/fail`, "POST", { daemonId: evidenceDaemon, state: "changed" }, agentHeaders));
+  const failedStatus = await json(await evidenceApi(`/${failedSession.requestId}/status`));
+  assert.equal(failedStatus.state, "failed"); assert.equal(failedStatus.failure, "changed");
+  assert.equal((await evidenceApi(`/${failedSession.requestId}/content`)).status, 409);
+  await json(await evidenceApi(`/${failedSession.requestId}/cancel`, "POST", {}));
   const revokedSession = await json(await evidenceApi("/open", "POST", { requirementId: boundRequirement.id, outputId: boundOutput.id, purpose: "download" }, fixture.outsider.headers), 201);
   const revokedDemand = (await json(await evidenceApi(`/demands/${evidenceDaemon}`, "GET", undefined, agentHeaders))).items.find((item: { requestId: string }) => item.requestId === revokedSession.requestId);
   const revokedProof = sign(null, Buffer.from(evidenceDemandPayload(revokedDemand)), pair.privateKey).toString("base64");

@@ -1,5 +1,5 @@
 import { and, eq, gt, ne } from 'drizzle-orm';
-import { daemons, requirements, workflowOutputs, type Database } from '@task-weaver/db';
+import { activityLog, daemons, requirements, workflowOutputs, type Database } from '@task-weaver/db';
 import { AuthorizationError, NotFoundError, ValidationError, type EvidenceNodeDemand, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { EvidenceHandshake, type RegisteredLocalEvidence } from './evidence-handshake';
 import { EvidenceTransferBuffer, type EvidenceManifest, type EvidenceProducer, type EvidenceTransferPrincipal } from './evidence-transfer';
@@ -71,7 +71,12 @@ export class EvidenceSessionService {
     const binding: RegisteredLocalEvidence = { outputId, projectId: requirement.projectId, requirementId, nodeId: output.nodeId, relativePath: output.relativePath, sizeBytes: output.sizeBytes, sha256: output.sha256, nodePublicKey: output.nodePublicKey, daemonId: daemon.id, producerActorId: output.createdBy };
     const opened = await this.handshake.open(reader, binding, purpose);
     this.sessions.set(opened.requestId, { output: binding, reader, purpose, expiresAt: Date.parse(opened.expiresAt), state: 'pending' });
+    try { await this.audit(context, binding, 'evidence.read_requested', { purpose }); }
+    catch (error) { this.sessions.delete(opened.requestId); await this.handshake.cancel(reader, opened.requestId); throw error; }
     return opened;
+  }
+  private async audit(context: VerifiedRequestContext, output: RegisteredLocalEvidence, action: string, metadata: Record<string, unknown>) {
+    await this.db.insert(activityLog).values({ entityType: 'requirement', entityId: output.requirementId, action, actorId: context.actor.id, actorType: context.actor.type, metadata: { outputId: output.outputId, ...metadata } });
   }
   async poll(context: VerifiedRequestContext, daemonId: string) { return this.handshake.poll(await this.producer(context, daemonId)); }
   async claim(context: VerifiedRequestContext, daemonId: string, requestId: string, proof: string) {
@@ -94,6 +99,7 @@ export class EvidenceSessionService {
     if (!session?.bufferId || !session.bufferNonce || session.state !== 'streaming') throw new NotFoundError('Evidence request is unavailable');
     await this.handshake.recheck(producer, requestId);
     await this.buffer.finish(producer, { requestId: session.bufferId, nonce: session.bufferNonce, outputId: session.output.outputId, sequence });
+    await this.audit(context, session.output, 'evidence.verified', { sizeBytes: session.output.sizeBytes });
     session.state = 'verified'; return { verified: true };
   }
   async fail(context: VerifiedRequestContext, daemonId: string, requestId: string, failure: 'missing' | 'changed' | 'unsupported' | 'too_large') {
@@ -101,7 +107,9 @@ export class EvidenceSessionService {
     if (!session || session.state !== 'streaming') throw new NotFoundError('Evidence request is unavailable');
     await this.handshake.recheck(producer, requestId);
     if (session.bufferId) await this.buffer.cancel(session.reader, session.bufferId);
+    session.bufferId = undefined; session.bufferNonce = undefined;
     session.state = 'failed'; session.failure = failure;
+    await this.audit(context, session.output, 'evidence.read_failed', { failure });
     return { recorded: true };
   }
   async status(context: VerifiedRequestContext, requestId: string) {
