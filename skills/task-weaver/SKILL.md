@@ -1,8 +1,12 @@
 ---
 name: task-weaver-overview
 description: Core platform knowledge — data model, authentication, conventions, and quick start guide for Task Weaver.
-keywords: ["project management", "data model", "authentication", "conventions", "quick start", "task tracking"]
-tags: ["core", "getting-started"]
+metadata:
+  version: "1.2.0"
+  source-repository: "limmytian/task-weaver"
+  source-path: "skills/task-weaver"
+  keywords: ["project management", "data model", "authentication", "conventions", "quick start", "task tracking"]
+  tags: ["core", "getting-started"]
 ---
 
 # Task Weaver
@@ -678,13 +682,32 @@ See [rest-api-reference.md](rest-api-reference.md) for the endpoints.
 stdio using the configured API URL and subject-bound API key. It requires an API
 server with inbound MCP support. Remote clients can use Streamable HTTP at
 `/api/v1/mcp-server` with a Bearer key on every request. Both adapters use the same
-29-tool catalog, live resource authorization, dependency and workflow guards.
+live authorization-filtered catalog, resource checks, dependency and workflow guards.
 Read-only mode hides writes and rejects known write names at dispatch.
 
 This inbound Server is separate from the outbound Registry commands above.
 OAuth-only onboarding, resources, prompts, attachments, daemon controls, registry
 management and release actions are not part of this catalog. See the
 [MCP Server guide](../../docs/mcp-server.md) for credentials, limits and setup.
+
+## Capability Diagnostics
+
+Interactive CLI/REST clients can inspect selected-project readiness with
+`tw context readiness --project <id> --json`. Permission, registered content,
+metadata candidates and API runtime observations are separate. Missing discovery
+or runtime access is unknown, not an empty inventory or absent configuration.
+Inspect selected exact content, source freshness and schemas/graphs before use;
+optional unavailable execution can degrade to instructions.
+
+`tw context evidence --project <id> --json` additionally requires current project
+read/audit access and rechecks current asset visibility before counts/pagination.
+It shows unique visible references and separate progress reports, not call totals,
+proof of task usefulness or inferred model cost. Whole-process token reports stay
+in the existing Usage commands. Daemon children keep their bounded launch
+bootstrap; do not seek broader aggregate audit grants to improve their prompts.
+See [Capability diagnostics](rest-api-reference.md#capability-diagnostics) for
+coverage and input details. Installed copies require the existing staged/versioned
+refresh workflow; remote registration is a separate authorized action.
 
 ## Live Planning and Recovery
 
@@ -734,3 +757,29 @@ No shared checkpoint upload is required. Leases cannot undo network requests alr
 sent and do not promise exactly-once physical execution.
 
 See [the execution recovery specification](../../docs/live-planning-recovery.md).
+
+
+## Bootstrap and local instruction freshness
+
+A local skill installation is optional. Start remote clients with
+`tw_context_bootstrap` and `tools/list`; CLI clients use `tw context bootstrap --json`.
+Load relevant summaries and selected exact sources instead of a full catalog.
+Instruction access, useful inventory and executable runtime readiness are separate.
+The instruction-only `task-weaver-execution` starter package provides task start,
+controlled Git, recovery, inspected MCP and reviewed memory workflows on demand.
+
+This file's `metadata.version` is an instruction-content version, not the API/CLI
+product version or proof of server compatibility. Check live contracts and CLI
+help before using version-sensitive options. For local updates, identify the
+canonical repository/ref and compare file hashes against the installed copy.
+For hosted packages, record package ID, exact version and file SHA-256 values
+from the manifest. Read or materialize a candidate into a fresh staging directory
+(using a unique `--cache-dir` when installing a package), compare it with the
+installed files, and merge intentional customizations before an explicitly chosen
+replacement. Keep a record of source ref, hashes and local edits. Do not silently
+overwrite installed skills or assume that restarting a client refreshed them.
+
+Use current task/run authority after replan. Report verified artifacts and concise
+asset references/outcomes; abstention is valid when capabilities add no value.
+Memory saves need current authorization, explicit review/confirmation and a fresh
+source. Never save raw conversations, secrets or unverified conclusions.

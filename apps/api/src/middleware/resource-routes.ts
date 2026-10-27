@@ -1,5 +1,7 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
+  ["POST", /^\/api\/v1\/worker-console\/(?:open|[a-z0-9_-]{1,32}\/[a-z0-9_.-]{1,160}\/(?:read|cancel|response))$/],
+  ["GET", /^\/api\/v1\/worker-console\/(?:[a-z0-9_-]{1,32}\/)?demands\/[0-9a-f-]{36}$/],
   ["GET", /^\/api\/v1\/mcp\/(?:audit|approvals\/[0-9a-f-]{36})\/?$/],
   ["POST", /^\/api\/v1\/mcp\/(?:policy|audit\/cleanup|approvals\/[0-9a-f-]{36}\/approve)\/?$/],
   ["PATCH", /^\/api\/v1\/mcp\/tools\/[0-9a-f-]{36}\/authorization\/?$/],
@@ -22,6 +24,7 @@ const ordinaryRoutes: Array<[string, RegExp]> = [
   ["POST", new RegExp("^/api/v1/daemons/[0-9a-fA-F-]{36}/execution-controls/[0-9a-fA-F-]{36}/(?:ack|resume)/?$")],
   ["POST", new RegExp("^/api/v1/daemons/[0-9a-fA-F-]{36}/(?:execution-authority|git-synchronization)/?$")],
   ["POST", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/(?:execution-revalidation|execution-recovery)/?$")],
+  ["GET", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/execution-recovery-state/?$")],
   ["POST", new RegExp("^/api/v1/daemons/register/?$")],
   ["POST", new RegExp("^/api/v1/daemons/[0-9a-fA-F-]{36}/(?:heartbeat|status|control|apply-task|apply-requirement|apply-review|apply-merge|progress|reconcile)/?$")],
   ["GET", new RegExp("^/api/v1/observability/(?:overview|metrics|history|logs)/?$")],
@@ -58,10 +61,10 @@ const ordinaryRoutes: Array<[string, RegExp]> = [
   ["PATCH", new RegExp("^/api/v1/embeddings/profiles/[0-9a-fA-F-]{36}/?$")],
   ["GET", new RegExp("^/api/v1/search/(?:documents(?:/fulltext)?|tasks|requirements|repositories|all)/?$")],
   ["POST", new RegExp("^/api/v1/search/resolve-titles/?$")],
-  ["GET", new RegExp("^/api/v1/context/(?:search|list|bootstrap)/?$")],
+  ["GET", new RegExp("^/api/v1/context/(?:search|list|bootstrap|readiness|evidence)/?$")],
   ["GET", new RegExp("^/api/v1/context/[0-9a-fA-F-]{36}/?$")],
   ["GET", new RegExp("^/api/v1/memories/search/?$")],
-  ["GET", new RegExp("^/api/v1/projects/[0-9a-fA-F-]{36}/(?:stats|health|knowledge-graph|board|gantt)/?$")],
+  ["GET", new RegExp("^/api/v1/projects/[0-9a-fA-F-]{36}/(?:stats|health|knowledge-graph|board|board-page|gantt)/?$")],
   ["GET", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/(?:burndown|task-dependency-graph)/?$")],
   ["GET", new RegExp("^/api/v1/projects/[0-9a-fA-F-]{36}/requirements/heatmap/?$")],
   ["GET", new RegExp("^/api/v1/(?:tasks|documents)/[0-9a-fA-F-]{36}/recommendations/?$")],

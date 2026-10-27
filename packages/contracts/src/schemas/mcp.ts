@@ -118,6 +118,7 @@ export const searchMcpToolsSchema = z.object({
 });
 
 export const callMcpToolSchema = z.object({
+  expectedSchemaHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   approvalId: z.string().uuid().optional(),
   arguments: z.record(z.string(), z.unknown()).refine(value => JSON.stringify(value).length <= 1_048_576, "MCP arguments exceed size limit").optional(),
 });

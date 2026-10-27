@@ -1,10 +1,20 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalPassThroughEnv": ["DATABASE_URL"],
+  "globalPassThroughEnv": [
+    "DATABASE_URL",
+    "TW_WORKSPACE_BUILD_LOCK",
+    "TW_WORKSPACE_BUILD_CHILD"
+  ],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**",
+        ".next/**",
+        "!.next/cache/**"
+      ]
     },
     "test": {
       "outputs": []
@@ -14,10 +24,14 @@
       "persistent": true
     },
     "lint": {
-      "dependsOn": ["^build"]
+      "dependsOn": [
+        "^build"
+      ]
     },
     "typecheck": {
-      "dependsOn": ["^build"]
+      "dependsOn": [
+        "^build"
+      ]
     },
     "db:generate": {
       "cache": false
@@ -28,5 +42,10 @@
     "db:migrate": {
       "cache": false
     }
-  }
+  },
+  "globalDependencies": [
+    "scripts/workspace-build.mjs",
+    "scripts/workspace-build-lock.mjs",
+    "scripts/compiled-outputs.mjs"
+  ]
 }

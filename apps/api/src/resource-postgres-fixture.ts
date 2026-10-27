@@ -10,10 +10,11 @@ type ResourceFixture = { auth: Authentication; identity: ReturnType<typeof creat
   admin: UserFixture; owner: UserFixture; outsider: UserFixture;
   project: Awaited<ReturnType<ReturnType<typeof createIdentityManagementService>["createProject"]>>;
   configuration: Parameters<typeof createAuthenticationService>[1];
+  createHuman(): Promise<UserFixture>;
   app: ReturnType<typeof createApiApplication>["app"] };
 
 /** Fixture credentials and state exist only in the caller's disposable test database. */
-export async function resourcePostgresFixture(db: Database, databaseUrl: string, options: { password?: string; webOrigin?: string; apiOrigin?: string } = {}): Promise<ResourceFixture> {
+export async function resourcePostgresFixture(db: Database, databaseUrl: string, options: { password?: string; ownerEmail?: string; webOrigin?: string; apiOrigin?: string } = {}): Promise<ResourceFixture> {
   await db.update(authInstanceState).set({ initializedByUserId: null, initializedAt: null });
   const config = { secret: randomBytes(32).toString("hex"), bootstrapSecret: randomBytes(32).toString("hex"),
     baseURL: options.apiOrigin ?? "http://127.0.0.1:3001", trustedOrigins: [options.webOrigin ?? "http://127.0.0.1:3000"] };
@@ -34,15 +35,14 @@ export async function resourcePostgresFixture(db: Database, databaseUrl: string,
   const email = `${randomUUID()}@example.test`;
   await auth.bootstrap(client(), { email, password, displayName: "Test administrator", bootstrapSecret: config.bootstrapSecret }, randomUUID());
   const admin = await login(email);
-  const human = async () => {
-    const email = `${randomUUID()}@example.test`;
+  const human = async (email = `${randomUUID()}@example.test`) => {
     const invite = await auth.provision(admin.headers, { email, displayName: "Test member" });
     await auth.activate(client(), { token: invite.activationToken, password }, randomUUID());
     return login(email);
   };
-  const owner = await human(), outsider = await human();
+  const owner = await human(options.ownerEmail), outsider = await human();
   const project = await identity.createProject(owner.headers, { name: "Private test project" });
   const app = createApiApplication({ db, databaseUrl, env: { TW_AUTH_SECRET: config.secret, TW_AUTH_BASE_URL: config.baseURL,
     TW_AUTH_TRUSTED_ORIGINS: config.trustedOrigins[0], TW_PRESET_SKILLS_SYNC: "disabled" } }).app;
-  return { auth, identity, admin, owner, outsider, project, app, configuration: config };
+  return { auth, identity, admin, owner, outsider, project, app, configuration: config, createHuman: human };
 }

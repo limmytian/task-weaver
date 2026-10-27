@@ -2,7 +2,7 @@ import { executionControls, executionSynchronizations } from "@task-weaver/db";
 import { RequirementCompletionError } from "@task-weaver/contracts";
 import type { RetrievalPredicates } from "./retrieval-predicates";
 import type { SQL } from "drizzle-orm";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { eq, ne, and, sql, inArray } from "drizzle-orm";
 import {
   type Database,
   requirements,
@@ -367,8 +367,8 @@ export async function advanceWorkflowStage(
 const TERMINAL_REQ_STATUSES = ["done", "cancelled", "archived"] as const;
 const DEFAULT_REQ_COMPLETED_WITHIN_DAYS = 14;
 
-type PagedRequirementList = {
-  items: unknown[]
+type PagedRequirementList<T = unknown> = {
+  items: T[]
   total: number
   page: number
   pageSize: number
@@ -382,7 +382,14 @@ type RequirementListItem = typeof requirements.$inferSelect & {
   repositories: Array<typeof requirementRepositories.$inferSelect & { repository: typeof repositories.$inferSelect }>
 }
 type LegacyRequirementList = RequirementListItem[]
+type RequirementSummary = Pick<typeof requirements.$inferSelect,
+  "id" | "projectId" | "title" | "status" | "priority" | "modelTier" | "branchName" | "createdAt" | "updatedAt">;
 
+export function listRequirements(
+  db: Database,
+  input: ListRequirementsInput & { view: "summary" },
+  authorizedPredicate?: SQL,
+): Promise<PagedRequirementList<RequirementSummary>>
 
 export function listRequirements(
   db: Database,
@@ -405,6 +412,9 @@ export async function listRequirements(
 
   if (input.status) {
     conditions.push(eq(requirements.status, input.status));
+  }
+  if (input.excludeStatus) {
+    conditions.push(ne(requirements.status, input.excludeStatus));
   }
   if (input.priority) {
     conditions.push(eq(requirements.priority, input.priority));
@@ -473,7 +483,7 @@ export async function listRequirements(
           createdAt: true,
           updatedAt: true,
         },
-        orderBy: (r, { desc }) => [desc(r.updatedAt)],
+        orderBy: (r, { desc }) => [desc(r.updatedAt), desc(r.id)],
         limit: pageSize,
         offset,
       }),
@@ -501,7 +511,7 @@ export async function listRequirements(
         dependents: { with: { requirement: true } },
         repositories: { with: { repository: true } },
       },
-      orderBy: (r, { desc }) => [desc(r.updatedAt)],
+      orderBy: (r, { desc }) => [desc(r.updatedAt), desc(r.id)],
       limit: pageSize,
       offset,
     }),
@@ -526,7 +536,7 @@ export async function updateRequirement(
   actor: Actor,
 ) {
   const existing = await getRequirementOrThrow(db, id);
-  const { leaseGeneration, daemonId, runId, workflow, workflowPreset, ...fields } = input;
+  const { leaseGeneration, daemonId, runId, workflow, workflowPreset, reason, ...fields } = input;
 
   if ((input.status && !["draft", "approved", "in_progress", "cancelled", "archived"].includes(input.status)) || leaseGeneration !== undefined || daemonId !== undefined) {
     await assertRequirementLease(db, id, actor, { leaseGeneration, daemonId, runId });
@@ -595,6 +605,7 @@ export async function updateRequirement(
     actorId: actor.id,
     actorType: actor.type,
     metadata: {
+      ...(reason !== undefined ? { reason } : {}),
       changes: { ...fields, ...workflowChanges },
       previous: {
         title: existing.title,
@@ -1430,3 +1441,6 @@ export async function listRequirementDependenciesPage(db: Database, requirementI
   ]);
   return { items: rows.map(row => row.link), meta: { ...page, total: total[0]!.count, nextPage: page.page * page.pageSize < total[0]!.count ? page.page + 1 : null } };
 }
+
+
+export { getRequirementWorkspace } from "./requirement-workspace";

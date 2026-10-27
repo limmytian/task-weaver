@@ -7,6 +7,9 @@ import {
   updateTaskSchema,
   updateTaskStatusSchema,
   listTasksSchema,
+  boardPageSchema,
+  boardColumnsSchema,
+  boardColumnSchema,
   createTaskCommentSchema,
   createTaskNoteSchema,
   createTaskDependencySchema,
@@ -129,6 +132,15 @@ export const taskRouter = router({
         completedWithinDays: input.completedWithinDays,
       });
     }),
+
+  boardColumns: resourceProcedure.input(boardColumnsSchema)
+    .query(async ({ ctx, input }) => createResourceServices(ctx.identity).taskService.getKanbanBoardColumns(ctx.db, input.projectId, input)),
+  boardColumn: resourceProcedure.input(boardColumnSchema)
+    .query(async ({ ctx, input }) => createResourceServices(ctx.identity).taskService.getKanbanBoardColumn(ctx.db, input.projectId, input)),
+
+  boardPage: resourceProcedure
+    .input(boardPageSchema)
+    .query(async ({ ctx, input }) => createResourceServices(ctx.identity).taskService.getKanbanBoardPage(ctx.db, input.projectId, input)),
 
   gantt: resourceProcedure
     .input(z.object({ projectId: z.string().uuid() }))

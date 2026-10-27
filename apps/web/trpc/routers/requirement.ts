@@ -2,9 +2,14 @@ import { z } from "zod";
 import { router, ordinaryResourceProcedure as resourceProcedure } from "../init";
 import {
   createResourceServices,
+  createExecutionRecoveryViewService,
+  createExecutionControlService,
+  executionRevalidationSchema,
+  executionRecoveryDecisionSchema,
   createRequirementSchema,
   updateRequirementSchema,
   listRequirementsSchema,
+  requirementWorkspaceSchema,
   linkDocumentToRequirementSchema,
   createRequirementDependencySchema,
   createExecutionSliceSchema,
@@ -15,10 +20,25 @@ import {
 } from "@task-weaver/core";
 
 export const requirementRouter = router({
+  revalidateExecution: resourceProcedure.input(z.object({ requirementId: z.string().uuid(), data: executionRevalidationSchema }))
+    .mutation(async ({ ctx, input }) => createExecutionControlService(ctx.identity).revalidate(ctx.db, input.requirementId, input.data.reason, input.data.expectedPlanRevision)),
+  authorizeRecovery: resourceProcedure.input(z.object({ requirementId: z.string().uuid(), data: executionRecoveryDecisionSchema.required({ expectedControlUpdatedAt: true, expectedControlPhase: true }) }))
+    .mutation(async ({ ctx, input }) => createExecutionControlService(ctx.identity).authorizeRecovery(ctx.db, input.requirementId, input.data)),
+  recoveryState: resourceProcedure.input(z.object({ id: z.string().uuid() }))
+    .query(async ({ ctx, input }) => createExecutionRecoveryViewService(ctx.identity).get(ctx.db, input.id)),
   addWorkflowInput: resourceProcedure.input(z.object({ requirementId: z.string().uuid(), data: addWorkflowInputSchema }))
     .mutation(async ({ ctx, input }) => createResourceServices(ctx.identity).requirementService.addWorkflowInput(ctx.db, input.requirementId, input.data, ctx.actor)),
   list: resourceProcedure
     .input(listRequirementsSchema)
+    .query(async ({ ctx, input }) => {
+      return createResourceServices(ctx.identity).requirementService.listRequirements(ctx.db, input);
+    }),
+
+  workspace: resourceProcedure.input(requirementWorkspaceSchema)
+    .query(async ({ ctx, input }) => createResourceServices(ctx.identity).requirementService.getRequirementWorkspace(ctx.db, input)),
+
+  listSummary: resourceProcedure
+    .input(listRequirementsSchema.extend({ view: z.literal("summary").default("summary") }))
     .query(async ({ ctx, input }) => {
       return createResourceServices(ctx.identity).requirementService.listRequirements(ctx.db, input);
     }),

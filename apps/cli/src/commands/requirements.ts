@@ -292,10 +292,12 @@ export function registerRequirements(program: Command): void {
     .option('--workflow <preset>', 'replace workflow with a preset')
     .option('--workflow-file <path>', 'replace workflow with a JSON definition')
     .option('--recovery-policy <json>', 'explicit retrySafe, maxAttempts and graceMs policy')
+    .option('--reason <text>', 'audit reason for this update (1-2000 characters)')
     .option('--json', 'output raw JSON')
     .action(async (id, opts) => {
       if (opts.workflow && opts.workflowFile) throw new Error('Choose either --workflow or --workflow-file')
       const body: Record<string, unknown> = {}
+      if (opts.reason !== undefined) body.reason = opts.reason
       if (opts.title) body.title = opts.title
       if (opts.description) body.description = opts.description
       if (opts.status) body.status = opts.status

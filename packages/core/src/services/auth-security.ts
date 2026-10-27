@@ -11,6 +11,7 @@ import {
   authInstanceState,
   authRateLimits,
   authSessions,
+  startDatabasePhase,
 } from "@task-weaver/db";
 import {
   AuthenticationRateLimitError,
@@ -32,13 +33,16 @@ export function constantTimeEqual(left: string, right: string) {
 }
 
 export async function lockIdentityLifecycle(db: AuthDatabase) {
-  const [state] = await db
-    .select()
-    .from(authInstanceState)
-    .where(eq(authInstanceState.id, "instance"))
-    .for("update");
-  if (!state) throw new Error("Authentication migrations are required");
-  return state;
+  const finish = startDatabasePhase("identityLock");
+  try {
+    const [state] = await db
+      .select()
+      .from(authInstanceState)
+      .where(eq(authInstanceState.id, "instance"))
+      .for("update");
+    if (!state) throw new Error("Authentication migrations are required");
+    return state;
+  } finally { finish(); }
 }
 
 export async function auditIdentity(

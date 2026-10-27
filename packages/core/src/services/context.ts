@@ -1,6 +1,7 @@
 import { documentSearchVector } from "./search-vector";
 import { type SQL, and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { type Database, documents, skillPackages } from "@task-weaver/db";
+import { NotFoundError, ValidationError } from "@task-weaver/contracts";
 import type { Actor } from "@task-weaver/contracts";
 import type { SearchContextInput, ImportSkillInput } from "@task-weaver/contracts";
 import * as documentService from "./documents";
@@ -196,6 +197,7 @@ export async function listSkills(
     includeGlobal?: boolean;
     includePersonal?: boolean;
     allProjects?: boolean;
+    limit?: number;
     personalOwnerId?: string;
     personalOwnerType?: "human" | "agent";
   },
@@ -211,11 +213,12 @@ export async function listSkills(
     conditions.push(sql`${documents.tags} && ${opts.tags}`);
   }
 
-  const results = await db
+  const query = db
     .select(CONTEXT_SUMMARY_COLUMNS)
     .from(documents)
     .where(and(...conditions))
     .orderBy(documents.title);
+  const results = await (opts?.limit ? query.limit(opts.limit) : query);
   return enrichSkillPackageResults(db, results, authorizedPackagePredicate);
 }
 
@@ -286,4 +289,15 @@ function availablePackageDocument(predicate: SQL): SQL {
       AND ${skillPackages.status} = 'active' AND pv.status = 'active'
     )
   )`;
+}
+
+/** Typed instruction read; ordinary document routes retain their frozen IDs. */
+export async function getSkill(db: Database, id: string, authorizedPackagePredicate?: SQL) {
+  const [record] = await db.select().from(documents).where(and(
+    eq(documents.id, id), eq(documents.docType, "skill"),
+    authorizedPackagePredicate ? availablePackageDocument(authorizedPackagePredicate) : undefined,
+  )).limit(1);
+  if (!record) throw new NotFoundError("Skill not found");
+  if (Buffer.byteLength(record.content, "utf8") > 32768) throw new ValidationError("Skill text exceeds the 32768-byte read limit");
+  return record;
 }

@@ -1,3 +1,5 @@
+import { capabilityOperationEvidence } from "./capability-evidence";
+import { capabilityDigest } from "./capability-digest";
 import { requireExecutionSynchronization } from "./execution-synchronization";
 import { planningImpact, invalidatePlanningExecutions } from "./planning-impact";
 import { withEventActor } from "./durable-events";
@@ -7,8 +9,8 @@ import { requireDaemonLease } from './daemon-lease-authorization';
 import { createTiExecutionService, isTiExecutionOperation } from './ti-execution';
 import { inArray, and, eq, isNull, sql, desc } from "drizzle-orm";
 import {
-  apiKeyProjectCreations, apiKeys, projectPreferences, type Database, daemons, requirementClaims, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
-  mcpServers, mcpTools, mcpLocalRequests, requirementRepositories, skillPackages, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
+  startDatabasePhase, apiKeyProjectCreations, apiKeys, projectPreferences, type Database, daemons, requirementClaims, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
+  mcpServers, mcpTools, mcpLocalRequests, requirementRepositories, skillPackages, skillPackageVersions, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
   documentRequirementLinks, projectMemberships, activityLog, executionDelegations, taskComments, workflowOutputs,
 } from "@task-weaver/db";
 import {
@@ -34,7 +36,7 @@ import * as packageImplementation from "./skill-packages";
 import { packageResourcePredicate, requirePackage, profileResourcePredicate, requireProfile, requireProfileManagement, canManageProvider } from "./asset-authorization";
 import { auditIdentity, lockIdentityLifecycle } from "./auth-security";
 import {
-  canAccessResource, labelledResourcePredicate, qualifiedScopeColumns, taskResourcePredicate, memoryResourcePredicate, resourceAuthority, requireResource, requireScope, resourcePredicate, projectPredicate,
+  canAccessResource, skillResourcePredicate, labelledResourcePredicate, qualifiedScopeColumns, taskResourcePredicate, memoryResourcePredicate, resourceAuthority, requireResource, requireScope, resourcePredicate, projectPredicate,
   validateAssignee, type ResourceAuthority, type ResourceKind, type ResourceScope,
 } from "./resource-authorization";
 
@@ -64,7 +66,7 @@ const readById: Record<string, ResourceKind> = {
   getRequirementRecord: "requirement", listRequirementDependenciesPage: "requirement",
   listTaskCommentsPage: "task", listTaskDependenciesPage: "task",
   getProject: "project", getRequirement: "requirement", getTask: "task", getTaskDetail: "task",
-  getDocument: "document", getDocumentDetail: "document", getMemory: "memory", getExecutionSlice: "slice",
+  getSkill: "skill", getDocument: "document", getDocumentDetail: "document", getMemory: "memory", getExecutionSlice: "slice",
   getTaskClaim: "task", getRequirementClaim: "requirement", listExecutionSlices: "requirement",
   listRequirementDependencies: "requirement", checkBlockingDependencies: "task", checkBlockingRequirementDependencies: "requirement",
   getBacklinks: "document", getDocumentVersion: "document",
@@ -72,13 +74,13 @@ const readById: Record<string, ResourceKind> = {
   listWorkflowOutputs: "requirement",
   listWorkflowInputs: "requirement",
   getWorkflowCleanupEligibility: "requirement",
-  getKanbanBoard: "project", getGanttChart: "project", getRequirementHeatmap: "project",
+  getKanbanBoard: "project", getKanbanBoardPage: "project", getKanbanBoardColumns: "project", getKanbanBoardColumn: "project", getGanttChart: "project", getRequirementHeatmap: "project",
   getRequirementBurndown: "requirement", getRequirementTaskDependencyGraph: "requirement",
   getDocumentRecommendations: "document", getTaskRecommendations: "task",
 };
 // Explicit read allowlist: new operations must opt in before seeing archived resources.
 const archivedReadOperations = new Set([
-  ...Object.keys(readById), "listProjects", "getProjectCounts", "listTasks", "listRequirements", "listDocuments",
+  ...Object.keys(readById), "listProjects", "getProjectCounts", "listTasks", "listRequirements", "getRequirementWorkspace", "listDocuments",
   "listTaskComments", "listTaskNotes", "listDocumentVersions", "compareDocumentVersions",
   "listActivityLog", "exportActivityLog", "listSchedules", "getSchedule", "listScheduleRuns", "listRuns", "getRun",
   "getProjectReviewPolicy", "getEffectiveReviewPolicy", "listRequirementReviewRuns",
@@ -117,7 +119,10 @@ function bindServices(context?: VerifiedRequestContext) {
         if (group === "ti" && isTiExecutionOperation(name)) return createTiExecutionService(context).invoke(db, name, args.slice(1));
         if (group === "mcp" && name === "syncTools") return synchronizeAuthorizedMcpTools(db, context, args[1], args[2]);
         if (group === "mcp" && name === "callTool") return invokeMcpTool(db, context, args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
+        const entered = startDatabasePhase("transactionEntry");
+        const finished = startDatabasePhase("resourceTransaction");
         return db.transaction(async tx => {
+          entered();
           // Serialize policy mutations with resource operations, including reads and nested relations.
           await lockIdentityLifecycle(tx);
           const txDb = tx as unknown as Database;
@@ -142,7 +147,7 @@ function bindServices(context?: VerifiedRequestContext) {
             const services = createResourceServices(context);
             call[3] = { createTask: services.taskService.createTask, createRun: services.tiAgentService.createRun };
           }
-          if (authority.bounds && ["updateTask", "updateTaskStatus", "updateDocument", "registerWorkflowOutput"].includes(name)) {
+          if (authority.bounds && ["updateTask", "updateTaskStatus", "updateDocument", "registerWorkflowOutput", "recordMemory"].includes(name)) {
             await requireExecutionSynchronization(txDb, authority.bounds.requirementId, authority.bounds.runId);
           }
           const impact = name === "updateTaskStatus" && call[6]?.daemonId ? [] : await planningImpact(txDb, name, call);
@@ -232,11 +237,15 @@ function bindServices(context?: VerifiedRequestContext) {
           if (["updateProject", "deleteProject"].includes(name) && result?.status === "archived") {
             await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(isNull(executionDelegations.revokedAt), eq(executionDelegations.projectId, call[1])));
           }
+          if (authority.bounds && group === "package" && name === "getPackage") {
+            // Manifests are metadata; content is read through the selected-file budget.
+            result = { ...result, primaryDocument: null, versions: result.versions.filter((version: any) => version.status === "active") };
+          }
           if (group === "mcp" && name !== "callTool") result = redactMcpResult(authority, result);
           if (group === "embedding") result = redactEmbeddingResult(authority, result);
           if (group === "repository") result = redactRepositoryResult(result);
           if (group === "ti" || group === "activity" || group === "schedule") result = redactMetadataResult(result, group);
-          if (authority.bounds) await auditIdentity(tx, "delegation.operation", actor.id, actor.id, authority.bounds.id, { operation: name, runId: authority.bounds.runId, requirementId: authority.bounds.requirementId, parentCredentialId: authority.bounds.parentCredentialId });
+          if (authority.bounds) await auditIdentity(tx, "delegation.operation", actor.id, actor.id, authority.bounds.id, { operation: name, runId: authority.bounds.runId, requirementId: authority.bounds.requirementId, parentCredentialId: authority.bounds.parentCredentialId, projectId: authority.bounds.projectId, ...capabilityOperationEvidence(name, call[1], result) });
           if (group === "project") {
             const pins = new Map((await tx.select().from(projectPreferences).where(eq(projectPreferences.actorId, actor.id))).map(pin => [pin.projectId, pin.pinnedAt]));
             const personalize = (value: any): any => {
@@ -249,7 +258,7 @@ function bindServices(context?: VerifiedRequestContext) {
           const visible = await pruneRelations(txDb, authority, result);
           if (authority.bounds && authority.bounds.expiresAt <= new Date()) throw new AuthenticationError("credential_expired");
           return visible;
-        });
+        }).finally(() => { entered(); finished(); });
       }];
     })) as T;
   }
@@ -310,8 +319,17 @@ function authorizeDelegatedOperation(authority: ResourceAuthority, group: Group,
     package: ["listPackages", "getPackage", "listPackageFiles", "readPackageTextFile"],
     mcp: ["listServers", "searchTools", "getServer", "getToolDetail", "listServerTools"],
   };
-  if (authority.bounds?.purpose === "automation" && assetReads[group]?.includes(name)) return;
-  const reads = new Set(["getProject", "getRequirement", "getTask", "getTaskDetail", "listTasks", "listRequirements", "listProjects", "getDocument", "getDocumentDetail", "listDocuments", "getTaskClaim", "getRequirementClaim", "listExecutionSlices", "listTaskComments", "listTaskNotes", "listDocumentVersions", "getDocumentVersion", "getRequirementRepositories", "getTaskRepositories", "listRequirementRepositories", "listTaskRepositories", "getRepository", "listRepositories", "bootstrapContext", "getBootstrapContext", "searchTasks", "searchRequirements", "searchDocuments", "searchDocumentsFulltext", "searchAll", "resolveTitles", "listContextEntries", "searchContext", "getContextEntry"]);
+  if (authority.bounds && ["automation", "execute", "review"].includes(authority.bounds.purpose) && assetReads[group]?.includes(name)) return;
+  if (authority.bounds?.purpose === "execute" && name === "recordMemory") {
+    const input = call[1];
+    requireScope(authority, { projectId: authority.bounds.projectId }, "mcp.invoke");
+    if (input.projectId !== authority.bounds.projectId || input.personalOwnerId || input.personalOwnerType
+      || input.confirmed !== true || !input.idempotencyKey || input.provenance?.origin !== "reviewed_source"
+      || !input.provenance.sourceUpdatedAt || !input.entityType || !input.entityId
+      || Buffer.byteLength(input.content ?? "", "utf8") > 32768) throw new AuthorizationError();
+    return;
+  }
+  const reads = new Set(["getProject", "getRequirement", "getTask", "getTaskDetail", "listTasks", "listRequirements", "listProjects", "getDocument", "getDocumentDetail", "listDocuments", "getTaskClaim", "getRequirementClaim", "listExecutionSlices", "listTaskComments", "listTaskNotes", "listDocumentVersions", "getDocumentVersion", "getRequirementRepositories", "getTaskRepositories", "listRequirementRepositories", "listTaskRepositories", "getRepository", "listRepositories", "bootstrapContext", "getBootstrapContext", "searchTasks", "searchRequirements", "searchDocuments", "searchDocumentsFulltext", "searchAll", "resolveTitles", "listContextEntries", "searchContext", "listSkills", "getSkill", "getContextEntry"]);
   const writes = new Set(["updateTask", "updateTaskStatus", "addTaskComment", "addTaskNote", "claimTask", "releaseTask", "heartbeatClaim", "updateDocument"]);
   reads.add("listWorkflowOutputs");
   reads.add("listWorkflowInputs");
@@ -334,6 +352,9 @@ function authorizeDelegatedOperation(authority: ResourceAuthority, group: Group,
 
 async function authorizeOperation(db: Database, authority: ResourceAuthority, group: Group, name: string, call: any[], context: VerifiedRequestContext) {
   if (authority.bounds) {
+    if (["listSkills", "searchContext", "listPackages", "listMemories", "searchMemories"].includes(name)) {
+      call[1] = { ...call[1], limit: Math.min(call[1]?.limit ?? 20, 20), ...(group === "memory" ? { includeExpired: false } : {}), ...(name === "listPackages" ? { status: "active" } : {}), ...(name === "searchContext" ? { mode: "summary" } : {}) };
+    }
     authorizeDelegatedOperation(authority, group, name, call);
     for (let index = 1; index < call.length; index++) call[index] = redactDelegatedInput(call[index]);
   }
@@ -539,12 +560,30 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     if (!reads.includes(name) && !writes.includes(name)) throw new AuthorizationError();
     const packageId = typeof id === "string" ? id : id.packageId;
     await requirePackage(db, authority, packageId, writes.includes(name) ? "resource.write" : "resource.read");
+    if (authority.bounds) {
+      const pkg = await db.query.skillPackages.findFirst({ where: eq(skillPackages.id, packageId) });
+      if (pkg?.status !== "active") throw new NotFoundError("Skill package not found");
+      if (["listPackageFiles", "readPackageTextFile"].includes(name)) {
+        const [version] = await db.select({ version: skillPackageVersions.version }).from(skillPackageVersions)
+          .where(and(eq(skillPackageVersions.packageId, packageId), eq(skillPackageVersions.status, "active"),
+            id.version ? eq(skillPackageVersions.version, id.version) : undefined))
+          .orderBy(desc(skillPackageVersions.createdAt)).limit(1);
+        if (!version) throw new NotFoundError("Skill package version not found");
+        call[1] = { ...id, version: version.version };
+      }
+      if (name === "readPackageTextFile") call[3] = 32768;
+    }
     if (name === "reindexPackageTextFiles") call[4] = resourcePredicate(authority, documents);
     return;
   }
   if (name === "importSkill" || name === "bulkImportSkills") {
     for (const input of name === "bulkImportSkills" ? id : [id]) requireScope(authority, input);
     call[3] = resourcePredicate(authority, documents);
+    return;
+  }
+  if (name === "getSkill") {
+    await requireResource(db, authority, "skill", id);
+    call[2] = packageResourcePredicate(authority);
     return;
   }
   if (readById[name]) {
@@ -556,7 +595,7 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     if (["getProjectStats", "getProjectHealthDashboard", "getKnowledgeGraph", "getRequirementHeatmap"].includes(name)) call[2] = predicates;
     if (["getGanttChart", "getRequirementBurndown"].includes(name)) call[2] = predicates.tasks;
     if (name === "getRequirementTaskDependencyGraph") call[2] = and(predicates.tasks, eq(tasks.projectId, scope.projectId!));
-    if (name === "getKanbanBoard" || name === "listTaskDependenciesPage") call[3] = predicates.tasks;
+    if (name === "getKanbanBoard" || name === "getKanbanBoardPage" || name === "getKanbanBoardColumns" || name === "getKanbanBoardColumn" || name === "listTaskDependenciesPage") call[3] = predicates.tasks;
     if (name === "listRequirementDependenciesPage") call[3] = predicates.requirements;
     if (name === "getDocumentRecommendations" || name === "getTaskRecommendations") {
       if (call[2]?.projectId) await requireResource(db, authority, "project", call[2].projectId);
@@ -564,6 +603,7 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     }
     if (name === "getMemory") {
       const memory = await db.query.memories.findFirst({ where: eq(memories.id, id) });
+      if (authority.bounds && memory?.expiresAt && memory.expiresAt <= new Date()) throw new NotFoundError("Memory not found");
       await checkMemoryEntity(db, authority, memory!);
     }
     return;
@@ -637,7 +677,8 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     if (input.entityId && input.entityType) await checkMemoryEntity(db, authority, input);
     call[2] = name === "searchTasks" ? taskResourcePredicate(authority)
       : name === "searchRequirements" ? resourcePredicate(authority, requirements)
-      : name === "searchMemories" ? memoryResourcePredicate(authority) : resourcePredicate(authority, documents);
+      : name === "searchMemories" ? memoryResourcePredicate(authority)
+      : name === "searchContext" || name === "listSkills" ? skillResourcePredicate(authority) : resourcePredicate(authority, documents);
     if (name === "searchContext" || name === "listSkills") call[3] = packageResourcePredicate(authority);
     if (name === "searchDocuments" || name === "searchDocumentsWithMetadata") call[3] = labelledResourcePredicate(authority, embeddingProfiles);
     return;
@@ -674,6 +715,11 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     if (name === "listPinnedProjects") call[1] = predicate;
     else { if (name === "listProjects") call[1] ??= {}; call[2] = predicate; }
     if (name === "getProjectCounts") call[3] = taskResourcePredicate(authority, true);
+    return;
+  }
+  if (name === "getRequirementWorkspace") {
+    await requireResource(db, authority, "project", call[1].projectId);
+    call[2] = { requirements: resourcePredicate(authority, requirements), tasks: taskResourcePredicate(authority), repositories: repositoryPredicate(authority) };
     return;
   }
   if (["listTasks", "listRequirements", "listDocuments", "listMemories"].includes(name)) {
@@ -824,6 +870,7 @@ function redactMcpResult(authority: ResourceAuthority, value: any): any {
   if (Array.isArray(value)) return value.map(item => redactMcpResult(authority, item));
   if (!value || typeof value !== "object" || value instanceof Date) return value;
   const result = { ...value };
+  if ("serverId" in result && "inputSchema" in result) result.schemaHash = capabilityDigest({ name: result.name, inputSchema: result.inputSchema, readOnly: result.readOnly, targetProjectArgument: result.targetProjectArgument });
   if ("serverId" in result && "inputSchema" in result) result.authorization = {
     stableId: result.id, sourceServerId: result.serverId, requiredPermissions: ["mcp.invoke"],
     targetScope: result.targetProjectArgument ? "project_argument" : "server",

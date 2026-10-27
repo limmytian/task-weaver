@@ -79,6 +79,7 @@ settings, replacing the secret placeholders. API and Web must use the same value
 | Setting | Local value |
 | --- | --- |
 | `DATABASE_URL` | Connection URL for your own empty PostgreSQL database |
+| `TW_DATABASE_POOL_MAX` | Optional API/Web business-pool cap from `1` to `10`; unset keeps `10`. Budget all runtime pools and realtime connections as described in [deployment](docs/deployment.md#database-connection-budgets). |
 | `TW_AUTH_SECRET` | A private random value of at least 32 characters |
 | `TW_AUTH_BASE_URL` | `http://localhost:3001` |
 | `TW_AUTH_TRUSTED_ORIGINS` | `http://localhost:3000` |

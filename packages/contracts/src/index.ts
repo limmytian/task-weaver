@@ -12,3 +12,6 @@ export * from "./sse";
 export * from "./schemas/execution-controls";
 
 export { inputJsonSchema } from "./json-schema";
+export * from "./schemas/recovery-view";
+export * from "./schemas/capability-readiness";
+export * from "./schemas/capability-evidence-view";

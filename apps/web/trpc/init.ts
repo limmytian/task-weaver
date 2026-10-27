@@ -1,6 +1,6 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
-import { createDb, type Database } from "@task-weaver/db";
+import { createDb, databasePoolOptions, type Database } from "@task-weaver/db";
 import {
   authenticationConfiguration,
   createAuthenticationRuntime,
@@ -30,7 +30,7 @@ let server: TRPCContextDependencies | undefined;
 export function getWebAuthenticationRuntime() {
   if (!server) {
     if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required");
-    const db = createDb(process.env.DATABASE_URL);
+    const db = createDb(process.env.DATABASE_URL, databasePoolOptions(process.env));
     server = {
       db,
       auth: createAuthenticationRuntime(

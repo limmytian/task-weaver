@@ -5,6 +5,9 @@ import {
   personalResourceOwnerId,
   skillPackageStorageService,
   importSkillSchema,
+  projectCapabilityReadinessQuerySchema,
+  capabilityEvidenceQuerySchema,
+  createCapabilityEvidenceViewService,
   registerSkillPackageSchema,
   listSkillPackagesSchema,
   getSkillPackageSchema,
@@ -17,6 +20,7 @@ import {
   updateSkillPackageVersionStatusSchema,
 } from "@task-weaver/core";
 import { resolve } from "node:path";
+import { readProjectCapabilityReadiness } from "../../lib/capability-readiness-api";
 
 function createSkillPackageStorage() {
   const baseDir = process.env.SKILL_PACKAGE_STORAGE_DIR
@@ -28,6 +32,10 @@ function createSkillPackageStorage() {
 }
 
 export const skillRouter = router({
+  evidence: ordinaryResourceProcedure.input(capabilityEvidenceQuerySchema)
+    .query(async ({ ctx, input }) => createCapabilityEvidenceViewService(ctx.identity).get(ctx.db, input)),
+  readiness: ordinaryResourceProcedure.input(projectCapabilityReadinessQuerySchema)
+    .query(async ({ ctx, input }) => readProjectCapabilityReadiness(ctx.req, input.projectId)),
   list: ordinaryResourceProcedure
     .input(
       z.object({

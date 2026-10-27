@@ -1,6 +1,6 @@
 import type { RetrievalPredicates } from "./retrieval-predicates";
 import type { SQL } from "drizzle-orm";
-import { eq, sql, and, gte, inArray, or } from "drizzle-orm";
+import { eq, sql, and, gte, lt, inArray, or } from "drizzle-orm";
 import {
   type Database,
   projects,
@@ -302,73 +302,47 @@ export async function getProjectHealthDashboard(
   const project = await getProject(db, id);
   const now = new Date();
 
-  // --- Task aggregates ---
-  const allTasks = await db
-    .select({
-      id: tasks.id,
-      title: tasks.title,
-      status: tasks.status,
-      priority: tasks.priority,
-      assignee: tasks.assignee,
-      expectedAt: tasks.expectedAt,
-      completedAt: tasks.completedAt,
-      createdAt: tasks.createdAt,
-      updatedAt: tasks.updatedAt,
-    })
-    .from(tasks)
-    .where(and(eq(tasks.projectId, id), authorized.tasks));
-
-  const totalTasks = allTasks.length;
-  const doneTasks = allTasks.filter((t) => t.status === "done").length;
-  const cancelledTasks = allTasks.filter((t) => t.status === "cancelled").length;
-  const activeTasks = totalTasks - cancelledTasks;
-
-  // Completion rate (excluding cancelled)
-  const completionRate = activeTasks > 0 ? doneTasks / activeTasks : 1;
-
-  // Overdue tasks: have expectedAt in the past, not done/cancelled
-  const overdueTasks = allTasks.filter(
-    (t) =>
-      t.expectedAt &&
-      t.expectedAt < now &&
-      t.status !== "done" &&
-      t.status !== "cancelled",
-  );
-  const overdueRate = activeTasks > 0 ? 1 - overdueTasks.length / activeTasks : 1;
-
-  // Stale tasks: in_progress or in_review but not updated in 7+ days
   const sevenDaysAgo = new Date(now);
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-  const staleTasks = allTasks.filter(
-    (t) =>
-      (t.status === "in_progress" || t.status === "in_review") &&
-      t.updatedAt < sevenDaysAgo,
-  );
-
-  // Unassigned active tasks
-  const unassignedTasks = allTasks.filter(
-    (t) => !t.assignee && t.status !== "done" && t.status !== "cancelled",
-  ).length;
-
-  // --- Velocity (tasks completed per week, last 4 weeks) ---
-  const velocity: { week: string; completed: number }[] = [];
-  for (let i = 3; i >= 0; i--) {
-    const weekStart = new Date(now);
-    weekStart.setDate(weekStart.getDate() - (i + 1) * 7);
-    weekStart.setHours(0, 0, 0, 0);
-    const weekEnd = new Date(now);
-    weekEnd.setDate(weekEnd.getDate() - i * 7);
-    weekEnd.setHours(23, 59, 59, 999);
-
-    const completed = allTasks.filter(
-      (t) => t.completedAt && t.completedAt >= weekStart && t.completedAt < weekEnd,
-    ).length;
-
-    velocity.push({
-      week: weekStart.toISOString().slice(0, 10),
-      completed,
-    });
-  }
+  // Compute calendar boundaries in the application timezone, preserving the existing windows.
+  const weeks = Array.from({ length: 4 }, (_, index) => {
+    const i = 3 - index;
+    const start = new Date(now);
+    start.setDate(start.getDate() - (i + 1) * 7);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(now);
+    end.setDate(end.getDate() - i * 7);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+  });
+  const active = sql`${tasks.status} NOT IN ('done', 'cancelled')`;
+  const overdue = and(lt(tasks.expectedAt, now), active)!;
+  const stale = and(sql`${tasks.status} IN ('in_progress', 'in_review')`, lt(tasks.updatedAt, sevenDaysAgo))!;
+  // Counts, velocity and complete alert lists share one authorized statement snapshot.
+  const [summary] = await db.select({
+    total: sql<number>`count(*)::int`,
+    done: sql<number>`count(*) FILTER (WHERE ${tasks.status} = 'done')::int`,
+    cancelled: sql<number>`count(*) FILTER (WHERE ${tasks.status} = 'cancelled')::int`,
+    unassigned: sql<number>`count(*) FILTER (WHERE (${tasks.assignee} IS NULL OR ${tasks.assignee} = '') AND ${active})::int`,
+    overdue: sql<Array<{ id: string; title: string; expectedAt: string; assignee: string | null }>>`
+      coalesce(jsonb_agg(jsonb_build_object('id', ${tasks.id}, 'title', ${tasks.title},
+        'expectedAt', ${tasks.expectedAt}, 'assignee', ${tasks.assignee})) FILTER (WHERE ${overdue}), '[]'::jsonb)`,
+    stale: sql<Array<{ id: string; title: string; updatedAt: string; status: string }>>`
+      coalesce(jsonb_agg(jsonb_build_object('id', ${tasks.id}, 'title', ${tasks.title},
+        'updatedAt', ${tasks.updatedAt}, 'status', ${tasks.status})) FILTER (WHERE ${stale}), '[]'::jsonb)`,
+    velocity: sql<number[]>`ARRAY[${sql.join(weeks.map(({ start, end }) => sql`
+      count(*) FILTER (WHERE ${tasks.completedAt} >= ${start.toISOString()}::timestamptz
+        AND ${tasks.completedAt} < ${end.toISOString()}::timestamptz)::int`), sql`, `)}]`,
+  }).from(tasks).where(and(eq(tasks.projectId, id), authorized.tasks));
+  const activeTasks = summary!.total - summary!.cancelled;
+  const completionRate = activeTasks > 0 ? summary!.done / activeTasks : 1;
+  const overdueTasks = summary!.overdue.map(task => ({ ...task, expectedAt: new Date(task.expectedAt) }));
+  const staleTasks = summary!.stale.map(task => ({ ...task, updatedAt: new Date(task.updatedAt) }));
+  const overdueRate = activeTasks > 0 ? 1 - overdueTasks.length / activeTasks : 1;
+  const unassignedTasks = summary!.unassigned;
+  const velocity = weeks.map(({ start }, index) => ({
+    week: start.toISOString().slice(0, 10), completed: summary!.velocity[index]!,
+  }));
 
   // Velocity trend: compare last 2 weeks
   const lastWeekVel = velocity[3]?.completed ?? 0;
@@ -402,23 +376,16 @@ export async function getProjectHealthDashboard(
     and(eq(activityLog.entityType, "document"), inArray(activityLog.entityId, db.select({ id: documents.id }).from(documents).where(and(eq(documents.projectId, id), authorized.documents)))),
     and(eq(activityLog.entityType, "project"), eq(activityLog.entityId, id)),
   );
-  const [recentRow] = await db
-    .select({ count: sql<number>`count(*)::int` })
+  const [activity] = await db
+    .select({
+      recent: sql<number>`count(*) FILTER (WHERE ${activityLog.createdAt} >= ${sevenDaysAgo.toISOString()}::timestamptz)::int`,
+      previous: sql<number>`count(*) FILTER (WHERE ${activityLog.createdAt} < ${sevenDaysAgo.toISOString()}::timestamptz)::int`,
+    })
     .from(activityLog)
-    .where(and(gte(activityLog.createdAt, sevenDaysAgo), entityFilter));
-  const [previousRow] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(activityLog)
-    .where(
-      and(
-        gte(activityLog.createdAt, fourteenDaysAgo),
-        sql`${activityLog.createdAt} < ${sevenDaysAgo.toISOString()}::timestamptz`,
-        entityFilter,
-      ),
-    );
+    .where(and(gte(activityLog.createdAt, fourteenDaysAgo), entityFilter));
 
-  const last7Days = recentRow?.count ?? 0;
-  const previous7Days = previousRow?.count ?? 0;
+  const last7Days = activity?.recent ?? 0;
+  const previous7Days = activity?.previous ?? 0;
   const activityTrendDir: "up" | "down" | "stable" =
     last7Days > previous7Days * 1.2 ? "up" : last7Days < previous7Days * 0.8 ? "down" : "stable";
   const activityScore = previous7Days > 0 ? Math.min(last7Days / previous7Days, 2) / 2 : last7Days > 0 ? 1 : 0.5;

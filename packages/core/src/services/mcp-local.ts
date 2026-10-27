@@ -1,3 +1,5 @@
+import { capabilityOperationEvidence } from "./capability-evidence";
+import { requireExecutionSynchronization } from "./execution-synchronization";
 import { requireMcpInput } from "./mcp-input-validation";
 import { acquireMcpInvocation } from "./mcp-invocation-budget";
 import { resolveHostedMcpRuntime } from "./mcp-hosted-runtime";
@@ -175,6 +177,9 @@ export async function invokeMcpTool(db: Database, context: VerifiedRequestContex
   try {
     signal?.throwIfAborted();
     const authority = await resourceAuthority(db, context);
+    if (authority.bounds?.purpose === "execute") await requireExecutionSynchronization(db, authority.bounds.requirementId, authority.bounds.runId);
+    if (authority.bounds?.purpose === "execute" && !/^[a-f0-9]{64}$/.test(expectedSchemaHash ?? "")) throw new ValidationError("Worker invocation requires the inspected exact schema hash");
+    if (authority.bounds?.purpose === "execute" && Buffer.byteLength(JSON.stringify(args ?? {})) > 16384) throw new ValidationError("Worker MCP arguments exceed the 16384-byte limit");
     const tool = await db.query.mcpTools.findFirst({ where: eq(mcpTools.id, toolId) });
     if (!tool) throw new NotFoundError("Resource not found");
     if (expectedSchemaHash && expectedSchemaHash !== capabilityDigest({ name: tool.name, inputSchema: tool.inputSchema, readOnly: tool.readOnly, targetProjectArgument: tool.targetProjectArgument })) throw new ValidationError("The tool schema changed; discover and confirm the current schema");
@@ -203,7 +208,7 @@ export async function invokeMcpTool(db: Database, context: VerifiedRequestContex
     };
     const result = await invokeMcpToolUnchecked(db, context, toolId, args, actor, checkedPool, approvalId, expectedSchemaHash, signal);
     if (JSON.stringify(await mcpPolicy(db, mcpScopeKey(scope), toolId)) !== JSON.stringify(policy)) throw new AuthorizationError();
-    const audit = await recordMcpInvocationAudit(db, context, scope, serverId, toolId, start, undefined, Boolean((result as { isError?: boolean }).isError));
+    const audit = await recordMcpInvocationAudit(db, context, scope, serverId, toolId, start, undefined, Boolean((result as { isError?: boolean }).isError), capabilityOperationEvidence("callTool", { toolId, expectedSchemaHash }, result));
     return { ...result, _meta: { ...(result._meta as Record<string, unknown> | undefined), "task-weaver/auditId": audit.id } };
   } catch (error) {
     await recordMcpInvocationAudit(db, context, scope, serverId, toolId, start, error);

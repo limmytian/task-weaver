@@ -319,6 +319,8 @@ export const executionDelegationSchema = z
     runId: idSchema,
     purpose: z.enum(["execute", "delivery", "review", "merge", "automation"]),
     leaseGeneration: z.number().int().positive(),
+    sharedCapabilityReads: z.boolean().optional(),
+    capabilityExecution: z.boolean().optional(),
     expiresAt: timestampSchema,
   })
   .strict().superRefine((value, ctx) => {
@@ -348,7 +350,9 @@ export const credentialIdentitySchema = z.discriminatedUnion("kind", [
     .object({
       ...credentialIdentityFields,
       kind: z.literal("delegation"),
-      grants: z.array(projectAuthorizationGrantSchema).min(1).max(100),
+      grants: z.array(z.union([projectAuthorizationGrantSchema, z.object({
+        scope: z.literal("global"), permissions: z.tuple([z.literal("resource.read")]),
+      }).strict()])).min(1).max(100),
       delegation: executionDelegationSchema,
     })
     .strict(),
@@ -417,7 +421,14 @@ export const requestIdentitySnapshotSchema = z
         "execution.review",
         "execution.merge",
       ];
+      if (delegation.capabilityExecution && (delegation.purpose !== "execute" || !credential.grants.some(grant => grant.scope === "project" && grant.projectId === delegation.projectId && grant.permissions.includes("mcp.invoke"))))
+        issue("Capability execution requires an execution-purpose invocation grant", ["credential", "delegation", "capabilityExecution"]);
       credential.grants.forEach((grant, index) => {
+        if (grant.scope === "global") {
+          if (delegation.sharedCapabilityReads !== true || !["execute", "review"].includes(delegation.purpose))
+            issue("Shared capability reads require explicit execution opt-in", ["credential", "grants", index]);
+          return;
+        }
         if (grant.projectId !== delegation.projectId) {
           issue("Delegated grant must use the execution project", [
             "credential",
@@ -426,6 +437,8 @@ export const requestIdentitySnapshotSchema = z
             "projectId",
           ]);
         }
+        if (delegation.purpose === "execute" && grant.permissions.includes("mcp.invoke") && delegation.capabilityExecution !== true)
+          issue("Execution invocation requires explicit capability opt-in", ["credential", "delegation", "capabilityExecution"]);
         grant.permissions.forEach((permission) => {
           if (
             !delegatedPermissions.includes(permission) ||

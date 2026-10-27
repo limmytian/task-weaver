@@ -230,3 +230,34 @@ test("authentication and authorization errors share safe messages and stable cod
   assert.equal(authorization.code, "csrf_rejected");
   assert.equal(authorization.message, "Access denied");
 });
+
+test("shared delegation reads require explicit opt-in and cannot include shared writes or management", () => {
+  const credential = {
+    ...delegationContext.credential,
+    delegation: { ...delegationContext.credential.delegation, sharedCapabilityReads: true },
+    grants: [...grants, { scope: "global", permissions: ["resource.read"] }],
+  };
+  assert.equal(requestIdentitySnapshotSchema.safeParse({ ...delegationContext, credential }).success, true);
+  for (const changed of [
+    { ...credential, delegation: { ...credential.delegation, sharedCapabilityReads: false } },
+    { ...credential, delegation: { ...credential.delegation, purpose: "merge" } },
+    { ...credential, delegation: { ...credential.delegation, purpose: "delivery" } },
+    { ...credential, grants: [...grants, { scope: "global", permissions: ["resource.read", "resource.write"] }] },
+    { ...credential, grants: [...grants, { scope: "global", permissions: ["mcp.invoke"] }] },
+    { ...credential, grants: [...grants, { scope: "personal", actorId, permissions: ["resource.read"] }] },
+  ]) assert.equal(requestIdentitySnapshotSchema.safeParse({ ...delegationContext, credential: changed }).success, false);
+});
+
+test("execution invocation metadata agrees with the immutable project grant", () => {
+  const credential = {
+    ...delegationContext.credential,
+    delegation: { ...delegationContext.credential.delegation, capabilityExecution: true },
+    grants: [{ ...grants[0], permissions: [...grants[0]!.permissions, "mcp.invoke"] }],
+  };
+  assert.equal(requestIdentitySnapshotSchema.safeParse({ ...delegationContext, credential }).success, true);
+  for (const changed of [
+    { ...credential, delegation: { ...credential.delegation, capabilityExecution: false } },
+    { ...credential, delegation: { ...credential.delegation, purpose: "review" } },
+    { ...credential, grants },
+  ]) assert.equal(requestIdentitySnapshotSchema.safeParse({ ...delegationContext, credential: changed }).success, false);
+});

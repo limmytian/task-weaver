@@ -93,7 +93,7 @@ export async function recordMemory(
   input: RecordMemoryInput,
   actor: Actor,
 ) {
-  const { idempotencyKey, ...payload } = input;
+  const { idempotencyKey, confirmed: _confirmed, ...payload } = input;
   const scopeKey = input.projectId ? `project:${input.projectId}` : input.personalOwnerId ? `personal:${input.personalOwnerType}:${input.personalOwnerId}` : "global";
   const payloadHash = capabilityDigest(payload);
   const receiptWhere = and(eq(memoryReceipts.actorId, actor.id), eq(memoryReceipts.actorType, actor.type), eq(memoryReceipts.scopeKey, scopeKey), idempotencyKey ? eq(memoryReceipts.key, idempotencyKey) : undefined);
@@ -103,7 +103,7 @@ export async function recordMemory(
       const existing = await db.query.memoryReceipts.findFirst({ where: receiptWhere });
       if (!existing || existing.payloadHash !== payloadHash) throw new ConflictError("Memory save key was already used for different content", 0);
       if (!existing.memoryId) throw new ConflictError("The saved memory was forgotten; use a new key for an intentional new save", 0);
-      return getMemory(db, existing.memoryId);
+      return getMemoryRecord(db, existing.memoryId);
     }
   }
   await assertMemorySource(db, input);
@@ -130,12 +130,24 @@ export async function recordMemory(
   return memory!;
 }
 
-export async function getMemory(db: Database, id: string) {
+async function getMemoryRecord(db: Database, id: string) {
   const memory = await db.query.memories.findFirst({
     where: eq(memories.id, id),
   });
   if (!memory) throw new NotFoundError("Memory not found");
   return memory;
+}
+
+/** Source freshness is read metadata, not renewed expiry or proof of correctness. */
+export async function getMemory(db: Database, id: string) {
+  const record = await getMemoryRecord(db, id);
+  let sourceFreshness: "not_applicable" | "current" | "changed" = "not_applicable";
+  if (record.provenance?.origin === "reviewed_source" && record.entityType && record.entityId) {
+    const table = record.entityType === "task" ? tasks : record.entityType === "requirement" ? requirements : record.entityType === "document" ? documents : projects;
+    const [source] = await db.select({ updatedAt: table.updatedAt }).from(table).where(eq(table.id, record.entityId));
+    sourceFreshness = source && source.updatedAt.getTime() === Date.parse(typeof record.provenance.sourceUpdatedAt === "string" ? record.provenance.sourceUpdatedAt : "") ? "current" : "changed";
+  }
+  return { ...record, expired: Boolean(record.expiresAt && record.expiresAt <= new Date()), sourceFreshness };
 }
 
 export async function updateMemory(
@@ -144,7 +156,7 @@ export async function updateMemory(
   input: UpdateMemoryInput,
   _actor: Actor,
 ) {
-  const current = await getMemory(db, id);
+  const current = await getMemoryRecord(db, id);
   if (input.expectedVersion !== undefined && input.expectedVersion !== current.version) throw new ConflictError("Memory changed", current.version);
   if (input.provenance) await assertMemorySource(db, { ...current, provenance: input.provenance });
 
@@ -162,19 +174,19 @@ export async function updateMemory(
     .where(and(eq(memories.id, id), eq(memories.version, current.version)))
     .returning();
 
-  if (!updated) throw new ConflictError("Memory changed", (await getMemory(db, id)).version);
+  if (!updated) throw new ConflictError("Memory changed", (await getMemoryRecord(db, id)).version);
   return updated;
 }
 
 export async function forgetMemory(db: Database, id: string, _actor: Actor, expectedVersion?: number) {
-  const current = await getMemory(db, id);
+  const current = await getMemoryRecord(db, id);
   if (expectedVersion !== undefined && expectedVersion !== current.version) throw new ConflictError("Memory changed", current.version);
   const result = await db
     .delete(memories)
     .where(and(eq(memories.id, id), eq(memories.version, current.version)))
     .returning({ id: memories.id });
 
-  if (result.length === 0) throw new ConflictError("Memory changed", (await getMemory(db, id)).version);
+  if (result.length === 0) throw new ConflictError("Memory changed", (await getMemoryRecord(db, id)).version);
 }
 
 // -- Search --

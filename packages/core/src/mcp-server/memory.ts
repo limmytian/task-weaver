@@ -69,7 +69,8 @@ export async function mcpMemory(db: Database, identity: VerifiedRequestContext, 
   if (operation === "get" && expired && !raw.includeExpired) throw new NotFoundError("Resource not found");
   if (Buffer.byteLength(record.content, "utf8") > 32768) throw new McpToolFailure("result_too_large", "Memory content exceeds the 32768-byte read limit.");
   let sourceFreshness: "not_applicable" | "current" | "changed" = "not_applicable";
-  if (record.provenance?.origin === "reviewed_source" && record.entityType && record.entityId) {
+  if ("sourceFreshness" in record && (record.sourceFreshness === "current" || record.sourceFreshness === "changed" || record.sourceFreshness === "not_applicable")) sourceFreshness = record.sourceFreshness;
+  else if (record.provenance?.origin === "reviewed_source" && record.entityType && record.entityId) {
     const table = record.entityType === "task" ? tasks : record.entityType === "requirement" ? requirements : record.entityType === "document" ? documents : projects;
     const [source] = await db.select({ updatedAt: table.updatedAt }).from(table).where(eq(table.id, record.entityId));
     sourceFreshness = source && source.updatedAt.toISOString() === record.provenance.sourceUpdatedAt ? "current" : "changed";

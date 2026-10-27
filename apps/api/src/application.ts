@@ -1,3 +1,4 @@
+import { createWorkerConsoleRoutes } from './routes/worker-console.js';
 import { Hono } from "hono";
 import type { Database } from "@task-weaver/db";
 import {
@@ -115,11 +116,13 @@ const consoleLogger: ApplicationLogger = {
 };
 
 function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
+  const consoleRuntime = createWorkerConsoleRoutes(env);
   let webhookQueue = Promise.resolve();
   let pendingWebhooks = 0;
   let webhookBackground: Promise<void> | undefined;
   return {
     apiRoutes: [
+      { id: "worker-console", method: "POST", path: "/api/v1/worker-console", route: consoleRuntime.router },
       {
         id: "agent-usage",
         method: "GET",
@@ -251,6 +254,7 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
       },
     ],
     workers: [
+      { id: "worker-console", start() {}, async stop() { consoleRuntime.close(); } },
       {
         id: "durable-webhook-delivery",
         start(context: ApiRuntimeContext) {

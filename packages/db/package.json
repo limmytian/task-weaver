@@ -7,9 +7,9 @@
     "./schema": "./src/schema/index.ts"
   },
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "build": "node ../../scripts/workspace-build.mjs package-build",
     "test": "tsx --test src/*.test.ts src/**/*.test.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node ../../scripts/workspace-build.mjs package-typecheck",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:migrate": "drizzle-kit migrate",

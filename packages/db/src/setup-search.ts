@@ -12,13 +12,16 @@ async function main() {
     process.exit(1);
   }
 
-  const db = createDb(databaseUrl);
+  const db = createDb(databaseUrl, { maxConnections: 1 });
   const sql = readFileSync(resolve(__dirname, "setup-search.sql"), "utf-8");
 
-  console.log("Setting up full-text search...");
-  await db.execute(sql);
-  console.log("Full-text search setup complete.");
-  process.exit(0);
+  try {
+    console.log("Setting up full-text search...");
+    await db.execute(sql);
+    console.log("Full-text search setup complete.");
+  } finally {
+    await db.$client.end({ timeout: 2 });
+  }
 }
 
 main().catch((err) => {

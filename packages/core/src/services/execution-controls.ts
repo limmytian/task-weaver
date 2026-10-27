@@ -57,6 +57,8 @@ export function createExecutionControlService(context: VerifiedRequestContext) {
         const row = await ownedControl(tx, daemon, id, authority.actor.id);
         await requireResource(tx, authority, 'requirement', row.requirementId, 'execution.run');
         if (input.revision !== row.revision) throw new ConflictError('Plan changed; read the latest execution control', row.revision);
+        // A late old-node report cannot reopen an already resolved control.
+        if (row.phase === 'resumed') return row;
         if (phases.indexOf(input.phase) < phases.indexOf(row.phase)) return row;
         if (input.phase === 'stopped' && !['stopping', 'stopped'].includes(row.phase)) throw new ValidationError('Report stopping before observed termination');
         if (input.phase === 'reconciling' && !['stopped', 'reconciling'].includes(row.phase)) throw new ValidationError('Observe termination before assessment');
@@ -137,6 +139,9 @@ export function createExecutionControlService(context: VerifiedRequestContext) {
         const control = await tx.query.executionControls.findFirst({ where: and(eq(executionControls.id, input.controlId), eq(executionControls.requirementId, requirementId)) });
         if (!requirement || !control) throw new NotFoundError('Execution recovery not found');
         if (requirement.planRevision !== input.expectedPlanRevision) throw new ConflictError('Plan changed; inspect the latest recovery state', requirement.planRevision);
+        const latest = await tx.select({ id: executionControls.id }).from(executionControls).where(eq(executionControls.requirementId, requirementId)).orderBy(desc(executionControls.createdAt), desc(executionControls.id)).limit(1);
+        if (latest[0]?.id !== control.id || control.phase === 'resumed' || ['done', 'cancelled', 'archived'].includes(requirement.status)) throw new ConflictError('Recovery state changed; inspect the latest control', requirement.planRevision);
+        if ((input.expectedControlUpdatedAt && control.updatedAt.getTime() !== input.expectedControlUpdatedAt.getTime()) || (input.expectedControlPhase && control.phase !== input.expectedControlPhase)) throw new ConflictError('Control observation changed; inspect current evidence', requirement.planRevision);
         const claim = await tx.query.requirementClaims.findFirst({ where: eq(requirementClaims.requirementId, requirementId) });
         if (claim && claim.id !== control.runId) throw new ValidationError('A replacement already owns execution; inspect its results before deciding');
         await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(eq(executionDelegations.runId, control.runId));

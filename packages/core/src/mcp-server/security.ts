@@ -1,3 +1,4 @@
+import { capabilityOperationEvidence } from "../services/capability-evidence";
 import { requireRepository } from "../services/repository-authorization";
 import { requireMcpServer, requireMcpToolTarget } from "../services/mcp-authorization";
 import { lockIdentityLifecycle } from "../services/auth-security";
@@ -15,6 +16,13 @@ export class DeferredMcpOperation {
 
 async function target(db: Database, identity: VerifiedRequestContext, name: McpServerToolName, raw: Record<string, unknown>) {
   const authority = await resourceAuthority(db, identity);
+  if (authority.bounds) {
+    const reads = ["tw_context_search", "tw_context_get", "tw_skill_packages_list", "tw_skill_packages_get", "tw_skill_package_files", "tw_skill_package_read", "tw_memories_search", "tw_memories_get", "tw_memories_preview", "tw_skill_packages_resolve"];
+    const execution = ["tw_skill_runtimes_list", "tw_skills_run", "tw_mcp_search", "tw_mcp_tool", "tw_mcp_call", "tw_memories_record"];
+    if (!["execute", "review", "automation"].includes(authority.bounds.purpose)
+      || !reads.includes(name) && !(authority.bounds.purpose === "execute" && execution.includes(name)
+        && authority.grants.some(grant => grant.scope === "project" && grant.projectId === authority.bounds!.projectId && grant.permissions.includes("mcp.invoke")))) throw new AuthorizationError();
+  }
   const write = !(mcpServerReadTools as readonly string[]).includes(name);
   const permission = write ? "resource.write" : "resource.read";
   const projectId = raw.projectId ?? (raw.plan as { projectId?: string } | undefined)?.projectId;
@@ -46,9 +54,9 @@ async function target(db: Database, identity: VerifiedRequestContext, name: McpS
     const [record] = await db.select().from(skillPackages).where(eq(skillPackages.id, raw.packageId));
     revision = record;
   } else if (typeof raw.id === "string") {
-    const kind: ResourceKind = name.startsWith("tw_memories_") ? "memory" : name.startsWith("tw_projects_") ? "project" : name.startsWith("tw_requirements_") || name.startsWith("tw_requirement_") || name === "tw_document_requirement_links_add" || name === "tw_execution_slices_list" || name === "tw_execution_slices_create" ? "requirement" : name === "tw_execution_slices_update" ? "slice" : name.startsWith("tw_documents_") || name.startsWith("tw_document_task") || name === "tw_document_history" || name === "tw_document_version" || name === "tw_context_get" ? "document" : "task";
+    const kind: ResourceKind = name.startsWith("tw_memories_") ? "memory" : name.startsWith("tw_projects_") ? "project" : name.startsWith("tw_requirements_") || name.startsWith("tw_requirement_") || name === "tw_document_requirement_links_add" || name === "tw_execution_slices_list" || name === "tw_execution_slices_create" ? "requirement" : name === "tw_execution_slices_update" ? "slice" : name === "tw_context_get" ? "skill" : name.startsWith("tw_documents_") || name.startsWith("tw_document_task") || name === "tw_document_history" || name === "tw_document_version" ? "document" : "task";
     scope = await requireResource(db, authority, kind, raw.id, permission);
-    const table = kind === "memory" ? memories : kind === "project" ? projects : kind === "requirement" ? requirements : kind === "slice" ? executionSlices : kind === "document" ? documents : tasks;
+    const table = kind === "memory" ? memories : kind === "project" ? projects : kind === "requirement" ? requirements : kind === "slice" ? executionSlices : (kind === "document" || kind === "skill") ? documents : tasks;
     const [record] = await db.select().from(table).where(eq(table.id, raw.id));
     revision = record;
   } else if (typeof projectId === "string") {
@@ -89,7 +97,8 @@ export function secureMcpExecutor(db: Database, identity: VerifiedRequestContext
         const current = await target(db, identity, name, input);
         if (mcpScopeKey(current.scope) !== mcpScopeKey(scope) || JSON.stringify(await mcpPolicy(db, mcpScopeKey(current.scope), name)) !== JSON.stringify(policy)) throw new AuthorizationError();
       }
-      await recordMcpInvocationAudit(db, identity, scope, "task-weaver", name, start);
+      const executionFailed = name === "tw_skills_run" && (completed as { status?: string })?.status === "failed";
+      await recordMcpInvocationAudit(db, identity, scope, "task-weaver", name, start, undefined, executionFailed, capabilityOperationEvidence(name, input, completed));
       return completed;
     } catch (error) {
       await recordMcpInvocationAudit(db, identity, scope, "task-weaver", name, start, error);

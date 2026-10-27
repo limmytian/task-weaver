@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { createPersonalTaskSchema, createTaskSchema, listTasksSchema } from "./tasks.js";
+import { boardPageSchema, createPersonalTaskSchema, createTaskSchema, listTasksSchema } from "./tasks.js";
 
 const projectId = "00000000-0000-4000-8000-000000000001";
 const requirementId = "00000000-0000-4000-8000-000000000002";
@@ -48,4 +48,12 @@ test("task scope schemas", async (t) => {
 
     assert.equal(result.success, true);
   });
+});
+
+test("Board pages have explicit bounded defaults and reject invalid bounds", () => {
+  assert.equal(boardPageSchema.parse({ projectId }).pageSize, 50);
+  for (const input of [{ pageSize: 51 }, { page: 0 }, { page: "invalid" }, { completedWithinDays: -1 }]) {
+    assert.equal(boardPageSchema.safeParse({ projectId, ...input }).success, false);
+  }
+  assert.equal(boardPageSchema.parse({ projectId, page: "80", completedWithinDays: "0" }).page, 80);
 });

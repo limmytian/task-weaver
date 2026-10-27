@@ -109,6 +109,7 @@ export function RequirementRepositories({
       utils.repository.listForRequirement.invalidate({ requirementId }),
       utils.requirement.get.invalidate({ id: requirementId }),
       utils.requirement.list.invalidate(),
+      utils.requirement.listSummary.invalidate(),
       utils.repository.invalidate(),
     ]);
   };
@@ -332,6 +333,9 @@ export function TaskRepositoryScope({
       utils.task.get.invalidate({ id: taskId }),
       utils.task.list.invalidate(),
       utils.task.board.invalidate(),
+      utils.task.boardPage.invalidate(),
+      utils.task.boardColumns.invalidate(),
+      utils.task.boardColumn.invalidate(),
       requirementId ? utils.repository.listForRequirement.invalidate({ requirementId }) : Promise.resolve(),
     ]);
   };

@@ -16,6 +16,7 @@ import {
   Plus,
   ClipboardList,
 } from "lucide-react";
+import { resourceAccessLost } from "@/lib/resource-access";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,13 +25,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { z } from "zod";
+import { ResourceLinkPicker } from "@/components/resource-link-picker";
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -53,7 +49,9 @@ export default function DocumentDetailPage({
   const [tags, setTags] = useState("");
   const utils = trpc.useUtils();
 
-  const { data: doc, isLoading } = trpc.document.get.useQuery({ id });
+  const documentQuery = trpc.document.get.useQuery({ id });
+  const doc = resourceAccessLost(documentQuery.error) ? undefined : documentQuery.data;
+  const isLoading = documentQuery.isLoading;
 
   useEffect(() => {
     if (doc && !editing) {
@@ -143,6 +141,8 @@ export default function DocumentDetailPage({
     return (
       <div className="flex flex-col items-center justify-center py-20">
         <p className="text-muted-foreground">Document not found</p>
+        {documentQuery.isError && <Button variant="outline" className="mt-4" disabled={documentQuery.isFetching}
+          onClick={() => documentQuery.refetch()}>Retry document</Button>}
         <Button
           variant="outline"
           className="mt-4"
@@ -289,18 +289,10 @@ function DocumentSidebar({
   const [selectedReqId, setSelectedReqId] = useState("");
   const utils = trpc.useUtils();
 
-  const { data: projects } = trpc.project.list.useQuery({});
-  const projectId = doc.projectId ?? projects?.[0]?.id;
-
-  const { data: tasks } = trpc.task.list.useQuery(
-    { projectId: projectId! },
-    { enabled: linkingTask && !!projectId },
-  );
-
-  const { data: requirements } = trpc.requirement.list.useQuery(
-    { projectId: projectId! },
-    { enabled: linkingReq && !!projectId },
-  );
+  const projects = trpc.project.list.useQuery({ view: "summary", page: 1, pageSize: 1 },
+    { enabled: !doc.projectId && (linkingTask || linkingReq) });
+  const projectPage = z.object({ items: z.array(z.object({ id: z.string().uuid() })) }).safeParse(projects.data);
+  const projectId = doc.projectId ?? (projectPage.success ? projectPage.data.items[0]?.id : undefined);
 
   const linkToTask = trpc.document.linkToTask.useMutation({
     onSuccess: () => {
@@ -320,9 +312,7 @@ function DocumentSidebar({
   });
 
   const existingTaskIds = new Set(doc.taskLinks?.map((l) => l.task.id) ?? []);
-  const availableTasks = tasks?.filter((t) => !existingTaskIds.has(t.id) && t.status !== "cancelled");
   const existingReqIds = new Set(doc.requirementLinks?.map((link) => link.requirement.id) ?? []);
-  const availableReqs = requirements?.filter((r) => !existingReqIds.has(r.id) && r.status !== "cancelled");
 
   return (
     <aside className="space-y-4">
@@ -392,6 +382,7 @@ function DocumentSidebar({
             </span>
             <button
               className="text-muted-foreground hover:text-foreground"
+              aria-label="Link task options"
               onClick={() => setLinkingTask(!linkingTask)}
             >
               {linkingTask ? <X className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
@@ -401,21 +392,8 @@ function DocumentSidebar({
         <CardContent className="space-y-2">
           {linkingTask && (
             <div className="space-y-2 rounded border p-2">
-              <Select value={selectedTaskId} onValueChange={setSelectedTaskId}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="Select task..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableTasks?.map((t) => (
-                    <SelectItem key={t.id} value={t.id} className="text-xs">
-                      {t.title}
-                    </SelectItem>
-                  ))}
-                  {(!availableTasks || availableTasks.length === 0) && (
-                    <div className="px-2 py-1 text-xs text-muted-foreground">No tasks available</div>
-                  )}
-                </SelectContent>
-              </Select>
+              {projectId && <ResourceLinkPicker kind="task" projectId={projectId} value={selectedTaskId}
+                onValueChange={setSelectedTaskId} linkedIds={existingTaskIds} />}
               <Button
                 size="sm"
                 className="w-full h-7 text-xs"
@@ -460,6 +438,7 @@ function DocumentSidebar({
             </span>
             <button
               className="text-muted-foreground hover:text-foreground"
+              aria-label="Link requirement options"
               onClick={() => setLinkingReq(!linkingReq)}
             >
               {linkingReq ? <X className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
@@ -475,21 +454,8 @@ function DocumentSidebar({
           ))}
           {linkingReq && (
             <div className="space-y-2 rounded border p-2">
-              <Select value={selectedReqId} onValueChange={setSelectedReqId}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="Select requirement..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableReqs?.map((r) => (
-                    <SelectItem key={r.id} value={r.id} className="text-xs">
-                      {r.title}
-                    </SelectItem>
-                  ))}
-                  {(!availableReqs || availableReqs.length === 0) && (
-                    <div className="px-2 py-1 text-xs text-muted-foreground">No requirements available</div>
-                  )}
-                </SelectContent>
-              </Select>
+              {projectId && <ResourceLinkPicker kind="requirement" projectId={projectId} value={selectedReqId}
+                onValueChange={setSelectedReqId} linkedIds={existingReqIds} />}
               <Button
                 size="sm"
                 className="w-full h-7 text-xs"

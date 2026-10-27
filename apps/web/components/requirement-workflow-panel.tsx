@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { RequirementRecoveryPanel } from "@/components/requirement-recovery-panel";
 import { WorkflowEditor } from "@/components/workflow-editor";
 
 type Output = { id: string; type: string; summary: string | null; url: string | null; relativePath: string | null; nodeId: string | null; availability: string };
@@ -30,7 +31,7 @@ export function RequirementWorkflowPanel({ requirement }: { requirement: Workflo
   const [checks, setChecks] = useState<Record<string, boolean>>({});
   const [outputValue, setOutputValue] = useState("");
   const [inputId, setInputId] = useState("");
-  const refresh = () => { void utils.requirement.get.invalidate({ id: requirement.id }); };
+  const refresh = () => { void utils.requirement.get.invalidate({ id: requirement.id }); void utils.requirement.recoveryState.invalidate({ id: requirement.id }); };
   const update = trpc.requirement.update.useMutation({ onSuccess: () => { refresh(); setEditing(false); toast.success("Workflow updated"); }, onError: (error) => toast.error(error.message) });
   const advance = trpc.requirement.advanceWorkflowStage.useMutation({ onSuccess: () => { refresh(); setReason(""); setChecks({}); toast.success("Stage updated"); }, onError: (error) => toast.error(error.message) });
   const registerOutput = trpc.requirement.registerWorkflowOutput.useMutation({ onSuccess: () => { refresh(); setOutputValue(""); toast.success("Output registered"); }, onError: (error) => toast.error(error.message) });
@@ -63,14 +64,9 @@ export function RequirementWorkflowPanel({ requirement }: { requirement: Workflo
     <CardContent className="space-y-4 text-sm">
       <p className="text-muted-foreground">Plan revision {requirement.planRevision ?? 0}. Execution input edits stop affected runs. Notification receipt does not confirm that execution has stopped.</p>
       {requirement.evidenceNeedsReview && <p role="alert" className="rounded border border-amber-500 p-3">The plan changed after work completed. Inspect historical evidence against the latest acceptance criteria and record explicit revalidation before delivery.</p>}
-      {requirement.executionRecovery?.map(control => <div key={control.id} className="rounded border p-3">
-        <p className="font-medium">Execution recovery: {control.phase}</p>
-        <p>{control.reason}</p>
-        <p className="break-all text-xs text-muted-foreground">Run {control.runId} · daemon {control.daemonId} · revision {control.revision} · deadline {new Date(control.deadline).toISOString()}</p>
-        {typeof control.workspace?.nodeId === "string" && <p className="text-xs text-muted-foreground">Node: {control.workspace.nodeId}</p>}
-      </div>)}
+      <RequirementRecoveryPanel key={requirement.id} requirementId={requirement.id} />
       {requirement.executionSynchronizations?.slice(0, 3).map(sync => <p key={sync.id} className="break-all text-xs text-muted-foreground">Observed target baseline: {sync.remoteTip} · plan {sync.planRevision} · fetched {new Date(sync.fetchedAt).toISOString()} · run {sync.runId}. The remote branch may advance after this observation.</p>)}
-      {requirement.recoveryPolicy && <p className="text-xs text-muted-foreground">Recovery attempts: {requirement.recoveryAttempts ?? 0}/{requirement.recoveryPolicy.maxAttempts}. {requirement.recoveryPolicy.retrySafe ? "Cross-node retries may lose local progress and duplicate computation." : "Unknown replay safety requires manual recovery."} Local metadata does not reconstruct files.</p>}
+
 
       {!workflow && <p className="text-muted-foreground">This requirement keeps its existing Git delivery flow. Unstarted requirements can migrate to a configurable workflow.</p>}
       {workflow && <>

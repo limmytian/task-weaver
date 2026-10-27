@@ -6,7 +6,7 @@ servers to Task Weaver; its `tw mcp search/tools/call/servers/register-local`
 commands use live authorization-aware discovery.
 
 Both paths require an API server with authorization-aware catalog support.
-The local path also requires a matching `tw` CLI. The server uses SDK 1.31.0
+The local path also requires a matching `tw` CLI. The server uses the SDK version pinned in the workspace lockfile
 and targets published protocol revision 2025-11-25. See the
 [contract](mcp-server-contract.md) for exact names and boundaries.
 
@@ -14,6 +14,28 @@ Start with `tw_context_bootstrap` for small, permission-filtered capability hint
 It distinguishes readable skill guidance from executable hosting; see
 [capability contracts and loading budgets](capabilities.md). The CLI/REST context
 bootstrap includes the same object as `capabilityBootstrap`.
+
+## Bootstrap-first onboarding
+
+An external agent does not need local Task Weaver skill files. Connect with its
+own scoped key, inspect `tools/list`, then call `tw_context_bootstrap`. CLI agents
+can use `tw context bootstrap --json`; the REST response exposes the same
+`capabilityBootstrap` object. The daemon reads that object through its own worker
+broker, so supervisor-only capabilities are not advertised to the child.
+
+Use the current task and project to search a few relevant summaries, then read
+selected exact skill/package versions and memory sources. Instruction permission,
+useful inventory and execution readiness are separate facts. Empty authorized
+inventory or an unavailable optional runtime can justify no call. A required
+missing capability needs a concrete blocked/review reason and operator action.
+
+Before external operations, inspect the tool schema/hash or resolve the pinned
+skill graph and runtime profile. Replan/resume requires fresh authority and source
+review. Before finishing, verify the actual artifact and report concise asset
+references and outcomes; self-reported use is not verified tool evidence. Save
+useful memories only under current write authority and explicit source review and
+confirmation. See [worker capability access](worker-capability-access.md) for the
+bounded daemon modes and [capability contracts](capabilities.md) for exact budgets.
 
 ## Credentials
 

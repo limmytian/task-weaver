@@ -1,3 +1,5 @@
+import { verifyCompiledOutputs } from "./compiled-outputs.mjs";
+import { withWorkspaceBuildLock } from "./workspace-build-lock.mjs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -65,6 +67,7 @@ function rewriteRelativeImports(contents, filePath) {
 
 export function stagePackage(root, stageRoot, packageName, version) {
   const packageRoot = join(root, "packages", packageName);
+  verifyCompiledOutputs(packageRoot);
   const sourceDist = join(packageRoot, "dist");
   if (!existsSync(sourceDist)) throw new Error(`Build output is missing: ${sourceDist}`);
   const stage = join(stageRoot, packageName);
@@ -105,6 +108,8 @@ export function packCe(root, output, version, canary = false) {
   if (!existsSync(join(root, "LICENSE")) || existsSync(join(root, "open-source.manifest.json"))) {
     throw new Error("CE packages must be assembled from the verified public export.");
   }
+  // Reject an incomplete workspace before producing even the first archive.
+  for (const name of PUBLIC_PACKAGES) verifyCompiledOutputs(join(root, "packages", name));
   mkdirSync(output, { recursive: true });
   const stageRoot = mkdtempSync(join(tmpdir(), "task-weaver-pack-"));
   try {
@@ -128,5 +133,7 @@ if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   if (!version) throw new Error("Usage: node scripts/pack-ce.mjs <version> [output-directory] [--canary]");
   const root = process.cwd();
   const output = resolve(process.argv[3]?.startsWith("--") ? join(root, "release-artifacts", "npm") : process.argv[3] ?? join(root, "release-artifacts", "npm"));
-  console.log(JSON.stringify(packCe(root, output, version, process.argv.includes("--canary")), null, 2));
+  await withWorkspaceBuildLock(root, () => {
+    console.log(JSON.stringify(packCe(root, output, version, process.argv.includes("--canary")), null, 2));
+  });
 }

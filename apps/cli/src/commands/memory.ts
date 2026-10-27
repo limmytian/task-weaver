@@ -16,6 +16,8 @@ export function registerMemory(program: Command): void {
     .option('--entity-type <type>', 'project|requirement|task|document')
     .option('--entity-id <id>', 'entity UUID to link this memory to')
     .option('--expires <datetime>', 'expiry datetime (ISO 8601)')
+    .option('--confirm', 'confirm that the source-linked memory content was reviewed')
+    .option('--source-updated-at <datetime>', 'observed source revision timestamp for a reviewed memory')
     .option('--key <uuid>', 'save retry key; reuse with an identical payload')
     .option('--json', 'output raw JSON')
     .action(async (opts) => {
@@ -29,6 +31,8 @@ export function registerMemory(program: Command): void {
         entityId: opts.entityId,
         expiresAt: opts.expires,
         idempotencyKey: opts.key,
+        confirmed: opts.confirm || undefined,
+        provenance: opts.sourceUpdatedAt ? { origin: "reviewed_source", sourceUpdatedAt: opts.sourceUpdatedAt } : undefined,
       })
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)

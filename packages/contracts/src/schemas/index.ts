@@ -30,3 +30,7 @@ export * from "./workflows";
 export * from "./mcp-bridge";
 
 export * from "./inbound-events";
+export * from "./recovery-view";
+export * from "./capability-readiness";
+export * from "./capability-evidence-view";
+export * from './worker-console';

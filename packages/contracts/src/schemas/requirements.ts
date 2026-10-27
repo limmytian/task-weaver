@@ -53,6 +53,7 @@ export const createRequirementSchema = z.object({
 
 export const updateRequirementSchema = z.object({
   title: z.string().min(1).max(500).optional(),
+  reason: z.string().trim().min(1).max(2000).optional().describe("Audit reason for this update; not an entity field or execution input"),
   description: z.string().optional(),
   status: requirementStatusSchema.optional(),
   priority: requirementPrioritySchema.optional(),
@@ -69,6 +70,7 @@ export const updateRequirementSchema = z.object({
 export const listRequirementsSchema = z.object({
   projectId: z.string().uuid(),
   status: requirementStatusSchema.optional(),
+  excludeStatus: requirementStatusSchema.optional(),
   priority: requirementPrioritySchema.optional(),
   tag: z.string().optional(),
   query: z.string().trim().min(1).max(500).optional(),
@@ -83,6 +85,18 @@ export const listRequirementsSchema = z.object({
     .describe(
       "For terminal-status requirements (done/cancelled/archived), only return those completed within this many days. Default 14. Set 0 to return all.",
     ),
+});
+
+export const requirementWorkspaceSchema = z.object({
+  projectId: z.string().uuid(),
+  completedWithinDays: z.number().int().min(0).optional(),
+  archived: z.boolean().default(false),
+  tag: z.string().optional(),
+  sortBy: z.enum(["created", "priority", "expected", "status"]).default("created"),
+  reverse: z.boolean().default(false),
+  page: z.number().int().min(1).default(1),
+  pageSize: z.number().int().min(1).max(50).default(50),
+  graph: z.boolean().default(false),
 });
 
 

@@ -225,3 +225,22 @@ and check both running build commits. Publication requires the entire controlled
 workflow to succeed and validates the two consumption receipts against the
 candidate configuration digests. Receipt checks fail closed on source, CPU,
 configuration or installation drift.
+
+### Public metadata acquisition
+
+Source preparation metadata GETs use `getText` in `scripts/binary-source-lib.mjs`.
+The helper permits at most two retries with 250/500 ms backoff, a shared 90 second
+monotonic deadline, a 45 second per-request limit, a 10 second connection limit
+and five redirects. Each redirect must satisfy the original public HTTPS host
+allowlist before contact. Curl configuration files and URL globbing are disabled;
+TLS verification remains enabled. Only explicitly transient transport failures
+and HTTP 408/429/500/502/503/504 retry. Authentication, TLS, local process,
+malformed response and allowlist failures stop immediately. Diagnostics contain
+only the current public hostname, status/category and request count, excluding
+response bodies, request paths, query strings and upstream stderr.
+
+This policy covers metadata reads only. It does not retry artifact publication,
+registry mutations, deployment or large/ranged source downloads. Source preparation
+still requires the existing immutable references and downstream checksum/Git-blob
+verification; a successful HTTP read does not establish source identity. Test
+without contacting public services using `node --test scripts/upstream-metadata.test.mjs`.

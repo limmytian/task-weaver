@@ -1,6 +1,10 @@
 "use client";
 
-import { useEffect, useId, useRef, memo, type ComponentProps } from "react";
+import { useEffect, useId, useRef, useMemo, useState, memo, type ComponentProps } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { getQueryKey } from "@trpc/react-query";
+import { resolveWikiLinkBatches } from "@/lib/wiki-link-batches";
+import { Button } from "@/components/ui/button";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useRouter } from "next/navigation";
@@ -11,30 +15,61 @@ interface MarkdownRendererProps {
   className?: string;
 }
 
-export function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
-  const wikiLinkTitles = extractWikiLinkTitles(content);
-  const { data: resolved } = trpc.document.resolveWikiLinks.useQuery(
-    { titles: wikiLinkTitles },
-    { enabled: wikiLinkTitles.length > 0 },
-  );
-  const titleToId = new Map(resolved?.map((d) => [d.title, d.id]) ?? []);
+const EAGER_PREVIEW_CHARACTERS = 64 * 1024;
 
-  const preprocessed = preprocessWikiLinks(content, titleToId);
+/** Large bodies stay complete and readable without eagerly constructing an unbounded preview DOM. */
+export const MarkdownRenderer = memo(function MarkdownRenderer(props: MarkdownRendererProps) {
+  const [preview, setPreview] = useState({ content: props.content, enabled: false });
+  if (preview.content !== props.content) setPreview({ content: props.content, enabled: false });
+  const large = props.content.length > EAGER_PREVIEW_CHARACTERS;
+  const enabled = preview.content === props.content && preview.enabled;
+  if (large && !enabled) return <div className={props.className}>
+    <p className="mb-2 text-sm text-muted-foreground">Large document preview is loaded on demand. The complete Markdown source remains available.</p>
+    <Button type="button" variant="outline" className="mb-3"
+      onClick={() => setPreview({ content: props.content, enabled: true })}>Render full preview</Button>
+    <textarea aria-label="Complete Markdown source" readOnly value={props.content} rows={16}
+      className="block w-full resize-y rounded-md border bg-background p-3 font-mono text-sm" />
+  </div>;
+  return <div>
+    {large && <Button type="button" variant="outline" className="mb-3"
+      onClick={() => setPreview({ content: props.content, enabled: false })}>Pause full preview</Button>}
+    <ParsedMarkdownRenderer {...props} />
+  </div>;
+});
+
+const ParsedMarkdownRenderer = memo(function ParsedMarkdownRenderer({ content, className }: MarkdownRendererProps) {
+  const wikiLinkTitles = useMemo(() => extractWikiLinkTitles(content), [content]);
+  const utils = trpc.useUtils();
+  const resolution = useQuery({
+    queryKey: getQueryKey(trpc.document.resolveWikiLinks, { titles: wikiLinkTitles }, "query"),
+    queryFn: ({ signal }) => resolveWikiLinkBatches(wikiLinkTitles,
+      (titles, signal) => utils.client.document.resolveWikiLinks.query({ titles }, { signal }), signal),
+    enabled: wikiLinkTitles.length > 0,
+  });
+  const resolved = resolution.isError ? undefined : resolution.data;
+  const titleToId = useMemo(() => new Map(resolved?.map(d => [d.title, d.id]) ?? []), [resolved]);
+
+  const preprocessed = useMemo(() => preprocessWikiLinks(content, titleToId), [content, titleToId]);
 
   return (
     <div className={className}>
+      {resolution.isError && <div role="alert" className="mb-3 text-sm text-muted-foreground">
+        Wiki links could not be resolved. <Button type="button" size="sm" variant="outline"
+          onClick={() => resolution.refetch()}>Retry links</Button>
+      </div>}
+      {resolution.isPending && wikiLinkTitles.length > 0 && <p role="status" className="text-sm text-muted-foreground">Resolving wiki links...</p>}
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          code: CodeBlockRenderer,
-          a: WikiLinkAwareLink,
-        }}
+        remarkPlugins={MARKDOWN_PLUGINS}
+        components={MARKDOWN_COMPONENTS}
       >
         {preprocessed}
       </ReactMarkdown>
     </div>
   );
-}
+});
+
+const MARKDOWN_PLUGINS = [remarkGfm];
+const MARKDOWN_COMPONENTS = { code: CodeBlockRenderer, a: WikiLinkAwareLink };
 
 const WIKI_LINK_RE = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
 

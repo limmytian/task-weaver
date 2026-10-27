@@ -71,6 +71,7 @@ export const createPersonalTaskSchema = baseCreateTaskSchema
 
 export const updateTaskSchema = z.object({
   title: z.string().min(1).max(500).optional(),
+  reason: z.string().trim().min(1).max(2000).optional().describe("Audit reason for this update; not an entity field or execution input"),
   description: z.string().optional(),
   requirementId: z.string().uuid().optional(),
   executionSliceId: z.string().uuid().nullable().optional(),
@@ -147,6 +148,26 @@ export const listTasksSchema = z.object({
 });
 
 
+
+/** Explicit bounded Board contract; the legacy full Board remains compatible. */
+export const boardPageSchema = z.object({
+  projectId: z.string().uuid(),
+  requirementId: z.string().uuid().optional(),
+  includeTerminal: z.boolean().default(false),
+  completedWithinDays: z.coerce.number<number>().int().min(0).default(14),
+  page: z.coerce.number<number>().int().min(1).default(1),
+  pageSize: z.coerce.number<number>().int().min(1).max(50).default(50),
+});
+export type BoardPageInput = z.input<typeof boardPageSchema>;
+
+export const boardColumnsSchema = boardPageSchema.omit({ page: true, pageSize: true }).extend({
+  groupBy: z.enum(["status", "priority", "assignee"]).default("status"),
+});
+export const boardColumnSchema = boardColumnsSchema.extend({
+  value: z.string().max(500).nullable(),
+  pageSize: z.number().int().min(1).max(50).default(20),
+  cursor: z.object({ createdAt: z.string().datetime(), id: z.string().uuid() }).nullish(),
+});
 
 export const createTaskCommentSchema = z.object({
   content: z.string().min(1),

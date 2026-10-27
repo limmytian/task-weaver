@@ -1,5 +1,6 @@
 "use client";
 
+import { WorkerConsole } from "./worker-console";
 import { ExecutorProfiles } from "./executor-profiles";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -22,7 +23,7 @@ import {
   UserRoundCog,
 } from "lucide-react";
 import { trpc } from "@/trpc/client";
-import { useRealtime } from "@/hooks/use-realtime";
+import { useRealtimeStatus } from "@/components/realtime-provider";
 import { QueryStatePanel } from "@/components/query-state-panel";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
@@ -138,6 +139,7 @@ type DaemonRoadmapTask = {
 };
 
 type DaemonWorkerView = {
+  runId?: string | null;
   index: number;
   status: string;
   requirementId?: string | null;
@@ -247,7 +249,7 @@ const queueViews = [
 ] as const;
 
 export default function DaemonsPage() {
-  const realtime = useRealtime();
+  const realtime = useRealtimeStatus();
   const utils = trpc.useUtils();
   const daemonQuery = trpc.daemon.list.useQuery(undefined, { refetchInterval: 30_000 });
   const queueQuery = trpc.daemon.queues.useQuery(undefined, { refetchInterval: 30_000 });
@@ -971,6 +973,8 @@ function WorkerCard({
           <span>{worker.lastLeaseError}</span>
         </div>
       )}
+
+      {worker.requirementId && worker.taskId && worker.runId && leaseGeneration != null && <WorkerConsole key={worker.runId} target={{ requirementId: worker.requirementId, taskId: worker.taskId, runId: worker.runId, workerIndex: worker.index, leaseGeneration }} />}
 
       {worker.progress && (
         <div className="mt-2 space-y-1 rounded border bg-background/70 p-2 text-[11px] text-muted-foreground">
