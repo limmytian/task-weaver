@@ -66,8 +66,22 @@ async function trustedForgeRequest(repository: ForgeRepositoryIdentity, provider
   try { response = await (options.fetch ?? fetch)(apiUrl, { headers, redirect: "error", signal: AbortSignal.timeout(10_000) }); }
   catch { throw new ValidationError("Trusted forge request failed; retry after checking server connectivity"); }
   if (!response.ok) throw new ValidationError(`Trusted forge could not read delivery evidence (HTTP ${response.status}); check the server connection permissions`);
-  const text = await response.text();
-  if (text.length > 2_000_000) throw new ValidationError("Trusted forge response exceeds the supported size");
+  const limit = 2_000_000;
+  const advertised = response.headers.get("content-length");
+  if (advertised && /^\d+$/.test(advertised) && Number(advertised) > limit) { await response.body?.cancel(); throw new ValidationError("Trusted forge response exceeds the supported size"); }
+  const reader = response.body?.getReader();
+  const chunks: Uint8Array[] = []; let size = 0;
+  if (reader) {
+    try {
+      while (true) {
+        const part = await reader.read(); if (part.done) break;
+        size += part.value.byteLength;
+        if (size > limit) { await reader.cancel(); throw new ValidationError("Trusted forge response exceeds the supported size"); }
+        chunks.push(part.value);
+      }
+    } finally { reader.releaseLock(); }
+  }
+  const text = Buffer.concat(chunks, size).toString("utf8");
   try { return { data: JSON.parse(text) as unknown, source: apiUrl }; }
   catch { throw new ValidationError("Trusted forge returned invalid JSON evidence"); }
 }

@@ -17,6 +17,15 @@ test("trusted server fetch derives API paths, refuses redirects and validates me
   for (const changes of [{ merged_at: null }, { merge_commit_sha: null }, { number: 13 }, { base: { ...payload.base, repo: { full_name: "evil/app" } } }]) await assert.rejects(readTrustedPullRequest(repository, payload.html_url, { fetch: async () => Response.json({ ...payload, ...changes }) }));
   await assert.rejects(readTrustedPullRequest(repository, payload.html_url, { fetch: async () => new Response(null, { status: 403 }) }), /HTTP 403/);
 });
+test("trusted forge response size is bounded while streaming", async () => {
+  let cancelled = false; let pulled = 0;
+  const response = () => new Response(new ReadableStream<Uint8Array>({
+    pull(controller) { pulled++; controller.enqueue(new Uint8Array(1_000_001)); },
+    cancel() { cancelled = true; },
+  }));
+  await assert.rejects(readTrustedPullRequest(repository, payload.html_url, { fetch: async () => response() }), /exceeds the supported size/);
+  assert.equal(cancelled, true); assert.ok(pulled <= 3);
+});
 test("Gitea uses only its configured trusted API origin", async () => {
   const repo = { ...repository, host: "forge.example", provider: "gitea" };
   const url = "https://forge.example/acme/app/pulls/12";
