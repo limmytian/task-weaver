@@ -132,11 +132,13 @@ export async function describeWorkflowEvidence(db: Database, requirementId: stri
     return { ...base, availability: output.availability === "retired" ? "retired" as const : "available" as const, kind: "attachment" as const, documentId: file.documentId, fileVersionId: file.id, fileVersion: file.version, mimeType: file.mimeType, originalFilename: file.originalFilename, sizeBytes: file.sizeBytes, sha256: file.sha256 };
   }
   if (output.type === "local" && output.nodeId && output.sizeBytes !== null && Number.isSafeInteger(output.sizeBytes) && output.sizeBytes >= 0 && output.sha256 && /^[a-f0-9]{64}$/.test(output.sha256)) {
-    const online = await db.query.daemons.findMany({ where: and(eq(daemons.nodeId, output.nodeId), ne(daemons.status, "offline"), sql`${daemons.lastHeartbeatAt} > now() - interval '90 seconds'`) });
+    const online = await db.query.daemons.findMany({ where: and(eq(daemons.nodeId, output.nodeId), eq(daemons.actorId, output.createdBy), ne(daemons.status, "offline"), sql`${daemons.lastHeartbeatAt} > now() - interval '90 seconds'`) });
     const availability = output.availability !== "available" ? output.availability
       : output.sizeBytes > evidenceLimits.verifiedArtifactBytes ? "too_large" as const
+      : !output.nodePublicKey || output.createdByType !== "agent" ? "unsupported" as const
       : !online.length ? "offline" as const
-      : "unsupported" as const;
+      : !online.some(daemon => daemon.capabilities?.includes("evidence-read-v1")) ? "unsupported" as const
+      : "available" as const;
     return { ...base, kind: "local" as const, availability, nodeId: output.nodeId, sizeBytes: output.sizeBytes, sha256: output.sha256 };
   }
   if (output.type === "attachment" && output.referenceId && output.attachmentFileVersionId) {

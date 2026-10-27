@@ -139,6 +139,7 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   const transport = createApiApplication({ db, databaseUrl: databaseUrl!, env: { TW_AUTH_SECRET: fixture.configuration.secret, TW_AUTH_BASE_URL: fixture.configuration.baseURL, TW_AUTH_TRUSTED_ORIGINS: fixture.configuration.trustedOrigins[0], TW_PRESET_SKILLS_SYNC: "disabled", TW_EVIDENCE_READ_ENABLED: "true" } });
   t.after(() => transport.stop());
   const evidenceApi = (path: string, method = "GET", body?: unknown, headers = fixture.owner.headers) => transport.app.request(`/api/v1/evidence${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  assert.equal((await json(await api(`/requirements/${boundRequirement.id}/workflow-outputs/${boundOutput.id}/evidence`))).availability, "available");
   const remote = await json(await evidenceApi("/open", "POST", { requirementId: boundRequirement.id, outputId: boundOutput.id, purpose: "download" }), 201);
   assert.equal((await json(await evidenceApi(`/demands/${daemonB}`, "GET", undefined, agentHeaders))).items.length, 0);
   const remoteDemand = (await json(await evidenceApi(`/demands/${evidenceDaemon}`, "GET", undefined, agentHeaders))).items[0];
