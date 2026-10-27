@@ -90,6 +90,8 @@ export const registerWorkflowOutputSchema = z.object({
   relativePath: z.string().trim().min(1).max(2000).optional(),
   sizeBytes: z.number().int().min(0).optional(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  nodePublicKey: z.string().max(64).optional(),
+  nodeRegistrationProof: z.string().max(128).optional(),
   summary: z.string().trim().max(4000).optional(),
   ...requirementLeaseFenceFields,
 }).superRefine((value, ctx) => {
@@ -97,6 +99,9 @@ export const registerWorkflowOutputSchema = z.object({
     if (!value.referenceId) ctx.addIssue({ code: "custom", path: ["referenceId"], message: "A platform reference is required" });
   }
   if (value.type === "url" && !value.url) ctx.addIssue({ code: "custom", path: ["url"], message: "A URL is required" });
+  if (Boolean(value.nodePublicKey) !== Boolean(value.nodeRegistrationProof) || value.type !== "local" && (value.nodePublicKey || value.nodeRegistrationProof)) {
+    ctx.addIssue({ code: "custom", path: ["nodePublicKey"], message: "Node key and proof must be supplied together for a local output" });
+  }
   if (value.type === "local" && (!value.nodeId || !value.relativePath || value.sizeBytes === undefined || !value.sha256)) {
     ctx.addIssue({ code: "custom", path: ["relativePath"], message: "A node, path, size, and checksum are required" });
   }

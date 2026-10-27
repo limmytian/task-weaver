@@ -61,3 +61,8 @@ export const evidenceNodeResultSchema = z.object({
 export type EvidenceDescriptor = z.infer<typeof evidenceDescriptorSchema>;
 export type EvidenceNodeDemand = z.infer<typeof evidenceNodeDemandSchema>;
 export type EvidenceNodeResult = z.infer<typeof evidenceNodeResultSchema>;
+
+/** Signed registration bytes bind one immutable local manifest to a node key. */
+export function evidenceRegistrationPayload(input: { requirementId: string; nodeId: string; relativePath: string; sizeBytes: number; sha256: string }): string {
+  return JSON.stringify(['task-weaver:evidence-registration:v1', input.requirementId, input.nodeId, input.relativePath, input.sizeBytes, input.sha256]);
+}

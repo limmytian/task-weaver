@@ -1,3 +1,4 @@
+import { verifyEvidenceRegistration } from "./evidence-proof";
 import { executionControls, executionSynchronizations } from "@task-weaver/db";
 import { evidenceLimits, RequirementCompletionError } from "@task-weaver/contracts";
 import type { RetrievalPredicates } from "./retrieval-predicates";
@@ -243,6 +244,7 @@ export async function registerWorkflowOutput(
     if (document?.form !== "attachment" || document.projectId !== requirement.projectId) throw new ValidationError("Attachment does not belong to the project");
   }
   if (input.type === "local") {
+    if (input.nodePublicKey && !verifyEvidenceRegistration({ requirementId, nodeId: input.nodeId!, relativePath: input.relativePath!, sizeBytes: input.sizeBytes!, sha256: input.sha256! }, input.nodePublicKey, input.nodeRegistrationProof!)) throw new ValidationError("Invalid local evidence registration proof");
     const claim = await db.query.requirementClaims.findFirst({ where: eq(requirementClaims.requirementId, requirementId) });
     if (claim?.daemonId) {
       const daemon = await db.query.daemons.findFirst({ where: eq(daemons.id, claim.daemonId) });
@@ -263,7 +265,7 @@ export async function registerWorkflowOutput(
     planRevision: requirement.planRevision,
     requirementRepositoryId: input.requirementRepositoryId, type: input.type,
     referenceId: input.referenceId, url: input.url, nodeId: input.nodeId,
-    relativePath: input.relativePath, sizeBytes: input.sizeBytes, sha256: input.sha256,
+    relativePath: input.relativePath, sizeBytes: input.sizeBytes, sha256: input.sha256, nodePublicKey: input.nodePublicKey,
     headCommit: gitLink ? gitLink.pushedCommit ?? gitLink.headCommit : null,
     summary: input.summary, createdBy: actor.id, createdByType: actor.type,
     verifiedAt: input.type === "local" ? new Date() : undefined,

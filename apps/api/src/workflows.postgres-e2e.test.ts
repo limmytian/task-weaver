@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { randomUUID } from "node:crypto";
+import { randomUUID, generateKeyPairSync, sign } from "node:crypto";
+import { evidenceRegistrationPayload } from "@task-weaver/contracts";
 import { eq } from "drizzle-orm";
 import { createDb, runMigrations, tasks } from "@task-weaver/db";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
@@ -92,6 +93,15 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   assert.equal(delivered.status, "done");
   assert.equal((await api("/auth/me", "GET", undefined, delegated)).status, 401);
 
+  const signedProducer = await create({ workflowPreset: "local" });
+  const pair = generateKeyPairSync("ed25519");
+  const nodePublicKey = pair.publicKey.export({ type: "spki", format: "der" }).toString("base64");
+  const manifest = { requirementId: signedProducer.id, nodeId: "signed-node", relativePath: `${signedProducer.id}/result.txt`, sizeBytes: 5, sha256: "b".repeat(64) };
+  const nodeRegistrationProof = sign(null, Buffer.from(evidenceRegistrationPayload(manifest)), pair.privateKey).toString("base64");
+  const signed = { type: "local", ...manifest, nodePublicKey, nodeRegistrationProof };
+  assert.equal((await api(`/requirements/${signedProducer.id}/workflow-outputs`, "POST", { ...signed, sha256: "c".repeat(64) })).status, 400);
+  const signedOutput = await json(await api(`/requirements/${signedProducer.id}/workflow-outputs`, "POST", signed), 201);
+  assert.equal(signedOutput.nodePublicKey, nodePublicKey);
   const producer = await create({ workflowPreset: "local" });
   const local = await json(await api(`/requirements/${producer.id}/workflow-outputs`, "POST", { type: "local", nodeId: "node-a", relativePath: `${producer.id}/file.bin`, sizeBytes: 42, sha256: "a".repeat(64) }), 201);
   const evidence = await json(await api(`/requirements/${producer.id}/workflow-outputs/${local.id}/evidence`));

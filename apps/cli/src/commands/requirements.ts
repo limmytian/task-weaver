@@ -1,3 +1,4 @@
+import { signEvidenceRegistration } from "../evidence-node-key.js";
 import { Command } from 'commander'
 import * as readline from 'readline/promises'
 import { readFileSync, unlinkSync } from 'node:fs'
@@ -155,8 +156,9 @@ export function registerRequirements(program: Command): void {
         if (!config.nodeId) throw new Error('Node identity is unavailable')
         local = await storeWorkflowArtifact(id, opts.file, config.nodeId)
       }
+      const nodeProof = local ? signEvidenceRegistration({ requirementId: id, ...local }) : {};
       const data = await post(`/api/v1/requirements/${id}/workflow-outputs`, {
-        type: opts.type, referenceId: opts.reference, url: opts.url,
+        ...nodeProof, type: opts.type, referenceId: opts.reference, url: opts.url,
         nodeId: local?.nodeId ?? opts.node, relativePath: local?.relativePath ?? opts.path,
         sizeBytes: local?.sizeBytes ?? (opts.size === undefined ? undefined : Number(opts.size)),
         sha256: local?.sha256 ?? opts.sha256, requirementRepositoryId: opts.repositoryLink,

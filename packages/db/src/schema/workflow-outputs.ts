@@ -19,6 +19,7 @@ export const workflowOutputs = pgTable("workflow_outputs", {
   relativePath: text("relative_path"),
   sizeBytes: bigint("size_bytes", { mode: "number" }),
   sha256: text("sha256"),
+  nodePublicKey: text("node_public_key"),
   headCommit: text("head_commit"),
   summary: text("summary"),
   availability: text("availability", { enum: ["available", "missing", "changed", "retired"] }).default("available").notNull(),
