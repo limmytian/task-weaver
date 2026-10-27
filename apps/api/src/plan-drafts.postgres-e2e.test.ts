@@ -112,4 +112,14 @@ test("drafts persist, reject stale writes and validate against live dependencies
   assert.equal((await json(await api(`/plans/drafts/${ready.id}/receipt?projectId=${projectId}`))).revision, 1);
   await json(await api(`/plans/drafts/${draft.id}/discard`, "POST", { projectId, revision: 3 }));
   assert.equal((await api(`/plans/drafts/${draft.id}?projectId=${projectId}`)).status, 404);
+  const boundedTasks = Array.from({ length: 200 }, (_, i) => ({ key: `task-${i}`, title: `Fixture task ${i}` }));
+  const boundedEdges = boundedTasks.flatMap((task, i) => [1, 2, 3].filter(offset => i >= offset).map(offset => ({ task: task.key, dependsOn: `task-${i - offset}`, type: "blocks" }))).slice(0, 500);
+  const boundedPlan = { projectId, requirements: [{ key: "bounded", title: "Bounded fixture", tasks: boundedTasks }], taskDependencies: boundedEdges };
+  assert.equal(boundedEdges.length, 500);
+  const boundedDraft = await json(await api("/plans/drafts", "POST", { plan: boundedPlan }), 201);
+  const started = performance.now();
+  const boundedResult = await json(await api(`/plans/drafts/${boundedDraft.id}/validate`, "POST", { projectId }));
+  const elapsedMs = Math.round(performance.now() - started);
+  assert.equal(boundedResult.result.summary.tasks.create, 200); assert.equal(boundedResult.result.summary.taskDependencies, 500);
+  console.log(`Bounded plan validation: 200 tasks, 500 edges, ${Buffer.byteLength(JSON.stringify(boundedPlan))} bytes, ${elapsedMs} ms`);
 });
