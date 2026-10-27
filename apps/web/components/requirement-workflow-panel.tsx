@@ -151,11 +151,28 @@ function EvidenceMetadata({ requirementId, outputId }: { requirementId: string; 
       {evidence.data.kind === "local" && evidence.data.availability !== "retired" && <><p>Size: {evidence.data.sizeBytes} bytes</p><p>SHA-256: {evidence.data.sha256}</p><p>Node download requires a connected compatible producer and an enabled evidence service.</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('download'); }}>Download original</Button>{capabilities.data?.canWrite && <Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('promotion'); }}>Save as attachment</Button>}{controller && <Button size="sm" variant="ghost" onClick={() => controller.abort()}>Cancel request</Button>}</div></>}
       {evidence.data.kind === "attachment" && evidence.data.availability !== "retired" && <PinnedAttachmentEvidence file={evidence.data} />}
       {evidence.data.availability === "retired" && <p>This output has been retired.</p>}
-      {evidence.data.kind === "git" && <><p>Commit: {evidence.data.headCommit}</p><p>Comparison viewer is not yet available.</p></>}
+      {evidence.data.kind === "git" && <GitEvidence requirementId={requirementId} outputId={outputId} headCommit={evidence.data.headCommit} />}
       {evidence.data.kind === "unsupported" && <p>This output does not have a supported immutable evidence identity.</p>}
       {state && <p role="status">{state}</p>}
     </div>}
   </div>;
+}
+
+function GitEvidence({ requirementId, outputId, headCommit }: { requirementId: string; outputId: string; headCommit: string }) {
+  const comparison = trpc.requirement.compareGitEvidence.useMutation();
+  const [selected, setSelected] = useState<number | null>(null);
+  const file = selected === null ? undefined : comparison.data?.files[selected];
+  return <div className="space-y-2"><p className="break-all">Head commit: {headCommit}</p><Button size="sm" variant="outline" disabled={comparison.isPending} onClick={() => { setSelected(null); comparison.mutate({ requirementId, outputId }); }}>Open Git comparison</Button>
+    {comparison.isPending && <p>Opening comparison…</p>}{comparison.error && <p role="alert">Git comparison is unavailable or access is denied.</p>}
+    {comparison.data && <><p className="break-all">Base: {comparison.data.baseCommit}</p><p className="break-all">Merge base: {comparison.data.comparisonCommit}</p><p>Comparison mode: merge base to head</p>{comparison.data.truncated && <p role="status">The comparison exceeds the display limit; some changes are omitted.</p>}
+      <div className="grid gap-3 md:grid-cols-3"><ul className="max-h-96 space-y-1 overflow-auto">{comparison.data.files.map((entry, index) => <li key={`${entry.path}-${index}`}><Button size="sm" variant={selected === index ? "secondary" : "ghost"} className="h-auto max-w-full justify-start whitespace-normal break-all text-left" onClick={() => setSelected(index)}>{entry.status}: {entry.previousPath ? `${entry.previousPath} → ` : ""}{entry.path}</Button></li>)}</ul><div className="min-w-0 md:col-span-2">{file && <><p className="break-all">{file.path}</p>{file.patchState === "available" ? <GitPatch patch={file.patch ?? ""} /> : <p>Diff unavailable for this file ({file.patchState}).</p>}</>}</div></div>
+    </>}
+  </div>;
+}
+
+function GitPatch({ patch }: { patch: string }) {
+  const lines = patch.split("\n");
+  return <><pre className="max-h-96 overflow-auto whitespace-pre text-xs">{lines.slice(0, 2000).map((line, index) => <span className={`block ${line.startsWith("+") ? "text-green-700 dark:text-green-400" : line.startsWith("-") ? "text-red-700 dark:text-red-400" : line.startsWith("@@") ? "text-blue-700 dark:text-blue-400" : ""}`} key={index}>{line || " "}</span>)}</pre>{lines.length > 2000 && <p role="status">Diff display is limited to the first 2,000 lines.</p>}</>;
 }
 
 function PinnedAttachmentEvidence({ file }: { file: { documentId: string; fileVersion: number; originalFilename: string; mimeType: string; sizeBytes: number; sha256: string } }) {

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import {
   createResourceServices,
+  createGitEvidenceService,
   createExecutionControlService,
   createExecutionRecoveryViewService,
   executionRevalidationSchema,
@@ -141,6 +142,10 @@ requirements.get("/requirements/:id", async (c) => {
 
 requirements.get("/requirements/:id/workflow-outputs/:outputId/evidence", async c => {
   return c.json(await createResourceServices(c.get("identity")).requirementService.describeWorkflowEvidence(c.get("db"), c.req.param("id"), c.req.param("outputId")));
+});
+
+requirements.get("/requirements/:id/workflow-outputs/:outputId/git-comparison", async c => {
+  return c.json(await createGitEvidenceService(c.get("identity")).compare(c.get("db"), c.req.param("id"), c.req.param("outputId")));
 });
 
 requirements.get("/requirements/:id/workflow-outputs", async (c) => {

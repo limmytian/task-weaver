@@ -67,6 +67,7 @@ export { createAssistantService } from "./assistant-authorization";
 export { createChatModelService } from "./chat-models";
 
 export { createAttachmentService, handleAttachmentRequest, cleanupAttachmentGarbage, attachmentPreviewType } from "./attachments";
+export { createGitEvidenceService } from "./git-evidence";
 
 export * from "./mcp-security";
 
