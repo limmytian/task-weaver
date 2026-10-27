@@ -17,7 +17,6 @@ import { toast } from "sonner";
 import { trpc } from "@/trpc/client";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -288,7 +287,7 @@ export function KanbanBoard({
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <ScrollArea className="w-full">
+        <div className="w-full overflow-x-auto">
           <div className="flex snap-x snap-mandatory gap-3 pb-4 sm:gap-4">
             {columns.map((column) => (
               <KanbanColumn
@@ -305,8 +304,7 @@ export function KanbanBoard({
               />
             ))}
           </div>
-          <ScrollBar orientation="horizontal" />
-        </ScrollArea>
+        </div>
 
         <DragOverlay>
           {activeTask ? <TaskCardOverlay task={activeTask} reqColorMap={reqColorMap} /> : null}
@@ -344,7 +342,6 @@ function KanbanColumn({
   showReqLabel: boolean;
 }) {
   const container = useRef<HTMLDivElement>(null);
-  const viewport = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   useEffect(() => {
@@ -372,7 +369,7 @@ function KanbanColumn({
     if (!visible || !enabled || !count || !hasNextPage || isFetching || isError) return;
     const observer = new IntersectionObserver(([entry]) => {
       if (entry.isIntersecting) void fetchNextPage({ cancelRefetch: false });
-    }, { root: viewport.current, rootMargin: "0px 0px 160px 0px" });
+    }, { rootMargin: "0px 0px 160px 0px" });
     if (sentinel.current) observer.observe(sentinel.current);
     return () => observer.disconnect();
   }, [visible, enabled, count, hasNextPage, isFetching, isError, fetchNextPage]);
@@ -383,7 +380,7 @@ function KanbanColumn({
       ref={node => { setNodeRef(node); container.current = node; }}
       data-board-column={columnKey}
       className={cn(
-        "flex h-[min(70dvh,48rem)] min-h-80 w-[calc(100vw-2rem)] max-w-72 shrink-0 snap-start flex-col rounded-xl border bg-muted/30 transition-colors sm:w-72",
+        "flex min-h-80 w-[calc(100vw-2rem)] max-w-72 shrink-0 snap-start flex-col rounded-xl border bg-muted/30 transition-colors sm:w-72",
         isOver && "border-primary/50 bg-primary/5",
       )}
     >
@@ -395,7 +392,7 @@ function KanbanColumn({
         <span aria-label={`${label}: ${count} matching tasks`} title="Total matching current filters" className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs tabular-nums text-muted-foreground">{count}</span>
       </div>
 
-      <div ref={viewport} tabIndex={0} role="region" aria-label={`${label} tasks`} className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-b-xl px-2 pb-2 outline-offset-[-2px]">
+      <div role="region" aria-label={`${label} tasks`} className="flex-1 rounded-b-xl px-2 pb-2">
       <div className="flex min-h-[60px] flex-col gap-2">
         {(tasks.length === 0 && !query.isPending && !query.isError) || count === 0 ? (
           <p className="px-2 py-8 text-center text-xs text-muted-foreground">
