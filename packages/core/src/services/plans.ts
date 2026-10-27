@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { type Database, projects, requirements } from "@task-weaver/db";
+import { type Database, projects, requirements, tasks, taskDependencies, requirementDependencies } from "@task-weaver/db";
 import type { Actor } from "@task-weaver/contracts";
 import type {
   ApplyPlanInput,
@@ -100,8 +100,7 @@ export async function applyPlan(
   await validateExistingEntities(db, input.plan, normalized, services);
   validateReferences(input.plan, normalized);
   await validateSliceAssignments(db, input.plan, normalized, services);
-  validateDependencyCycles(normalized.requirementDependencies, "requirement");
-  validateDependencyCycles(normalized.taskDependencies, "task");
+  await validatePlanDependencyCycles(db, input.plan, normalized);
 
   const initialRefs = buildInitialRefs(input.plan);
   const dryRunResult = buildResult(input.plan, normalized, initialRefs, input.dryRun);
@@ -610,34 +609,56 @@ function assertKnownRef(ref: string, knownKeys: Set<string>, kind: string) {
   throw new ValidationError(`Unknown ${kind} reference: ${ref}`);
 }
 
-function validateDependencyCycles(
-  dependencies: Array<{ requirement?: string; task?: string; dependsOn: string }>,
+async function validatePlanDependencyCycles(
+  db: Database,
+  plan: PlanInput,
+  normalized: ReturnType<typeof normalizePlan>,
+) {
+  const requirementRefs = new Map(plan.requirements.map((item) => [item.key, item.existingId ?? `new:${item.key}`]));
+  const taskRefs = new Map(listPlanTasks(plan).map(({ task }) => [task.key, task.existingId ?? `new:${task.key}`]));
+  const [liveRequirements, liveTasks] = await Promise.all([
+    db.select({ from: requirementDependencies.requirementId, to: requirementDependencies.dependsOnRequirementId })
+      .from(requirementDependencies).innerJoin(requirements, eq(requirementDependencies.requirementId, requirements.id))
+      .where(eq(requirements.projectId, plan.projectId)),
+    db.select({ from: taskDependencies.taskId, to: taskDependencies.dependsOnTaskId })
+      .from(taskDependencies).innerJoin(tasks, eq(taskDependencies.taskId, tasks.id))
+      .where(eq(tasks.projectId, plan.projectId)),
+  ]);
+  assertPlanGraphAcyclic(liveRequirements, normalized.requirementDependencies.map((edge) => ({
+    from: requirementRefs.get(edge.requirement) ?? edge.requirement,
+    to: requirementRefs.get(edge.dependsOn) ?? edge.dependsOn,
+  })), "requirement");
+  assertPlanGraphAcyclic(liveTasks, normalized.taskDependencies.map((edge) => ({
+    from: taskRefs.get(edge.task) ?? edge.task,
+    to: taskRefs.get(edge.dependsOn) ?? edge.dependsOn,
+  })), "task");
+}
+
+/** Validate proposed edges against the live graph, including aliases for existing entities. */
+export function assertPlanGraphAcyclic(
+  live: Array<{ from: string; to: string }>,
+  proposed: Array<{ from: string; to: string }>,
   kind: "requirement" | "task",
 ) {
   const graph = new Map<string, string[]>();
-  for (const dep of dependencies) {
-    const node = kind === "requirement" ? dep.requirement : dep.task;
-    if (!node || UUID_RE.test(node) || UUID_RE.test(dep.dependsOn)) continue;
-    const edges = graph.get(node) ?? [];
-    edges.push(dep.dependsOn);
-    graph.set(node, edges);
+  for (const edge of [...live, ...proposed]) {
+    const edges = graph.get(edge.from) ?? [];
+    edges.push(edge.to);
+    graph.set(edge.from, edges);
   }
-
-  const visiting = new Set<string>();
-  const visited = new Set<string>();
-
-  const visit = (node: string) => {
-    if (visited.has(node)) return;
-    if (visiting.has(node)) {
-      throw new ValidationError(`Plan ${kind} dependencies contain a cycle at ${node}`);
+  // Check only cycles introduced by a proposed edge. Iterative traversal also
+  // avoids stack exhaustion on large existing graphs.
+  for (const edge of proposed) {
+    const pending = [edge.to];
+    const visited = new Set<string>();
+    while (pending.length) {
+      const node = pending.pop()!;
+      if (node === edge.from) throw new ValidationError(`Plan ${kind} dependencies contain a cycle at ${edge.from}`);
+      if (visited.has(node)) continue;
+      visited.add(node);
+      pending.push(...(graph.get(node) ?? []));
     }
-    visiting.add(node);
-    for (const next of graph.get(node) ?? []) visit(next);
-    visiting.delete(node);
-    visited.add(node);
-  };
-
-  for (const node of graph.keys()) visit(node);
+  }
 }
 
 function listPlanTasks(plan: PlanInput) {
