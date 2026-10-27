@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BASIC_WORKFLOW, requirementWorkflowSchema, evidencePreviewKind, type RequirementWorkflow } from "@task-weaver/contracts";
+import { readEvidencePreview } from "@/lib/evidence-preview-transfer";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -136,14 +137,10 @@ function EvidenceMetadata({ requirementId, outputId }: { requirementId: string; 
             const result = await fetch(`/api/evidence/${requestId}/content`, { credentials: 'same-origin', cache: 'no-store', signal: abort.signal });
             if (!result.ok || !result.body) throw new Error('Evidence preview failed');
             const limit = ['text', 'csv', 'tsv'].includes(kind) ? 256 * 1024 : 10 * 1024 * 1024;
-            const reader = result.body.getReader(); const parts: ArrayBuffer[] = []; let size = 0;
-            try {
-              while (size < limit) { const item = await reader.read(); if (item.done) break; const piece = item.value.subarray(0, limit - size); parts.push(piece.slice().buffer); size += piece.length; }
-              await reader.cancel();
-            } finally { reader.releaseLock(); }
+            const { parts, truncated } = await readEvidencePreview(result, evidence.data.sizeBytes, limit);
             requestId = undefined;
             const url = URL.createObjectURL(new Blob(parts, { type: evidence.data.mimeType }));
-            setLocalPreview({ url, kind, filename: evidence.data.originalFilename, truncated: size < evidence.data.sizeBytes });
+            setLocalPreview({ url, kind, filename: evidence.data.originalFilename, truncated });
             setState('Verified preview ready.'); return;
           }
           setState('Downloading verified bytes…');
