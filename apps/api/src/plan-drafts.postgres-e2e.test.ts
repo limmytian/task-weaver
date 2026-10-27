@@ -42,6 +42,11 @@ test("drafts persist, reject stale writes and validate against live dependencies
   const invalid = await api(`/plans/drafts/${draft.id}/validate`, "POST", { projectId });
   assert.equal(invalid.status, 400);
   assert.match((await invalid.json() as { error: string }).error, /cycle/);
+  const duplicateAssignment = { projectId, requirements: [{ key: "r", title: "R", tasks: [{ key: "t", title: "T", slice: "s1" }], slices: [{ key: "s1", title: "First" }, { key: "s2", title: "Second", tasks: ["t"] }] }] };
+  const invalidAssignment = await json(await api("/plans/drafts", "POST", { plan: duplicateAssignment }), 201);
+  assert.equal((await api(`/plans/drafts/${invalidAssignment.id}/validate`, "POST", { projectId })).status, 400);
+  const foreignProject = randomUUID();
+  assert.equal((await api("/plans/drafts", "POST", { plan: { projectId, documents: [{ key: "x", projectId: foreignProject, title: "Foreign", content: "x" }] } })).status, 400);
   const ready = await json(await api("/plans/drafts", "POST", { plan }), 201);
   await json(await api(`/plans/drafts/${ready.id}/validate`, "POST", { projectId }));
   await json(await api(`/projects/${projectId}/requirements`, "POST", { title: "Concurrent change" }), 201);

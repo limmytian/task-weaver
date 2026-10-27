@@ -45,3 +45,16 @@ test('enforces per-node capacity and expires abandoned transfers', async () => {
   await manager.open(reader, producer, manifest);
   manager.close();
 });
+
+test('cancellation interrupts an active verified stream', async () => {
+  const manager = new EvidenceTransferBuffer(async () => {});
+  const request = await manager.open(reader, producer, manifest);
+  await manager.push(producer, { ...request, outputId: manifest.outputId, sequence: 0, bytes: content.subarray(0, 4) });
+  await manager.push(producer, { ...request, outputId: manifest.outputId, sequence: 1, bytes: content.subarray(4) });
+  await manager.finish(producer, { ...request, outputId: manifest.outputId, sequence: 2 });
+  const stream = manager.read(reader, request.requestId);
+  assert.equal((await stream.next()).value?.toString(), 'veri');
+  await manager.cancel(reader, request.requestId);
+  await assert.rejects(stream.next(), /expired or cancelled/);
+  manager.close();
+});

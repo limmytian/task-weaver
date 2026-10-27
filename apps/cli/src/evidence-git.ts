@@ -11,7 +11,7 @@ async function git(workspace: string, args: string[], limit: number, signal?: Ab
   const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
   return new Promise((resolve, reject) => {
     const child = spawn('git', ['--no-pager', '--no-optional-locks', '--literal-pathspecs', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-C', workspace, ...args], {
-      env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, LANG: 'C.UTF-8', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_EXTERNAL_DIFF: '', GIT_PAGER: 'cat' },
+      env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, LANG: 'C.UTF-8', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1', GIT_NO_LAZY_FETCH: '1', GIT_EXTERNAL_DIFF: '', GIT_PAGER: 'cat' },
       stdio: ['ignore', 'pipe', 'ignore'], signal: combined,
     });
     const parts: Buffer[] = []; let bytes = 0; let truncated = false; let settled = false;

@@ -128,7 +128,7 @@ export async function describeWorkflowEvidence(db: Database, requirementId: stri
     const availability = output.availability !== "available" ? output.availability
       : output.sizeBytes > evidenceLimits.verifiedArtifactBytes ? "too_large" as const
       : !online.length ? "offline" as const
-      : !online.some(daemon => daemon.capabilities?.includes("evidence-read-v1")) ? "unsupported" as const : "available" as const;
+      : "unsupported" as const;
     return { ...base, kind: "local" as const, availability, nodeId: output.nodeId, sizeBytes: output.sizeBytes, sha256: output.sha256 };
   }
   if ((output.type === "git_branch" || output.type === "git_pr") && output.requirementRepositoryId && output.headCommit && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(output.headCommit)) {

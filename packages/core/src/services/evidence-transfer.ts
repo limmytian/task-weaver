@@ -20,7 +20,7 @@ export class EvidenceTransferBuffer {
     this.timer = setInterval(() => this.sweep(), 1000);
     this.timer.unref();
   }
-  private remove(id: string) { const item = this.transfers.get(id); if (item) { this.reservedBytes -= item.manifest.sizeBytes; this.transfers.delete(id); } }
+  private remove(id: string) { const item = this.transfers.get(id); if (item) { this.reservedBytes -= item.manifest.sizeBytes; this.transfers.delete(id); item.chunks.length = 0; } }
   private sweep() { for (const item of this.transfers.values()) if (item.expiresAt <= this.now()) this.remove(item.id); }
   private async current(id: string, side: 'reader' | 'producer', principal: EvidenceTransferPrincipal | EvidenceProducer) {
     this.sweep(); const item = this.transfers.get(id);
@@ -59,6 +59,7 @@ export class EvidenceTransferBuffer {
     item.state = 'reading';
     try {
       for (const chunk of item.chunks) { signal?.throwIfAborted(); await this.current(id, 'reader', reader); yield Buffer.from(chunk); }
+      if (this.transfers.get(id) !== item || item.expiresAt <= this.now()) throw new ValidationError('Evidence request expired or cancelled');
     } finally { this.remove(id); }
   }
   async cancel(reader: EvidenceTransferPrincipal, id: string) { await this.current(id, 'reader', reader); this.remove(id); }

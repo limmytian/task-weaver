@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm, writeFile, rename } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, rename, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pinEvidenceComparison, listEvidenceGitFiles, readEvidenceGitDiff } from './evidence-git';
@@ -11,14 +11,16 @@ test('Git evidence stays pinned and rejects unlisted paths or revision expressio
   t.after(() => rm(root, { recursive: true, force: true }));
   const git = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim();
   git('init', '-q'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.test');
-  await writeFile(join(root, 'before.txt'), 'one\ntwo\n'); git('add', '.'); git('commit', '-qm', 'base'); const base = git('rev-parse', 'HEAD');
-  await rename(join(root, 'before.txt'), join(root, 'after.txt'));
+  await writeFile(join(root, 'before.txt'), 'one\ntwo\n'); await writeFile(join(root, 'deleted.txt'), 'old\n'); git('add', '.'); git('commit', '-qm', 'base'); const base = git('rev-parse', 'HEAD');
+  await rename(join(root, 'before.txt'), join(root, 'after.txt')); await unlink(join(root, 'deleted.txt')); await writeFile(join(root, 'binary.dat'), Buffer.from([0, 1, 2, 255]));
   await writeFile(join(root, 'extra.txt'), 'new text\n'); await writeFile(join(root, ':(glob)*'), 'literal only\n'); git('add', '-A'); git('commit', '-qm', 'head'); const head = git('rev-parse', 'HEAD');
   const comparison = await pinEvidenceComparison(root, base, head);
   const listing = await listEvidenceGitFiles(root, comparison);
   assert.equal(listing.truncated, false);
   assert.ok(listing.files.some(file => file.previousPath === 'before.txt' && file.path === 'after.txt' && file.status.startsWith('R')));
   assert.ok(listing.files.some(file => file.path === 'extra.txt' && file.status === 'A'));
+  assert.ok(listing.files.some(file => file.path === 'deleted.txt' && file.status === 'D'));
+  assert.match((await readEvidenceGitDiff(root, comparison, 'binary.dat')).diff, /Binary files/);
   assert.match((await readEvidenceGitDiff(root, comparison, 'extra.txt')).diff, /new text/);
   const literal = await readEvidenceGitDiff(root, comparison, ':(glob)*');
   assert.match(literal.diff, /literal only/);
