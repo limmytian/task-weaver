@@ -46,7 +46,7 @@ export function getText(url, {
     const result = execute("curl", ["--disable", "--globoff", "--silent", "--show-error", "--proto", "=https",
       "--connect-timeout", "10", "--max-time", String(Math.min(45_000, remaining) / 1000),
       "--write-out", "\\n%{http_code}\\n%{redirect_url}", current],
-    { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: remaining });
+    { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: Math.max(1, Math.floor(remaining)) });
     if (now() >= deadline) fail("deadline exhausted");
     if (result.error || result.signal) fail("transport process failed");
     let transient = false;
