@@ -2,6 +2,7 @@ import { bigint, index, integer, pgTable, text, timestamp, uuid } from "drizzle-
 import { actorTypeEnum } from "./enums";
 import { requirements, executionSlices } from "./requirements";
 import { tasks } from "./tasks";
+import { documentFileVersions } from "./documents";
 import { requirementRepositories } from "./repositories";
 
 export const workflowOutputs = pgTable("workflow_outputs", {
@@ -14,6 +15,7 @@ export const workflowOutputs = pgTable("workflow_outputs", {
   requirementRepositoryId: uuid("requirement_repository_id").references(() => requirementRepositories.id, { onDelete: "set null" }),
   type: text("type", { enum: ["comment", "attachment", "url", "local", "git_branch", "git_pr"] }).notNull(),
   referenceId: uuid("reference_id"),
+  attachmentFileVersionId: uuid("attachment_file_version_id").references(() => documentFileVersions.id, { onDelete: "restrict" }),
   url: text("url"),
   nodeId: text("node_id"),
   relativePath: text("relative_path"),

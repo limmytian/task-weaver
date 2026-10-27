@@ -9,6 +9,7 @@ import {
   requirements,
   projects,
   documents,
+  documentFileVersions,
   repositories,
   executionSlices,
   requirementClaims,
@@ -132,6 +133,10 @@ export async function describeWorkflowEvidence(db: Database, requirementId: stri
       : "unsupported" as const;
     return { ...base, kind: "local" as const, availability, nodeId: output.nodeId, sizeBytes: output.sizeBytes, sha256: output.sha256 };
   }
+  if (output.type === "attachment" && output.referenceId && output.attachmentFileVersionId) {
+    const file = await db.query.documentFileVersions.findFirst({ where: and(eq(documentFileVersions.id, output.attachmentFileVersionId), eq(documentFileVersions.documentId, output.referenceId)) });
+    if (file) return { ...base, kind: "attachment" as const, documentId: file.documentId, fileVersionId: file.id, fileVersion: file.version, mimeType: file.mimeType, originalFilename: file.originalFilename, sizeBytes: file.sizeBytes, sha256: file.sha256 };
+  }
   if ((output.type === "git_branch" || output.type === "git_pr") && output.requirementRepositoryId && output.headCommit && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(output.headCommit)) {
     return { ...base, kind: "git" as const, requirementRepositoryId: output.requirementRepositoryId, headCommit: output.headCommit };
   }
@@ -239,9 +244,13 @@ export async function registerWorkflowOutput(
     const task = comment && await db.query.tasks.findFirst({ where: eq(tasks.id, comment.taskId) });
     if (task?.requirementId !== requirementId) throw new ValidationError("Comment does not belong to the requirement");
   }
+  let attachmentFileVersionId: string | undefined;
   if (input.type === "attachment") {
     const document = await db.query.documents.findFirst({ where: eq(documents.id, input.referenceId!) });
-    if (document?.form !== "attachment" || document.projectId !== requirement.projectId) throw new ValidationError("Attachment does not belong to the project");
+    if (document?.form !== "attachment" || document.projectId !== requirement.projectId || !document.currentFileVersionId) throw new ValidationError("Attachment does not belong to the project");
+    const file = await db.query.documentFileVersions.findFirst({ where: and(eq(documentFileVersions.id, document.currentFileVersionId), eq(documentFileVersions.documentId, document.id)) });
+    if (!file) throw new ValidationError("Attachment file version is unavailable");
+    attachmentFileVersionId = file.id;
   }
   if (input.type === "local") {
     if (input.nodePublicKey && !verifyEvidenceRegistration({ requirementId, nodeId: input.nodeId!, relativePath: input.relativePath!, sizeBytes: input.sizeBytes!, sha256: input.sha256! }, input.nodePublicKey, input.nodeRegistrationProof!)) throw new ValidationError("Invalid local evidence registration proof");
@@ -264,7 +273,7 @@ export async function registerWorkflowOutput(
     workflowRevision: requirement.workflowRevision,
     planRevision: requirement.planRevision,
     requirementRepositoryId: input.requirementRepositoryId, type: input.type,
-    referenceId: input.referenceId, url: input.url, nodeId: input.nodeId,
+    referenceId: input.referenceId, attachmentFileVersionId, url: input.url, nodeId: input.nodeId,
     relativePath: input.relativePath, sizeBytes: input.sizeBytes, sha256: input.sha256, nodePublicKey: input.nodePublicKey,
     headCommit: gitLink ? gitLink.pushedCommit ?? gitLink.headCommit : null,
     summary: input.summary, createdBy: actor.id, createdByType: actor.type,

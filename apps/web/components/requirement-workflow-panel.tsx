@@ -2,12 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { BASIC_WORKFLOW, requirementWorkflowSchema, type RequirementWorkflow } from "@task-weaver/contracts";
+import { BASIC_WORKFLOW, requirementWorkflowSchema, evidencePreviewKind, type RequirementWorkflow } from "@task-weaver/contracts";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { TextAttachmentPreview } from "@/components/text-attachment-preview";
+import { PdfAttachmentPreview } from "@/components/pdf-attachment-preview";
 import { RequirementRecoveryPanel } from "@/components/requirement-recovery-panel";
 import { WorkflowEditor } from "@/components/workflow-editor";
 
@@ -139,8 +141,23 @@ function EvidenceMetadata({ requirementId, outputId }: { requirementId: string; 
     {open && evidence.error && <p role="alert">Evidence is unavailable or access is denied.</p>}
     {open && evidence.data && <div className="space-y-1 text-xs"><p>Source: {evidence.data.kind} · {evidence.data.availability}</p>
       {evidence.data.kind === "local" && <><p>Size: {evidence.data.sizeBytes} bytes</p><p>SHA-256: {evidence.data.sha256}</p><p>Node download requires a connected compatible producer and an enabled evidence service.</p><Button size="sm" variant="outline" disabled={Boolean(controller)} onClick={() => { void download(); }}>Download original</Button>{controller && <Button size="sm" variant="ghost" onClick={() => controller.abort()}>Cancel download</Button>}{state && <p role="status">{state}</p>}</>}
+      {evidence.data.kind === "attachment" && <PinnedAttachmentEvidence file={evidence.data} />}
       {evidence.data.kind === "git" && <><p>Commit: {evidence.data.headCommit}</p><p>Comparison viewer is not yet available.</p></>}
       {evidence.data.kind === "unsupported" && <p>This output does not have a supported immutable evidence identity.</p>}
     </div>}
+  </div>;
+}
+
+function PinnedAttachmentEvidence({ file }: { file: { documentId: string; fileVersion: number; originalFilename: string; mimeType: string; sizeBytes: number; sha256: string } }) {
+  const [preview, setPreview] = useState(false);
+  const path = `/api/attachments/${file.documentId}?fileVersion=${file.fileVersion}`;
+  const kind = evidencePreviewKind(file.mimeType, file.sizeBytes);
+  return <div className="space-y-2"><p>{file.originalFilename} · {file.sizeBytes.toLocaleString()} bytes · file version {file.fileVersion}</p><p className="break-all">Recorded SHA-256: {file.sha256}</p><p>The stored file is not reverified when previewed.</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" asChild><a href={path}>Download original</a></Button>{['text', 'image', 'pdf'].includes(kind) && <Button size="sm" variant="outline" onClick={() => setPreview(value => !value)}>{preview ? 'Hide preview' : 'Preview'}</Button>}</div>
+    {preview && kind === 'text' && <TextAttachmentPreview src={`${path}&preview=true`} filename={file.originalFilename} maximumBytes={256 * 1024} />}
+    {preview && kind === 'pdf' && <PdfAttachmentPreview src={`${path}&preview=true`} filename={file.originalFilename} />}
+    {/* Authenticated attachment bytes must bypass Next image optimization. */}
+    {/* eslint-disable-next-line @next/next/no-img-element */}
+    {preview && kind === 'image' && <img src={`${path}&preview=true`} alt={file.originalFilename} className="max-h-96 max-w-full object-contain" />}
+    {kind === 'download' && <p>Preview unavailable; download the original to inspect it.</p>}
   </div>;
 }
