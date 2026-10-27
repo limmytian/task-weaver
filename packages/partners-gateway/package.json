@@ -1,6 +1,6 @@
 {
   "name": "@task-weaver/partners-gateway",
-  "version": "0.3.13",
+  "version": "0.3.14",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",

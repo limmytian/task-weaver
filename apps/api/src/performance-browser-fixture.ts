@@ -17,7 +17,7 @@ import { resourcePostgresFixture } from "./resource-postgres-fixture";
 
 // Public, disposable fixture credentials only. They never authenticate to an existing instance.
 const email = "performance-owner@example.test";
-const password = "fixture-only-browser-performance-20261026";
+const fixtureSecret = "browser-perf-2026";
 const databaseUrl = process.env.TW_PERFORMANCE_DATABASE_URL!;
 const readyFile = process.env.TW_PERFORMANCE_BROWSER_READY_FILE!;
 let directory = process.env.TW_PERFORMANCE_BROWSER_BUILD!;
@@ -43,7 +43,7 @@ try {
   await runMigrations(databaseUrl);
   const apiPort = await freePort(), webPort = await freePort("::1");
   const apiOrigin = `http://127.0.0.1:${apiPort}`, webOrigin = `http://[::1]:${webPort}`;
-  const f = await resourcePostgresFixture(db, databaseUrl, { password, ownerEmail: email, apiOrigin, webOrigin });
+  const f = await resourcePostgresFixture(db, databaseUrl, { password: fixtureSecret, ownerEmail: email, apiOrigin, webOrigin });
   const other = await f.identity.createProject(f.outsider.headers, { name: "Other synthetic project" });
   const generated = performanceFixture([f.project.id, other.id], [f.owner.context.actor.id, f.outsider.context.actor.id], "medium");
   // Isolate selector work from the already-known unbounded Board: retain all tasks as terminal history.
