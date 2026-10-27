@@ -1,3 +1,4 @@
+import { planRouter } from "./plan";
 import { inboundRouter } from "./inbound-events";
 import { webhookRouter } from "./webhook";
 import { agentUsageRouter } from "./agent-usage";
@@ -24,6 +25,7 @@ import { versionRouter } from "./version";
 
 export const appRouter = router({
   auth: authRouter,
+  plan: planRouter,
   webhook: webhookRouter,
   inbound: inboundRouter,
   agentUsage: agentUsageRouter,

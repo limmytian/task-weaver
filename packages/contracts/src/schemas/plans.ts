@@ -209,3 +209,26 @@ export type PlanRequirementDependencyInput = z.infer<typeof planRequirementDepen
 export type PlanDocumentRefInput = z.infer<typeof planDocumentRefSchema>;
 export type PlanCommentInput = z.infer<typeof planCommentSchema>;
 export type PlanNoteInput = z.infer<typeof planNoteSchema>;
+
+/** Limits for interactive staging; direct plan submission keeps its existing contract. */
+export const stagedPlanSchema = planSchema.superRefine((plan, ctx) => {
+  const tasks = plan.requirements.flatMap((requirement) => requirement.tasks);
+  const slices = plan.requirements.flatMap((requirement) => requirement.slices);
+  const edges = plan.taskDependencies.length + plan.requirementDependencies.length
+    + plan.requirements.reduce((sum, requirement) => sum + requirement.dependsOn.length + requirement.dependencies.length, 0)
+    + tasks.reduce((sum, task) => sum + task.dependsOn.length + task.dependencies.length, 0);
+  if (new TextEncoder().encode(JSON.stringify(plan)).byteLength > 1024 * 1024) ctx.addIssue({ code: "custom", message: "Plan exceeds the 1 MiB limit" });
+  if (plan.requirements.length > 100 || plan.documents.length > 100 || tasks.length > 200 || slices.length > 20 || edges > 500) {
+    ctx.addIssue({ code: "custom", message: "Plan exceeds the staging entity or dependency limit" });
+  }
+  for (const [requirementIndex, requirement] of plan.requirements.entries()) {
+    if (!requirement.existingId && requirement.status !== "draft") ctx.addIssue({ code: "custom", path: ["requirements", requirementIndex, "status"], message: "Staged new requirements must start as draft" });
+    for (const [taskIndex, task] of requirement.tasks.entries()) {
+      if (!task.existingId && task.status !== "todo") ctx.addIssue({ code: "custom", path: ["requirements", requirementIndex, "tasks", taskIndex, "status"], message: "Staged new tasks must start as todo" });
+    }
+  }
+});
+export const createPlanDraftSchema = z.object({ plan: stagedPlanSchema, source: z.enum(["web", "assistant", "mcp"]) });
+export const updatePlanDraftSchema = z.object({ projectId: z.string().uuid(), revision: z.number().int().positive(), plan: stagedPlanSchema });
+export type CreatePlanDraftInput = z.infer<typeof createPlanDraftSchema>;
+export type UpdatePlanDraftInput = z.infer<typeof updatePlanDraftSchema>;

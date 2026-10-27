@@ -21,7 +21,7 @@ import { readMcpPackage, readMcpSkill, listMcpPackages } from "./discovery";
 import type { SkillPackageStorageAdapter } from "../services/skill-package-storage";
 import type { Database } from "@task-weaver/db";
 import type { VerifiedRequestContext } from "@task-weaver/contracts";
-import { AuthorizationError, isMcpServerToolAllowed, mcpServerCatalog, mcpServerReadTools, createTaskSchema, listTasksSchema, createRequirementSchema, updateRequirementSchema, updateTaskSchema, createDocumentSchema, updateDocumentSchema, listProjectsSchema, listRequirementsSchema, listDocumentsSchema } from "@task-weaver/contracts";
+import { AuthorizationError, stagedPlanSchema, isMcpServerToolAllowed, mcpServerCatalog, mcpServerReadTools, createTaskSchema, listTasksSchema, createRequirementSchema, updateRequirementSchema, updateTaskSchema, createDocumentSchema, updateDocumentSchema, listProjectsSchema, listRequirementsSchema, listDocumentsSchema } from "@task-weaver/contracts";
 import { createResourceServices } from "../services/resource-services";
 import { personalResourceOwnerId, resourceAuthority, canAccessResource } from "../services/resource-authorization";
 import type { McpExecutor } from "./index";
@@ -67,6 +67,11 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
       case "tw_memories_record": return mcpMemory(db, identity, "record", raw);
       case "tw_memories_update": return mcpMemory(db, identity, "update", raw);
       case "tw_memories_forget": return mcpMemory(db, identity, "forget", raw);
+      case "tw_plan_stage": {
+        const plan = stagedPlanSchema.parse(raw.plan);
+        const draft = await services.planService.createPlanDraft(db, { plan, source: "mcp" }, actor);
+        return { draftId: draft.id, projectId: draft.projectId, revision: draft.revision, webPath: `/projects/${draft.projectId}/plans/${draft.id}` };
+      }
       case "tw_plan_validate": return submitMcpPlan(db, identity, { plan: raw.plan }, signal);
       case "tw_plan_apply": return submitMcpPlan(db, identity, { plan: raw.plan, idempotencyKey: raw.idempotencyKey as string }, signal);
       case "tw_tasks_context": return readMcpContext(db, identity, "task", raw as unknown as Parameters<typeof readMcpContext>[3], signal);

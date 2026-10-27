@@ -1,5 +1,6 @@
-import { eq } from "drizzle-orm";
-import { type Database, projects, requirements, tasks, taskDependencies, requirementDependencies } from "@task-weaver/db";
+import { createHash } from "node:crypto";
+import { and, desc, eq, gt, inArray } from "drizzle-orm";
+import { type Database, projects, requirements, tasks, taskDependencies, requirementDependencies, planDrafts, activityLog, executionSlices, requirementClaims, documents } from "@task-weaver/db";
 import type { Actor } from "@task-weaver/contracts";
 import type {
   ApplyPlanInput,
@@ -10,7 +11,7 @@ import type {
   PlanRequirementDependencyInput,
   PlanTaskDependencyInput,
 } from "@task-weaver/contracts";
-import { NotFoundError, ValidationError, BASIC_WORKFLOW, requirementWorkflowSchema, workflowFromPreset, type RequirementWorkflow } from "@task-weaver/contracts";
+import { NotFoundError, ValidationError, ConflictError, BASIC_WORKFLOW, requirementWorkflowSchema, workflowFromPreset, type RequirementWorkflow } from "@task-weaver/contracts";
 import type * as DocumentService from "./documents";
 import type * as RequirementService from "./requirements";
 import type * as TaskService from "./tasks";
@@ -641,22 +642,52 @@ export function assertPlanGraphAcyclic(
   kind: "requirement" | "task",
 ) {
   const graph = new Map<string, string[]>();
+  const reverse = new Map<string, string[]>();
   for (const edge of [...live, ...proposed]) {
-    const edges = graph.get(edge.from) ?? [];
-    edges.push(edge.to);
-    graph.set(edge.from, edges);
+    if (!graph.has(edge.from)) graph.set(edge.from, []);
+    if (!reverse.has(edge.to)) reverse.set(edge.to, []);
+    graph.get(edge.from)!.push(edge.to);
+    reverse.get(edge.to)!.push(edge.from);
+    if (!graph.has(edge.to)) graph.set(edge.to, []);
+    if (!reverse.has(edge.from)) reverse.set(edge.from, []);
   }
-  // Check only cycles introduced by a proposed edge. Iterative traversal also
-  // avoids stack exhaustion on large existing graphs.
-  for (const edge of proposed) {
-    const pending = [edge.to];
-    const visited = new Set<string>();
+  // Iterative Kosaraju traversal keeps work linear in the project graph size
+  // and avoids stack exhaustion. Only components containing a proposed edge
+  // are rejected, so an unrelated legacy cycle does not block planning.
+  const seen = new Set<string>();
+  const order: string[] = [];
+  for (const root of graph.keys()) {
+    if (seen.has(root)) continue;
+    seen.add(root);
+    const stack: Array<{ node: string; next: number }> = [{ node: root, next: 0 }];
+    while (stack.length) {
+      const frame = stack[stack.length - 1]!;
+      const neighbors = graph.get(frame.node)!;
+      if (frame.next < neighbors.length) {
+        const next = neighbors[frame.next++]!;
+        if (!seen.has(next)) { seen.add(next); stack.push({ node: next, next: 0 }); }
+      } else {
+        order.push(frame.node);
+        stack.pop();
+      }
+    }
+  }
+  const component = new Map<string, number>();
+  let componentId = 0;
+  for (const root of order.reverse()) {
+    if (component.has(root)) continue;
+    const pending = [root];
+    component.set(root, componentId);
     while (pending.length) {
-      const node = pending.pop()!;
-      if (node === edge.from) throw new ValidationError(`Plan ${kind} dependencies contain a cycle at ${edge.from}`);
-      if (visited.has(node)) continue;
-      visited.add(node);
-      pending.push(...(graph.get(node) ?? []));
+      for (const next of reverse.get(pending.pop()!) ?? []) {
+        if (!component.has(next)) { component.set(next, componentId); pending.push(next); }
+      }
+    }
+    componentId++;
+  }
+  for (const edge of proposed) {
+    if (component.get(edge.from) === component.get(edge.to)) {
+      throw new ValidationError(`Plan ${kind} dependencies contain a cycle at ${edge.from}`);
     }
   }
 }
@@ -753,7 +784,154 @@ function buildWarnings(plan: PlanInput) {
     req.tasks.some((task) => !task.existingId && task.status === "todo"),
   );
   if (hasDraftExecutableTasks) {
-    warnings.push("Plan creates todo tasks under draft requirements. Requirement-lane daemons may pick non-terminal requirements unless scheduling is constrained.");
+    warnings.push("New requirements remain draft and need approval before daemon execution.");
+  }
+  for (const [kind, items] of [["requirement", plan.requirements], ["task", listPlanTasks(plan).map(({ task }) => task)], ["document", plan.documents]] as const) {
+    const titles = new Set<string>();
+    for (const item of items) {
+      const title = item.title?.trim().toLocaleLowerCase("en-US");
+      if (title && titles.has(title)) warnings.push(`Multiple ${kind} entries have the same title: ${item.title}`);
+      if (title) titles.add(title);
+    }
   }
   return warnings;
+}
+
+const DRAFT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Draft operations are authorized by the resource-service boundary. */
+export async function createPlanDraft(db: Database, input: import("@task-weaver/contracts").CreatePlanDraftInput, actor: Actor) {
+  const { stagedPlanSchema } = await import("@task-weaver/contracts");
+  const plan = stagedPlanSchema.parse(input.plan);
+  const [draft] = await db.insert(planDrafts).values({
+    projectId: plan.projectId, createdBy: actor.id, createdByType: actor.type, source: input.source,
+    plan: JSON.parse(JSON.stringify(plan)), expiresAt: new Date(Date.now() + DRAFT_RETENTION_MS),
+  }).returning();
+  await recordDraftActivity(db, draft!.projectId, draft!.id, "created", actor);
+  return draft!;
+}
+
+export async function getPlanDraft(db: Database, projectId: string, draftId: string) {
+  const [draft] = await db.select().from(planDrafts).where(and(eq(planDrafts.projectId, projectId), eq(planDrafts.id, draftId)));
+  if (!draft || draft.state !== "draft" || draft.expiresAt <= new Date()) throw new NotFoundError("Plan draft not found");
+  return { ...draft, canWrite: false };
+}
+
+export async function planDraftCapabilities(_db: Database, _projectId: string) { return { canWrite: false }; }
+
+export async function listPlanDrafts(db: Database, projectId: string) {
+  return db.select({ id: planDrafts.id, projectId: planDrafts.projectId, createdBy: planDrafts.createdBy, createdByType: planDrafts.createdByType, source: planDrafts.source, revision: planDrafts.revision, createdAt: planDrafts.createdAt, updatedAt: planDrafts.updatedAt, expiresAt: planDrafts.expiresAt }).from(planDrafts).where(and(eq(planDrafts.projectId, projectId), eq(planDrafts.state, "draft"), gt(planDrafts.expiresAt, new Date()))).orderBy(desc(planDrafts.updatedAt)).limit(100);
+}
+
+export async function updatePlanDraft(db: Database, draftId: string, input: import("@task-weaver/contracts").UpdatePlanDraftInput, actor: Actor) {
+  const { stagedPlanSchema } = await import("@task-weaver/contracts");
+  const plan = stagedPlanSchema.parse(input.plan);
+  if (plan.projectId !== input.projectId) throw new ValidationError("Draft project cannot be changed");
+  const [draft] = await db.update(planDrafts).set({ plan: JSON.parse(JSON.stringify(plan)), revision: input.revision + 1, validatedRevision: null, liveFingerprint: null, updatedAt: new Date() })
+    .where(and(eq(planDrafts.id, draftId), eq(planDrafts.projectId, input.projectId), eq(planDrafts.revision, input.revision), eq(planDrafts.state, "draft"), gt(planDrafts.expiresAt, new Date()))).returning();
+  if (!draft) {
+    const current = await getPlanDraft(db, input.projectId, draftId);
+    throw new ConflictError("Plan draft has changed", current.revision);
+  }
+  await recordDraftActivity(db, draft.projectId, draft.id, "updated", actor);
+  return draft;
+}
+
+export async function discardPlanDraft(db: Database, projectId: string, draftId: string, revision: number, actor: Actor) {
+  const [draft] = await db.update(planDrafts).set({ state: "discarded", revision: revision + 1, updatedAt: new Date() })
+    .where(and(eq(planDrafts.id, draftId), eq(planDrafts.projectId, projectId), eq(planDrafts.revision, revision), eq(planDrafts.state, "draft"), gt(planDrafts.expiresAt, new Date()))).returning();
+  if (!draft) {
+    const current = await getPlanDraft(db, projectId, draftId);
+    throw new ConflictError("Plan draft has changed", current.revision);
+  }
+  await recordDraftActivity(db, projectId, draftId, "discarded", actor);
+  return { id: draftId, revision: draft.revision };
+}
+
+async function recordDraftActivity(db: Database, projectId: string, draftId: string, action: string, actor: Actor) {
+  await db.insert(activityLog).values({ entityType: "project", entityId: projectId, action: `plan_draft.${action}`, actorId: actor.id, actorType: actor.type, metadata: { draftId } });
+}
+
+export async function validatePlanDraft(db: Database, projectId: string, draftId: string, actor: Actor, services?: PlanResourceServices) {
+  const { stagedPlanSchema } = await import("@task-weaver/contracts");
+  const draft = await getPlanDraft(db, projectId, draftId);
+  const plan = stagedPlanSchema.parse(draft.plan);
+  const result = await applyPlan(db, { plan, dryRun: true }, actor, services);
+  const normalized = normalizePlan(plan);
+  const existingTasks = new Map(listPlanTasks(plan).map(({ task }) => [task.key, task.existingId ?? `new:${task.key}`]));
+  const assignments = new Map<string, string>();
+  for (const [slice, refs] of normalized.sliceTasks) {
+    for (const ref of refs) {
+      const identity = existingTasks.get(ref) ?? ref;
+      const previous = assignments.get(identity);
+      if (previous && previous !== slice) throw new ValidationError(`Task ${ref} is assigned to multiple slices`);
+      assignments.set(identity, slice);
+    }
+  }
+  const requirementIds = new Set(plan.requirements.flatMap(item => item.existingId ? [item.existingId] : []));
+  const taskIds = new Set(listPlanTasks(plan).flatMap(({ task }) => task.existingId ? [task.existingId] : []));
+  const reqKeys = new Set(plan.requirements.map(item => item.key));
+  const taskKeys = new Set(listPlanTasks(plan).map(({ task }) => task.key));
+  for (const id of collectDirectRefs([...normalized.requirementDependencies.flatMap(edge => [edge.requirement, edge.dependsOn]), ...normalized.documentRequirementLinks.map(link => link.requirement)], reqKeys)) requirementIds.add(id);
+  for (const id of collectDirectRefs([...normalized.taskDependencies.flatMap(edge => [edge.task, edge.dependsOn]), ...normalized.documentTaskLinks.map(link => link.task), ...[...normalized.sliceTasks.values()].flat()], taskKeys)) taskIds.add(id);
+  const [terminalRequirements, cancelledTasks] = await Promise.all([
+    requirementIds.size ? db.select({ id: requirements.id }).from(requirements).where(and(inArray(requirements.id, [...requirementIds]), inArray(requirements.status, ["cancelled", "archived"]))) : [],
+    taskIds.size ? db.select({ id: tasks.id }).from(tasks).where(and(inArray(tasks.id, [...taskIds]), eq(tasks.status, "cancelled"))) : [],
+  ]);
+  if (terminalRequirements.length || cancelledTasks.length) throw new ValidationError("A referenced requirement or task is cancelled or archived");
+  const fingerprint = await livePlanFingerprint(db, projectId);
+  await db.update(planDrafts).set({ validatedRevision: draft.revision, liveFingerprint: fingerprint }).where(and(eq(planDrafts.id, draftId), eq(planDrafts.revision, draft.revision)));
+  return { revision: draft.revision, result };
+}
+
+async function livePlanFingerprint(db: Database, projectId: string): Promise<string> {
+  const [project, reqs, projectTasks, reqEdges, taskEdges, slices, claims, projectDocuments] = await Promise.all([
+    db.select({ defaultWorkflow: projects.defaultWorkflow, status: projects.status }).from(projects).where(eq(projects.id, projectId)),
+    db.select({ id: requirements.id, revision: requirements.planRevision, status: requirements.status, leaseGeneration: requirements.leaseGeneration }).from(requirements).where(eq(requirements.projectId, projectId)).orderBy(requirements.id),
+    db.select({ id: tasks.id, version: tasks.version, status: tasks.status, requirementId: tasks.requirementId }).from(tasks).where(eq(tasks.projectId, projectId)).orderBy(tasks.id),
+    db.select({ id: requirementDependencies.id, from: requirementDependencies.requirementId, to: requirementDependencies.dependsOnRequirementId, type: requirementDependencies.type }).from(requirementDependencies).innerJoin(requirements, eq(requirementDependencies.requirementId, requirements.id)).where(eq(requirements.projectId, projectId)).orderBy(requirementDependencies.id),
+    db.select({ id: taskDependencies.id, from: taskDependencies.taskId, to: taskDependencies.dependsOnTaskId, type: taskDependencies.type }).from(taskDependencies).innerJoin(tasks, eq(taskDependencies.taskId, tasks.id)).where(eq(tasks.projectId, projectId)).orderBy(taskDependencies.id),
+    db.select({ id: executionSlices.id, requirementId: executionSlices.requirementId, order: executionSlices.orderIndex, status: executionSlices.status }).from(executionSlices).innerJoin(requirements, eq(executionSlices.requirementId, requirements.id)).where(eq(requirements.projectId, projectId)).orderBy(executionSlices.id),
+    db.select({ id: requirementClaims.id, requirementId: requirementClaims.requirementId, claimedBy: requirementClaims.claimedBy, expiresAt: requirementClaims.expiresAt }).from(requirementClaims).innerJoin(requirements, eq(requirementClaims.requirementId, requirements.id)).where(eq(requirements.projectId, projectId)).orderBy(requirementClaims.id),
+    db.select({ id: documents.id, version: documents.version }).from(documents).where(eq(documents.projectId, projectId)).orderBy(documents.id),
+  ]);
+  return createHash("sha256").update(JSON.stringify([project, reqs, projectTasks, reqEdges, taskEdges, slices, claims, projectDocuments])).digest("hex");
+}
+
+export async function applyPlanDraft(db: Database, projectId: string, draftId: string, revision: number, operationKey: string, actor: Actor, services?: PlanResourceServices) {
+  if (!services) throw new AuthorizationError();
+  const [draft] = await db.select().from(planDrafts).where(and(eq(planDrafts.projectId, projectId), eq(planDrafts.id, draftId))).for("update");
+  if (!draft) throw new NotFoundError("Plan draft not found");
+  if (draft.state === "applied") {
+    if (draft.operationKey !== operationKey || draft.revision !== revision || !draft.receipt) throw new ConflictError("Draft was already applied", draft.revision);
+    const receipt = draft.receipt as unknown as PlanApplyResult;
+    for (const item of receipt.refs.requirements) if (item.id) await services.requirementService.getRequirementRecord(db, item.id);
+    for (const item of receipt.refs.tasks) if (item.id) await services.taskService.getTask(db, item.id);
+    for (const item of receipt.refs.documents) if (item.id) await services.documentService.getDocument(db, item.id);
+    return { result: receipt, replayed: true };
+  }
+  if (draft.state !== "draft" || draft.expiresAt <= new Date()) throw new NotFoundError("Plan draft not found");
+  const [keyOwner] = await db.select({ id: planDrafts.id }).from(planDrafts).where(and(eq(planDrafts.projectId, projectId), eq(planDrafts.operationKey, operationKey)));
+  if (keyOwner && keyOwner.id !== draftId) throw new ConflictError("Operation key already identifies another draft", draft.revision);
+  if (draft.revision !== revision || draft.validatedRevision !== revision || !draft.liveFingerprint) throw new ConflictError("Draft must be validated at its current revision", draft.revision);
+  if (draft.liveFingerprint !== await livePlanFingerprint(db, projectId)) throw new ConflictError("Project plan has changed; validate again", draft.revision);
+  const { stagedPlanSchema } = await import("@task-weaver/contracts");
+  const plan = stagedPlanSchema.parse(draft.plan);
+  // Revalidate under the same transaction and resource authorization lock.
+  await validatePlanDraft(db, projectId, draftId, actor, services);
+  const result = await applyPlan(db, { plan, dryRun: false }, actor, services);
+  await db.update(planDrafts).set({ state: "applied", operationKey, receipt: JSON.parse(JSON.stringify(result)), updatedAt: new Date() }).where(eq(planDrafts.id, draftId));
+  await recordDraftActivity(db, projectId, draftId, "applied", actor);
+  return { result, replayed: false };
+}
+
+export async function getPlanDraftReceipt(db: Database, projectId: string, draftId: string, services?: PlanResourceServices) {
+  if (!services) throw new AuthorizationError();
+  const [draft] = await db.select().from(planDrafts).where(and(eq(planDrafts.projectId, projectId), eq(planDrafts.id, draftId), eq(planDrafts.state, "applied")));
+  if (!draft?.receipt) throw new NotFoundError("Plan receipt not found");
+  const receipt = draft.receipt as unknown as PlanApplyResult;
+  for (const ref of receipt.refs.requirements) if (ref.id) await services.requirementService.getRequirementRecord(db, ref.id);
+  for (const ref of receipt.refs.tasks) if (ref.id) await services.taskService.getTask(db, ref.id);
+  for (const ref of receipt.refs.documents) if (ref.id) await services.documentService.getDocument(db, ref.id);
+  return { result: receipt, revision: draft.revision };
 }

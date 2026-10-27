@@ -70,7 +70,7 @@ export const mcpServerWriteTools = [
   "tw_task_comments_add", "tw_task_dependencies_add", "tw_task_dependencies_remove",
   "tw_documents_create", "tw_documents_update",
   "tw_document_task_links_add", "tw_document_requirement_links_add",
-  "tw_execution_slices_create", "tw_execution_slices_update", "tw_plan_apply",
+  "tw_execution_slices_create", "tw_execution_slices_update", "tw_plan_apply", "tw_plan_stage",
   "tw_memories_record", "tw_memories_update", "tw_memories_forget",
 ] as const;
 

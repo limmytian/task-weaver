@@ -4,6 +4,7 @@ import { deferView } from "@/components/deferred-view";
 
 import { use, useMemo, useState } from "react";
 import Link from "next/link";
+import { PlanDrafts } from "@/components/plan-drafts";
 import { ProjectMembers } from "@/components/project-members";
 import { useRouter } from "next/navigation";
 import {
@@ -201,6 +202,7 @@ export default function ProjectDetailPage({
               Timeline
             </TabsTrigger>
             <TabsTrigger value="requirements">Requirements</TabsTrigger>
+            <TabsTrigger value="plans">Plans</TabsTrigger>
             <TabsTrigger value="analytics">
               <BarChart3 className="mr-1 h-3.5 w-3.5" />
               Analytics
@@ -217,6 +219,7 @@ export default function ProjectDetailPage({
             <TabsTrigger value="settings">Settings</TabsTrigger>
           </TabsList>
 
+          <TabsContent value="plans" className="mt-4"><PlanDrafts projectId={id} /></TabsContent>
           <TabsContent value="requirements" className="mt-4">
             <RequirementsTab
               projectId={id}

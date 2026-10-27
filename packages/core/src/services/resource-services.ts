@@ -1,3 +1,4 @@
+import { preflightPlan } from "./plan-preflight";
 import { capabilityOperationEvidence } from "./capability-evidence";
 import { capabilityDigest } from "./capability-digest";
 import { requireExecutionSynchronization } from "./execution-synchronization";
@@ -11,11 +12,11 @@ import { inArray, and, eq, isNull, sql, desc } from "drizzle-orm";
 import {
   startDatabasePhase, apiKeyProjectCreations, apiKeys, projectPreferences, type Database, daemons, requirementClaims, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
   mcpServers, mcpTools, mcpLocalRequests, requirementRepositories, skillPackages, skillPackageVersions, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
-  documentRequirementLinks, projectMemberships, activityLog, executionDelegations, taskComments, workflowOutputs,
+  documentRequirementLinks, projectMemberships, activityLog, executionDelegations, taskComments, workflowOutputs, planDrafts,
 } from "@task-weaver/db";
 import {
   AuthenticationError, AuthorizationError, NotFoundError, ValidationError, type Actor,
-  type VerifiedRequestContext, stableActorReferenceSchema, credentialGrantsSchema,
+  type VerifiedRequestContext, stableActorReferenceSchema, credentialGrantsSchema, stagedPlanSchema,
 } from "@task-weaver/contracts";
 import * as projectImplementation from "./projects";
 import * as requirementImplementation from "./requirements";
@@ -139,6 +140,9 @@ function bindServices(context?: VerifiedRequestContext) {
           call[0] = txDb;
           await authorizeOperation(txDb, authority, group, name, call, context);
           if (group === "plan" && name === "applyPlan") call[3] = createResourceServices(context);
+          if (group === "plan" && name === "validatePlanDraft") call[4] = createResourceServices(context);
+          if (group === "plan" && name === "applyPlanDraft") call[6] = createResourceServices(context);
+          if (group === "plan" && name === "getPlanDraftReceipt") call[3] = createResourceServices(context);
           const removedDocumentLink = name === "unlinkDocumentFromTask"
             ? await tx.query.documentTaskLinks.findFirst({ where: eq(documentTaskLinks.id, call[1]) })
             : name === "unlinkDocumentFromRequirement"
@@ -198,6 +202,9 @@ function bindServices(context?: VerifiedRequestContext) {
               await requireResource(txDb, authority, "memory", result.id, "resource.write");
               await checkMemoryEntity(txDb, authority, result);
             }
+          }
+          if (group === "plan" && (name === "getPlanDraft" || name === "planDraftCapabilities")) {
+            result = { ...result, canWrite: canAccessResource(authority, { projectId: call[1] }, "resource.write") };
           }
           await invalidatePlanningExecutions(txDb, impact, name, previousClaims);
           if (group === "requirement" && result?.id && impact.includes(result.id)) {
@@ -361,8 +368,17 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
   if (group === "usage" || group === "review" || group === "ti" || group === "activity" || group === "schedule" || group === "observability" || group === "metrics" || group === "progress" || group === "daemon") return authorizeMetadataOperation(db, authority, group, name, call);
   const id = call[1];
   if (group === "plan") {
-    if (name !== "applyPlan" || authority.bounds) throw new AuthorizationError();
-    await requireResource(db, authority, "project", call[1].plan.projectId, "resource.write");
+    if (authority.bounds) throw new AuthorizationError();
+    const projectId = name === "applyPlan" || name === "createPlanDraft" ? call[1]?.plan?.projectId
+      : name === "updatePlanDraft" ? call[2]?.projectId
+      : ["getPlanDraft", "listPlanDrafts", "discardPlanDraft", "validatePlanDraft", "applyPlanDraft", "planDraftCapabilities", "getPlanDraftReceipt"].includes(name) ? call[1] : undefined;
+    if (!projectId) throw new AuthorizationError();
+    await requireResource(db, authority, "project", projectId, ["getPlanDraft", "listPlanDrafts", "planDraftCapabilities", "getPlanDraftReceipt"].includes(name) ? "resource.read" : "resource.write");
+    if (name === "applyPlanDraft") {
+      const [draft] = await db.select().from(planDrafts).where(and(eq(planDrafts.id, call[2]), eq(planDrafts.projectId, projectId)));
+      if (!draft) throw new NotFoundError("Plan draft not found");
+      await preflightPlan(db, authority, stagedPlanSchema.parse(draft.plan));
+    }
     return;
   }
   if (group === "repository") {

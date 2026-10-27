@@ -84,6 +84,7 @@ export const mcpServerCatalog = [
   tool("tw_execution_slices_create", "Create a requirement slice with guarded task assignment.", z.object({ id, input: mcpSliceCreateSchema }).strict()),
   tool("tw_execution_slices_update", "Update a slice using expectedUpdatedAt for concurrent change detection.", z.object({ id, expectedUpdatedAt: z.string().datetime(), patch: mcpSliceUpdateSchema }).strict()),
   tool("tw_plan_validate", "Validate and preview a project plan without writes; checks write authority.", mcpPlanValidateSchema),
+  tool("tw_plan_stage", "Save a draft plan for review in the Web interface; does not create or schedule tasks.", mcpPlanValidateSchema),
   tool("tw_plan_apply", "Atomically apply a bounded project plan; retry with the same key and identical plan.", mcpPlanApplySchema),
   tool("tw_tasks_context", "Read selected bounded task context sections; reports truncation and non-snapshot freshness.", mcpAggregateContextSchema),
   tool("tw_requirements_context", "Read selected bounded requirement context sections; reports truncation and non-snapshot freshness.", mcpAggregateContextSchema),

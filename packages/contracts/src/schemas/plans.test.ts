@@ -57,3 +57,12 @@ test("plan schema requires creation fields for new entities", () => {
     assert.ok(errors.requirements);
   }
 });
+
+test("staging enforces bounds and does not schedule newly created work", async () => {
+  const { stagedPlanSchema } = await import("./plans");
+  const projectId = "00000000-0000-4000-8000-000000000001";
+  assert.equal(stagedPlanSchema.safeParse({ projectId, requirements: [{ key: "r", title: "R", status: "approved" }] }).success, false);
+  assert.equal(stagedPlanSchema.safeParse({ projectId, requirements: [{ key: "r", title: "R", tasks: [{ key: "t", title: "T", status: "in_progress" }] }] }).success, false);
+  assert.equal(stagedPlanSchema.safeParse({ projectId, documents: [{ key: "d", title: "D", content: "x".repeat(1024 * 1024) }] }).success, false);
+  assert.equal(stagedPlanSchema.safeParse({ projectId, requirements: [{ key: "r", title: "R", tasks: Array.from({ length: 201 }, (_, i) => ({ key: `t${i}`, title: "T" })) }] }).success, false);
+});
