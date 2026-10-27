@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { readTextPreview } from "@/lib/text-attachment-preview";
 
-export function TextAttachmentPreview({ src, filename, maximumBytes = 1024 * 1024 }: { src: string; filename: string; maximumBytes?: number }) {
+export function TextAttachmentPreview({ src, filename, maximumBytes = 1024 * 1024, sampled = false }: { src: string; filename: string; maximumBytes?: number; sampled?: boolean }) {
   const [preview, setPreview] = useState<{ text: string; truncated: boolean } | null>(null);
   const [error, setError] = useState(false);
   useEffect(() => {
@@ -11,13 +11,13 @@ export function TextAttachmentPreview({ src, filename, maximumBytes = 1024 * 102
     async function load() {
       try {
         const response = await fetch(src, { credentials: "same-origin", redirect: "error", signal: controller.signal });
-        const result = await readTextPreview(response, maximumBytes);
+        const result = await readTextPreview(response, maximumBytes, sampled);
         if (!controller.signal.aborted) setPreview(result);
       } catch { if (!controller.signal.aborted) setError(true); }
     }
     void load();
     return () => controller.abort();
-  }, [src, maximumBytes]);
+  }, [src, maximumBytes, sampled]);
   if (error) return <p role="alert">Text preview unavailable. Download the original to open it locally.</p>;
   if (!preview) return <p role="status">Loading text preview...</p>;
   return <div>

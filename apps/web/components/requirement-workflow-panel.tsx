@@ -176,7 +176,7 @@ function EvidenceMetadata({ requirementId, outputId }: { requirementId: string; 
 
 function LocalEvidencePreview({ preview }: { preview: { url: string; kind: string; filename: string; truncated: boolean } }) {
   return <div className="space-y-2">{preview.truncated && <p>Preview is truncated; download the original for the complete file.</p>}
-    {preview.kind === 'text' && <TextAttachmentPreview src={preview.url} filename={preview.filename} maximumBytes={256 * 1024} />}
+    {preview.kind === 'text' && <TextAttachmentPreview src={preview.url} filename={preview.filename} maximumBytes={256 * 1024} sampled={preview.truncated} />}
     {(preview.kind === 'csv' || preview.kind === 'tsv') && <EvidenceTablePreview src={preview.url} filename={preview.filename} sizeBytes={preview.truncated ? 256 * 1024 + 1 : 0} delimiter={preview.kind === 'csv' ? ',' : '\t'} />}
     {preview.kind === 'pdf' && <PdfAttachmentPreview src={preview.url} filename={preview.filename} />}
     {preview.kind === 'audio' && <audio controls preload="metadata" src={preview.url}>Audio preview is not supported by this browser.</audio>}

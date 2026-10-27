@@ -19,3 +19,10 @@ test("text preview bounds bytes and cancels the remaining transfer", async () =>
   assert.equal(cancelled, true);
   await assert.rejects(readTextPreview(new Response(null, { status: 401 })), /unavailable/);
 });
+
+test("text preview rejects binary or invalid UTF-8 and trims a split sample", async () => {
+  await assert.rejects(readTextPreview(new Response(new Uint8Array([0xff]))));
+  await assert.rejects(readTextPreview(new Response(new Uint8Array([0x61, 0, 0x62]))));
+  assert.deepEqual(await readTextPreview(new Response(new TextEncoder().encode("a你好")), 3), { text: "a", truncated: true });
+  assert.deepEqual(await readTextPreview(new Response(new Uint8Array([0x61, 0xe4, 0xbd])), 3, true), { text: "a", truncated: true });
+});
