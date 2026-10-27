@@ -5,7 +5,8 @@ import { evidenceRegistrationPayload, evidenceDemandPayload } from "@task-weaver
 import { eq } from "drizzle-orm";
 import { createDb, runMigrations, tasks, daemons } from "@task-weaver/db";
 import { resolve, join } from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createApiApplication } from "./application";
@@ -136,6 +137,14 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   const storageDir = await mkdtemp(join(tmpdir(), "tw-promotion-"));
   const previousStorage = process.env.TW_ATTACHMENT_STORAGE_DIR; process.env.TW_ATTACHMENT_STORAGE_DIR = storageDir;
   t.after(async () => { if (previousStorage === undefined) delete process.env.TW_ATTACHMENT_STORAGE_DIR; else process.env.TW_ATTACHMENT_STORAGE_DIR = previousStorage; await rm(storageDir, { recursive: true, force: true }); });
+  const { createAttachmentService } = await import("@task-weaver/core");
+  const previousLimit = process.env.TW_ATTACHMENT_MAX_BYTES; process.env.TW_ATTACHMENT_MAX_BYTES = "1";
+  try {
+    await assert.rejects(createAttachmentService(fixture.owner.context).promoteEvidence(db, boundRequirement.id, boundOutput.id, Readable.from([content])));
+    const remaining = await readdir(storageDir, { recursive: true, withFileTypes: true });
+    assert.equal(remaining.some(entry => entry.isFile()), false);
+    assert.equal((await json(await api(`/requirements/${boundRequirement.id}/workflow-outputs/${boundOutput.id}/evidence`))).kind, "local");
+  } finally { if (previousLimit === undefined) delete process.env.TW_ATTACHMENT_MAX_BYTES; else process.env.TW_ATTACHMENT_MAX_BYTES = previousLimit; }
   const transport = createApiApplication({ db, databaseUrl: databaseUrl!, env: { TW_AUTH_SECRET: fixture.configuration.secret, TW_AUTH_BASE_URL: fixture.configuration.baseURL, TW_AUTH_TRUSTED_ORIGINS: fixture.configuration.trustedOrigins[0], TW_PRESET_SKILLS_SYNC: "disabled", TW_EVIDENCE_READ_ENABLED: "true" } });
   t.after(() => transport.stop());
   const evidenceApi = (path: string, method = "GET", body?: unknown, headers = fixture.owner.headers) => transport.app.request(`/api/v1/evidence${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
