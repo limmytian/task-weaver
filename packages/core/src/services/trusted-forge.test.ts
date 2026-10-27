@@ -26,6 +26,25 @@ test("trusted forge response size is bounded while streaming", async () => {
   await assert.rejects(readTrustedPullRequest(repository, payload.html_url, { fetch: async () => response() }), /exceeds the supported size/);
   assert.equal(cancelled, true); assert.ok(pulled <= 3);
 });
+test("Git evidence resolves the base once and fetches pinned commits after branch movement", async () => {
+  const { pinTrustedGitComparison, readTrustedGitComparison } = await import("./trusted-forge");
+  const base = "a".repeat(40), head = "b".repeat(40), mergeBase = "c".repeat(40);
+  let tip = base; const paths: string[] = [];
+  const fetcher: typeof fetch = async url => {
+    paths.push(String(url));
+    if (String(url).endsWith("/branches/main")) return Response.json({ name: "main", commit: { sha: tip } });
+    assert.ok(String(url).endsWith(`/compare/${base}...${head}`));
+    return Response.json({ base_commit: { sha: base }, merge_base_commit: { sha: mergeBase }, files: [{ filename: "新.txt", previous_filename: "old.txt", status: "renamed", patch: "+content" }, { filename: "asset.bin", status: "modified" }] });
+  };
+  const pinned = await pinTrustedGitComparison(repository, "main", head, { fetch: fetcher });
+  tip = "d".repeat(40);
+  const result = await readTrustedGitComparison(repository, pinned, { fetch: fetcher });
+  assert.equal(result.baseCommit, base); assert.equal(result.comparisonCommit, mergeBase);
+  assert.equal(result.files[0]?.previousPath, "old.txt"); assert.equal(result.files[1]?.patchState, "unavailable");
+  assert.equal(paths.filter(path => path.endsWith("/branches/main")).length, 1);
+  await assert.rejects(readTrustedGitComparison(repository, { ...pinned, comparisonCommit: "e".repeat(40) }, { fetch: fetcher }), /identity changed/);
+  await assert.rejects(pinTrustedGitComparison(repository, "main", "--upload-pack=evil", { fetch: fetcher }));
+});
 test("Gitea uses only its configured trusted API origin", async () => {
   const repo = { ...repository, host: "forge.example", provider: "gitea" };
   const url = "https://forge.example/acme/app/pulls/12";

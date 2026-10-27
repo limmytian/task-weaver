@@ -99,6 +99,46 @@ export async function readTrustedPullRequest(repository: ForgeRepositoryIdentity
     mergedAt: row.merged_at, observedAt: new Date(), source: apiUrl };
 }
 
+const fullObjectId = z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);
+const comparisonSchema = z.object({
+  base_commit: z.object({ sha: fullObjectId }), merge_base_commit: z.object({ sha: fullObjectId }),
+  files: z.array(z.object({ filename: z.string().min(1).max(4096), previous_filename: z.string().max(4096).optional(), status: z.string().max(32), patch: z.string().optional() })).max(300),
+});
+
+/** Resolve a configured branch once, then compare only complete immutable object IDs. */
+export async function pinTrustedGitComparison(repository: ForgeRepositoryIdentity, baseBranch: string, headCommit: string, options: ForgeReadOptions = {}) {
+  if (repository.provider !== "github" && repository.host !== "github.com") throw new ValidationError("This forge does not support Git evidence comparisons");
+  const head = fullObjectId.parse(headCommit);
+  if (!baseBranch || baseBranch.length > 255) throw new ValidationError("Invalid configured base branch");
+  const branchResult = await trustedForgeRequest(repository, "github", `branches/${encodeURIComponent(baseBranch)}`, options);
+  const branch = z.object({ name: z.literal(baseBranch), commit: z.object({ sha: fullObjectId }) }).safeParse(branchResult.data);
+  if (!branch.success) throw new ValidationError("Trusted forge returned an invalid base branch");
+  const base = branch.data.commit.sha;
+  const result = await trustedForgeRequest(repository, "github", `compare/${base}...${head}`, options);
+  const comparison = comparisonSchema.safeParse(result.data);
+  if (!comparison.success || comparison.data.base_commit.sha !== base) throw new ValidationError("Trusted forge returned an invalid comparison");
+  return { baseCommit: base, headCommit: head, comparisonCommit: comparison.data.merge_base_commit.sha, mode: "merge-base" as const };
+}
+
+/** Every fetch is bound to already-pinned OIDs; no caller-supplied remote is accepted. */
+export async function readTrustedGitComparison(repository: ForgeRepositoryIdentity, comparison: { baseCommit: string; headCommit: string; comparisonCommit: string; mode: "merge-base" }, options: ForgeReadOptions = {}) {
+  if (repository.provider !== "github" && repository.host !== "github.com") throw new ValidationError("This forge does not support Git evidence comparisons");
+  if (comparison.mode !== "merge-base") throw new ValidationError("Invalid comparison mode");
+  const base = fullObjectId.parse(comparison.baseCommit), head = fullObjectId.parse(comparison.headCommit), mergeBase = fullObjectId.parse(comparison.comparisonCommit);
+  const result = await trustedForgeRequest(repository, "github", `compare/${base}...${head}`, options);
+  const parsed = comparisonSchema.safeParse(result.data);
+  if (!parsed.success || parsed.data.base_commit.sha !== base || parsed.data.merge_base_commit.sha !== mergeBase) throw new ValidationError("Pinned Git comparison identity changed");
+  let remaining = 1024 * 1024; let truncated = parsed.data.files.length > 200;
+  const files = parsed.data.files.slice(0, 200).map(file => {
+    if (file.patch === undefined) return { path: file.filename, previousPath: file.previous_filename, status: file.status, patch: null, patchState: "unavailable" as const };
+    const bytes = Buffer.from(file.patch, "utf8");
+    if (bytes.length > remaining) { truncated = true; return { path: file.filename, previousPath: file.previous_filename, status: file.status, patch: null, patchState: "too_large" as const }; }
+    remaining -= bytes.length;
+    return { path: file.filename, previousPath: file.previous_filename, status: file.status, patch: file.patch, patchState: "available" as const };
+  });
+  return { ...comparison, files, truncated };
+}
+
 /** Verify a direct integration against the server-observed target branch. */
 export async function readTrustedDirectMerge(repository: ForgeRepositoryIdentity, baseBranch: string, commit: string, options: ForgeReadOptions = {}) {
   const provider = repository.provider === "github" || repository.host === "github.com" ? "github" : repository.provider;
