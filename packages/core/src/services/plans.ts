@@ -648,7 +648,7 @@ function assertNoDuplicatePlanEdges(live: Array<{ from: string; to: string; type
   const seen = new Set(live.map(edge => JSON.stringify([edge.from, edge.to, edge.type])));
   for (const edge of proposed) {
     const key = JSON.stringify([edge.from, edge.to, edge.type]);
-    if (seen.has(key)) throw new ValidationError(`Duplicate ${kind} dependency`);
+    if (seen.has(key)) throw new ValidationError(`Duplicate ${kind} dependency: ${edge.from} → ${edge.to}`);
     seen.add(key);
   }
 }

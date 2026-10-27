@@ -26,7 +26,7 @@ export const planRouter = router({
       return { ok: true as const, ...value };
     } catch (error) {
       if (error instanceof ValidationError) {
-        const safe = /^(Plan (?:task|requirement) dependencies contain a cycle|Duplicate (?:task|requirement|document|slice) key|Unknown (?:task|requirement|document|slice) reference|Slice |Task .* assigned to multiple slices|A referenced requirement or task is cancelled or archived)/.test(error.message);
+        const safe = /^(Plan (?:task|requirement) dependencies contain a cycle|Duplicate (?:task|requirement|document|slice) key|Duplicate (?:task|requirement) dependency|Unknown (?:task|requirement|document|slice) reference|Slice |Task .* assigned to multiple slices|A referenced requirement or task is cancelled or archived)/.test(error.message);
         return { ok: false as const, diagnostic: safe ? error.message : "Plan validation failed. Check references, permissions and assignments." };
       }
       throw error;
