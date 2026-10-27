@@ -55,3 +55,18 @@ test('concurrent directory-to-symlink replacement cannot escape the evidence roo
   }
   await swaps;
 });
+
+test('verified evidence streams a multi-chunk artifact with its complete digest', { skip: process.platform !== 'linux' }, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'tw-evidence-size-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const bytes = Buffer.alloc(8 * 1024 * 1024, 0x5a);
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  await writeFile(join(root, 'large.bin'), bytes);
+  const started = performance.now();
+  const evidence = await openVerifiedEvidence(root, { relativePath: 'large.bin', sizeBytes: bytes.length, sha256 });
+  const hash = createHash('sha256'); let received = 0;
+  try { for await (const chunk of evidence.createReadStream()) { received += chunk.length; hash.update(chunk); } }
+  finally { await evidence.close(); }
+  assert.equal(received, bytes.length); assert.equal(hash.digest('hex'), sha256);
+  console.log(`Verified local evidence: ${received} bytes, ${Math.round(performance.now() - started)} ms`);
+});
