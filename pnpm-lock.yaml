@@ -139,6 +139,12 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.3)
+      '@lezer/highlight':
+        specifier: ^1.2.3
+        version: 1.2.3
+      '@lezer/javascript':
+        specifier: ^1.5.4
+        version: 1.5.4
       '@tailwindcss/typography':
         specifier: ^0.5.19
         version: 0.5.19(tailwindcss@4.2.1)

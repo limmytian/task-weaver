@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BASIC_WORKFLOW, requirementWorkflowSchema, evidencePreviewKind, type RequirementWorkflow } from "@task-weaver/contracts";
 import { readEvidencePreview } from "@/lib/evidence-preview-transfer";
+import { highlightGitDiffLine } from "@/lib/git-diff-highlight";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -194,14 +195,14 @@ function GitEvidence({ requirementId, outputId, headCommit }: { requirementId: s
   return <div className="space-y-2"><p className="break-all">Head commit: {headCommit}</p><Button size="sm" variant="outline" disabled={comparison.isPending} onClick={() => { setSelected(null); comparison.mutate({ requirementId, outputId }); }}>Open Git comparison</Button>
     {comparison.isPending && <p>Opening comparison…</p>}{comparison.error && <p role="alert">Git comparison is unavailable or access is denied.</p>}
     {comparison.data && <><p className="break-all">Base: {comparison.data.baseCommit}</p><p className="break-all">Merge base: {comparison.data.comparisonCommit}</p><p>Comparison mode: merge base to head</p>{comparison.data.truncated && <p role="status">The comparison exceeds the display limit; some changes are omitted.</p>}
-      <div className="grid gap-3 md:grid-cols-3"><ul className="max-h-96 space-y-1 overflow-auto">{comparison.data.files.map((entry, index) => <li key={`${entry.path}-${index}`}><Button size="sm" variant={selected === index ? "secondary" : "ghost"} className="h-auto max-w-full justify-start whitespace-normal break-all text-left" onClick={() => setSelected(index)}>{entry.status}: {entry.previousPath ? `${entry.previousPath} → ` : ""}{entry.path}</Button></li>)}</ul><div className="min-w-0 md:col-span-2">{file.isFetching && <p>Loading file…</p>}{file.error && <p role="alert">File is unavailable or access is denied.</p>}{!file.isFetching && !file.error && file.data && <><p className="break-all">{file.data.path}</p>{file.data.patchState === "available" ? <GitPatch patch={file.data.patch ?? ""} /> : <p>Diff unavailable for this file ({file.data.patchState}).</p>}</>}</div></div>
+      <div className="grid gap-3 md:grid-cols-3"><ul className="max-h-96 space-y-1 overflow-auto">{comparison.data.files.map((entry, index) => <li key={`${entry.path}-${index}`}><Button size="sm" variant={selected === index ? "secondary" : "ghost"} className="h-auto max-w-full justify-start whitespace-normal break-all text-left" onClick={() => setSelected(index)}>{entry.status}: {entry.previousPath ? `${entry.previousPath} → ` : ""}{entry.path}</Button></li>)}</ul><div className="min-w-0 md:col-span-2">{file.isFetching && <p>Loading file…</p>}{file.error && <p role="alert">File is unavailable or access is denied.</p>}{!file.isFetching && !file.error && file.data && <><p className="break-all">{file.data.path}</p>{file.data.patchState === "available" ? <GitPatch path={file.data.path} patch={file.data.patch ?? ""} /> : <p>Diff unavailable for this file ({file.data.patchState}).</p>}</>}</div></div>
     </>}
   </div>;
 }
 
-function GitPatch({ patch }: { patch: string }) {
+function GitPatch({ path, patch }: { path: string; patch: string }) {
   const lines = patch.split("\n");
-  return <><pre className="max-h-96 overflow-auto whitespace-pre text-xs">{lines.slice(0, 2000).map((line, index) => <span className={`block ${line.startsWith("+") ? "text-green-700 dark:text-green-400" : line.startsWith("-") ? "text-red-700 dark:text-red-400" : line.startsWith("@@") ? "text-blue-700 dark:text-blue-400" : ""}`} key={index}>{line || " "}</span>)}</pre>{lines.length > 2000 && <p role="status">Diff display is limited to the first 2,000 lines.</p>}</>;
+  return <><pre className="max-h-96 overflow-auto whitespace-pre text-xs">{lines.slice(0, 2000).map((line, index) => <span className={`block ${line.startsWith("+") ? "bg-green-100 text-green-800 dark:bg-green-950/40 dark:text-green-200" : line.startsWith("-") ? "bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-200" : line.startsWith("@@") ? "text-blue-700 dark:text-blue-400" : ""}`} key={index}>{line ? highlightGitDiffLine(path, line).map((span, i) => <span className={span.className} key={i}>{span.text}</span>) : " "}</span>)}</pre>{lines.length > 2000 && <p role="status">Diff display is limited to the first 2,000 lines.</p>}</>;
 }
 
 function PinnedAttachmentEvidence({ file }: { file: { documentId: string; fileVersion: number; originalFilename: string; mimeType: string; sizeBytes: number; sha256: string } }) {
