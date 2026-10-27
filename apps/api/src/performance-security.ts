@@ -8,6 +8,7 @@ const input = new URL(process.env.TW_PERFORMANCE_DATABASE_URL!);
 assert.equal(input.hostname, "127.0.0.1"); assert.equal(input.pathname, "/tw_performance");
 const db = createDb(input.href, { maxConnections: 1 });
 const suites = [
+  { database: "tw_update_reason_e2e", variable: "TW_UPDATE_REASON_E2E_DATABASE_URL", file: "update-reason" },
   { database: "tw_auth_e2e", variable: "TW_AUTH_E2E_DATABASE_URL", file: "authentication" },
   { database: "tw_console_e2e", variable: "TW_CONSOLE_E2E_DATABASE_URL", file: "worker-console" },
   { database: "tw_execution_recovery_e2e", variable: "TW_EXECUTION_RECOVERY_E2E_DATABASE_URL", file: "execution-recovery" },

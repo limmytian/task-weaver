@@ -429,7 +429,7 @@ export async function updateTask(
 ) {
   const task = await getTask(db, id);
 
-  const { expectedVersion, ...fields } = input;
+  const { expectedVersion, reason, ...fields } = input;
   if (task.scope === "personal" && (fields.requirementId || fields.executionSliceId)) {
     throw new ValidationError("Personal tasks cannot be moved into a requirement or execution slice");
   }
@@ -482,7 +482,7 @@ export async function updateTask(
     action: "updated",
     actorId: actor.id,
     actorType: actor.type,
-    metadata: { changes: fields },
+    metadata: { changes: fields, ...(reason !== undefined ? { reason } : {}) },
   });
 
   await emitDurable(db, { type: "task_updated", projectId: updated!.projectId, taskId: id });

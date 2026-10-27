@@ -53,6 +53,7 @@ export const createRequirementSchema = z.object({
 
 export const updateRequirementSchema = z.object({
   title: z.string().min(1).max(500).optional(),
+  reason: z.string().trim().min(1).max(2000).optional().describe("Audit reason for this update; not an entity field or execution input"),
   description: z.string().optional(),
   status: requirementStatusSchema.optional(),
   priority: requirementPrioritySchema.optional(),

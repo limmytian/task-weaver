@@ -373,6 +373,10 @@ PATCH /api/v1/tasks/:id
 
 All fields optional. Set `assignee`, `assigneeType`, `expectedAt` to `null` to clear. `requirementId` can be changed but not nullified.
 
+Optional `reason` is trimmed, must contain 1–2000 characters, and is saved as `metadata.reason` on the update activity record. It is not an entity field and is not echoed in the updated entity. Omitting it preserves the existing update behavior.
+
+CLI: `tw task update <id> --title "Revised title" --reason "Review feedback"`. For status transitions, use `tw task status <id> <status> --reason "Starting work"`; task field updates do not accept `--status`.
+
 ### Change Task Status
 
 ```
@@ -712,6 +716,10 @@ PATCH /api/v1/requirements/:id
 ```
 
 All fields optional. `modelTier` controls daemon scheduling for this requirement lane and accepts `fast`, `standard`, or `strong`. `workflowPreset` or `workflow` can replace the resolved workflow only while the requirement is draft or approved and all tasks are unstarted.
+
+Optional `reason` is trimmed, must contain 1–2000 characters, and is saved as `metadata.reason` on the update activity record. It is not an entity field and is not echoed in the updated entity. Omitting it preserves the existing update behavior.
+
+CLI: `tw req update <id> --status approved --reason "Owner approved scope"`. A reason never bypasses workflow, lease, authorization or evidence-review guards.
 
 ### Workflow Outputs and Stage Decisions
 

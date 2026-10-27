@@ -536,7 +536,7 @@ export async function updateRequirement(
   actor: Actor,
 ) {
   const existing = await getRequirementOrThrow(db, id);
-  const { leaseGeneration, daemonId, runId, workflow, workflowPreset, ...fields } = input;
+  const { leaseGeneration, daemonId, runId, workflow, workflowPreset, reason, ...fields } = input;
 
   if ((input.status && !["draft", "approved", "in_progress", "cancelled", "archived"].includes(input.status)) || leaseGeneration !== undefined || daemonId !== undefined) {
     await assertRequirementLease(db, id, actor, { leaseGeneration, daemonId, runId });
@@ -605,6 +605,7 @@ export async function updateRequirement(
     actorId: actor.id,
     actorType: actor.type,
     metadata: {
+      ...(reason !== undefined ? { reason } : {}),
       changes: { ...fields, ...workflowChanges },
       previous: {
         title: existing.title,

@@ -191,9 +191,11 @@ export function registerTasks(program: Command): void {
     .addOption(new Option('--requested-pi-provider <provider>').hideHelp())
     .addOption(new Option('--requested-pi-model <model>').hideHelp())
     .option('--branch-name <name>', 'git branch name for this task')
+    .option('--reason <text>', 'audit reason for this update (1-2000 characters)')
     .option('--json', 'output raw JSON')
     .action(async (id, opts) => {
       const body: Record<string, unknown> = {}
+      if (opts.reason !== undefined) body.reason = opts.reason
       if (opts.title) body.title = opts.title
       if (opts.description) body.description = opts.description
       if (opts.slice) body.executionSliceId = opts.slice
