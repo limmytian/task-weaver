@@ -1,4 +1,4 @@
-import { bigint, index, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { actorTypeEnum } from "./enums";
 import { requirements, executionSlices } from "./requirements";
 import { tasks } from "./tasks";
@@ -35,6 +35,18 @@ export const workflowOutputs = pgTable("workflow_outputs", {
   index("idx_workflow_outputs_requirement").on(table.requirementId, table.createdAt),
   index("idx_workflow_outputs_node").on(table.nodeId),
 ]);
+
+export const evidenceGitComparisons = pgTable("evidence_git_comparisons", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  outputId: uuid("output_id").references(() => workflowOutputs.id, { onDelete: "cascade" }).notNull(),
+  requirementId: uuid("requirement_id").references(() => requirements.id, { onDelete: "cascade" }).notNull(),
+  repositoryId: uuid("repository_id").notNull(),
+  repositoryKey: text("repository_key").notNull(),
+  baseCommit: text("base_commit").notNull(),
+  headCommit: text("head_commit").notNull(),
+  comparisonCommit: text("comparison_commit").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("idx_evidence_git_comparisons_output").on(table.outputId), uniqueIndex("idx_evidence_git_comparison_identity").on(table.outputId, table.repositoryId, table.repositoryKey, table.baseCommit, table.headCommit, table.comparisonCommit)]);
 
 export const workflowInputs = pgTable("workflow_inputs", {
   id: uuid("id").primaryKey().defaultRandom(),

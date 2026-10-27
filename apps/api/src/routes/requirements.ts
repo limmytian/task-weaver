@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import {
   createResourceServices,
   createGitEvidenceService,
@@ -144,8 +145,13 @@ requirements.get("/requirements/:id/workflow-outputs/:outputId/evidence", async 
   return c.json(await createResourceServices(c.get("identity")).requirementService.describeWorkflowEvidence(c.get("db"), c.req.param("id"), c.req.param("outputId")));
 });
 
-requirements.get("/requirements/:id/workflow-outputs/:outputId/git-comparison", async c => {
+requirements.post("/requirements/:id/workflow-outputs/:outputId/git-comparison", async c => {
   return c.json(await createGitEvidenceService(c.get("identity")).compare(c.get("db"), c.req.param("id"), c.req.param("outputId")));
+});
+requirements.get("/requirements/:id/workflow-outputs/:outputId/git-comparison/file", async c => {
+  const input = z.object({ comparisonId: z.string().uuid(), path: z.string().min(1).max(4096) }).safeParse(c.req.query());
+  if (!input.success) return c.json({ error: "Invalid comparison file" }, 400);
+  return c.json(await createGitEvidenceService(c.get("identity")).file(c.get("db"), c.req.param("id"), c.req.param("outputId"), input.data.comparisonId, input.data.path));
 });
 
 requirements.get("/requirements/:id/workflow-outputs", async (c) => {

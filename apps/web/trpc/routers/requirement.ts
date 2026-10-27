@@ -25,6 +25,8 @@ export const requirementRouter = router({
     createResourceServices(ctx.identity).requirementService.describeWorkflowEvidence(ctx.db, input.requirementId, input.outputId)),
   compareGitEvidence: resourceProcedure.input(z.object({ requirementId: z.string().uuid(), outputId: z.string().uuid() })).mutation(({ ctx, input }) =>
     createGitEvidenceService(ctx.identity).compare(ctx.db, input.requirementId, input.outputId)),
+  gitEvidenceFile: resourceProcedure.input(z.object({ requirementId: z.string().uuid(), outputId: z.string().uuid(), comparisonId: z.string().uuid(), path: z.string().min(1).max(4096) })).query(({ ctx, input }) =>
+    createGitEvidenceService(ctx.identity).file(ctx.db, input.requirementId, input.outputId, input.comparisonId, input.path)),
   revalidateExecution: resourceProcedure.input(z.object({ requirementId: z.string().uuid(), data: executionRevalidationSchema }))
     .mutation(async ({ ctx, input }) => createExecutionControlService(ctx.identity).revalidate(ctx.db, input.requirementId, input.data.reason, input.data.expectedPlanRevision)),
   authorizeRecovery: resourceProcedure.input(z.object({ requirementId: z.string().uuid(), data: executionRecoveryDecisionSchema.required({ expectedControlUpdatedAt: true, expectedControlPhase: true }) }))

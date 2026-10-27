@@ -205,12 +205,23 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   const head = "b".repeat(40), base = "a".repeat(40), mergeBase = "c".repeat(40);
   const [gitOutput] = await db.insert(workflowOutputs).values({ requirementId: boundRequirement.id, requirementRepositoryId: gitLink!.id, type: "git_branch", headCommit: head, createdBy: fixture.owner.context.actor.id, createdByType: "human" }).returning();
   const { createGitEvidenceService } = await import("@task-weaver/core");
-  const forgeFetch: typeof fetch = async url => String(url).endsWith("/branches/main") ? Response.json({ name: "main", commit: { sha: base } }) : Response.json({ base_commit: { sha: base }, merge_base_commit: { sha: mergeBase }, files: [{ filename: "src/example.ts", status: "modified", patch: "+example" }] });
+  let branchTip = base;
+  const forgeFetch: typeof fetch = async url => {
+    if (String(url).endsWith("/branches/main")) return Response.json({ name: "main", commit: { sha: branchTip } });
+    assert.ok(String(url).endsWith(`/compare/${base}...${head}`));
+    return Response.json({ base_commit: { sha: base }, merge_base_commit: { sha: mergeBase }, files: [{ filename: "src/example.ts", status: "modified", patch: "+example" }] });
+  };
   const comparison = await createGitEvidenceService(fixture.owner.context, { fetch: forgeFetch }).compare(db, boundRequirement.id, gitOutput!.id);
-  assert.equal(comparison.headCommit, head); assert.equal(comparison.files[0]?.patch, "+example");
+  assert.equal(comparison.headCommit, head); assert.equal("patch" in comparison.files[0]!, false);
+  assert.equal((await createGitEvidenceService(fixture.owner.context, { fetch: forgeFetch }).compare(db, boundRequirement.id, gitOutput!.id)).comparisonId, comparison.comparisonId);
+  branchTip = "d".repeat(40);
+  assert.equal((await createGitEvidenceService(fixture.owner.context, { fetch: forgeFetch }).file(db, boundRequirement.id, gitOutput!.id, comparison.comparisonId, "src/example.ts")).patch, "+example");
   await assert.rejects(createGitEvidenceService(fixture.outsider.context, { fetch: async () => { throw new Error("Unauthorized forge fetch"); } }).compare(db, boundRequirement.id, gitOutput!.id));
-  assert.notEqual((await api(`/requirements/${boundRequirement.id}/workflow-outputs/${gitOutput!.id}/git-comparison`, "GET", undefined, fixture.outsider.headers)).status, 200);
+  await assert.rejects(createGitEvidenceService(fixture.outsider.context, { fetch: async () => { throw new Error("Unauthorized forge fetch"); } }).file(db, boundRequirement.id, gitOutput!.id, comparison.comparisonId, "src/example.ts"));
+  assert.notEqual((await api(`/requirements/${boundRequirement.id}/workflow-outputs/${gitOutput!.id}/git-comparison`, "POST", {}, fixture.outsider.headers)).status, 200);
   await fixture.identity.setMembership(fixture.owner.headers, fixture.project.id, fixture.outsider.context.actor.id, { role: "viewer", explicitPermissions: [] });
+  branchTip = base;
+  assert.equal((await createGitEvidenceService(fixture.outsider.context, { fetch: forgeFetch }).file(db, boundRequirement.id, gitOutput!.id, comparison.comparisonId, "src/example.ts")).patch, "+example");
   let forgeRequests = 0;
   await assert.rejects(createGitEvidenceService(fixture.outsider.context, { fetch: async url => {
     forgeRequests++;
@@ -218,6 +229,12 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
     return forgeFetch(url);
   } }).compare(db, boundRequirement.id, gitOutput!.id));
   assert.equal(forgeRequests, 3);
+  await assert.rejects(createGitEvidenceService(fixture.outsider.context, { fetch: forgeFetch }).file(db, boundRequirement.id, gitOutput!.id, comparison.comparisonId, "src/example.ts"));
+  await fixture.identity.setMembership(fixture.owner.headers, fixture.project.id, fixture.outsider.context.actor.id, { role: "viewer", explicitPermissions: [] });
+  await assert.rejects(createGitEvidenceService(fixture.outsider.context, { fetch: async url => {
+    await fixture.identity.removeMembership(fixture.owner.headers, fixture.project.id, fixture.outsider.context.actor.id);
+    return forgeFetch(url);
+  } }).file(db, boundRequirement.id, gitOutput!.id, comparison.comparisonId, "src/example.ts"));
   const producer = await create({ workflowPreset: "local" });
   const local = await json(await api(`/requirements/${producer.id}/workflow-outputs`, "POST", { type: "local", nodeId: "node-a", relativePath: `${producer.id}/file.bin`, sizeBytes: 42, sha256: "a".repeat(64) }), 201);
   const evidence = await json(await api(`/requirements/${producer.id}/workflow-outputs/${local.id}/evidence`));
