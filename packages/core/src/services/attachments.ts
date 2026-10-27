@@ -14,6 +14,15 @@ export function publicAttachmentFile(row: FileVersion) {
   return attachmentFileMetadataSchema.parse(row);
 }
 
+/** Only the final filename is exposed; unknown or active formats stay download-only. */
+export function evidenceAttachmentMetadata(relativePath: string | null) {
+  const raw = relativePath?.split(/[\\/]/).at(-1) ?? "";
+  const filename = raw.replace(/[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]/g, "").slice(0, 255).replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "") || "evidence.bin";
+  const extension = filename.includes(".") ? filename.split(".").at(-1)!.toLowerCase() : "";
+  const types: Record<string, string> = { txt: "text/plain", md: "text/plain", log: "text/plain", csv: "text/csv", tsv: "text/tab-separated-values", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif", pdf: "application/pdf", mp3: "audio/mpeg", ogg: "audio/ogg", wav: "audio/wav", mp4: "video/mp4", webm: "video/webm" };
+  return { originalFilename: filename, mimeType: types[extension] ?? "application/octet-stream" };
+}
+
 /** Original content is never passed to document search or embedding services. */
 export function createAttachmentService(identity: VerifiedRequestContext) {
   async function authority(db: Database) {
@@ -86,7 +95,7 @@ export function createAttachmentService(identity: VerifiedRequestContext) {
             return { documentId: output.promotedDocumentId, fileVersionId: output.attachmentFileVersionId, replayed: true, projectId: requirement.projectId };
           }
           const [doc] = await tx.insert(documents).values({ projectId: requirement.projectId, form: "attachment", title: `Evidence ${output.id}`, content: "", docType: "other", readingTimeMin: null, createdBy: current.actor.id }).returning();
-          const [file] = await tx.insert(documentFileVersions).values({ documentId: doc!.id, version: 1, originalFilename: "evidence.bin", mimeType: "application/octet-stream", sizeBytes: object.sizeBytes, sha256: object.sha256, objectKey, storageBackend: object.backend, createdBy: current.actor.id, createdByType: current.actor.type }).returning();
+          const [file] = await tx.insert(documentFileVersions).values({ documentId: doc!.id, version: 1, ...evidenceAttachmentMetadata(output.relativePath), sizeBytes: object.sizeBytes, sha256: object.sha256, objectKey, storageBackend: object.backend, createdBy: current.actor.id, createdByType: current.actor.type }).returning();
           await tx.update(documents).set({ currentFileVersionId: file!.id }).where(eq(documents.id, doc!.id));
           await tx.insert(documentVersions).values({ documentId: doc!.id, version: 1, title: doc!.title, content: "", docType: doc!.docType, fileVersionId: file!.id, changeType: "created", changedBy: current.actor.id, changedByType: current.actor.type });
           await tx.update(workflowOutputs).set({ promotedDocumentId: doc!.id, attachmentFileVersionId: file!.id }).where(eq(workflowOutputs.id, output.id));

@@ -115,7 +115,7 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   const { createHash } = await import("node:crypto");
   const contentHash = createHash("sha256").update(content).digest("hex");
   const boundRequirement = await create({ workflowPreset: "local" });
-  const boundManifest = { requirementId: boundRequirement.id, nodeId: "bound-node", relativePath: `${boundRequirement.id}/bound`, sizeBytes: content.length, sha256: contentHash };
+  const boundManifest = { requirementId: boundRequirement.id, nodeId: "bound-node", relativePath: `${boundRequirement.id}/bound.txt`, sizeBytes: content.length, sha256: contentHash };
   const boundProof = sign(null, Buffer.from(evidenceRegistrationPayload(boundManifest)), pair.privateKey).toString("base64");
   const boundOutput = await json(await api(`/requirements/${boundRequirement.id}/workflow-outputs`, "POST", { type: "local", ...boundManifest, nodePublicKey, nodeRegistrationProof: boundProof }, agentHeaders), 201);
   const broker = new EvidenceSessionService(db); t.after(() => broker.close());
@@ -177,8 +177,11 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   await db.update(daemons).set({ status: "offline" }).where(eq(daemons.id, evidenceDaemon));
   const durableEvidence = await json(await api(`/requirements/${boundRequirement.id}/workflow-outputs/${boundOutput.id}/evidence`));
   assert.equal(durableEvidence.kind, "attachment"); assert.equal(durableEvidence.documentId, promoted[0].documentId);
+  assert.equal(durableEvidence.originalFilename, "bound.txt"); assert.equal(durableEvidence.mimeType, "text/plain");
   const savedEvidence = await api(`/documents/${durableEvidence.documentId}/file?fileVersion=${durableEvidence.fileVersion}`);
   assert.equal(savedEvidence.status, 200); assert.deepEqual(Buffer.from(await savedEvidence.arrayBuffer()), content);
+  const savedPreview = await api(`/documents/${durableEvidence.documentId}/file?fileVersion=${durableEvidence.fileVersion}&preview=true`);
+  assert.equal(savedPreview.headers.get("content-type"), "text/plain"); assert.deepEqual(Buffer.from(await savedPreview.arrayBuffer()), content);
   await db.update(daemons).set({ status: "idle" }).where(eq(daemons.id, evidenceDaemon));
   const failedSession = await json(await evidenceApi("/open", "POST", { requirementId: boundRequirement.id, outputId: boundOutput.id, purpose: "download" }), 201);
   const failedDemand = (await json(await evidenceApi(`/demands/${evidenceDaemon}`, "GET", undefined, agentHeaders))).items.find((item: { requestId: string }) => item.requestId === failedSession.requestId);
