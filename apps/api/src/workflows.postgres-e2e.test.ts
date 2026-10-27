@@ -4,11 +4,12 @@ import { randomUUID, generateKeyPairSync, sign } from "node:crypto";
 import { evidenceRegistrationPayload, evidenceDemandPayload } from "@task-weaver/contracts";
 import { eq } from "drizzle-orm";
 import { createDb, runMigrations, tasks, daemons, repositories, requirementRepositories, workflowOutputs } from "@task-weaver/db";
-import { resolve, join } from "node:path";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
-import { pathToFileURL } from "node:url";
+import { serve } from "@hono/node-server";
+import { EvidenceSessionService } from "@task-weaver/core";
 import { createApiApplication } from "./application";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 
@@ -108,7 +109,6 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   assert.equal((await api(`/requirements/${signedProducer.id}/workflow-outputs`, "POST", { ...signed, sha256: "c".repeat(64) })).status, 400);
   const signedOutput = await json(await api(`/requirements/${signedProducer.id}/workflow-outputs`, "POST", signed), 201);
   assert.equal(signedOutput.nodePublicKey, nodePublicKey);
-  const { EvidenceSessionService } = await import(pathToFileURL(resolve("../../packages/core/src/services/evidence-session.ts")).href);
   const evidenceDaemon = randomUUID();
   await json(await api("/daemons/register", "POST", { id: evidenceDaemon, name: "Evidence fixture", nodeId: "bound-node", capabilities: ["codex", "executor:codex", "live-plan-v1", "evidence-read-v1"], role: "executor" }, agentHeaders), 201);
   const content = Buffer.from("bound bytes");
@@ -160,6 +160,47 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   const download = await evidenceApi(`/${remote.requestId}/content`);
   assert.equal(download.status, 200); assert.equal(download.headers.get("x-content-type-options"), "nosniff");
   assert.deepEqual(Buffer.from(await download.arrayBuffer()), content);
+  if (process.platform === "linux" && process.env.TW_LINUX_NODE_E2E === "1") {
+    const coordinatorModule = process.env.TW_EVIDENCE_COORDINATOR_MODULE;
+    assert.ok(coordinatorModule, "Set TW_EVIDENCE_COORDINATOR_MODULE to the isolated Linux coordinator bundle");
+    const { createEvidenceCoordinator } = await import(coordinatorModule) as { createEvidenceCoordinator: (options: { daemonId: string; nodeId: string; root: string; get: (path: string, signal: AbortSignal) => Promise<{ items: unknown[] }>; post: (path: string, body: unknown, signal: AbortSignal) => Promise<unknown> }) => { close: () => void } };
+    const nodeRoot = await mkdtemp(join(tmpdir(), "tw-live-node-"));
+    const config = join(nodeRoot, "config"); const artifacts = join(nodeRoot, "artifacts");
+    const previousConfig = process.env.TW_CONFIG_DIR; process.env.TW_CONFIG_DIR = config;
+    t.after(async () => { if (previousConfig === undefined) delete process.env.TW_CONFIG_DIR; else process.env.TW_CONFIG_DIR = previousConfig; await rm(nodeRoot, { recursive: true, force: true }); });
+    const liveContent = Buffer.alloc(150 * 1024, 0x5a);
+    const liveRequirement = await create({ workflowPreset: "local" });
+    const liveManifest = { requirementId: liveRequirement.id, nodeId: "bound-node", relativePath: `${liveRequirement.id}/live.bin`, sizeBytes: liveContent.length, sha256: createHash("sha256").update(liveContent).digest("hex") };
+    const liveProof = sign(null, Buffer.from(evidenceRegistrationPayload(liveManifest)), pair.privateKey).toString("base64");
+    const liveOutput = await json(await api(`/requirements/${liveRequirement.id}/workflow-outputs`, "POST", { type: "local", ...liveManifest, nodePublicKey, nodeRegistrationProof: liveProof }, agentHeaders), 201);
+    await mkdir(config); await mkdir(join(artifacts, liveRequirement.id), { recursive: true });
+    await writeFile(join(config, "evidence-node-key.pem"), pair.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+    await writeFile(join(artifacts, liveManifest.relativePath), liveContent);
+    const server = serve({ hostname: "127.0.0.1", port: 0, fetch: transport.app.fetch });
+    t.after(() => { server.close(); });
+    await new Promise<void>(resolve => server.once("listening", resolve));
+    const address = server.address(); assert.ok(address && typeof address !== "string");
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const request = async (path: string, signal: AbortSignal, body?: unknown) => {
+      const response = await fetch(`${baseUrl}${path}`, { method: body === undefined ? "GET" : "POST", headers: agentHeaders, body: body === undefined ? undefined : JSON.stringify(body), signal });
+      if (!response.ok) throw new Error(`Fixture evidence HTTP ${response.status}`);
+      return response.json();
+    };
+    const started = performance.now();
+    const realRequest = await json(await evidenceApi("/open", "POST", { requirementId: liveRequirement.id, outputId: liveOutput.id, purpose: "preview" }), 201);
+    const coordinator = createEvidenceCoordinator({ daemonId: evidenceDaemon, nodeId: "bound-node", root: artifacts, get: (path, signal) => request(path, signal) as Promise<{ items: unknown[] }>, post: (path, body, signal) => request(path, signal, body) });
+    try {
+      const deadline = Date.now() + 15_000; let state = "pending";
+      while (Date.now() < deadline && state !== "verified") { await new Promise(resolve => setTimeout(resolve, 100)); state = (await json(await evidenceApi(`/${realRequest.requestId}/status`))).state; }
+      assert.equal(state, "verified");
+      assert.deepEqual(Buffer.from(await (await evidenceApi(`/${realRequest.requestId}/content`)).arrayBuffer()), liveContent);
+      console.log(`Linux node HTTP evidence: ${liveContent.length} bytes, ${Math.round(performance.now() - started)} ms`);
+    } finally {
+      coordinator.close(); await new Promise<void>(resolve => server.close(() => resolve()));
+      if (previousConfig === undefined) delete process.env.TW_CONFIG_DIR; else process.env.TW_CONFIG_DIR = previousConfig;
+      await rm(nodeRoot, { recursive: true, force: true });
+    }
+  }
   const previewRequest = await json(await evidenceApi("/open", "POST", { requirementId: boundRequirement.id, outputId: boundOutput.id, purpose: "preview" }), 201);
   const previewDemand = (await json(await evidenceApi(`/demands/${evidenceDaemon}`, "GET", undefined, agentHeaders))).items.find((item: { requestId: string }) => item.requestId === previewRequest.requestId);
   const previewProof = sign(null, Buffer.from(evidenceDemandPayload(previewDemand)), pair.privateKey).toString("base64");
