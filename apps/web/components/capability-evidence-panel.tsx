@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { CapabilityEvidenceView } from "@task-weaver/contracts";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,7 @@ export function CapabilityEvidenceViewContent({ data }: { data: CapabilityEviden
     {data.summary.length > 0 && <div className="overflow-x-auto"><table className="w-full text-left"><caption className="text-left text-muted-foreground">Reference groups by observed action/outcome, not call totals</caption><thead><tr><th>Action</th><th>Outcome</th><th>Visible references</th></tr></thead><tbody>{data.summary.map(row => <tr key={`${row.action}:${row.outcome}`}><td>{row.action}</td><td>{row.outcome}</td><td>{row.references}</td></tr>)}</tbody></table></div>}
     <p className="text-muted-foreground">These are unique per-run or per-credential asset/action/version/hash/outcome observations, not API-call totals or a measure of task quality. Nested success layers are combined. Current asset access is checked before pagination and counts.</p>
     <p className="text-muted-foreground">Coverage is incomplete. Missing, inaccessible, expired/revoked or unattributed references are not counted. Discovery coverage, task usefulness, context tokens and model cost remain unknown. A zero visible count does not prove no use.</p>
-    <p className="text-muted-foreground">Whole-process token reports, when available, remain in <a className="underline" href="/projects/usage">Usage</a>; they cannot be apportioned to individual capabilities here.</p>
+    <p className="text-muted-foreground">Whole-process token reports, when available, remain in <Link className="underline" href="/projects/usage">Usage</Link>; they cannot be apportioned to individual capabilities here.</p>
     {data.items.length === 0 ? <p>No currently visible references in this page/window.</p> : <ul className="space-y-3">{data.items.map(item => <li key={item.id} className="space-y-1 rounded border p-3">
       <p className="font-medium">{labels[item.kind]} · {item.action} · {item.outcome === "observed" ? "API response observed; task outcome unverified" : item.outcome === "error" ? "API error recorded" : "Outcome unknown"}</p>
       <p>{item.attribution === "run" ? "Attributed to a daemon run; this historical observation is not execution authority." : "Credential observation; no daemon run is inferred."}</p>

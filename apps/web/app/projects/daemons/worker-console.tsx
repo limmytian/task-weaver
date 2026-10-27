@@ -15,6 +15,7 @@ export function WorkerConsole({ target }: { target: ConsoleTarget }) {
   const [notice, setNotice] = useState('Only recent retained output is available. Silence does not mean the worker is stuck.');
   const tail = useRef<HTMLDivElement>(null);
   const epoch = useRef(0);
+  const { requirementId, taskId, runId, workerIndex, leaseGeneration } = target;
   useEffect(() => {
     if (!open) return;
     const current = ++epoch.current;
@@ -35,12 +36,12 @@ export function WorkerConsole({ target }: { target: ConsoleTarget }) {
     const stop = () => { if (closed) return; closed = true; if (timer) clearTimeout(timer); cancel(); };
     const hide = () => { if (document.visibilityState === 'hidden') { stop(); setOpen(false); setStatus('Closed while page hidden'); } };
     window.addEventListener('pagehide', stop); document.addEventListener('visibilitychange', hide);
-    setFrames([]); setStatus('Requesting recent output'); setNotice('Only recent retained output is available. Silence does not mean the worker is stuck.');
+    queueMicrotask(() => { if (!closed) { setFrames([]); setStatus('Requesting recent output'); setNotice('Only recent retained output is available. Silence does not mean the worker is stuck.'); } });
     const read = async () => {
       try {
         if (closed) return;
         if (!id) {
-          const result = await call('open', { ...target, follow }); id = result.id;
+          const result = await call('open', { requirementId, taskId, runId, workerIndex, leaseGeneration, follow }); id = result.id;
           if (closed) { cancel(); return; }
         }
         const result = await call(`${id!.split('.')[0]}/${id}/read`, { follow });
@@ -65,8 +66,7 @@ export function WorkerConsole({ target }: { target: ConsoleTarget }) {
     };
     void read();
     return () => { stop(); window.removeEventListener('pagehide', stop); document.removeEventListener('visibilitychange', hide); };
-  }, [open, follow, target.requirementId, target.taskId, target.runId, target.workerIndex, target.leaseGeneration]);
-  useEffect(() => { if (frames[0] && frames[0].sequence > 1) setNotice('Output prefix is missing or was dropped from the bounded display.'); }, [frames]);
+  }, [open, follow, requirementId, taskId, runId, workerIndex, leaseGeneration]);
   useEffect(() => { if (!paused) tail.current?.scrollIntoView({ block: 'nearest' }); }, [frames, paused]);
   const visible = visibleConsoleText(frames, filter);
   return <section className="mt-3 space-y-2 rounded border bg-background p-2 text-xs" aria-label="Worker console">
@@ -78,7 +78,7 @@ export function WorkerConsole({ target }: { target: ConsoleTarget }) {
       <Button size="sm" variant="ghost" disabled={!visible} onClick={() => { void navigator.clipboard.writeText(visible).catch(() => setStatus('Copy unavailable')); }}>Copy visible output</Button>
     </div>
     <p role="status">{status}</p>
-    <p className="text-muted-foreground">{notice}</p>
+    <p className="text-muted-foreground">{frames[0] && frames[0].sequence > 1 ? 'Output prefix is missing or was dropped from the bounded display.' : notice}</p>
     <p className="break-all text-muted-foreground">Run {target.runId} · follow ends after 15 minutes; reopen to continue. Pausing scrolling does not pause the worker.</p>
     {(open || frames.length > 0) && <div className="max-h-72 overflow-auto rounded bg-muted p-2"><ConsoleOutput text={visible} /><div ref={tail} /></div>}
   </section>;
