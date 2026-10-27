@@ -49,12 +49,23 @@ test('enforces per-node capacity and expires abandoned transfers', async () => {
 test('cancellation interrupts an active verified stream', async () => {
   const manager = new EvidenceTransferBuffer(async () => {});
   const request = await manager.open(reader, producer, manifest);
-  await manager.push(producer, { ...request, outputId: manifest.outputId, sequence: 0, bytes: content.subarray(0, 4) });
-  await manager.push(producer, { ...request, outputId: manifest.outputId, sequence: 1, bytes: content.subarray(4) });
-  await manager.finish(producer, { ...request, outputId: manifest.outputId, sequence: 2 });
-  const stream = manager.read(reader, request.requestId);
-  assert.equal((await stream.next()).value?.toString(), 'veri');
+  const large = Buffer.alloc(65537, 65);
   await manager.cancel(reader, request.requestId);
+  const largeManifest = { ...manifest, sizeBytes: large.length, sha256: createHash('sha256').update(large).digest('hex') };
+  const largeRequest = await manager.open(reader, producer, largeManifest);
+  await manager.push(producer, { ...largeRequest, outputId: manifest.outputId, sequence: 0, bytes: large.subarray(0, 65536) });
+  await manager.push(producer, { ...largeRequest, outputId: manifest.outputId, sequence: 1, bytes: large.subarray(65536) });
+  await manager.finish(producer, { ...largeRequest, outputId: manifest.outputId, sequence: 2 });
+  const stream = manager.read(reader, largeRequest.requestId);
+  assert.equal((await stream.next()).value?.length, 65536);
+  await manager.cancel(reader, largeRequest.requestId);
   await assert.rejects(stream.next(), /expired or cancelled/);
+  manager.close();
+});
+
+test('rejects fragmented uploads that could bypass memory bounds', async () => {
+  const manager = new EvidenceTransferBuffer(async () => {});
+  const request = await manager.open(reader, producer, manifest);
+  await assert.rejects(manager.push(producer, { ...request, outputId: manifest.outputId, sequence: 0, bytes: content.subarray(0, 1) }), /invalid/);
   manager.close();
 });

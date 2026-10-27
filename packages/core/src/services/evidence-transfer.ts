@@ -44,7 +44,7 @@ export class EvidenceTransferBuffer {
   }
   async push(producer: EvidenceProducer, input: { requestId: string; outputId: string; nonce: string; sequence: number; bytes: Uint8Array }) {
     const item = await this.current(input.requestId, 'producer', producer);
-    if (item.state !== 'pending' || item.manifest.outputId !== input.outputId || item.nonce !== input.nonce || input.sequence !== item.next || input.bytes.byteLength > evidenceLimits.chunkBytes || !input.bytes.byteLength || item.received + input.bytes.byteLength > item.manifest.sizeBytes) { this.remove(item.id); throw new ValidationError('Evidence frame is invalid or replayed'); }
+    if (item.state !== 'pending' || item.manifest.outputId !== input.outputId || item.nonce !== input.nonce || input.sequence !== item.next || input.bytes.byteLength > evidenceLimits.chunkBytes || !input.bytes.byteLength || item.received + input.bytes.byteLength > item.manifest.sizeBytes || (input.bytes.byteLength !== evidenceLimits.chunkBytes && item.received + input.bytes.byteLength !== item.manifest.sizeBytes)) { this.remove(item.id); throw new ValidationError('Evidence frame is invalid or replayed'); }
     const bytes = Buffer.from(input.bytes); item.chunks.push(bytes); item.hash.update(bytes); item.received += bytes.length; item.next++;
     return { nextSequence: item.next };
   }

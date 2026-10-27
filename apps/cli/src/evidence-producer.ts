@@ -23,14 +23,16 @@ export async function produceEvidence(demandInput: EvidenceNodeDemand, options: 
   const snapshot = await openVerifiedEvidence(options.root, { relativePath: accepted.relativePath, sizeBytes: demand.sizeBytes, sha256: demand.sha256 }, signal);
   try {
     let sequence = 0;
+    let pending = Buffer.alloc(0);
     for await (const chunk of snapshot.createReadStream()) {
       signal.throwIfAborted();
-      const bytes = Buffer.from(chunk);
-      for (let offset = 0; offset < bytes.length; offset += evidenceLimits.chunkBytes) {
-        signal.throwIfAborted();
-        await options.push(demand, sequence++, bytes.subarray(offset, offset + evidenceLimits.chunkBytes), signal);
+      pending = Buffer.concat([pending, Buffer.from(chunk)]);
+      while (pending.length >= evidenceLimits.chunkBytes) {
+        await options.push(demand, sequence++, pending.subarray(0, evidenceLimits.chunkBytes), signal);
+        pending = pending.subarray(evidenceLimits.chunkBytes);
       }
     }
+    if (pending.length) await options.push(demand, sequence++, pending, signal);
     signal.throwIfAborted();
     await options.finish(demand, sequence, signal);
   } finally { await snapshot.close(); }
