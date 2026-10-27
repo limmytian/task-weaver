@@ -1,6 +1,6 @@
 import { and, eq, lt, notInArray } from "drizzle-orm";
 import { type Database, executionSlices } from "@task-weaver/db";
-import { NotFoundError, ValidationError } from "@task-weaver/contracts";
+import { ExecutionSliceBlockedError, NotFoundError } from "@task-weaver/contracts";
 
 export const TERMINAL_EXECUTION_SLICE_STATUSES = ["done", "cancelled"] as const;
 
@@ -29,7 +29,7 @@ export async function assertExecutionSliceCanAdvance(
     const blockers = earlierSlices
       .map((candidate) => `"${candidate.title}" (${candidate.status})`)
       .join(", ");
-    throw new ValidationError(
+    throw new ExecutionSliceBlockedError(
       `Execution slice "${slice.title}" cannot advance before earlier slices are terminal: ${blockers}. `
       + "Mark this slice as allowParallel only when concurrent execution is intentional.",
     );

@@ -34,6 +34,20 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   const create = async (body: Record<string, unknown>) => json(await api(`/projects/${fixture.project.id}/requirements`, "POST", { title: "Workflow fixture", ...body }), 201);
   const advance = (id: string, data: Record<string, unknown>, headers = fixture.owner.headers) => api(`/requirements/${id}/workflow-advance`, "POST", { reason: "Fixture evidence", ...data }, headers);
 
+  const ordered = await create({});
+  const blockedTask = await json(await api(`/projects/${fixture.project.id}/tasks`, "POST", { requirementId: ordered.id, title: "Later slice task" }), 201);
+  const firstSlice = await json(await api(`/requirements/${ordered.id}/slices`, "POST", { title: "First slice", orderIndex: 0 }), 201);
+  const laterSlice = await json(await api(`/requirements/${ordered.id}/slices`, "POST", { title: "Later slice", orderIndex: 1, taskIds: [blockedTask.id] }), 201);
+  const blockedSlice = await api(`/execution-slices/${laterSlice.id}`, "PATCH", { status: "in_progress" });
+  assert.equal(blockedSlice.status, 400);
+  assert.match((await blockedSlice.json() as { error: string }).error, /earlier execution slice/i);
+  const blocked = await api(`/tasks/${blockedTask.id}/status`, "PATCH", { status: "in_progress" });
+  assert.equal(blocked.status, 400);
+  assert.match((await blocked.json() as { error: string }).error, /earlier execution slice/i);
+  assert.equal((await api(`/tasks/${blockedTask.id}/status`, "PATCH", { status: "in_progress" }, fixture.outsider.headers)).status, 404);
+  await json(await api(`/execution-slices/${firstSlice.id}`, "PATCH", { status: "done" }));
+  assert.equal((await api(`/tasks/${blockedTask.id}/status`, "PATCH", { status: "in_progress" })).status, 200);
+
   const basic = await create({});
   assert.equal(basic.workflow.delivery.method, "none");
   assert.equal(basic.workflowSource, "basic");

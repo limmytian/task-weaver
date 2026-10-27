@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ValidationError } from "@task-weaver/contracts";
+import { ExecutionSliceBlockedError } from "@task-weaver/contracts";
 import { assertExecutionSliceCanAdvance } from "./execution-slice-policy";
 
 function policyDb(slice: Record<string, unknown>, earlierSlices: Record<string, unknown>[]) {
@@ -25,7 +25,7 @@ test("sequential execution slices cannot advance past an earlier nonterminal sli
 
   await assert.rejects(
     () => assertExecutionSliceCanAdvance(db as any, "slice-2"),
-    (error: unknown) => error instanceof ValidationError
+    (error: unknown) => error instanceof ExecutionSliceBlockedError
       && /First.*in_progress/.test(error.message),
   );
 });

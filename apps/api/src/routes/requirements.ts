@@ -25,6 +25,7 @@ import {
   NotFoundError,
   ConflictError,
   ValidationError,
+  ExecutionSliceBlockedError,
 } from "@task-weaver/core";
 import type { Env } from "../middleware/actor.js";
 
@@ -454,6 +455,9 @@ requirements.patch("/execution-slices/:id", async (c) => {
     const slice = await createResourceServices(c.get("identity")).requirementService.updateExecutionSlice(db, id, parsed.data, actor);
     return c.json(slice);
   } catch (err) {
+    if (err instanceof ExecutionSliceBlockedError) {
+      return c.json({ error: "An earlier execution slice must be completed or cancelled before this slice can advance." }, 400);
+    }
     if (err instanceof NotFoundError) {
       return c.json({ error: "Resource not found" }, 404);
     }

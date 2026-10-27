@@ -18,6 +18,7 @@ import {
   batchClaimTasksSchema,
   NotFoundError,
   ValidationError,
+  ExecutionSliceBlockedError,
   ConflictError,
 } from "@task-weaver/core";
 import type { Env } from "../middleware/actor.js";
@@ -302,6 +303,9 @@ tasks.patch("/tasks/:id/status", async (c) => {
     );
     return c.json(task);
   } catch (err) {
+    if (err instanceof ExecutionSliceBlockedError) {
+      return c.json({ error: "An earlier execution slice must be completed or cancelled before this task can advance." }, 400);
+    }
     if (err instanceof NotFoundError) {
       return c.json({ error: "Resource not found" }, 404);
     }

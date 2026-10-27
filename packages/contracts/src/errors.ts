@@ -20,6 +20,7 @@ export class ValidationError extends Error {
 /** Typed collaboration failures preserve existing ValidationError transport handling. */
 export class ClaimConflictError extends ValidationError {}
 export class DependencyConflictError extends ValidationError {}
+export class ExecutionSliceBlockedError extends ValidationError {}
 
 export class ConflictError extends Error {
   public currentVersion: number;
