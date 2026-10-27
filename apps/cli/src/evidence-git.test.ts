@@ -1,0 +1,31 @@
+import { test } from 'node:test';
+import { strict as assert } from 'node:assert';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, rm, writeFile, rename } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pinEvidenceComparison, listEvidenceGitFiles, readEvidenceGitDiff } from './evidence-git';
+
+test('Git evidence stays pinned and rejects unlisted paths or revision expressions', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'tw-git-evidence-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const git = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim();
+  git('init', '-q'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.test');
+  await writeFile(join(root, 'before.txt'), 'one\ntwo\n'); git('add', '.'); git('commit', '-qm', 'base'); const base = git('rev-parse', 'HEAD');
+  await rename(join(root, 'before.txt'), join(root, 'after.txt'));
+  await writeFile(join(root, 'extra.txt'), 'new text\n'); await writeFile(join(root, ':(glob)*'), 'literal only\n'); git('add', '-A'); git('commit', '-qm', 'head'); const head = git('rev-parse', 'HEAD');
+  const comparison = await pinEvidenceComparison(root, base, head);
+  const listing = await listEvidenceGitFiles(root, comparison);
+  assert.equal(listing.truncated, false);
+  assert.ok(listing.files.some(file => file.previousPath === 'before.txt' && file.path === 'after.txt' && file.status.startsWith('R')));
+  assert.ok(listing.files.some(file => file.path === 'extra.txt' && file.status === 'A'));
+  assert.match((await readEvidenceGitDiff(root, comparison, 'extra.txt')).diff, /new text/);
+  const literal = await readEvidenceGitDiff(root, comparison, ':(glob)*');
+  assert.match(literal.diff, /literal only/);
+  assert.doesNotMatch(literal.diff, /new text/);
+  await writeFile(join(root, 'later.txt'), 'later\n'); git('add', '.'); git('commit', '-qm', 'later');
+  assert.deepEqual(await listEvidenceGitFiles(root, comparison), listing);
+  await assert.rejects(readEvidenceGitDiff(root, comparison, 'later.txt'));
+  await assert.rejects(pinEvidenceComparison(root, 'HEAD', head));
+  await assert.rejects(pinEvidenceComparison(root, '-'.repeat(40), head));
+});

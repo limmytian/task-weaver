@@ -20,6 +20,8 @@ import {
 } from "@task-weaver/core";
 
 export const requirementRouter = router({
+  evidence: resourceProcedure.input(z.object({ requirementId: z.string().uuid(), outputId: z.string().uuid() })).query(({ ctx, input }) =>
+    createResourceServices(ctx.identity).requirementService.describeWorkflowEvidence(ctx.db, input.requirementId, input.outputId)),
   revalidateExecution: resourceProcedure.input(z.object({ requirementId: z.string().uuid(), data: executionRevalidationSchema }))
     .mutation(async ({ ctx, input }) => createExecutionControlService(ctx.identity).revalidate(ctx.db, input.requirementId, input.data.reason, input.data.expectedPlanRevision)),
   authorizeRecovery: resourceProcedure.input(z.object({ requirementId: z.string().uuid(), data: executionRecoveryDecisionSchema.required({ expectedControlUpdatedAt: true, expectedControlPhase: true }) }))

@@ -76,7 +76,7 @@ export function RequirementWorkflowPanel({ requirement }: { requirement: Workflo
           <p className="text-muted-foreground">{workflow[stage].mode === "manual" ? "Human decision" : workflow[stage].mode === "skip" ? "No additional action" : stage === "delivery" ? "Executor" : stage === "acceptance" ? "Reviewer" : "Integrator"}{stage === "delivery" ? ` · ${workflow.delivery.method}` : stage === "integration" ? ` · ${workflow.integration.method}` : ""}</p>
           {workflow[stage].instructions && <p className="mt-1 whitespace-pre-wrap">{workflow[stage].instructions}</p>}
         </div>)}
-        {requirement.workflowOutputs?.length ? <div className="space-y-2"><div className="font-medium">Outputs</div>{requirement.workflowOutputs.map((output) => <div key={output.id} className="break-all rounded border p-2"><div>{output.type} · {output.availability}{output.nodeId ? ` · ${output.nodeId}` : ""}</div><div className="text-muted-foreground">{output.summary || output.url || output.relativePath || output.id}</div><div className="text-xs text-muted-foreground">{output.id}</div></div>)}</div> : null}
+        {requirement.workflowOutputs?.length ? <div className="space-y-2"><div className="font-medium">Outputs</div>{requirement.workflowOutputs.map((output) => <div key={output.id} className="break-all rounded border p-2"><div>{output.type} · {output.availability}{output.nodeId ? ` · ${output.nodeId}` : ""}</div><div className="text-muted-foreground">{output.summary || (output.type === "url" ? output.url : null) || output.id}</div><div className="text-xs text-muted-foreground">{output.id}</div>{["local", "git_branch", "git_pr", "attachment"].includes(output.type) && <EvidenceMetadata requirementId={requirement.id} outputId={output.id} />}</div>)}</div> : null}
         {requirement.workflowInputs?.length ? <div className="space-y-1"><div className="font-medium">Required inputs</div>{requirement.workflowInputs.map((input) => <p key={input.id} className="break-all text-muted-foreground">{input.output.summary || input.output.id} · {input.output.availability}{input.output.nodeId ? ` · node ${input.output.nodeId}` : ""}</p>)}</div> : null}
         {!terminal && <div className="flex gap-2"><Input aria-label="Required output ID" placeholder="Output ID needed by this requirement" value={inputId} onChange={(event) => setInputId(event.target.value)} /><Button variant="outline" disabled={!inputId.trim() || addInput.isPending} onClick={() => addInput.mutate({ requirementId: requirement.id, data: { outputId: inputId.trim() } })}>Add input</Button></div>}
         {!terminal && !["complete", "skipped"].includes(state.acceptance ?? "pending") && registerable && <div className="flex gap-2"><Input aria-label="Delivery output" placeholder={method === "url" ? "Delivered output URL" : `${method} ID`} value={outputValue} onChange={(event) => setOutputValue(event.target.value)} /><Button variant="outline" disabled={!outputValue.trim() || registerOutput.isPending} onClick={() => registerOutput.mutate({ requirementId: requirement.id, data: { type: method, ...(method === "url" ? { url: outputValue.trim() } : { referenceId: outputValue.trim() }) } })}>Register output</Button></div>}
@@ -90,4 +90,18 @@ export function RequirementWorkflowPanel({ requirement }: { requirement: Workflo
       {canEdit && (editing ? <div className="space-y-3"><WorkflowEditor value={definition} onChange={setDefinition} /><div className="flex gap-2"><Button onClick={save} disabled={update.isPending}>Save workflow</Button><Button variant="outline" onClick={() => setEditing(false)}>Cancel</Button></div></div> : <Button variant="outline" onClick={() => { setDefinition(workflow ?? BASIC_WORKFLOW); setEditing(true); }}>{workflow ? "Edit workflow" : "Configure workflow"}</Button>)}
     </CardContent>
   </Card>;
+}
+
+function EvidenceMetadata({ requirementId, outputId }: { requirementId: string; outputId: string }) {
+  const [open, setOpen] = useState(false);
+  const evidence = trpc.requirement.evidence.useQuery({ requirementId, outputId }, { enabled: open, retry: false });
+  return <div className="mt-2 space-y-1"><Button size="sm" variant="outline" onClick={() => setOpen(value => !value)}>{open ? "Hide evidence details" : "Evidence details"}</Button>
+    {open && evidence.isLoading && <p>Loading evidence…</p>}
+    {open && evidence.error && <p role="alert">Evidence is unavailable or access is denied.</p>}
+    {open && evidence.data && <div className="space-y-1 text-xs"><p>Source: {evidence.data.kind} · {evidence.data.availability}</p>
+      {evidence.data.kind === "local" && <><p>Size: {evidence.data.sizeBytes} bytes</p><p>SHA-256: {evidence.data.sha256}</p><p>Node read transport is not yet available.</p></>}
+      {evidence.data.kind === "git" && <><p>Commit: {evidence.data.headCommit}</p><p>Comparison viewer is not yet available.</p></>}
+      {evidence.data.kind === "unsupported" && <p>This output does not have a supported immutable evidence identity.</p>}
+    </div>}
+  </div>;
 }

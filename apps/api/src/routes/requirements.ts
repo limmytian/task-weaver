@@ -139,6 +139,10 @@ requirements.get("/requirements/:id", async (c) => {
   }
 });
 
+requirements.get("/requirements/:id/workflow-outputs/:outputId/evidence", async c => {
+  return c.json(await createResourceServices(c.get("identity")).requirementService.describeWorkflowEvidence(c.get("db"), c.req.param("id"), c.req.param("outputId")));
+});
+
 requirements.get("/requirements/:id/workflow-outputs", async (c) => {
   try {
     return c.json(await createResourceServices(c.get("identity")).requirementService.listWorkflowOutputs(c.get("db"), c.req.param("id")));

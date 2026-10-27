@@ -94,6 +94,12 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
 
   const producer = await create({ workflowPreset: "local" });
   const local = await json(await api(`/requirements/${producer.id}/workflow-outputs`, "POST", { type: "local", nodeId: "node-a", relativePath: `${producer.id}/file.bin`, sizeBytes: 42, sha256: "a".repeat(64) }), 201);
+  const evidence = await json(await api(`/requirements/${producer.id}/workflow-outputs/${local.id}/evidence`));
+  assert.equal(evidence.kind, "local");
+  assert.equal(evidence.availability, "unsupported");
+  assert.equal(evidence.sha256, "a".repeat(64));
+  assert.equal("relativePath" in evidence, false);
+  assert.equal((await api(`/requirements/${producer.id}/workflow-outputs/${local.id}/evidence`, "GET", undefined, fixture.outsider.headers)).status, 404);
   await json(await advance(producer.id, { stage: "delivery", expectedRevision: 1 }));
   const consumer = await create({ status: "approved" });
   const task = await json(await api(`/projects/${fixture.project.id}/tasks`, "POST", { requirementId: consumer.id, title: "Consume local output" }), 201);

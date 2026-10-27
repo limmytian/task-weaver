@@ -10,6 +10,7 @@ export const evidenceLimits = {
   tableRows: 100,
   tableColumns: 50,
   nodeConcurrency: 2,
+  chunkBytes: 64 * 1024,
   requestDurationMs: 30_000,
 } as const;
 
@@ -25,6 +26,7 @@ const base = {
 };
 /** Public descriptors contain identities, never node paths or arbitrary URLs. */
 export const evidenceDescriptorSchema = z.discriminatedUnion("kind", [
+  z.object({ ...base, kind: z.literal("unsupported"), availability: z.enum(["unsupported", "retired"]) }).strict(),
   z.object({ ...base, kind: z.literal("local"), nodeId: z.string().min(1).max(255), sizeBytes: z.number().int().nonnegative().safe(), sha256 }).strict(),
   z.object({ ...base, kind: z.literal("attachment"), documentId: id, fileVersionId: id, sizeBytes: z.number().int().nonnegative().safe(), sha256 }).strict(),
   z.object({ ...base, kind: z.literal("git"), requirementRepositoryId: id, headCommit: oid }).strict(),
@@ -38,6 +40,12 @@ export const evidenceNodeDemandSchema = z.object({
   purpose: z.enum(["preview", "download", "promotion"]),
   sizeBytes: z.number().int().nonnegative().max(evidenceLimits.verifiedArtifactBytes), sha256,
   expiresAt: z.string().datetime(),
+}).strict();
+/** One ordered bounded transport frame. Authorization and exact sequence are server state. */
+export const evidenceNodeChunkSchema = z.object({
+  requestId: id, daemonId: id, outputId: id, nonce: z.string().regex(/^[a-f0-9]{64}$/),
+  sequence: z.number().int().nonnegative(),
+  contentBase64: z.string().max(Math.ceil(evidenceLimits.chunkBytes / 3) * 4).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
 }).strict();
 export const evidenceNodeResultSchema = z.object({
   requestId: id, daemonId: id, outputId: id, nonce: z.string().regex(/^[a-f0-9]{64}$/),

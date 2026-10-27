@@ -1,5 +1,5 @@
 import { executionControls, executionSynchronizations } from "@task-weaver/db";
-import { RequirementCompletionError } from "@task-weaver/contracts";
+import { evidenceLimits, RequirementCompletionError } from "@task-weaver/contracts";
 import type { RetrievalPredicates } from "./retrieval-predicates";
 import type { SQL } from "drizzle-orm";
 import { eq, ne, and, sql, inArray } from "drizzle-orm";
@@ -115,6 +115,27 @@ export async function getRequirement(db: Database, id: string) {
   const executionRecovery = await db.query.executionControls.findMany({ where: eq(executionControls.requirementId, id), orderBy: (control, { desc }) => [desc(control.createdAt)], limit: 10 });
   const synchronization = await db.query.executionSynchronizations.findMany({ where: eq(executionSynchronizations.requirementId, id), orderBy: (sync, { desc }) => [desc(sync.verifiedAt)], limit: 20 });
   return { ...requirement, executionRecovery, executionSynchronizations: synchronization };
+}
+
+/** Public evidence metadata never includes the producing node's path or a remote URL. */
+export async function describeWorkflowEvidence(db: Database, requirementId: string, outputId: string) {
+  const requirement = await getRequirementOrThrow(db, requirementId);
+  const output = await db.query.workflowOutputs.findFirst({ where: and(eq(workflowOutputs.requirementId, requirementId), eq(workflowOutputs.id, outputId)) });
+  if (!output) throw new NotFoundError("Output not found");
+  const base = { outputId: output.id, projectId: requirement.projectId, requirementId, availability: output.availability };
+  if (output.type === "local" && output.nodeId && output.sizeBytes !== null && Number.isSafeInteger(output.sizeBytes) && output.sizeBytes >= 0 && output.sha256 && /^[a-f0-9]{64}$/.test(output.sha256)) {
+    const online = await db.query.daemons.findMany({ where: and(eq(daemons.nodeId, output.nodeId), ne(daemons.status, "offline"), sql`${daemons.lastHeartbeatAt} > now() - interval '90 seconds'`) });
+    const availability = output.availability !== "available" ? output.availability
+      : output.sizeBytes > evidenceLimits.verifiedArtifactBytes ? "too_large" as const
+      : !online.length ? "offline" as const
+      : !online.some(daemon => daemon.capabilities?.includes("evidence-read-v1")) ? "unsupported" as const : "available" as const;
+    return { ...base, kind: "local" as const, availability, nodeId: output.nodeId, sizeBytes: output.sizeBytes, sha256: output.sha256 };
+  }
+  if ((output.type === "git_branch" || output.type === "git_pr") && output.requirementRepositoryId && output.headCommit && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(output.headCommit)) {
+    return { ...base, kind: "git" as const, requirementRepositoryId: output.requirementRepositoryId, headCommit: output.headCommit };
+  }
+  // Legacy attachments do not identify an immutable file version on the output.
+  return { ...base, kind: "unsupported" as const, availability: output.availability === "retired" ? "retired" as const : "unsupported" as const };
 }
 
 export async function listWorkflowOutputs(db: Database, requirementId: string) {

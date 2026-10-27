@@ -65,7 +65,7 @@ export async function openVerifiedEvidence(root: string, manifest: RegisteredArt
     abort();
     const verified = snapshot;
     snapshot = undefined;
-    return { sizeBytes: total, sha256: manifest.sha256, createReadStream: () => verified.createReadStream({ start: 0, autoClose: false }), close: () => verified.close() };
+    return { sizeBytes: total, sha256: manifest.sha256, createReadStream: () => verified.createReadStream({ start: 0, autoClose: false, signal: combined }), close: () => verified.close() };
   } catch (error) {
     if (error instanceof EvidenceArtifactError || combined.aborted) throw error;
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new EvidenceArtifactError('missing', 'Artifact is missing');
