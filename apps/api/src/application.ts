@@ -1,3 +1,4 @@
+import { createEvidenceRoutes } from './routes/evidence.js';
 import { createWorkerConsoleRoutes } from './routes/worker-console.js';
 import { Hono } from "hono";
 import type { Database } from "@task-weaver/db";
@@ -117,12 +118,14 @@ const consoleLogger: ApplicationLogger = {
 
 function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
   const consoleRuntime = createWorkerConsoleRoutes(env);
+  const evidenceRuntime = createEvidenceRoutes(env.TW_EVIDENCE_READ_ENABLED === 'true');
   let webhookQueue = Promise.resolve();
   let pendingWebhooks = 0;
   let webhookBackground: Promise<void> | undefined;
   return {
     apiRoutes: [
       { id: "worker-console", method: "POST", path: "/api/v1/worker-console", route: consoleRuntime.router },
+      { id: "evidence", method: "POST", path: "/api/v1/evidence", route: evidenceRuntime.router },
       {
         id: "agent-usage",
         method: "GET",
@@ -255,6 +258,7 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
     ],
     workers: [
       { id: "worker-console", start() {}, async stop() { consoleRuntime.close(); } },
+      { id: "evidence", start() {}, async stop() { evidenceRuntime.close(); } },
       {
         id: "durable-webhook-delivery",
         start(context: ApiRuntimeContext) {

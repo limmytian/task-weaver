@@ -4,3 +4,4 @@ export { createExecutionRecoveryViewService } from "./services/execution-recover
 export { createCapabilityReadinessService } from "./services/capability-readiness";
 export { createCapabilityEvidenceViewService } from "./services/capability-evidence-view";
 export { WorkerConsoleService } from './services/worker-console';
+export { EvidenceSessionService } from './services/evidence-session';

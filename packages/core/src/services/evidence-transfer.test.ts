@@ -6,7 +6,7 @@ import { EvidenceTransferBuffer } from './evidence-transfer';
 const reader = { actorId: 'reader', credentialId: 'reader-key' };
 const producer = { actorId: 'agent', credentialId: 'agent-key', daemonId: 'daemon', nodeId: 'node' };
 const content = Buffer.from('verified evidence');
-const manifest = { outputId: 'output', projectId: 'project', requirementId: 'requirement', nodeId: 'node', purpose: 'preview' as const, sizeBytes: content.length, sha256: createHash('sha256').update(content).digest('hex') };
+const manifest = { transferId: 'transfer', outputId: 'output', projectId: 'project', requirementId: 'requirement', nodeId: 'node', purpose: 'preview' as const, sizeBytes: content.length, sha256: createHash('sha256').update(content).digest('hex') };
 const collect = async (input: AsyncGenerator<Buffer>) => { const chunks: Buffer[] = []; for await (const chunk of input) chunks.push(chunk); return Buffer.concat(chunks); };
 
 test('only the bound producer can provide ordered bytes and readers see verified content', async () => {

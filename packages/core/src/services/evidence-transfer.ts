@@ -4,7 +4,7 @@ import { evidenceLimits, ValidationError } from '@task-weaver/contracts';
 /** The transport adapter supplies verified identities and rechecks their live authority on every call. */
 export type EvidenceTransferPrincipal = { actorId: string; credentialId: string };
 export type EvidenceProducer = EvidenceTransferPrincipal & { daemonId: string; nodeId: string };
-export type EvidenceManifest = { outputId: string; projectId: string; requirementId: string; nodeId: string; purpose: 'preview' | 'download' | 'promotion'; sizeBytes: number; sha256: string };
+export type EvidenceManifest = { transferId: string; outputId: string; projectId: string; requirementId: string; nodeId: string; purpose: 'preview' | 'download' | 'promotion'; sizeBytes: number; sha256: string };
 type Transfer = { id: string; nonce: string; manifest: EvidenceManifest; reader: EvidenceTransferPrincipal; producer: EvidenceProducer; expiresAt: number; next: number; received: number; hash: Hash; chunks: Buffer[]; state: 'pending' | 'complete' | 'reading' };
 
 /**

@@ -1,3 +1,5 @@
+import { createEvidenceCoordinator } from '../evidence-coordinator.js'
+import { workflowArtifactRoot } from '../workflow-artifacts.js'
 import { WorkerConsoleBuffer } from '../worker-console-buffer.js'
 import { createWorkerConsoleCoordinator } from '../worker-console-coordinator.js'
 import { recordLocalExecution, clearLocalExecution, reconcileLocalExecution, observedLocalStop, localExecutionInventory } from "../local-execution-inventory.js";
@@ -699,6 +701,7 @@ export function registerDaemon(program: Command): void {
         capabilities: [
           ...tools,
           'live-plan-v1',
+          ...(process.platform === 'linux' && process.env.TW_EVIDENCE_PRODUCER_ENABLED === 'true' && cliConfig.nodeId ? ['evidence-read-v1'] : []),
           ...tools.map((tool) => `executor:${tool}`),
           ...auxiliaryCapabilities,
           ...supportedModelTiers.map((tier) => `model-tier:${tier}`),
@@ -723,6 +726,11 @@ export function registerDaemon(program: Command): void {
         get: path => request('GET', path, undefined, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal: AbortSignal.timeout(2500) }),
         post: (path, body) => request('POST', path, body, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal: AbortSignal.timeout(2500) }),
       })
+      const evidenceCoordinator = process.platform === 'linux' && process.env.TW_EVIDENCE_PRODUCER_ENABLED === 'true' && cliConfig.nodeId
+        ? createEvidenceCoordinator({ daemonId, nodeId: cliConfig.nodeId, root: workflowArtifactRoot(),
+          get: (path, signal) => request('GET', path, undefined, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal }),
+          post: (path, body, signal) => request('POST', path, body, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal }),
+        }) : undefined
       const executorStatus = new ExecutorStatusClient(daemonId, tools)
       await executorStatus.refresh()
       const effectiveMode = opts.mode ?? serverConfig.mode
@@ -817,6 +825,7 @@ export function registerDaemon(program: Command): void {
         if (stopping) return
         stopping = true
         leaseSupervisor.stop()
+        evidenceCoordinator?.close()
         for (const w of workers) {
           if (w.pollTimer) clearTimeout(w.pollTimer)
         }
@@ -1746,6 +1755,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         if (stopping) return
         stopping = true
         console.log(`\n[Daemon] ${reason} received; entering drain mode...`)
+        evidenceCoordinator?.close()
         for (const w of workers) {
           if (w.pollTimer) clearTimeout(w.pollTimer)
         }

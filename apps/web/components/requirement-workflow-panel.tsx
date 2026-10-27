@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BASIC_WORKFLOW, requirementWorkflowSchema, type RequirementWorkflow } from "@task-weaver/contracts";
 import { trpc } from "@/trpc/client";
@@ -94,12 +94,51 @@ export function RequirementWorkflowPanel({ requirement }: { requirement: Workflo
 
 function EvidenceMetadata({ requirementId, outputId }: { requirementId: string; outputId: string }) {
   const [open, setOpen] = useState(false);
+  const [state, setState] = useState("");
+  const [controller, setController] = useState<AbortController | null>(null);
+  const activeDownload = useRef<AbortController | null>(null);
+  useEffect(() => () => activeDownload.current?.abort(), []);
   const evidence = trpc.requirement.evidence.useQuery({ requirementId, outputId }, { enabled: open, retry: false });
+  const download = async () => {
+    const abort = new AbortController(); activeDownload.current = abort; setController(abort); let requestId: string | undefined;
+    try {
+      const csrf = await fetch('/api/auth/csrf', { credentials: 'same-origin', cache: 'no-store', signal: abort.signal });
+      if (!csrf.ok) throw new Error('Authentication unavailable');
+      const token = (await csrf.json()).csrfToken as string;
+      const post = (path: string, data: unknown) => fetch(`/api/evidence/${path}`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-csrf-token': token }, body: JSON.stringify(data), signal: abort.signal });
+      setState('Requesting evidence from the producing node…');
+      const opened = await post('open', { requirementId, outputId, purpose: 'download' });
+      if (!opened.ok) throw new Error('Evidence producer is unavailable or access is denied');
+      requestId = (await opened.json()).requestId;
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline) {
+        const response = await fetch(`/api/evidence/${requestId}/status`, { credentials: 'same-origin', cache: 'no-store', signal: abort.signal });
+        if (!response.ok) throw new Error('Evidence request expired or access ended');
+        const status = await response.json() as { state: string; failure: string | null };
+        if (status.state === 'failed') throw new Error(`Evidence is ${status.failure ?? 'unavailable'}`);
+        if (status.state === 'verified') {
+          setState('Downloading verified bytes…');
+          const result = await fetch(`/api/evidence/${requestId}/content`, { credentials: 'same-origin', cache: 'no-store', signal: abort.signal });
+          if (!result.ok) throw new Error('Evidence download failed');
+          const blob = await result.blob(); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'evidence.bin'; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+          requestId = undefined; setState('Verified download completed.'); return;
+        }
+        await new Promise<void>((resolve, reject) => { const timer = setTimeout(resolve, 500); abort.signal.addEventListener('abort', () => { clearTimeout(timer); reject(abort.signal.reason); }, { once: true }); });
+      }
+      throw new Error('Evidence request timed out');
+    } catch (error) { setState(abort.signal.aborted ? 'Evidence request cancelled.' : error instanceof Error ? error.message : 'Evidence request failed'); }
+    finally {
+      if (requestId) {
+        try { const csrf = await fetch('/api/auth/csrf', { credentials: 'same-origin', cache: 'no-store' }); const token = (await csrf.json()).csrfToken; await fetch(`/api/evidence/${requestId}/cancel`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-csrf-token': token }, body: '{}' }); } catch { /* The request expires automatically. */ }
+      }
+      activeDownload.current = null; setController(null);
+    }
+  };
   return <div className="mt-2 space-y-1"><Button size="sm" variant="outline" onClick={() => setOpen(value => !value)}>{open ? "Hide evidence details" : "Evidence details"}</Button>
     {open && evidence.isLoading && <p>Loading evidence…</p>}
     {open && evidence.error && <p role="alert">Evidence is unavailable or access is denied.</p>}
     {open && evidence.data && <div className="space-y-1 text-xs"><p>Source: {evidence.data.kind} · {evidence.data.availability}</p>
-      {evidence.data.kind === "local" && <><p>Size: {evidence.data.sizeBytes} bytes</p><p>SHA-256: {evidence.data.sha256}</p><p>Node read transport is not yet available.</p></>}
+      {evidence.data.kind === "local" && <><p>Size: {evidence.data.sizeBytes} bytes</p><p>SHA-256: {evidence.data.sha256}</p><p>Node download requires a connected compatible producer and an enabled evidence service.</p><Button size="sm" variant="outline" disabled={Boolean(controller)} onClick={() => { void download(); }}>Download original</Button>{controller && <Button size="sm" variant="ghost" onClick={() => controller.abort()}>Cancel download</Button>}{state && <p role="status">{state}</p>}</>}
       {evidence.data.kind === "git" && <><p>Commit: {evidence.data.headCommit}</p><p>Comparison viewer is not yet available.</p></>}
       {evidence.data.kind === "unsupported" && <p>This output does not have a supported immutable evidence identity.</p>}
     </div>}
