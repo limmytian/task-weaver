@@ -40,13 +40,13 @@ const MIN_ZOOM = 0.04;
 const MAX_ZOOM = 2.4;
 
 const statusClasses: Record<string, string> = {
-  draft: "border-slate-300 bg-slate-50 text-slate-700 dark:bg-slate-900/40",
-  approved: "border-sky-300 bg-sky-50 text-sky-700 dark:bg-sky-950/40",
-  todo: "border-slate-300 bg-slate-50 text-slate-700 dark:bg-slate-900/40",
-  in_progress: "border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950/40",
-  in_review: "border-fuchsia-300 bg-fuchsia-50 text-fuchsia-800 dark:bg-fuchsia-950/40",
-  ready_to_merge: "border-cyan-300 bg-cyan-50 text-cyan-800 dark:bg-cyan-950/40",
-  done: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40",
+  draft: "border-slate-300 bg-slate-50 text-slate-700 dark:bg-slate-900/40 dark:text-slate-200",
+  approved: "border-sky-300 bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-200",
+  todo: "border-slate-300 bg-slate-50 text-slate-700 dark:bg-slate-900/40 dark:text-slate-200",
+  in_progress: "border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200",
+  in_review: "border-fuchsia-300 bg-fuchsia-50 text-fuchsia-800 dark:bg-fuchsia-950/40 dark:text-fuchsia-200",
+  ready_to_merge: "border-cyan-300 bg-cyan-50 text-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-200",
+  done: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200",
   cancelled: "border-destructive/40 bg-destructive/10 text-destructive",
   archived: "border-muted bg-muted/50 text-muted-foreground",
 };
