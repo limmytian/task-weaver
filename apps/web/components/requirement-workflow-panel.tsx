@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { EvidenceTablePreview } from "@/components/evidence-table-preview";
 import { TextAttachmentPreview } from "@/components/text-attachment-preview";
 import { PdfAttachmentPreview } from "@/components/pdf-attachment-preview";
 import { RequirementRecoveryPanel } from "@/components/requirement-recovery-panel";
@@ -152,8 +153,11 @@ function PinnedAttachmentEvidence({ file }: { file: { documentId: string; fileVe
   const [preview, setPreview] = useState(false);
   const path = `/api/attachments/${file.documentId}?fileVersion=${file.fileVersion}`;
   const kind = evidencePreviewKind(file.mimeType, file.sizeBytes);
-  return <div className="space-y-2"><p>{file.originalFilename} · {file.sizeBytes.toLocaleString()} bytes · file version {file.fileVersion}</p><p className="break-all">Recorded SHA-256: {file.sha256}</p><p>Storage is checked against the recorded fingerprint before reading.</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" asChild><a href={path}>Download original</a></Button>{['text', 'image', 'pdf'].includes(kind) && <Button size="sm" variant="outline" onClick={() => setPreview(value => !value)}>{preview ? 'Hide preview' : 'Preview'}</Button>}</div>
+  return <div className="space-y-2"><p>{file.originalFilename} · {file.sizeBytes.toLocaleString()} bytes · file version {file.fileVersion}</p><p className="break-all">Recorded SHA-256: {file.sha256}</p><p>Storage is checked against the recorded fingerprint before reading.</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" asChild><a href={path}>Download original</a></Button>{['text', 'csv', 'tsv', 'image', 'pdf', 'audio', 'video'].includes(kind) && <Button size="sm" variant="outline" onClick={() => setPreview(value => !value)}>{preview ? 'Hide preview' : 'Preview'}</Button>}</div>
+    {preview && (kind === 'csv' || kind === 'tsv') && <EvidenceTablePreview src={path} filename={file.originalFilename} sizeBytes={file.sizeBytes} delimiter={kind === 'csv' ? ',' : '\t'} />}
     {preview && kind === 'text' && <TextAttachmentPreview src={`${path}&preview=true`} filename={file.originalFilename} maximumBytes={256 * 1024} />}
+    {preview && kind === 'audio' && <audio controls preload="metadata" src={`${path}&preview=true`}>Audio preview is not supported by this browser.</audio>}
+    {preview && kind === 'video' && <video controls preload="metadata" className="max-h-96 max-w-full" src={`${path}&preview=true`}>Video preview is not supported by this browser.</video>}
     {preview && kind === 'pdf' && <PdfAttachmentPreview src={`${path}&preview=true`} filename={file.originalFilename} />}
     {/* Authenticated attachment bytes must bypass Next image optimization. */}
     {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -118,7 +118,7 @@ export async function cleanupAttachmentGarbage(db: Database) {
 }
 
 export function attachmentPreviewType(mimeType: string) {
-  if (["application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "text/plain"].includes(mimeType.toLowerCase())) return mimeType.toLowerCase();
+  if (["application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "text/plain", "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/mp4", "video/mp4", "video/webm", "video/ogg"].includes(mimeType.toLowerCase())) return mimeType.toLowerCase();
   return null;
 }
 
