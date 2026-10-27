@@ -614,25 +614,43 @@ async function validatePlanDependencyCycles(
   db: Database,
   plan: PlanInput,
   normalized: ReturnType<typeof normalizePlan>,
+  rejectDuplicates = false,
 ) {
   const requirementRefs = new Map(plan.requirements.map((item) => [item.key, item.existingId ?? `new:${item.key}`]));
   const taskRefs = new Map(listPlanTasks(plan).map(({ task }) => [task.key, task.existingId ?? `new:${task.key}`]));
   const [liveRequirements, liveTasks] = await Promise.all([
-    db.select({ from: requirementDependencies.requirementId, to: requirementDependencies.dependsOnRequirementId })
+    db.select({ from: requirementDependencies.requirementId, to: requirementDependencies.dependsOnRequirementId, type: requirementDependencies.type })
       .from(requirementDependencies).innerJoin(requirements, eq(requirementDependencies.requirementId, requirements.id))
       .where(eq(requirements.projectId, plan.projectId)),
-    db.select({ from: taskDependencies.taskId, to: taskDependencies.dependsOnTaskId })
+    db.select({ from: taskDependencies.taskId, to: taskDependencies.dependsOnTaskId, type: taskDependencies.type })
       .from(taskDependencies).innerJoin(tasks, eq(taskDependencies.taskId, tasks.id))
       .where(eq(tasks.projectId, plan.projectId)),
   ]);
-  assertPlanGraphAcyclic(liveRequirements, normalized.requirementDependencies.map((edge) => ({
+  const proposedRequirements = normalized.requirementDependencies.map(edge => ({
     from: requirementRefs.get(edge.requirement) ?? edge.requirement,
     to: requirementRefs.get(edge.dependsOn) ?? edge.dependsOn,
-  })), "requirement");
-  assertPlanGraphAcyclic(liveTasks, normalized.taskDependencies.map((edge) => ({
+    type: edge.type,
+  }));
+  const proposedTasks = normalized.taskDependencies.map(edge => ({
     from: taskRefs.get(edge.task) ?? edge.task,
     to: taskRefs.get(edge.dependsOn) ?? edge.dependsOn,
-  })), "task");
+    type: edge.type,
+  }));
+  if (rejectDuplicates) {
+    assertNoDuplicatePlanEdges(liveRequirements, proposedRequirements, "requirement");
+    assertNoDuplicatePlanEdges(liveTasks, proposedTasks, "task");
+  }
+  assertPlanGraphAcyclic(liveRequirements, proposedRequirements, "requirement");
+  assertPlanGraphAcyclic(liveTasks, proposedTasks, "task");
+}
+
+function assertNoDuplicatePlanEdges(live: Array<{ from: string; to: string; type: string }>, proposed: Array<{ from: string; to: string; type: string }>, kind: string) {
+  const seen = new Set(live.map(edge => JSON.stringify([edge.from, edge.to, edge.type])));
+  for (const edge of proposed) {
+    const key = JSON.stringify([edge.from, edge.to, edge.type]);
+    if (seen.has(key)) throw new ValidationError(`Duplicate ${kind} dependency`);
+    seen.add(key);
+  }
 }
 
 /** Validate proposed edges against the live graph, including aliases for existing entities. */
@@ -864,6 +882,7 @@ export async function validatePlanDraft(db: Database, projectId: string, draftId
   const plan = stagedPlanSchema.parse(draft.plan);
   const result = await applyPlan(db, { plan, dryRun: true }, actor, services);
   const normalized = normalizePlan(plan);
+  await validatePlanDependencyCycles(db, plan, normalized, true);
   const existingTasks = new Map(listPlanTasks(plan).map(({ task }) => [task.key, task.existingId ?? `new:${task.key}`]));
   const assignments = new Map<string, string>();
   for (const [slice, refs] of normalized.sliceTasks) {

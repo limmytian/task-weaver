@@ -42,6 +42,9 @@ test("drafts persist, reject stale writes and validate against live dependencies
   const invalid = await api(`/plans/drafts/${draft.id}/validate`, "POST", { projectId });
   assert.equal(invalid.status, 400);
   assert.match((await invalid.json() as { error: string }).error, /cycle/);
+  const duplicateEdgePlan = { projectId, requirements: [{ key: "a", existingId: a.id, dependsOn: ["b"] }, { key: "b", existingId: b.id }] };
+  const duplicateEdge = await json(await api("/plans/drafts", "POST", { plan: duplicateEdgePlan }), 201);
+  assert.equal((await api(`/plans/drafts/${duplicateEdge.id}/validate`, "POST", { projectId })).status, 400);
   const duplicateAssignment = { projectId, requirements: [{ key: "r", title: "R", tasks: [{ key: "t", title: "T", slice: "s1" }], slices: [{ key: "s1", title: "First" }, { key: "s2", title: "Second", tasks: ["t"] }] }] };
   const invalidAssignment = await json(await api("/plans/drafts", "POST", { plan: duplicateAssignment }), 201);
   assert.equal((await api(`/plans/drafts/${invalidAssignment.id}/validate`, "POST", { projectId })).status, 400);
