@@ -1189,8 +1189,18 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
             maxOutputBytes: 0,
             signal: access.signal,
             redact: access.redact,
-            onStdout: chunk => consoleBuffer.push('stdout', chunk),
-            onStderr: chunk => consoleBuffer.push('stderr', chunk),
+            onStdout: chunk => {
+              consoleBuffer.push('stdout', chunk)
+              for (const line of chunk.toString('utf8').split(/\r?\n/)) {
+                if (line.trim()) console.log(`[Daemon] Worker ${w.index} stdout: ${line}`)
+              }
+            },
+            onStderr: chunk => {
+              consoleBuffer.push('stderr', chunk)
+              for (const line of chunk.toString('utf8').split(/\r?\n/)) {
+                if (line.trim()) console.error(`[Daemon] Worker ${w.index} stderr: ${line}`)
+              }
+            },
           },
           { daemonId, runId: lane.runId, leaseGeneration: lane.leaseGeneration, workerIndex: w.index, projectId: requirement.projectId, requirementId: requirement.id, agent: toolCmd, phase: initialWorkspaceSnapshot.workspaceState === 'dirty' ? 'rework' : 'execution' },
           undefined, executorStatus.observer(toolCmd),

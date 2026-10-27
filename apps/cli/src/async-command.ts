@@ -63,7 +63,8 @@ function signalManagedGroup(child: ChildProcess, signal: NodeJS.Signals) {
     if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, signal)
     else child.kill(signal)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+    const code = (error as NodeJS.ErrnoException).code
+    if (code !== 'ESRCH' && code !== 'EPERM') throw error
   }
 }
 

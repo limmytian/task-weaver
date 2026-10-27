@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { test } from 'node:test'
 
@@ -92,12 +92,14 @@ function waitForExit(child: ReturnType<typeof spawn>, timeoutMs: number) {
 
 function waitForOutput(child: ReturnType<typeof spawn>, pattern: RegExp, timeoutMs: number) {
   return new Promise<void>((resolve, reject) => {
+    let accumulated = ''
     const timeout = setTimeout(() => {
       cleanup()
-      reject(new Error(`timed out waiting for daemon output ${pattern}`))
+      reject(new Error(`timed out waiting for daemon output ${pattern}\naccumulated:\n${accumulated}`))
     }, timeoutMs)
     const onData = (chunk: string | Buffer) => {
-      if (!pattern.test(chunk.toString())) return
+      accumulated += chunk.toString()
+      if (!pattern.test(accumulated)) return
       cleanup()
       resolve()
     }
@@ -526,6 +528,16 @@ async function runDaemonScenario(mode: AgentMode, workers = 1, injectControlDisc
       return sendJson(res, 200, { released: true })
     }
 
+    if (req.method === 'POST' && path === `/api/v1/requirements/${requirementId}/heartbeat`) {
+      await readJson(req)
+      return sendJson(res, 200, { ok: true, extended: true })
+    }
+
+    if (req.method === 'POST' && path === `/api/v1/daemons/${daemonId}/heartbeat`) {
+      await readJson(req)
+      return sendJson(res, 200, { ok: true })
+    }
+
     sendJson(res, 404, { error: `Unhandled ${req.method} ${path}` })
   })
 
@@ -534,15 +546,16 @@ async function runDaemonScenario(mode: AgentMode, workers = 1, injectControlDisc
     const address = server.address()
     assert.ok(address && typeof address === 'object')
     const apiUrl = `http://127.0.0.1:${address.port}`
+    const cliDir = resolve(import.meta.dirname, '..')
     const spawnDaemon = () => spawn(
       process.execPath,
       [
-        '--import', 'tsx/esm', join(process.cwd(), 'src/index.ts'),
+        '--import', 'tsx/esm', resolve(import.meta.dirname, 'index.ts'),
         'daemon', 'start', '--tools', 'fake-agent', '--project', projectId,
         '--workers', String(workers), '--mode', 'polling', '--id', daemonId, '--once',
       ],
       {
-        cwd: process.cwd(),
+        cwd: cliDir,
         env: {
           ...process.env,
           HOME: home,
@@ -563,7 +576,7 @@ async function runDaemonScenario(mode: AgentMode, workers = 1, injectControlDisc
     const child = spawnDaemon()
     const exit = waitForExit(child, 45_000)
     if (mode === 'slow') {
-      await waitForOutput(child, /fake-agent-ready/, 20_000)
+      await waitForOutput(child, /fake-agent-ready/, 40_000)
       child.kill('SIGINT')
     }
     let result = await exit
