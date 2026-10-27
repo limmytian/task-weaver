@@ -46,3 +46,19 @@ export function evidenceTablePreview(text: string, delimiter: ',' | '\t'): { row
   if (row.length || cell || afterQuote || !rows.length) pushRow();
   return { rows, truncated, malformed };
 }
+
+export type EvidencePreviewKind = 'text' | 'csv' | 'tsv' | 'image' | 'audio' | 'video' | 'pdf' | 'download';
+/** Only explicit safe content types are eligible; active and unknown content is download-only. */
+export function evidencePreviewKind(mimeType: string, sizeBytes: number): EvidencePreviewKind {
+  const mime = mimeType.split(';', 1)[0]!.trim().toLowerCase();
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) return 'download';
+  if (['text/plain', 'text/markdown'].includes(mime)) return 'text';
+  if (mime === 'text/csv') return 'csv';
+  if (mime === 'text/tab-separated-values') return 'tsv';
+  if (sizeBytes > evidenceLimits.mediaPreviewBytes) return 'download';
+  if (['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif'].includes(mime)) return 'image';
+  if (['audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/webm', 'audio/mp4'].includes(mime)) return 'audio';
+  if (['video/mp4', 'video/webm', 'video/ogg'].includes(mime)) return 'video';
+  if (mime === 'application/pdf') return 'pdf';
+  return 'download';
+}
