@@ -1,6 +1,7 @@
 import assert from 'node:assert'
 import { spawn, spawnSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash, generateKeyPairSync, verify } from 'node:crypto'
+import { evidenceDemandPayload } from '@task-weaver/contracts'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -8,7 +9,7 @@ import { delimiter, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { test } from 'node:test'
 
-type AgentMode = 'plan-change' | 'happy' | 'no-change' | 'push-failure' | 'partial-retry' | 'non-zero' | 'no-finalize' | 'slow' | 'delegation-unavailable' | 'human-key'
+type AgentMode = 'plan-change' | 'happy' | 'no-change' | 'push-failure' | 'partial-retry' | 'non-zero' | 'no-finalize' | 'slow' | 'evidence-slow' | 'delegation-unavailable' | 'human-key'
 
 type ScenarioResult = {
   applyCount: number
@@ -136,7 +137,7 @@ const { join } = require('node:path');
   const firstPartialRetryCycle = mode === 'partial-retry' && !existsSync(partialRetryMarker);
   if (firstPartialRetryCycle && isLastTask) writeFileSync(partialRetryMarker, 'started\\n');
   if (mode === 'non-zero') process.exit(7);
-  if (mode === 'slow') {
+  if (mode === 'slow' || mode === 'evidence-slow') {
     process.stdout.write('fake-agent-ready\\n');
     await new Promise(() => { setInterval(() => {}, 1000); });
   }
@@ -290,6 +291,20 @@ async function runDaemonScenario(mode: AgentMode, workers = 1, injectControlDisc
     tasks,
   }
   const { home, bin, remote, secondaryRemote } = await createGitFixture(root, mode, tasks.map((task) => task.id))
+  const evidenceContent = Buffer.alloc(150 * 1024, 0x5a)
+  const evidenceKey = generateKeyPairSync('ed25519')
+  const evidenceRequestId = randomUUID()
+  const evidenceDemand = { requestId: evidenceRequestId, outputId: randomUUID(), projectId, requirementId, daemonId,
+    nodeId: 'daemon-e2e-node', nonce: 'a'.repeat(64), purpose: 'download' as const, sizeBytes: evidenceContent.length,
+    sha256: createHash('sha256').update(evidenceContent).digest('hex'), expiresAt: '' }
+  const evidenceChunks: Buffer[] = []
+  let evidenceReady = false, evidenceFinished = false
+  if (mode === 'evidence-slow') {
+    await mkdir(join(home, '.config', 'tw'), { recursive: true })
+    await writeFile(join(home, '.config', 'tw', 'evidence-node-key.pem'), evidenceKey.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 })
+    await mkdir(join(home, '.task-weaver', 'artifacts', requirementId), { recursive: true })
+    await writeFile(join(home, '.task-weaver', 'artifacts', requirementId, 'fixture.bin'), evidenceContent)
+  }
   const repositoryId = '00000000-0000-4000-8000-0000000000e1'
   const delivery = {
     id: '00000000-0000-4000-8000-0000000000d1',
@@ -367,6 +382,22 @@ async function runDaemonScenario(mode: AgentMode, workers = 1, injectControlDisc
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const path = url.pathname
+    if (mode === 'evidence-slow' && req.method === 'GET' && path === `/api/v1/evidence/demands/${daemonId}`) {
+      return sendJson(res, 200, { items: evidenceReady && !evidenceFinished ? [evidenceDemand] : [] })
+    }
+    if (mode === 'evidence-slow' && req.method === 'POST' && path === `/api/v1/evidence/${evidenceRequestId}/claim`) {
+      const body = await readJson(req)
+      assert.equal(verify(null, Buffer.from(evidenceDemandPayload(evidenceDemand)), evidenceKey.publicKey, Buffer.from(body.signature, 'base64')), true)
+      return sendJson(res, 200, { demand: evidenceDemand, relativePath: `${requirementId}/fixture.bin` })
+    }
+    if (mode === 'evidence-slow' && req.method === 'POST' && path === `/api/v1/evidence/${evidenceRequestId}/chunk`) {
+      const body = await readJson(req); assert.equal(body.sequence, evidenceChunks.length); evidenceChunks.push(Buffer.from(body.contentBase64, 'base64'))
+      return sendJson(res, 200, { ok: true })
+    }
+    if (mode === 'evidence-slow' && req.method === 'POST' && path === `/api/v1/evidence/${evidenceRequestId}/finish`) {
+      const body = await readJson(req); assert.equal(body.sequence, evidenceChunks.length); assert.deepEqual(Buffer.concat(evidenceChunks), evidenceContent); evidenceFinished = true
+      return sendJson(res, 200, { ok: true })
+    }
     if (req.method === 'GET' && path === `/api/v1/daemons/${daemonId}/execution-controls`) {
       if (injectControlDisconnects && planControl && droppedControlRequests === 0) {
         droppedControlRequests++;
@@ -550,7 +581,7 @@ async function runDaemonScenario(mode: AgentMode, workers = 1, injectControlDisc
     const spawnDaemon = () => spawn(
       process.execPath,
       [
-        '--import', 'tsx/esm', resolve(import.meta.dirname, 'index.ts'),
+        ...(process.env.TW_TEST_CLI_BUNDLE ? [process.env.TW_TEST_CLI_BUNDLE] : ['--import', 'tsx/esm', resolve(import.meta.dirname, 'index.ts')]),
         'daemon', 'start', '--tools', 'fake-agent', '--project', projectId,
         '--workers', String(workers), '--mode', 'polling', '--id', daemonId, '--once',
       ],
@@ -564,6 +595,7 @@ async function runDaemonScenario(mode: AgentMode, workers = 1, injectControlDisc
           TW_API_KEY: 'test-key',
           TW_CLIENT_ID: 'daemon-e2e-client',
           TW_NODE_ID: 'daemon-e2e-node',
+          TW_EVIDENCE_PRODUCER_ENABLED: mode === 'evidence-slow' ? 'true' : 'false',
           GIT_AUTHOR_NAME: 'Task Weaver Test',
           GIT_AUTHOR_EMAIL: 'task-weaver@example.test',
           GIT_COMMITTER_NAME: 'Task Weaver Test',
@@ -575,8 +607,15 @@ async function runDaemonScenario(mode: AgentMode, workers = 1, injectControlDisc
 
     const child = spawnDaemon()
     const exit = waitForExit(child, 45_000)
-    if (mode === 'slow') {
+    if (mode === 'slow' || mode === 'evidence-slow') {
       await waitForOutput(child, /fake-agent-ready/, 40_000)
+      if (mode === 'evidence-slow') {
+        evidenceDemand.expiresAt = new Date(Date.now() + 25_000).toISOString(); evidenceReady = true
+        const deadline = Date.now() + 15_000
+        while (!evidenceFinished && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100))
+        assert.equal(evidenceFinished, true, 'evidence must complete while the worker remains active')
+        assert.equal(child.exitCode, null)
+      }
       child.kill('SIGINT')
     }
     let result = await exit
@@ -770,6 +809,12 @@ test('daemon SIGINT drains a running child and leaves durable retry state', { ti
   assert.match(result.stdout, /entering drain mode/)
 })
 
+
+test('Linux daemon transfers verified evidence while an execution is active', { timeout: 60_000, skip: process.platform !== 'linux' }, async () => {
+  const result = await runDaemonScenario('evidence-slow')
+  assert.equal(result.exitCode, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`)
+  assert.equal(result.releaseCount, 1)
+})
 
 test('daemon stops before acquisition when bounded delegation is unavailable', { timeout: 60_000 }, async () => {
   const result = await runDaemonScenario('delegation-unavailable')
