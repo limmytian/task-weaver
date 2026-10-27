@@ -5,6 +5,17 @@ import { useRouter } from "next/navigation";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { planRequirementSchema } from "@task-weaver/contracts";
+
+export function RequirementPlanDraft({ projectId, requirementId, disabled }: { projectId: string; requirementId: string; disabled?: boolean }) {
+  const router = useRouter();
+  const capabilities = trpc.plan.capabilities.useQuery({ projectId });
+  const create = trpc.plan.createDraft.useMutation({
+    onSuccess: draft => router.push(`/projects/${projectId}/plans/${draft.id}`),
+    onError: error => toast.error(error.message),
+  });
+  return <Button variant="outline" disabled={disabled || create.isPending || !capabilities.data?.canWrite} onClick={() => create.mutate({ plan: { projectId, documents: [], requirements: [planRequirementSchema.parse({ key: `requirement-${crypto.randomUUID()}`, existingId: requirementId })], requirementDependencies: [], taskDependencies: [], documentLinks: [], documentTaskLinks: [], documentRequirementLinks: [] } })}>Plan work for this requirement</Button>;
+}
 
 export function PlanDrafts({ projectId }: { projectId: string }) {
   const router = useRouter();

@@ -56,6 +56,7 @@ import { KnowledgeGraph } from "@/components/knowledge-graph";
 import { ProjectWorkspaceLinks, WorkspaceBreadcrumbs } from "@/components/project-navigation";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { RequirementWorkflowPanel } from "@/components/requirement-workflow-panel";
+import { RequirementPlanDraft } from "@/components/plan-drafts";
 import { RepositoryChips, RequirementRepositories } from "@/components/repository-links";
 import { cn } from "@/lib/utils";
 
@@ -529,6 +530,7 @@ export default function RequirementDetailPage({
 
               {/* Burndown Chart */}
               <RequirementWorkflowPanel requirement={requirement} />
+              <RequirementPlanDraft projectId={projectId} requirementId={reqId} disabled={isCancelled || requirement.projectId !== projectId} />
               <BurndownChart requirementId={reqId} />
 
               <ExecutionSlicesPanel
