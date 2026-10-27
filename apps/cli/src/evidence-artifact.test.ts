@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openVerifiedEvidence, EvidenceArtifactError } from './evidence-artifact';
@@ -33,4 +33,25 @@ test('verified snapshots are confined, immutable and fully hashed', { skip: proc
   assert.equal(await readFile(join(root, 'lane', 'file'), 'utf8'), 'modified');
   const controller = new AbortController(); controller.abort();
   await assert.rejects(openVerifiedEvidence(root, manifest, controller.signal));
+});
+
+test('concurrent directory-to-symlink replacement cannot escape the evidence root', { skip: process.platform !== 'linux' }, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'tw-evidence-race-'));
+  const outside = await mkdtemp(join(tmpdir(), 'tw-evidence-outside-'));
+  t.after(async () => { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); });
+  await mkdir(join(root, 'lane')); await writeFile(join(root, 'lane', 'file'), 'verified'); await writeFile(join(outside, 'file'), 'external');
+  const manifest = { relativePath: 'lane/file', sizeBytes: 8, sha256: digest('verified') };
+  const swaps = (async () => { for (let i = 0; i < 80; i++) {
+    await rename(join(root, 'lane'), join(root, 'parked')); await symlink(outside, join(root, 'lane'));
+    await rm(join(root, 'lane')); await rename(join(root, 'parked'), join(root, 'lane'));
+  } })();
+  for (let i = 0; i < 80; i++) {
+    try {
+      const snapshot = await openVerifiedEvidence(root, manifest); const chunks: Buffer[] = [];
+      try { for await (const chunk of snapshot.createReadStream()) chunks.push(Buffer.from(chunk)); }
+      finally { await snapshot.close(); }
+      assert.equal(Buffer.concat(chunks).toString(), 'verified');
+    } catch (error) { assert.ok(error instanceof EvidenceArtifactError); }
+  }
+  await swaps;
 });
