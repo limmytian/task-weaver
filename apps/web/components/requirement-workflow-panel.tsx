@@ -152,7 +152,7 @@ function PinnedAttachmentEvidence({ file }: { file: { documentId: string; fileVe
   const [preview, setPreview] = useState(false);
   const path = `/api/attachments/${file.documentId}?fileVersion=${file.fileVersion}`;
   const kind = evidencePreviewKind(file.mimeType, file.sizeBytes);
-  return <div className="space-y-2"><p>{file.originalFilename} · {file.sizeBytes.toLocaleString()} bytes · file version {file.fileVersion}</p><p className="break-all">Recorded SHA-256: {file.sha256}</p><p>The stored file is not reverified when previewed.</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" asChild><a href={path}>Download original</a></Button>{['text', 'image', 'pdf'].includes(kind) && <Button size="sm" variant="outline" onClick={() => setPreview(value => !value)}>{preview ? 'Hide preview' : 'Preview'}</Button>}</div>
+  return <div className="space-y-2"><p>{file.originalFilename} · {file.sizeBytes.toLocaleString()} bytes · file version {file.fileVersion}</p><p className="break-all">Recorded SHA-256: {file.sha256}</p><p>Storage is checked before opening the file.</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" asChild><a href={path}>Download original</a></Button>{['text', 'image', 'pdf'].includes(kind) && <Button size="sm" variant="outline" onClick={() => setPreview(value => !value)}>{preview ? 'Hide preview' : 'Preview'}</Button>}</div>
     {preview && kind === 'text' && <TextAttachmentPreview src={`${path}&preview=true`} filename={file.originalFilename} maximumBytes={256 * 1024} />}
     {preview && kind === 'pdf' && <PdfAttachmentPreview src={`${path}&preview=true`} filename={file.originalFilename} />}
     {/* Authenticated attachment bytes must bypass Next image optimization. */}
