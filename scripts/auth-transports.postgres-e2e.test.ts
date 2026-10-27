@@ -17,6 +17,8 @@ import { GET as nextTRPC } from "../apps/web/app/api/trpc/[trpc]/route";
 import { POST as nextAttachmentUpload } from "../apps/web/app/api/attachments/route";
 import { GET as nextAttachmentDownload, PUT as nextAttachmentReplace } from "../apps/web/app/api/attachments/[id]/route";
 import { GET as nextAttachmentHistory } from "../apps/web/app/api/attachments/[id]/files/route";
+import { GET as nextEvidenceGet, POST as nextEvidencePost } from "../apps/web/app/api/evidence/[...path]/route";
+import { POST as nextWorkerConsole } from "../apps/web/app/api/worker-console/[...path]/route";
 
 const apiRequire = createRequire(
   new URL("../apps/api/package.json", import.meta.url),
@@ -143,7 +145,7 @@ test(
         readdirSync(new URL("../apps/web/app/api/", import.meta.url), { recursive: true })
           .filter(path => typeof path === "string" && path.endsWith("route.ts"))
           .sort(),
-        ["assistant/stream/route.ts", "attachments/[id]/files/route.ts", "attachments/[id]/route.ts", "attachments/route.ts", "auth/csrf/route.ts", "events/route.ts", "trpc/[trpc]/route.ts"],
+        ["assistant/stream/route.ts", "attachments/[id]/files/route.ts", "attachments/[id]/route.ts", "attachments/route.ts", "auth/csrf/route.ts", "events/route.ts", "evidence/[...path]/route.ts", "trpc/[trpc]/route.ts", "worker-console/[...path]/route.ts"],
         "Classify and exercise any new Next API entry point in the authorization inventory",
       );
       const publicRoutes = new Set([
@@ -203,6 +205,21 @@ test(
           const response = await handler(new Request(`${origin}/api/${path}`, { method, headers }), context);
           assert.equal(response.status, 401, `Attachment ${method} ${path} authenticates before resource validation`);
         }
+        const evidenceGet = await nextEvidenceGet(
+          new Request(`${origin}/api/evidence/invalid-resource-id/status`, { headers }),
+          { params: Promise.resolve({ path: ["invalid-resource-id", "status"] }) },
+        );
+        assert.equal(evidenceGet.status, 401, "Evidence GET authenticates before resource validation");
+        const evidencePost = await nextEvidencePost(
+          new Request(`${origin}/api/evidence/open`, { method: "POST", headers }),
+          { params: Promise.resolve({ path: ["open"] }) },
+        );
+        assert.equal(evidencePost.status, 401, "Evidence POST authenticates before resource validation");
+        const workerConsole = await nextWorkerConsole(
+          new Request(`${origin}/api/worker-console/invalid-worker/console/read`, { method: "POST", headers }),
+          { params: Promise.resolve({ path: ["invalid-worker", "console", "read"] }) },
+        );
+        assert.equal(workerConsole.status, 401, "Worker console authenticates before resource validation");
       }
     });
     const email = `${randomUUID()}@example.test`;
