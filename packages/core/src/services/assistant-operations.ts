@@ -50,6 +50,10 @@ export const assistantOperations: Record<string, Operation> = {
       if (result.isError) throw new schemas.ValidationError("External MCP call failed or its outcome is unknown; do not retry automatically");
       return { id: tool.serverId, toolId: p.toolId, output: cleanAssistantToolData(redactAssistantValues(result, headerValues), true) };
     }), external: true },
+    stage_plan: operation(z.object({ plan: schemas.stagedPlanSchema }).strict(), "Save a project plan as a reviewable draft. This creates no live requirements or tasks; tell the user to open the returned Web path to review and apply it.", "project", async (db, s, p, a) => {
+      const draft = await s.planService.createPlanDraft(db, { plan: p.plan, source: "assistant" }, a);
+      return { id: draft.projectId, draftId: draft.id, revision: draft.revision, webPath: `/projects/${draft.projectId}/plans/${draft.id}` };
+    }),
     create_project: operation(schemas.createProjectSchema.strict(), "Create a project.", "project", (db, s, p, a) => s.projectService.createProject(db, p, a)),
     update_project: operation(update("projectId", schemas.updateProjectSchema), "Update project details or archive a project.", "project", (db, s, p, a) => s.projectService.updateProject(db, p.projectId, p.changes, a), "projectId"),
     archive_project: operation(id("projectId"), "Archive a project using normal CLI lifecycle rules.", "project", (db, s, p, a) => s.projectService.deleteProject(db, p.projectId, a), "projectId"),

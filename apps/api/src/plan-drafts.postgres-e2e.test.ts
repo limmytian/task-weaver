@@ -56,6 +56,13 @@ test("drafts persist, reject stale writes and validate against live dependencies
   assert.deepEqual(durable.result.refs, receipts[0].result.refs);
   assert.equal((await api(`/plans/drafts/${ready.id}/receipt?projectId=${projectId}`, "GET", undefined, f.outsider.headers)).status, 404);
   assert.equal((await api(`/plans/drafts/${ready.id}/apply`, "POST", { projectId, revision: 1, operationKey: randomUUID() })).status, 409);
+  const createdRequirementId = receipts[0].result.refs.requirements[0].id;
+  await json(await api(`/requirements/${createdRequirementId}`, "PATCH", { status: "approved" }));
+  await f.identity.setMembership(f.owner.headers, projectId, f.outsider.context.actor.id, { role: "maintainer", explicitPermissions: [] });
+  await json(await api(`/requirements/${createdRequirementId}/claim`, "POST", { durationMinutes: 5 }, f.outsider.headers), 201);
+  assert.equal((await json(await api(`/plans/drafts/${ready.id}/apply`, "POST", { projectId, revision: 1, operationKey }))).replayed, true);
+  await json(await api(`/requirements/${createdRequirementId}/release`, "POST", { reason: "Finish replay test" }, f.outsider.headers));
+  await f.identity.removeMembership(f.owner.headers, projectId, f.outsider.context.actor.id);
   const other = await json(await api("/plans/drafts", "POST", { plan }), 201);
   await json(await api(`/plans/drafts/${other.id}/validate`, "POST", { projectId }));
   assert.equal((await api(`/plans/drafts/${other.id}/apply`, "POST", { projectId, revision: 1, operationKey })).status, 409);
@@ -89,6 +96,9 @@ test("drafts persist, reject stale writes and validate against live dependencies
   await db.update(planDrafts).set({ expiresAt: new Date(0) }).where(eq(planDrafts.id, expired.id));
   assert.equal((await api(`/plans/drafts/${expired.id}?projectId=${projectId}`)).status, 404);
   assert.equal((await api(`/plans/drafts/${expired.id}/apply`, "POST", { projectId, revision: 1, operationKey: randomUUID() })).status, 404);
+  await json(await api("/plans/drafts", "POST", { plan }), 201);
+  assert.equal((await db.select().from(planDrafts).where(eq(planDrafts.id, expired.id))).length, 0);
+  assert.equal((await json(await api(`/plans/drafts/${ready.id}/receipt?projectId=${projectId}`))).revision, 1);
   await json(await api(`/plans/drafts/${draft.id}/discard`, "POST", { projectId, revision: 3 }));
   assert.equal((await api(`/plans/drafts/${draft.id}?projectId=${projectId}`)).status, 404);
 });

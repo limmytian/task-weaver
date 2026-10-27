@@ -221,6 +221,11 @@ export const stagedPlanSchema = planSchema.superRefine((plan, ctx) => {
   if (plan.requirements.length > 100 || plan.documents.length > 100 || tasks.length > 200 || slices.length > 20 || edges > 500) {
     ctx.addIssue({ code: "custom", message: "Plan exceeds the staging entity or dependency limit" });
   }
+  for (const [documentIndex, document] of plan.documents.entries()) {
+    if (document.projectId !== undefined && document.projectId !== plan.projectId) {
+      ctx.addIssue({ code: "custom", path: ["documents", documentIndex, "projectId"], message: "Staged documents must stay within the project" });
+    }
+  }
   for (const [requirementIndex, requirement] of plan.requirements.entries()) {
     if (!requirement.existingId && requirement.status !== "draft") ctx.addIssue({ code: "custom", path: ["requirements", requirementIndex, "status"], message: "Staged new requirements must start as draft" });
     for (const [taskIndex, task] of requirement.tasks.entries()) {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, desc, eq, gt, inArray } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, lte } from "drizzle-orm";
 import { type Database, projects, requirements, tasks, taskDependencies, requirementDependencies, planDrafts, activityLog, executionSlices, requirementClaims, documents } from "@task-weaver/db";
 import type { Actor } from "@task-weaver/contracts";
 import type {
@@ -803,6 +803,12 @@ const DRAFT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 export async function createPlanDraft(db: Database, input: import("@task-weaver/contracts").CreatePlanDraftInput, actor: Actor) {
   const { stagedPlanSchema } = await import("@task-weaver/contracts");
   const plan = stagedPlanSchema.parse(input.plan);
+  // Opportunistically prune a bounded batch; applied receipts remain durable.
+  const expired = await db.select({ id: planDrafts.id }).from(planDrafts).where(and(eq(planDrafts.projectId, plan.projectId), inArray(planDrafts.state, ["draft", "discarded"]), lte(planDrafts.expiresAt, new Date()))).limit(100);
+  if (expired.length) {
+    await db.delete(planDrafts).where(and(eq(planDrafts.projectId, plan.projectId), inArray(planDrafts.id, expired.map(item => item.id)), inArray(planDrafts.state, ["draft", "discarded"]), lte(planDrafts.expiresAt, new Date())));
+    for (const item of expired) await recordDraftActivity(db, plan.projectId, item.id, "expired", actor);
+  }
   const [draft] = await db.insert(planDrafts).values({
     projectId: plan.projectId, createdBy: actor.id, createdByType: actor.type, source: input.source,
     plan: JSON.parse(JSON.stringify(plan)), expiresAt: new Date(Date.now() + DRAFT_RETENTION_MS),

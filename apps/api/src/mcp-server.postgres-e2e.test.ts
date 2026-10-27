@@ -283,6 +283,10 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   assert.equal(optionalResolution.nodes.length, 1);
   assert.equal(optionalResolution.unavailable.length, 1);
   const plan = { projectId: f.project.id, documents: [{ key: "design", title: "Planning design", content: "Stage plan" }], requirements: [{ key: "planned", title: "Planned MCP requirement", status: "approved", documents: ["design"], slices: [{ key: "one", title: "First" }, { key: "two", title: "Second" }, { key: "three", title: "Third" }], tasks: [{ key: "first", title: "First task", slice: "one" }, { key: "second", title: "Second task", slice: "two", dependsOn: ["first"] }, { key: "third", title: "Third task", slice: "three", dependsOn: ["second"] }] }] };
+  const staged = await success("tw_plan_stage", { plan: { projectId: f.project.id, requirements: [{ key: "draft", title: "MCP staged requirement" }] } });
+  assert.equal(staged.projectId, f.project.id);
+  assert.equal(staged.webPath, `/projects/${f.project.id}/plans/${staged.draftId}`);
+  assert.equal((await call("tw_plan_stage", { plan: { projectId: f.project.id, requirements: [{ key: "draft", title: "Must stay draft", status: "approved" }] } })).ok, false);
   const preview = await success("tw_plan_validate", { plan });
   assert.equal(preview.dryRun, true); assert.equal(preview.refs.requirements[0].id, null);
   assert.equal((await call("tw_plan_validate", { plan }, readKey.rawKey)).ok, false);

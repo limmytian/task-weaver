@@ -72,7 +72,7 @@ const readById: Record<string, ResourceKind> = {
   listRequirementDependencies: "requirement", checkBlockingDependencies: "task", checkBlockingRequirementDependencies: "requirement",
   getBacklinks: "document", getDocumentVersion: "document",
   getProjectStats: "project", getProjectHealthDashboard: "project", getKnowledgeGraph: "project",
-  listWorkflowOutputs: "requirement",
+  listWorkflowOutputs: "requirement", describeWorkflowEvidence: "requirement",
   listWorkflowInputs: "requirement",
   getWorkflowCleanupEligibility: "requirement",
   getKanbanBoard: "project", getKanbanBoardPage: "project", getKanbanBoardColumns: "project", getKanbanBoardColumn: "project", getGanttChart: "project", getRequirementHeatmap: "project",
@@ -374,10 +374,10 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
       : ["getPlanDraft", "listPlanDrafts", "discardPlanDraft", "validatePlanDraft", "applyPlanDraft", "planDraftCapabilities", "getPlanDraftReceipt"].includes(name) ? call[1] : undefined;
     if (!projectId) throw new AuthorizationError();
     await requireResource(db, authority, "project", projectId, ["getPlanDraft", "listPlanDrafts", "planDraftCapabilities", "getPlanDraftReceipt"].includes(name) ? "resource.read" : "resource.write");
-    if (name === "applyPlanDraft") {
+    if (name === "applyPlanDraft" || name === "validatePlanDraft") {
       const [draft] = await db.select().from(planDrafts).where(and(eq(planDrafts.id, call[2]), eq(planDrafts.projectId, projectId)));
       if (!draft) throw new NotFoundError("Plan draft not found");
-      await preflightPlan(db, authority, stagedPlanSchema.parse(draft.plan));
+      if (draft.state !== "applied") await preflightPlan(db, authority, stagedPlanSchema.parse(draft.plan));
     }
     return;
   }
@@ -604,6 +604,15 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
   }
   if (readById[name]) {
     const scope = await requireResource(db, authority, readById[name]!, id);
+    if (name === "describeWorkflowEvidence") {
+      const output = await db.query.workflowOutputs.findFirst({ where: and(eq(workflowOutputs.id, call[2]), eq(workflowOutputs.requirementId, id)) });
+      if (!output) throw new NotFoundError("Output not found");
+      if (output.requirementRepositoryId) {
+        const link = await db.query.requirementRepositories.findFirst({ where: and(eq(requirementRepositories.id, output.requirementRepositoryId), eq(requirementRepositories.requirementId, id)) });
+        if (!link) throw new NotFoundError("Output not found");
+        await requireRepository(db, authority, link.repositoryId);
+      }
+    }
     const predicates = {
       tasks: taskResourcePredicate(authority), requirements: resourcePredicate(authority, requirements),
       documents: resourcePredicate(authority, documents),

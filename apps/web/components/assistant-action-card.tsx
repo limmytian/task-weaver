@@ -1,6 +1,7 @@
 "use client";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 export type AssistantActionView = {
   id: string; messageId?: string | null; actionType: string; status: string; preview: string | null;
@@ -29,6 +30,7 @@ export function AssistantActionCard({ action, allowed, busy, onApprove, onReject
         {!allowed && <span className="text-xs text-muted-foreground">Enable operations in Chat settings to approve.</span>}
       </div>
     </>}
+    {operation === "stage_plan" && action.status === "succeeded" && typeof (action.executionResult?.result as Record<string, unknown> | undefined)?.webPath === "string" && /^\/projects\/[0-9a-f-]{36}\/plans\/[0-9a-f-]{36}$/i.test((action.executionResult!.result as Record<string, string>).webPath!) && <Link className="mt-2 inline-block text-sm underline" href={(action.executionResult!.result as Record<string, string>).webPath!}>Open plan draft</Link>}
     {action.executionResult && <details className="mt-2 text-xs"><summary className="cursor-pointer text-muted-foreground">View recorded result</summary>
       <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2">{JSON.stringify(action.executionResult, null, 2)}</pre>
     </details>}

@@ -56,14 +56,14 @@ function PlanEditor({ projectId, draftId, initialPlan, initialRevision, canWrite
     catch (e) { setReview(null); setError(e instanceof Error ? e.message : "Apply failed; validate and retry"); }
   };
   const nodes = plan.requirements.flatMap(req => [
-    { id: req.key, title: req.title ?? req.existingId ?? req.key, status: "draft", meta: req.existingId ? "Reused requirement" : "New requirement" },
-    ...req.tasks.map(task => ({ id: task.key, title: task.title ?? task.existingId ?? task.key, status: "todo", meta: task.existingId ? "Reused task" : "New task" })),
+    { id: `requirement:${req.key}`, title: req.title ?? req.existingId ?? req.key, status: "draft", meta: req.existingId ? "Reused requirement" : "New requirement" },
+    ...req.tasks.map(task => ({ id: `task:${task.key}`, title: task.title ?? task.existingId ?? task.key, status: "todo", meta: task.existingId ? "Reused task" : "New task" })),
   ]);
   const edges = [
-    ...plan.requirementDependencies.map((edge, i) => ({ id: `r-${i}`, source: edge.dependsOn, target: edge.requirement, type: edge.type })),
-    ...plan.taskDependencies.map((edge, i) => ({ id: `t-${i}`, source: edge.dependsOn, target: edge.task, type: edge.type })),
-    ...plan.requirements.flatMap(req => [...req.dependsOn, ...req.dependencies].map((dep, i) => ({ id: `${req.key}-r-${i}`, source: typeof dep === "string" ? dep : dep.requirement, target: req.key, type: typeof dep === "string" ? "blocks" : dep.type }))),
-    ...plan.requirements.flatMap(req => req.tasks.flatMap(task => [...task.dependsOn, ...task.dependencies].map((dep, i) => ({ id: `${task.key}-t-${i}`, source: typeof dep === "string" ? dep : dep.task, target: task.key, type: typeof dep === "string" ? "blocks" : dep.type })))),
+    ...plan.requirementDependencies.map((edge, i) => ({ id: `r-${i}`, source: `requirement:${edge.dependsOn}`, target: `requirement:${edge.requirement}`, type: edge.type })),
+    ...plan.taskDependencies.map((edge, i) => ({ id: `t-${i}`, source: `task:${edge.dependsOn}`, target: `task:${edge.task}`, type: edge.type })),
+    ...plan.requirements.flatMap(req => [...req.dependsOn, ...req.dependencies].map((dep, i) => ({ id: `${req.key}-r-${i}`, source: `requirement:${typeof dep === "string" ? dep : dep.requirement}`, target: `requirement:${req.key}`, type: typeof dep === "string" ? "blocks" : dep.type }))),
+    ...plan.requirements.flatMap(req => req.tasks.flatMap(task => [...task.dependsOn, ...task.dependencies].map((dep, i) => ({ id: `${task.key}-t-${i}`, source: `task:${typeof dep === "string" ? dep : dep.task}`, target: `task:${task.key}`, type: typeof dep === "string" ? "blocks" : dep.type })))),
   ];
   if (receipt) return <section className="space-y-3"><h1 className="text-xl font-semibold">Plan applied</h1><p>Created work starts as drafts and to-do tasks. Approval is a separate action.</p><ul className="space-y-1">{receipt.result.refs.requirements.map(ref => <li key={ref.key}><Link className="underline" href={`/projects/${projectId}/requirements/${ref.id}`}>{ref.title ?? ref.key}</Link> · {ref.existing ? "reused" : "created"}</li>)}</ul><Link className="underline" href={`/projects/${projectId}`}>Open project</Link></section>;
   return <fieldset disabled={!canWrite} className="space-y-5"><header><h1 className="text-xl font-semibold">Plan draft</h1><p className="text-sm text-muted-foreground">Revision {revision} · {dirty ? "Unsaved changes" : "Saved"}{canWrite ? "" : " · Read only"}. Existing items are references; edits here do not change them.</p></header>
