@@ -377,7 +377,13 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
     if (name === "applyPlanDraft" || name === "validatePlanDraft") {
       const [draft] = await db.select().from(planDrafts).where(and(eq(planDrafts.id, call[2]), eq(planDrafts.projectId, projectId)));
       if (!draft) throw new NotFoundError("Plan draft not found");
-      if (draft.state !== "applied") await preflightPlan(db, authority, stagedPlanSchema.parse(draft.plan));
+      if (draft.state !== "applied") {
+        const plan = stagedPlanSchema.parse(draft.plan);
+        await preflightPlan(db, authority, plan);
+        for (const requirement of plan.requirements) for (const task of requirement.tasks) {
+          if (!task.existingId) await validateAssignee(db, authority, { projectId }, task.assignee, task.assigneeType);
+        }
+      }
     }
     return;
   }
