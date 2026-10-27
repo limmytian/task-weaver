@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "crypto";
-import { createReadStream, createWriteStream } from "fs";
-import { mkdir, readdir, rm, stat, rename, realpath, lstat } from "fs/promises";
+import { constants, createReadStream, createWriteStream } from "fs";
+import { mkdir, readdir, rm, stat, rename, realpath, lstat, open, mkdtemp, unlink } from "fs/promises";
+import { tmpdir } from "os";
 import { dirname, relative, resolve, sep } from "path";
 import { Readable, Transform } from "stream";
 import { pipeline } from "stream/promises";
@@ -87,6 +88,40 @@ export class LocalStorageAdapter implements StorageAdapter {
       ...metadata,
       body: createReadStream(this.resolveObjectPath(key)),
     };
+  }
+
+  /** Verify a private snapshot before serving immutable attachment evidence. */
+  async getVerifiedObject(key: string, expected: { sha256: string; sizeBytes: number }): Promise<GetStorageObjectResult> {
+    const filePath = this.resolveObjectPath(key);
+    await this.ensureSafeParent(filePath);
+    if (!Number.isSafeInteger(expected.sizeBytes) || expected.sizeBytes < 0) throw new Error("Storage object exceeds verification limit");
+    const source = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    let directory: string | undefined;
+    try {
+      const sourceStat = await source.stat();
+      if (!sourceStat.isFile() || sourceStat.size !== expected.sizeBytes) throw new Error("Attachment storage integrity check failed");
+      directory = await mkdtemp(resolve(tmpdir(), "tw-storage-"));
+      const snapshot = resolve(directory, "snapshot");
+      const hash = createHash("sha256"); let sizeBytes = 0;
+      const meter = new Transform({ transform: (chunk: Buffer, _encoding, callback) => {
+        sizeBytes += chunk.length;
+        if (sizeBytes > expected.sizeBytes) { callback(new Error("Attachment storage integrity check failed")); return; }
+        hash.update(chunk); callback(null, chunk);
+      } });
+      await pipeline(source.createReadStream({ autoClose: false }), meter, createWriteStream(snapshot, { flags: "wx", mode: 0o600 }));
+      if (sizeBytes !== expected.sizeBytes || hash.digest("hex") !== expected.sha256) throw new Error("Attachment storage integrity check failed");
+      const pinned = await open(snapshot, constants.O_RDONLY | constants.O_NOFOLLOW);
+      // Unix can remove the path while retaining the verified descriptor.
+      try { if (process.platform !== "win32") await unlink(snapshot); }
+      catch (error) { await pinned.close(); throw error; }
+      const body = pinned.createReadStream({ autoClose: true });
+      const cleanup = directory; directory = undefined;
+      body.once("close", () => { void rm(cleanup, { recursive: true, force: true }).catch(() => {}); });
+      return { key: normalizeObjectKey(key), backend: this.backend, sha256: expected.sha256, sizeBytes, updatedAt: sourceStat.mtime, body };
+    } finally {
+      await source.close();
+      if (directory) await rm(directory, { recursive: true, force: true });
+    }
   }
 
   async statObject(key: string): Promise<StorageObjectMetadata> {

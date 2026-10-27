@@ -101,8 +101,7 @@ export function createAttachmentService(identity: VerifiedRequestContext) {
         fileVersion === undefined ? eq(documentFileVersions.id, row.currentFileVersionId!) : eq(documentFileVersions.version, fileVersion)));
       if (!file) throw new NotFoundError("Attachment file version not found");
       if (file.storageBackend !== "local") throw new Error("Attachment storage backend unavailable");
-      const object = await attachmentStorage().getObject(file.objectKey);
-      if (object.sha256 !== file.sha256 || object.sizeBytes !== file.sizeBytes) { object.body.destroy(); throw new Error("Attachment storage integrity check failed"); }
+      const object = await attachmentStorage().getVerifiedObject(file.objectKey, { sha256: file.sha256, sizeBytes: file.sizeBytes });
       return { file: publicAttachmentFile(file), body: object.body };
     },
   };
