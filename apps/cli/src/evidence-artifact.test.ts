@@ -1,0 +1,32 @@
+import { test } from 'node:test';
+import { strict as assert } from 'node:assert';
+import { createHash } from 'node:crypto';
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { openVerifiedEvidence, EvidenceArtifactError } from './evidence-artifact';
+
+const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+test('verified snapshots are confined, immutable and fully hashed', { skip: process.platform !== 'linux' }, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'tw-evidence-test-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, 'lane'));
+  await writeFile(join(root, 'lane', 'file'), 'verified');
+  const manifest = { relativePath: 'lane/file', sizeBytes: 8, sha256: digest('verified') };
+  const evidence = await openVerifiedEvidence(root, manifest);
+  await writeFile(join(root, 'lane', 'file'), 'modified');
+  const chunks: Buffer[] = [];
+  for await (const chunk of evidence.createReadStream()) chunks.push(Buffer.from(chunk));
+  await evidence.close();
+  assert.equal(Buffer.concat(chunks).toString(), 'verified');
+  await assert.rejects(openVerifiedEvidence(root, manifest), (error: unknown) => error instanceof EvidenceArtifactError && error.state === 'changed');
+  await assert.rejects(openVerifiedEvidence(root, { ...manifest, relativePath: '../outside' }), EvidenceArtifactError);
+  await assert.rejects(openVerifiedEvidence(root, { ...manifest, relativePath: 'lane/%2e%2e/file' }), EvidenceArtifactError);
+  await symlink('/etc', join(root, 'escape'));
+  await assert.rejects(openVerifiedEvidence(root, { ...manifest, relativePath: 'escape/passwd' }), EvidenceArtifactError);
+  await symlink('/etc/passwd', join(root, 'lane', 'link'));
+  await assert.rejects(openVerifiedEvidence(root, { ...manifest, relativePath: 'lane/link' }), EvidenceArtifactError);
+  assert.equal(await readFile(join(root, 'lane', 'file'), 'utf8'), 'modified');
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(openVerifiedEvidence(root, manifest, controller.signal));
+});
