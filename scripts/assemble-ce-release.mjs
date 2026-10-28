@@ -67,6 +67,7 @@ if (existsSync(resolve(root, `docs/releases/${version}.zh-CN.md`))) {
   copyFileSync(translatedNotes, join(output, "RELEASE_NOTES.zh-CN.md"));
 }
 
+assertPublicArtifactTree(output);
 const artifacts = readdirSync(output).filter((file) => file !== "ce-release.json")
   .sort().map((file) => {
     const bytes = readFileSync(join(output, file));

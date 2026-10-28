@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -44,4 +46,17 @@ test("safe examples pass and artifact symlinks fail closed", t => {
   assertPublicArtifactTree(root);
   symlinkSync("guide.md", join(root, "link"));
   assert.throws(() => assertPublicArtifactTree(root), /nonregular-artifact-entry/);
+});
+
+test("finalization rejects stale private sidecars before rewriting the public manifest", t => {
+  const root = fixture(t);
+  const output = join(root, "release-artifacts", "bundle");
+  mkdirSync(output, { recursive: true });
+  const manifest = '{"schemaVersion":1,"artifacts":[]}\n';
+  writeFileSync(join(output, "ce-release.json"), manifest);
+  writeFileSync(join(output, "database.dump"), Buffer.from([0, 1, 2]));
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL("./finalize-ce-release.mjs", import.meta.url))], { cwd: root, encoding: "utf8" });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /database\.dump.*private-state-file/);
+  assert.equal(readFileSync(join(output, "ce-release.json"), "utf8"), manifest);
 });

@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { assertPublicArtifactTree } from "./public-artifact-privacy.mjs";
 
 const output = resolve(process.cwd(), "release-artifacts", "bundle");
 const manifestPath = join(output, "ce-release.json");
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+assertPublicArtifactTree(output);
 manifest.artifacts = readdirSync(output)
   .filter((file) => file !== "ce-release.json" && !file.endsWith(".sigstore.json"))
   .sort()
