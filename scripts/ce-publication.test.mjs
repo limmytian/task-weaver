@@ -1,3 +1,4 @@
+import { assertBusyboxWgetEvidence } from "./busybox-wget-evidence.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -208,4 +209,15 @@ test("formal staging signs candidate indexes without writing stable or latest ta
     assert.match(log, /cosign attest/);
     assert.equal(JSON.parse(readFileSync(join(out, "api-image.json"), "utf8")).image, "ghcr.io/example/task-weaver-api:0.3.17");
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("BusyBox verification must pass for the exact candidate image and platform", () => {
+  const image = `sha256:${"a".repeat(64)}`;
+  const report = { passed: true, imageId: image, platform: "linux/arm64" };
+  assert.doesNotThrow(() => assertBusyboxWgetEvidence(report, image, "linux/arm64"));
+  assert.throws(() => assertBusyboxWgetEvidence(null, image, "linux/arm64"));
+  assert.throws(() => assertBusyboxWgetEvidence({ ...report, passed: false }, image, "linux/arm64"));
+  assert.throws(() => assertBusyboxWgetEvidence(report, `sha256:${"b".repeat(64)}`, "linux/arm64"));
+  assert.throws(() => assertBusyboxWgetEvidence(report, image, "linux/amd64"));
 });

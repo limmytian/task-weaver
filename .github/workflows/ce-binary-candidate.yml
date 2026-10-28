@@ -111,6 +111,7 @@ jobs:
           name: ce-binary-candidate-diagnostics-${{ matrix.arch }}
           path: |
             release-artifacts/binary-licenses/
+            release-artifacts/busybox-wget/
             release-artifacts/images/
             release-artifacts/native-replacement/verification.json
             release-artifacts/deployment-verification.json

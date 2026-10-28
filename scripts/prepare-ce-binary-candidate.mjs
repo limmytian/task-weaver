@@ -17,6 +17,8 @@ const script = (name, ...args) => run(process.execPath, [`scripts/${name}.mjs`, 
 for (const [app, image] of [["api", api], ["web", web]]) {
   run("docker", ["buildx", "build", "--platform", platform, "--load", "--build-arg", `TW_BUILD_COMMIT=${execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()}`, "--file", `apps/${app}/Dockerfile`, "--tag", image, "."]);
 }
+// Check both image identities before preparing the expensive source sidecar.
+for (const image of [api, web]) script("verify-busybox-wget", image, platform);
 script("collect-image-license-evidence", `--platform=${platform}`, api, web);
 const root = "release-artifacts/binary-sources";
 script("prepare-binary-sources", "release-artifacts/binary-licenses");

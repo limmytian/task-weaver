@@ -149,6 +149,9 @@ a loopback HTTP server. It records the exact local image ID and fails on a
 missing wget applet, a request reaching the server, a timeout, or an image change.
 This is a behavioral regression check, not a substitute for source provenance,
 license review, vulnerability scanning, or testing other URL handling paths.
+Candidate preparation runs the check for both images. Packaging and loading
+require passing reports for the exact candidate image IDs and platform; earlier
+candidates without those reports need to be rebuilt and verified.
 
 ## Verify User Replacement
 
