@@ -83,7 +83,9 @@ database without an explicit compatibility test.
 Render the manifests with immutable image references:
 
 ```sh
+TW_NAMESPACE="${TW_NAMESPACE:-task-weaver}"
 TW_RELEASE_VERSION="${RELEASE_VERSION:?Set the reviewed release version}" \
+TW_NAMESPACE="$TW_NAMESPACE" \
 TW_API_IMAGE="$API_IMAGE_DIGEST" \
 TW_WEB_IMAGE="$WEB_IMAGE_DIGEST" \
 pnpm deploy:render-kubernetes
@@ -99,10 +101,11 @@ versioned migration Job to complete before applying `apps.yaml`:
 ```sh
 kubectl apply -f release-artifacts/kubernetes/base.yaml
 kubectl apply -f release-artifacts/kubernetes/migration.yaml
-kubectl -n task-weaver wait --for=condition=complete job/task-weaver-migrate-v0-2-0 --timeout=10m
+kubectl -n "$TW_NAMESPACE" wait --for=condition=complete \
+  "job/task-weaver-migrate-v$(printf '%s' "$RELEASE_VERSION" | sed 's/[^a-z0-9]/-/g')" --timeout=10m
 kubectl apply -f release-artifacts/kubernetes/apps.yaml
-kubectl -n task-weaver rollout status deployment/task-weaver-api
-kubectl -n task-weaver rollout status deployment/task-weaver-web
+kubectl -n "$TW_NAMESPACE" rollout status deployment/task-weaver-api
+kubectl -n "$TW_NAMESPACE" rollout status deployment/task-weaver-web
 ```
 
 Before a Kubernetes upgrade, snapshot the database and skill-data PVC with
