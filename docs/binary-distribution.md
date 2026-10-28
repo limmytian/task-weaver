@@ -134,6 +134,15 @@ permissions, and timestamps are deterministic. It does not include scratch trees
 database backups, replacement binaries, or local credentials. Packaging does not
 resolve missing notices or approve delivery conditions.
 
+For a proposed custom BusyBox build using the reviewed Alpine baseline, the
+optional `node scripts/prepare-busybox-build-sources.mjs
+release-artifacts/binary-sources/source-lock.json` generates an additional
+source acquisition plan for the pinned security patch and static library
+sources. Review and acquire that plan with the normal source acquisition
+process. The plan does not bind a compiled binary to those inputs or authorize
+replacement of the packaged BusyBox; the standard source verification rejects
+such replacements until the build and corresponding-source evidence are reviewed.
+
 ## Verify BusyBox wget request handling
 
 For each delivered API and Web image and each supported platform, run:

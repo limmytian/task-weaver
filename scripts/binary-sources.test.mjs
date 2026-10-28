@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import test from "node:test";
@@ -183,5 +183,17 @@ test("source sidecar delivers verified source-only vendor files, not raw native 
     assert.doesNotMatch(index, /sourcePath|local-vendor/);
     save("local-vendor/fixture/Cargo.toml", "changed");
     assert.notEqual(pack().status, 0);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("BusyBox build source planning rejects an unreviewed baseline before network access", () => {
+  const directory = mkdtempSync(join(tmpdir(), "tw-busybox-plan-"));
+  try {
+    const manifest = join(directory, "source-lock.json");
+    writeFileSync(manifest, JSON.stringify({ schemaVersion: 1, components: [{ id: "alpine-busybox", commit: "other" }], files: [] }));
+    const result = spawnSync(process.execPath, [resolve("scripts/prepare-busybox-build-sources.mjs"), manifest], { cwd: directory, encoding: "utf8", timeout: 5000 });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Unexpected BusyBox source baseline/);
+    assert.equal(existsSync(join(directory, "release-artifacts")), false);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

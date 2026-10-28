@@ -16,7 +16,7 @@ export function safePath(value) {
 export function publicUrl(value) {
   const url = new URL(value);
   if (url.protocol !== "https:" || url.username || url.password || url.port ||
-      !/^(?:github\.com|api\.github\.com|raw\.githubusercontent\.com|gist\.githubusercontent\.com|gist\.github\.com|patch-diff\.githubusercontent\.com|codeload\.github\.com|download\.gnome\.org|storage\.googleapis\.com|gitlab\.com|gitlab\.freedesktop\.org|cairographics\.org|busybox\.net|gcc\.gnu\.org|musl\.libc\.org|dev\.gentoo\.org|gitlab\.alpinelinux\.org|salsa\.debian\.org|static\.crates\.io|nodejs\.org|distfiles\.alpinelinux\.org|static\.rust-lang\.org)$/.test(url.hostname)) {
+      !/^(?:github\.com|api\.github\.com|raw\.githubusercontent\.com|gist\.githubusercontent\.com|gist\.github\.com|patch-diff\.githubusercontent\.com|codeload\.github\.com|download\.gnome\.org|storage\.googleapis\.com|gitlab\.com|gitlab\.freedesktop\.org|cairographics\.org|busybox\.net|skarnet\.org|gcc\.gnu\.org|musl\.libc\.org|dev\.gentoo\.org|gitlab\.alpinelinux\.org|salsa\.debian\.org|static\.crates\.io|nodejs\.org|distfiles\.alpinelinux\.org|static\.rust-lang\.org)$/.test(url.hostname)) {
     throw new Error("Source URL must use an approved public HTTPS upstream.");
   }
   return url.href;
