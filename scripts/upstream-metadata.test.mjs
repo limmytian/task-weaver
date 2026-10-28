@@ -39,6 +39,20 @@ test("safe metadata GET retries transient transport/status failures and preserve
   }
 });
 
+test("GitHub API metadata uses the scoped token without forwarding it across redirects", () => {
+  const api = "https://api.github.com/repos/example/project/contents/path?ref=immutable";
+  const f = fixture([response(302, "", "https://raw.githubusercontent.com/example/project/immutable-ref/file"), response(200, "metadata")]);
+  assert.equal(getText(api, { ...f.options, githubToken: "test-token" }), "metadata");
+  assert.ok(f.calls[0].args.includes("@-"));
+  assert.equal(f.calls[0].options.input, "Authorization: Bearer test-token\nAccept: application/vnd.github+json\n");
+  assert.ok(!f.calls[1].args.some((argument) => argument.includes("test-token")));
+  assert.equal(f.calls[1].options.input, undefined);
+
+  const publicMetadata = fixture([response(200, "metadata")]);
+  assert.equal(getText(url, { ...publicMetadata.options, githubToken: "test-token" }), "metadata");
+  assert.ok(!publicMetadata.calls[0].args.some((argument) => argument.includes("test-token")));
+});
+
 test("authentication, TLS and local process failures are never retried or disclosed", () => {
   for (const result of [response(401), response(403), response(404), { status: 35 }, { status: 60 },
     { status: 0, stdout: "malformed" }, { error: new Error("secret-path"), status: null }, { status: null, signal: "SIGTERM" }]) {

@@ -26,6 +26,7 @@ export function publicUrl(value) {
 // retain their own identity/checksum checks and are never replayed by this helper.
 export function getText(url, {
   execute = spawnSync,
+  githubToken = process.env.GH_TOKEN,
   now = () => performance.now(),
   sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms),
 } = {}) {
@@ -43,10 +44,18 @@ export function getText(url, {
     requests += 1;
     // Disable curlrc and automatic redirects: every target must pass publicUrl.
     // The final two lines are curl metadata, separate from the response body.
-    const result = execute("curl", ["--disable", "--globoff", "--silent", "--show-error", "--proto", "=https",
+    const args = ["--disable", "--globoff", "--silent", "--show-error", "--proto", "=https",
       "--connect-timeout", "10", "--max-time", String(Math.min(45_000, remaining) / 1000),
-      "--write-out", "\\n%{http_code}\\n%{redirect_url}", current],
-    { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: Math.max(1, Math.floor(remaining)) });
+      "--write-out", "\\n%{http_code}\\n%{redirect_url}"];
+    const authenticatedApiRequest = new URL(current).hostname === "api.github.com" && githubToken;
+    if (authenticatedApiRequest) args.push("--header", "@-");
+    args.push(current);
+    const result = execute("curl", args, {
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: Math.max(1, Math.floor(remaining)),
+      ...(authenticatedApiRequest ? { input: `Authorization: Bearer ${githubToken}\nAccept: application/vnd.github+json\n` } : {}),
+    });
     if (now() >= deadline) fail("deadline exhausted");
     if (result.error || result.signal) fail("transport process failed");
     let transient = false;

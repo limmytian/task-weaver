@@ -38,6 +38,7 @@ jobs:
       NEXT_TELEMETRY_DISABLED: "1"
       TURBO_TELEMETRY_DISABLED: "1"
       TASK_WEAVER_AUDIT_REGISTRY: https://registry.npmjs.org
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
