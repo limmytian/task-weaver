@@ -142,6 +142,10 @@ sources. Review and acquire that plan with the normal source acquisition
 process. The plan does not bind a compiled binary to those inputs or authorize
 replacement of the packaged BusyBox; the standard source verification rejects
 such replacements until the build and corresponding-source evidence are reviewed.
+The experimental `node scripts/build-reviewed-busybox.mjs <source-lock.json>
+<platform>` builds from those locked inputs with a fixed timestamp and checked
+static-library hashes. Its local report does not bind the resulting executable
+to an application image or replace the standard distribution checks.
 
 ## Verify BusyBox wget request handling
 

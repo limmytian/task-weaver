@@ -197,3 +197,21 @@ test("BusyBox build source planning rejects an unreviewed baseline before networ
     assert.equal(existsSync(join(directory, "release-artifacts")), false);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+test("BusyBox builds reject missing source provenance before invoking Docker", () => {
+  const directory = mkdtempSync(join(tmpdir(), "tw-busybox-build-"));
+  try {
+    const manifest = join(directory, "source-lock.json");
+    writeFileSync(manifest, JSON.stringify({ schemaVersion: 1, components: [], files: [] }));
+    const result = spawnSync(process.execPath, [resolve("scripts/build-reviewed-busybox.mjs"), manifest, "linux/arm64"], { cwd: directory, encoding: "utf8", timeout: 5000 });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Reviewed BusyBox source plan is required/);
+    assert.doesNotMatch(result.stderr, /docker/);
+    writeFileSync(manifest, JSON.stringify({ schemaVersion: 1, busyboxBuildInputs: { configuration: "original-alpine",
+      staticLibraries: ["alpine-utmps", "alpine-skalibs"], patch: "alpine-busybox/patches/wget-CVE-2025-60876.patch" },
+      components: [{ id: "alpine-busybox", commit: "changed" }], files: [] }));
+    const changed = spawnSync(process.execPath, [resolve("scripts/build-reviewed-busybox.mjs"), manifest, "linux/arm64"], { cwd: directory, encoding: "utf8", timeout: 5000 });
+    assert.notEqual(changed.status, 0);
+    assert.match(changed.stderr, /Unexpected alpine-busybox source commit/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
