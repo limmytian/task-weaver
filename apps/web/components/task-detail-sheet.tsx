@@ -83,6 +83,10 @@ export function TaskDetailSheet({
     { id: taskId! },
     { enabled: !!taskId },
   );
+  const runs = trpc.tiAgent.listRuns.useQuery(
+    { taskId: taskId!, limit: 1 },
+    { enabled: open && !!taskId && task?.status === "in_review", retry: false },
+  );
   const effectiveProjectId = task?.projectId ?? projectId;
   const candidates = trpc.auth.assignees.useQuery(
     { projectId: effectiveProjectId ?? undefined },
@@ -361,6 +365,13 @@ export function TaskDetailSheet({
             return <section aria-labelledby="task-review-heading" className="mb-5 space-y-3 rounded-lg border p-3 text-sm">
               <h3 id="task-review-heading" className="font-semibold">Review summary</h3>
               <div><h4 className="font-medium">Goal</h4><p className="whitespace-pre-wrap break-words">{task.description || "No task goal recorded."}</p></div>
+              <div><h4 className="font-medium">Latest Ti run</h4>
+                {runs.isLoading ? <p>Loading run…</p> : runs.isError ? <p role="alert">Run information is unavailable or access is denied.</p> : runs.data?.[0] ? <>
+                  <p className="text-xs text-muted-foreground">Status: {runs.data[0].status} · {new Date(runs.data[0].createdAt).toLocaleString()} · Run {runs.data[0].id}</p>
+                  <p className="text-xs text-muted-foreground">Model: {runs.data[0].actualProvider && runs.data[0].actualModel ? `${runs.data[0].actualProvider} / ${runs.data[0].actualModel}` : "Not recorded"}</p>
+                  <p className="whitespace-pre-wrap break-words">{runs.data[0].errorMessage || runs.data[0].outputSummary || "No run result recorded."}</p>
+                </> : <p className="text-muted-foreground">No accessible Ti run recorded for this task. Other agents may report through comments.</p>}
+              </div>
               <div><h4 className="font-medium">Latest recorded comment</h4>{latest ? <>
                 <p className="text-xs text-muted-foreground">{latest.authorId} · {latest.authorType} · {new Date(latest.createdAt).toLocaleString()}</p>
                 <p className="whitespace-pre-wrap break-words">{latest.content}</p>

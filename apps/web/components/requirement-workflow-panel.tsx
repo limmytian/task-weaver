@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BASIC_WORKFLOW, requirementWorkflowSchema, evidencePreviewKind, type RequirementWorkflow } from "@task-weaver/contracts";
 import { readEvidencePreview } from "@/lib/evidence-preview-transfer";
+import { recordedReviewChecks, type ReviewCheckStatus } from "@/lib/review-checks";
 import { highlightGitDiffLine } from "@/lib/git-diff-highlight";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
@@ -33,7 +34,7 @@ export function RequirementWorkflowPanel({ requirement }: { requirement: Workflo
   const [editing, setEditing] = useState(false);
   const [definition, setDefinition] = useState<RequirementWorkflow>(BASIC_WORKFLOW);
   const [reason, setReason] = useState("");
-  const [checks, setChecks] = useState<Record<string, boolean>>({});
+  const [checks, setChecks] = useState<Record<string, ReviewCheckStatus | undefined>>({});
   const [outputValue, setOutputValue] = useState("");
   const [inputId, setInputId] = useState("");
   const refresh = () => { void utils.requirement.get.invalidate({ id: requirement.id }); void utils.requirement.recoveryState.invalidate({ id: requirement.id }); };
@@ -58,7 +59,7 @@ export function RequirementWorkflowPanel({ requirement }: { requirement: Workflo
     if (!nextStage || !reason.trim()) return;
     advance.mutate({ requirementId: requirement.id, data: {
       stage: nextStage, decision, reason: reason.trim(), expectedRevision: requirement.workflowStateRevision,
-      checks: (workflow?.acceptance.requiredChecks ?? []).map((name) => ({ name, status: checks[name] ? "passed" : "failed" })),
+      checks: recordedReviewChecks(workflow?.acceptance.requiredChecks ?? [], checks),
     } });
   };
   const method = workflow?.delivery.method;
@@ -88,7 +89,7 @@ export function RequirementWorkflowPanel({ requirement }: { requirement: Workflo
         {method === "local" && !terminal && <p className="text-muted-foreground">Register a file on its producing machine with <code>tw req output register {requirement.id} --type local --file /path/to/file</code>. The file stays on that node.</p>}
         {canAdvance && <div className="space-y-3">
           <Textarea aria-label="Stage decision reason" value={reason} onChange={(event) => setReason(event.target.value)} placeholder={`Reason for the ${nextStage} decision`} rows={2} />
-          {nextStage === "acceptance" && workflow.acceptance.requiredChecks.map((name) => <label key={name} className="flex items-center gap-2"><input type="checkbox" checked={Boolean(checks[name])} onChange={(event) => setChecks({ ...checks, [name]: event.target.checked })} />{name}</label>)}
+          {nextStage === "acceptance" && workflow.acceptance.requiredChecks.map((name) => <label key={name} className="flex flex-wrap items-center gap-2">{name}<select className="rounded border bg-background p-1" value={checks[name] ?? ""} onChange={(event) => setChecks({ ...checks, [name]: (event.target.value || undefined) as ReviewCheckStatus | undefined })}><option value="">Not recorded</option><option value="passed">Passed</option><option value="failed">Failed</option></select></label>)}
           <div className="flex flex-wrap gap-2"><Button onClick={() => decide("complete")} disabled={!reason.trim() || advance.isPending}>Complete {nextStage}</Button>{nextStage !== "delivery" && <Button variant="outline" onClick={() => decide("changes_requested")} disabled={!reason.trim() || advance.isPending}>Request changes</Button>}{nextStage && state[nextStage] === "failed" && <Button variant="outline" onClick={() => decide("retry")} disabled={!reason.trim() || advance.isPending}>Retry stage</Button>}</div>
         </div>}
       </>}
