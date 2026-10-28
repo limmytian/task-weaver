@@ -55,6 +55,6 @@ test("stable source and bounded content are verified before comparison", async (
 });
 test("build identity never invents a commit when metadata is missing", () => {
   assert.deepEqual(installedBuild({ NODE_ENV: "production" }), { version: APPLICATION_VERSION, commit: null, development: true });
-  assert.equal(installedBuild({ NODE_ENV: "production", TW_BUILD_COMMIT: "a".repeat(40) }).development, false);
+  assert.equal(installedBuild({ NODE_ENV: "production", TW_BUILD_COMMIT: "a".repeat(40) }).development, /-dev(?:\.|-|$)/.test(APPLICATION_VERSION));
   assert.equal(installedBuild({ TW_BUILD_COMMIT: "invalid" }).commit, null);
 });
