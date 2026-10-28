@@ -322,7 +322,14 @@ Source integration does not authorize release/deployment.
 
 ### Status Rules
 
-**Tasks and Requirements**: Any status → any other status freely, **except** `cancelled` is terminal.
+**Tasks**: Status changes are flexible, except `cancelled` is terminal. Dependency
+and execution-slice checks still apply.
+
+**Requirements** follow the server's delivery state machine. A `draft` must be
+approved before entering execution. `done` can remain done or be archived;
+`cancelled` and `archived` are terminal. Review and integration transitions also
+depend on the configured workflow and its evidence and authority checks. Read the
+current requirement and workflow before changing its state.
 
 Side effects on tasks: `done` → sets `completedAt`; leaving `done` → clears it. Every status change → recorded in `task_status_log`.
 
