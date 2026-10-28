@@ -13,7 +13,7 @@ The application includes kanban boards, a linked Markdown knowledge base,
 keyword and vector search, agent task execution, and an MCP tool registry.
 
 > **Try Task Weaver locally** — start an isolated instance with Docker Compose.
-> Requires Docker Compose v2 and internet access to pull the images.
+> Requires Node.js, Docker Compose v2, and internet access to pull the images.
 >
 > ```bash
 > git clone https://github.com/limmytian/task-weaver.git

@@ -9,6 +9,7 @@ It does not create a shared account or send data to a Task Weaver-hosted service
 ## Requirements
 
 - Docker Desktop or Docker Engine with the Compose v2 plugin
+- Node.js 16 or later to generate local credentials
 - An available local TCP port 3000 and 3001
 - Internet access to pull the images on first startup
 

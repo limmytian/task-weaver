@@ -45,4 +45,5 @@ fi
 printf '%s\n' 'Starting the disposable Task Weaver trial on loopback ports.'
 printf '%s\n' 'One-time first-administrator bootstrap secret (also saved locally with mode 0600):'
 printf '%s\n' "$bootstrap_secret"
+unset TW_LOCAL_DATABASE_PASSWORD TW_LOCAL_AUTH_SECRET TW_LOCAL_BOOTSTRAP_SECRET
 docker compose --env-file "$env_file" -f docker-compose.local.yml up -d --wait
