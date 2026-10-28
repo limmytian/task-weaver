@@ -95,7 +95,18 @@ Set `API_IMAGE_DIGEST` and `WEB_IMAGE_DIGEST` to the verified full image
 references from the release assets before rendering.
 Create a `task-weaver-database` Secret with key `url` in the target namespace
 using the cluster's normal secret manager. Do not put its value in a manifest
-or shell history. Apply `base.yaml`, then `migration.yaml`; wait for the
+or shell history. Create a second Secret named `task-weaver-auth`, shared by API
+and Web, with keys `secret`, `base-url`, `trusted-origins`, and (for an
+uninitialized instance) `bootstrap-secret`. Use separate random values of at
+least 32 characters for `secret` and `bootstrap-secret`. Set `base-url` to the
+externally reachable API origin and `trusted-origins` to the exact Web origin;
+follow [authenticated access](authenticated-access.md) for the configuration
+and TLS requirements. Provision these values through the cluster's Secret
+facility rather than committing a manifest. After first-administrator setup,
+remove the `bootstrap-secret` key and restart both deployments. The template
+requires the other three keys and treats the bootstrap key as optional.
+
+Apply `base.yaml`, then `migration.yaml`; wait for the
 versioned migration Job to complete before applying `apps.yaml`:
 
 ```sh

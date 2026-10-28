@@ -74,6 +74,18 @@ test("local trial setup uses random ignored credentials instead of checked-in de
   assert.doesNotMatch(`${readme}\n${guide}\n${compose}`, /task-weaver-local-(?:first-admin-bootstrap|demo-secret-change|only)/);
 });
 
+test("Kubernetes API and Web receive the same required authentication secret keys", () => {
+  const apps = read(`${source}deploy/kubernetes/apps.yaml.in`);
+  const deployments = apps.split(/^---$/m);
+  assert.equal(deployments.length, 2);
+  for (const deployment of deployments) {
+    for (const [name, key] of [["TW_AUTH_SECRET", "secret"], ["TW_AUTH_BASE_URL", "base-url"], ["TW_AUTH_TRUSTED_ORIGINS", "trusted-origins"]]) {
+      assert.match(deployment, new RegExp(`name: ${name}\\s+valueFrom:\\s+secretKeyRef:\\s+name: task-weaver-auth\\s+key: ${key}`));
+    }
+    assert.match(deployment, /name: TW_AUTH_BOOTSTRAP_SECRET\s+valueFrom:\s+secretKeyRef:\s+name: task-weaver-auth\s+key: bootstrap-secret\s+optional: true/);
+  }
+});
+
 test("application base image is digest-pinned and package managers are absent from runner", () => {
   for (const name of ["api", "web"]) {
     const dockerfile = read(`${source}apps/${name}/Dockerfile`);

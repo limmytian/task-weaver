@@ -29,6 +29,27 @@ spec:
                 secretKeyRef:
                   name: task-weaver-database
                   key: url
+            - name: TW_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-auth
+                  key: secret
+            - name: TW_AUTH_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-auth
+                  key: base-url
+            - name: TW_AUTH_TRUSTED_ORIGINS
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-auth
+                  key: trusted-origins
+            - name: TW_AUTH_BOOTSTRAP_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-auth
+                  key: bootstrap-secret
+                  optional: true
             - name: TW_CHAT_CREDENTIAL_MASTER_KEY
               valueFrom:
                 secretKeyRef:
@@ -133,6 +154,27 @@ spec:
                   key: url
             - name: TW_API_URL
               value: http://task-weaver-api:3001
+            - name: TW_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-auth
+                  key: secret
+            - name: TW_AUTH_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-auth
+                  key: base-url
+            - name: TW_AUTH_TRUSTED_ORIGINS
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-auth
+                  key: trusted-origins
+            - name: TW_AUTH_BOOTSTRAP_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: task-weaver-auth
+                  key: bootstrap-secret
+                  optional: true
             - name: TW_CHAT_CREDENTIAL_MASTER_KEY
               valueFrom:
                 secretKeyRef:
