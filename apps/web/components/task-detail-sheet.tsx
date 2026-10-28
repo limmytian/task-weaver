@@ -82,7 +82,7 @@ export function TaskDetailSheet({
 
   const taskQuery = trpc.task.get.useQuery(
     { id: taskId! },
-    { enabled: !!taskId },
+    { enabled: open && !!taskId, retry: false, refetchInterval: open ? 5_000 : false, refetchIntervalInBackground: true },
   );
   const task = taskQuery.data;
   const runs = trpc.tiAgent.listRuns.useQuery(
