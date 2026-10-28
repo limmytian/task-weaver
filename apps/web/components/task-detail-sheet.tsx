@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
@@ -75,6 +76,7 @@ export function TaskDetailSheet({
   onTaskSelect?: (taskId: string) => void;
 }) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [detailTab, setDetailTab] = useState("activity");
   const utils = trpc.useUtils();
 
   const { data: task } = trpc.task.get.useQuery(
@@ -352,8 +354,27 @@ export function TaskDetailSheet({
 
           <Separator className="my-5" />
 
+          {task.status === "in_review" && (() => {
+            const latest = [...(task.comments ?? [])].sort(
+              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+            )[0];
+            return <section aria-labelledby="task-review-heading" className="mb-5 space-y-3 rounded-lg border p-3 text-sm">
+              <h3 id="task-review-heading" className="font-semibold">Review summary</h3>
+              <div><h4 className="font-medium">Goal</h4><p className="whitespace-pre-wrap break-words">{task.description || "No task goal recorded."}</p></div>
+              <div><h4 className="font-medium">Latest recorded comment</h4>{latest ? <>
+                <p className="text-xs text-muted-foreground">{latest.authorId} · {latest.authorType} · {new Date(latest.createdAt).toLocaleString()}</p>
+                <p className="whitespace-pre-wrap break-words">{latest.content}</p>
+              </> : <p className="text-muted-foreground">No result comment recorded.</p>}</div>
+              <p className="text-muted-foreground">Comments are reported by their authors. Checks and results have not been independently verified here.</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button variant="outline" size="sm" onClick={() => setDetailTab("comments")}>View all comments</Button>
+                {effectiveProjectId && task.requirementId && <Link className="text-primary underline underline-offset-4" href={`/projects/${effectiveProjectId}/requirements/${task.requirementId}`}>Review requirement outputs and evidence</Link>}
+              </div>
+            </section>;
+          })()}
+
           {/* Activity, Comments, Notes & Graph Tabs */}
-          <Tabs defaultValue="activity">
+          <Tabs value={detailTab} onValueChange={setDetailTab}>
             <TabsList className="scrollbar-none w-full justify-start overflow-x-auto">
               <TabsTrigger value="activity" className="shrink-0 sm:flex-1">
                 <History className="mr-1.5 h-3.5 w-3.5" />
