@@ -2,9 +2,10 @@
 
 ## Supported path
 
-The initial supported window is the current minor and one preceding minor.
-The `0.2.x` release line accepts a direct upgrade from the published `0.1.x`
-line. Test each patch and migration sequence against a restored copy before
+The supported window is the current minor and one preceding minor, subject to
+the authenticated migration boundary below. The earlier `0.2.x` line accepted
+a direct upgrade from `0.1.x`; that historical path does not certify a direct
+upgrade to a later release. Test each patch and migration sequence against a restored copy before
 production rollout. PostgreSQL 16 with the documented pgvector and pg_trgm
 extensions is the deployment baseline. Older database versions, skipped
 minor versions, and database downgrade are not certified.
