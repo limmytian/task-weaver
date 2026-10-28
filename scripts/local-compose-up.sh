@@ -1,6 +1,16 @@
 #!/bin/sh
 set -eu
 
+case "${1:-}" in
+  "") prepare_only=false ;;
+  --prepare-only) prepare_only=true ;;
+  *) printf '%s\n' 'Usage: local-compose-up.sh [--prepare-only]' >&2; exit 2 ;;
+esac
+if [ "$#" -gt 1 ]; then
+  printf '%s\n' 'Usage: local-compose-up.sh [--prepare-only]' >&2
+  exit 2
+fi
+
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_root"
 
@@ -40,6 +50,11 @@ if [ "$(printf '%s' "$database_password" | wc -c | tr -d ' ')" -lt 40 ] \
   || [ "$(printf '%s' "$bootstrap_secret" | wc -c | tr -d ' ')" -lt 64 ]; then
   printf '%s\n' 'Local trial credentials are invalid; remove .task-weaver/local-trial/compose.env and retry.' >&2
   exit 1
+fi
+
+if [ "$prepare_only" = true ]; then
+  printf '%s\n' 'Local trial credentials are ready in .task-weaver/local-trial/compose.env; no containers were changed.'
+  exit 0
 fi
 
 printf '%s\n' 'Starting the disposable Task Weaver trial on loopback ports.'
