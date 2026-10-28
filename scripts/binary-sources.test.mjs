@@ -215,3 +215,18 @@ test("BusyBox builds reject missing source provenance before invoking Docker", (
     assert.match(changed.stderr, /Unexpected alpine-busybox source commit/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+test("BusyBox image binding rejects a changed source lock before invoking Docker", () => {
+  const directory = mkdtempSync(join(tmpdir(), "tw-busybox-image-"));
+  try {
+    const root = join(directory, "release-artifacts", "busybox-build", "arm64");
+    mkdirSync(root, { recursive: true });
+    const manifest = join(directory, "source-lock.json");
+    writeFileSync(manifest, JSON.stringify({ schemaVersion: 1, files: [] }));
+    writeFileSync(join(root, "verification.json"), JSON.stringify({ platform: "linux/arm64", sourceLockSha256: "0".repeat(64) }));
+    const result = spawnSync(process.execPath, [resolve("scripts/verify-busybox-build-image.mjs"), manifest, "fixture:latest", "linux/arm64"], { cwd: directory, encoding: "utf8", timeout: 5000 });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Build source lock changed/);
+    assert.doesNotMatch(result.stderr, /docker/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
