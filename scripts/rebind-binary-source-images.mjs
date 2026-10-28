@@ -15,6 +15,12 @@ for (const image of inventory.inventory) {
   assert.equal(report.imageId, image.imageId);
   assert.equal(report.runtimeNoticeVerified, true);
   assert.ok(lock.components.some((entry) => entry.family === "runtime" && entry.version === report.runtime.version));
+  if (report.osSourcePackages.some((pkg) => pkg.P === "busybox")) {
+    const integrity = report.busyboxPackageIntegrity;
+    assert.match(integrity?.packageChecksum ?? "", /^Q1[A-Za-z0-9+/]{27}=$/, "BusyBox package checksum missing");
+    assert.equal(integrity.actualPackageChecksum, integrity.packageChecksum, "BusyBox differs from installed package; modified source and build inputs require separate review");
+    assert.match(integrity.sha256 ?? "", /^[a-f0-9]{64}$/);
+  }
   for (const pkg of report.osSourcePackages) {
     assert.ok(lock.components.some((entry) => entry.family === "alpine" && entry.origin === pkg.o && entry.commit === pkg.c &&
       entry.packages.some((item) => item.name === pkg.P && item.version === pkg.V)), "OS source baseline drift");

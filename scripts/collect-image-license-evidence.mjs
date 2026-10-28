@@ -63,6 +63,22 @@ const inspect = () => {
   const osSourcePackages = isAlpine ? fs.readFileSync(apkPath, "utf8").trim().split("\n\n").map((record) =>
     Object.fromEntries(record.split("\n").filter((line) => /^[PVLoUc]:/.test(line)).map((line) => [line[0], line.slice(2)])))
     : dpkg.stdout.trim().split("\n");
+  let busyboxPackageIntegrity = null;
+  if (isAlpine && osSourcePackages.some((pkg) => pkg.P === "busybox")) {
+    const record = fs.readFileSync(apkPath, "utf8").split("\n\n").find((part) => part.split("\n").includes("P:busybox"));
+    let directory = null;
+    let target = false;
+    let expected = null;
+    for (const line of record.split("\n")) {
+      if (line.startsWith("F:")) { directory = line.slice(2); target = false; }
+      else if (line.startsWith("R:")) target = directory === "bin" && line.slice(2) === "busybox";
+      else if (target && line.startsWith("Z:")) expected = line.slice(2);
+    }
+    const bytes = fs.readFileSync("/bin/busybox");
+    busyboxPackageIntegrity = { path: "/bin/busybox", packageChecksum: expected,
+      actualPackageChecksum: `Q1${crypto.createHash("sha1").update(bytes).digest("base64")}`,
+      sha256: hash(bytes) };
+  }
   const nodeLicensePath = ["/usr/local/LICENSE", "/app/THIRD_PARTY_LICENSES/Node-24.21.0-LICENSE.txt"].find((path) => fs.existsSync(path));
   const dependencyTextsPath = "/app/release-artifacts/dependency-license-texts.txt";
   const dependencyTexts = fs.existsSync(dependencyTextsPath) ? fs.readFileSync(dependencyTextsPath, "utf8") : "";
@@ -84,7 +100,7 @@ const inspect = () => {
     pending.push("Native-library corresponding source, build inputs, license texts, and replacement/relinking procedure require distribution review");
   }
   return { schemaVersion: 1, runtime: { name: "node", version: process.versions.node }, fonts, nativeAddons, nativeLibraries, nativeToolchains, copyrights,
-    osFamily: isAlpine ? "alpine" : "debian", osSourcePackages,
+    osFamily: isAlpine ? "alpine" : "debian", osSourcePackages, busyboxPackageIntegrity,
     nodeLicense: nodeLicensePath ? { path: nodeLicensePath, sha256: hash(fs.readFileSync(nodeLicensePath)), text: fs.readFileSync(nodeLicensePath, "utf8") } : null,
     dependencyLicenseTextsSha256: hash(dependencyTexts), nativeNoticePresent: fs.existsSync(notices),
     runtimeNoticeVerified, runtimeNoticesSha256, noticeBaseline,

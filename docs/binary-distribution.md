@@ -33,7 +33,11 @@ node scripts/package-binary-source-evidence.mjs release-artifacts/binary-sources
 
 The preparation tool is deliberately restricted to the reviewed Node 24.21.0,
 Alpine, Sharp 0.35.5, and sharp-libvips 1.3.4 baseline. Version or source-commit
-drift requires another review, not an automatic fallback. It preserves Alpine
+drift requires another review, not an automatic fallback. Image inspection
+compares the BusyBox binary to its installed APK file checksum; a replacement
+cannot reuse the package source evidence and must receive a separate build/source
+review. This comparison detects drift against the installed package database; it
+does not authenticate that database. The tool preserves Alpine
 recipes and their local patches/configuration at the installed source commit,
 checks recipe package versions against APK metadata, and validates SHA-512 and
 Git blob checksums. Native build recipes and patches come from the exact tagged

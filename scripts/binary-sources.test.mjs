@@ -99,6 +99,24 @@ test("binary evidence verification fails on source, image, or license-text drift
   const run = () => spawnSync(process.execPath, [script, join(root, "lock.json"), root, join(root, "replacement.json")], { cwd: directory, encoding: "utf8" });
   try {
     assert.equal(run().status, 0);
+    const originalLock = JSON.parse(readFileSync(join(root, "lock.json")));
+    const pkg = { P: "busybox", V: "1.37.0-r30", o: "busybox", c: "fixture" };
+    const busyboxLock = { ...originalLock, components: [...originalLock.components,
+      { id: "alpine-busybox", family: "alpine", origin: pkg.o, commit: pkg.c, packages: [{ name: pkg.P, version: pkg.V }] }] };
+    save("lock.json", busyboxLock);
+    save("notice-case-resolutions.json", { sourceLockSha256: hash(readFileSync(join(root, "lock.json"))), noticeBundleSha256: hash("notice"), resolutions: [], unresolvedTechnicalCases: [] });
+    const checksum = `Q1${"a".repeat(27)}=`;
+    const integrity = { packageChecksum: checksum, actualPackageChecksum: checksum, sha256: "a".repeat(64) };
+    save("image.json", { ...report, osSourcePackages: [pkg], busyboxPackageIntegrity: integrity });
+    assert.equal(run().status, 0, "An unchanged packaged BusyBox should pass");
+    save("image.json", { ...report, osSourcePackages: [pkg] });
+    assert.notEqual(run().status, 0, "Missing BusyBox checksum must fail closed");
+    save("image.json", { ...report, osSourcePackages: [pkg], busyboxPackageIntegrity: { ...integrity, actualPackageChecksum: `Q1${"b".repeat(27)}=` } });
+    assert.notEqual(run().status, 0, "Modified BusyBox must not inherit package source evidence");
+    save("lock.json", originalLock);
+    save("notice-case-resolutions.json", { sourceLockSha256: hash(readFileSync(join(root, "lock.json"))), noticeBundleSha256: hash("notice"), resolutions: [], unresolvedTechnicalCases: [] });
+    save("image.json", report);
+    assert.equal(run().status, 0);
     const packageScript = join(import.meta.dirname, "package-binary-source-evidence.mjs");
     const pack = () => spawnSync(process.execPath, [packageScript, join(root, "lock.json")], { cwd: directory, encoding: "utf8" });
     assert.equal(pack().status, 0);
