@@ -144,9 +144,12 @@ replacement of the packaged BusyBox; the standard source verification rejects
 such replacements until the build and corresponding-source evidence are reviewed.
 The experimental `node scripts/build-reviewed-busybox.mjs <source-lock.json>
 <platform>` builds from those locked inputs with a fixed timestamp and checked
-static-library hashes. `node scripts/verify-busybox-build-image.mjs
-<source-lock.json> <image> <platform>` compares the built executable to the
-actual image file and binds the result to that image ID. These experimental
+static-library hashes. `node scripts/build-busybox-image.mjs <base-image>
+<output-image> <platform>` can create a local experimental image while checking
+the original runtime configuration is preserved. `node
+scripts/verify-busybox-build-image.mjs <source-lock.json> <image> <platform>`
+compares the built executable to the actual image file and binds the result to
+that image ID. These experimental
 reports do not establish independent build provenance, inspect all image layers,
 or replace the standard distribution checks. To inspect every saved layer entry
 at `bin/busybox` against the reviewed binary hash, run

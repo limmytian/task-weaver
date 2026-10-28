@@ -237,3 +237,10 @@ test("BusyBox layer inspection rejects invalid expected hashes before Docker", (
   assert.match(result.stderr, /Expected BusyBox SHA-256 is required/);
   assert.doesNotMatch(result.stderr, /docker/);
 });
+
+test("BusyBox image builder rejects unsafe image references before Docker", () => {
+  const result = spawnSync(process.execPath, [resolve("scripts/build-busybox-image.mjs"), "bad image", "fixture:result", "linux/arm64"], { encoding: "utf8", timeout: 5000 });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Unsupported image reference/);
+  assert.doesNotMatch(result.stderr, /docker/);
+});
