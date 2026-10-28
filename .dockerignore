@@ -31,6 +31,9 @@ coverage/
 # Local attachment originals must never enter an image build context.
 .task-weaver/
 data/
+.env
+.env.*
+!.env.example
 .config/
 .kube/
 .ssh/

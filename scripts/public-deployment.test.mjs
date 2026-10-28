@@ -52,6 +52,28 @@ test("public export excludes every bundled PostgreSQL Compose service", () => {
   assert.equal(policy.npmPublished, false);
 });
 
+test("local trial setup uses random ignored credentials instead of checked-in defaults", () => {
+  if (source) return;
+  const compose = read("docker-compose.local.yml");
+  const helper = read("scripts/local-compose-up.sh");
+  const readme = read("README.md");
+  const guide = read("docs/local-quickstart.md");
+  const dockerignore = read(".dockerignore");
+  assert.match(compose, /TW_LOCAL_DATABASE_PASSWORD:\?Run the local bootstrap helper first/);
+  assert.match(compose, /TW_LOCAL_AUTH_SECRET:\?Run the local bootstrap helper first/);
+  assert.match(compose, /TW_LOCAL_BOOTSTRAP_SECRET:\?Run the local bootstrap helper first/);
+  assert.match(helper, /randomBytes\(32\)/);
+  assert.match(helper, /chmod 700/);
+  assert.match(helper, /chmod 600/);
+  assert.match(helper, /Refusing to use a symlink/);
+  assert.match(helper, /docker compose --env-file/);
+  assert.match(dockerignore, /^\.env$/m);
+  assert.match(dockerignore, /^\.env\.\*$/m);
+  assert.match(readme, /scripts\/local-compose-up\.sh/);
+  assert.match(guide, /scripts\/local-compose-up\.sh/);
+  assert.doesNotMatch(`${readme}\n${guide}\n${compose}`, /task-weaver-local-(?:first-admin-bootstrap|demo-secret-change|only)/);
+});
+
 test("application base image is digest-pinned and package managers are absent from runner", () => {
   for (const name of ["api", "web"]) {
     const dockerfile = read(`${source}apps/${name}/Dockerfile`);

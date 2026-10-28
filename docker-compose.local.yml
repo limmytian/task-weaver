@@ -1,13 +1,12 @@
-# Disposable, single-machine local trial. Ports are loopback-only and the
-# checked-in secrets below are for this local demo only. Do not expose this
-# Compose project to a network or reuse its credentials elsewhere.
+# Disposable, single-machine local trial. Ports are loopback-only. Do not expose
+# this Compose project to a network or use it with non-disposable credentials.
 services:
   database:
     image: pgvector/pgvector:0.8.6-pg16-bookworm
     environment:
       POSTGRES_DB: task_weaver
       POSTGRES_USER: task_weaver
-      POSTGRES_PASSWORD: task-weaver-local-only
+      POSTGRES_PASSWORD: ${TW_LOCAL_DATABASE_PASSWORD:?Run the local bootstrap helper first}
     volumes:
       - local-postgres:/var/lib/postgresql/data
     healthcheck:
@@ -21,7 +20,7 @@ services:
     working_dir: /app
     command: ["sh", "-c", "./node_modules/.bin/tsx node_modules/@task-weaver/db/src/migrate.ts && ./node_modules/.bin/tsx node_modules/@task-weaver/db/src/setup-search.ts"]
     environment:
-      DATABASE_URL: postgresql://task_weaver:task-weaver-local-only@database:5432/task_weaver
+      DATABASE_URL: postgresql://task_weaver:${TW_LOCAL_DATABASE_PASSWORD}@database:5432/task_weaver
     depends_on:
       database:
         condition: service_healthy
@@ -32,11 +31,11 @@ services:
     ports:
       - "127.0.0.1:3001:3001"
     environment:
-      DATABASE_URL: postgresql://task_weaver:task-weaver-local-only@database:5432/task_weaver
-      TW_AUTH_SECRET: task-weaver-local-demo-secret-change-before-network-use-2026
+      DATABASE_URL: postgresql://task_weaver:${TW_LOCAL_DATABASE_PASSWORD}@database:5432/task_weaver
+      TW_AUTH_SECRET: ${TW_LOCAL_AUTH_SECRET:?Run the local bootstrap helper first}
       TW_AUTH_BASE_URL: http://localhost:3001
       TW_AUTH_TRUSTED_ORIGINS: http://localhost:3000
-      TW_AUTH_BOOTSTRAP_SECRET: task-weaver-local-first-admin-bootstrap-secret-2026
+      TW_AUTH_BOOTSTRAP_SECRET: ${TW_LOCAL_BOOTSTRAP_SECRET:?Run the local bootstrap helper first}
       NODE_ENV: production
       TW_DAEMON_MODE: polling
       SKILL_PACKAGE_STORAGE_DIR: /app/data/skill-packages
@@ -60,11 +59,11 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     environment:
-      DATABASE_URL: postgresql://task_weaver:task-weaver-local-only@database:5432/task_weaver
-      TW_AUTH_SECRET: task-weaver-local-demo-secret-change-before-network-use-2026
+      DATABASE_URL: postgresql://task_weaver:${TW_LOCAL_DATABASE_PASSWORD}@database:5432/task_weaver
+      TW_AUTH_SECRET: ${TW_LOCAL_AUTH_SECRET:?Run the local bootstrap helper first}
       TW_AUTH_BASE_URL: http://localhost:3001
       TW_AUTH_TRUSTED_ORIGINS: http://localhost:3000
-      TW_AUTH_BOOTSTRAP_SECRET: task-weaver-local-first-admin-bootstrap-secret-2026
+      TW_AUTH_BOOTSTRAP_SECRET: ${TW_LOCAL_BOOTSTRAP_SECRET:?Run the local bootstrap helper first}
       TW_API_URL: http://api:3001
       TW_ATTACHMENT_STORAGE_DIR: /app/attachment-data
       TW_ATTACHMENT_MAX_BYTES: 52428800

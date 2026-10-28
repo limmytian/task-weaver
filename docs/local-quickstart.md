@@ -17,24 +17,25 @@ It does not create a shared account or send data to a Task Weaver-hosted service
 From the repository root, run:
 
 ```sh
-docker compose -f docker-compose.local.yml up -d --wait
+./scripts/local-compose-up.sh
 ```
 
 Compose pulls the current `latest` images when they are not already available
-locally. To refresh an existing installation to the newest CI build, pull first:
+locally. The helper stores generated trial credentials in the ignored
+`.task-weaver/local-trial/compose.env` file with owner-only permissions and
+prints the bootstrap secret needed for first setup. To refresh an existing
+installation to the newest CI build, pull first:
 
 ```sh
-docker compose -f docker-compose.local.yml pull
-docker compose -f docker-compose.local.yml up -d --wait
+docker compose --env-file .task-weaver/local-trial/compose.env -f docker-compose.local.yml pull
+docker compose --env-file .task-weaver/local-trial/compose.env -f docker-compose.local.yml up -d --wait
 ```
 
 Open [http://localhost:3000/login](http://localhost:3000/login). On first use,
-choose **Set up the first administrator**, enter this local bootstrap secret,
-and create your own account with an email address and password:
-
-```text
-task-weaver-local-first-admin-bootstrap-secret-2026
-```
+choose **Set up the first administrator**, enter the one-time bootstrap secret
+shown in the startup output, and create your own account with an email address
+and password. The helper generates separate random database, auth, and
+bootstrap secrets on first run and reuses the private local file afterward.
 
 The email and password are yours to choose; there is no shared demo login.
 After signing in, try this short workflow:
@@ -45,22 +46,21 @@ After signing in, try this short workflow:
 4. Add a discussion update or a Markdown document, then inspect the task history.
 
 The demo ports bind to `127.0.0.1`, so the Web UI and API are only reachable from
-the same computer. The bootstrap and database passwords in this file are
-intentionally fixed for this disposable, loopback-only trial. Do not expose this
-Compose project to a network, reuse its credentials, or use it for real data.
+the same computer. Do not expose this Compose project to a network or use it for
+real data.
 
 ## Stop or reset
 
 Stop the containers and keep your local data:
 
 ```sh
-docker compose -f docker-compose.local.yml down
+docker compose --env-file .task-weaver/local-trial/compose.env -f docker-compose.local.yml down
 ```
 
 To discard the trial and all its database, skill, and attachment data:
 
 ```sh
-docker compose -f docker-compose.local.yml down --volumes
+docker compose --env-file .task-weaver/local-trial/compose.env -f docker-compose.local.yml down --volumes
 ```
 
 The second command permanently removes this trial's Compose volumes.

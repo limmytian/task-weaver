@@ -18,13 +18,13 @@ keyword and vector search, agent task execution, and an MCP tool registry.
 > ```bash
 > git clone https://github.com/limmytian/task-weaver.git
 > cd task-weaver
-> docker compose -f docker-compose.local.yml up -d --wait
+> ./scripts/local-compose-up.sh
 > ```
 >
 > Then open [http://localhost:3000/login](http://localhost:3000/login), choose
-> **Set up the first administrator**, and enter the local bootstrap secret
-> `task-weaver-local-first-admin-bootstrap-secret-2026`. Create your own email
-> and password to sign in. This disposable trial runs entirely on your computer;
+> **Set up the first administrator**, and enter the one-time bootstrap secret
+> printed by the helper. Create your own email and password to sign in.
+> This disposable trial runs entirely on your computer;
 > see the [local Compose guide](docs/local-quickstart.md) for safety notes and
 > stop/reset commands.
 
