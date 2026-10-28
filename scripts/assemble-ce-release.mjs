@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 import { PUBLIC_PACKAGES } from "./pack-ce.mjs";
+import { assertPublicArtifactTree } from "./public-artifact-privacy.mjs";
 
 const version = process.argv[2];
 const rehearsal = process.argv.includes("--rehearsal");
@@ -27,6 +29,13 @@ const output = resolve(root, "release-artifacts", "bundle");
 mkdirSync(output, { recursive: true });
 const sourceName = `task-weaver-${version}-source.tar.gz`;
 const sourceTar = execFileSync("git", ["archive", "--format=tar", `--prefix=task-weaver-${version}/`, "HEAD"], { maxBuffer: 128 * 1024 * 1024 });
+const privacyRoot = mkdtempSync(join(tmpdir(), "tw-source-privacy-"));
+try {
+  execFileSync("tar", ["-xf", "-", "-C", privacyRoot], { input: sourceTar });
+  assertPublicArtifactTree(privacyRoot);
+} finally {
+  rmSync(privacyRoot, { recursive: true, force: true });
+}
 writeFileSync(join(output, sourceName), gzipSync(sourceTar, { level: 9, mtime: 0 }));
 
 const npmInventory = JSON.parse(readFileSync(resolve(root, "release-artifacts/npm/npm-artifacts.json"), "utf8"));

@@ -61,6 +61,23 @@ set `TASK_WEAVER_AUDIT_REGISTRY` to require an exact registry origin.
 Generated reports are evidence, not source-controlled release inputs. Review and
 archive them with the release record. Never bypass a failed gate silently.
 
+Source archive assembly and npm package staging also inspect the actual files
+about to be distributed. The privacy check rejects local configuration, private
+keys, database backups, operator home paths, symlinks and credential patterns,
+including credentials inside compiled package output. Example configuration and
+documented placeholder paths remain permitted. Findings report file locations
+and rule names without printing matched values. This check supplements review;
+it cannot identify every organization-specific hostname or arbitrary sensitive
+document. Keep private infrastructure and planning material outside the public
+checkout, and review the final artifact inventory before publication.
+
+Docker build contexts exclude local data, credential directories and backups.
+Image vulnerability reports redact host home paths in nested scanner metadata.
+Use a fresh advisory database and review fixable findings at every severity, even
+when they do not meet the blocking threshold. Development dependencies are also
+audited. The optional shadcn generator is not installed by the build; generated
+components are maintained as source in the repository.
+
 ## Container images
 
 Only API and Web are first-party release images; all packages and layers inside

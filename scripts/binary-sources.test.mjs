@@ -29,11 +29,12 @@ test("platform inspection fallback validates the actual local image CPU", () => 
 });
 
 test("scanner reports do not retain host cache paths", () => {
-  const report = { descriptor: { configuration: { db: { "cache-dir": "/Users/example/cache" } },
+  const report = { unexpected: { nested: ["/home/example/cache/scanner.json", "C:\\Users\\example\\scanner.json", "/app/node_modules/component"] }, descriptor: { configuration: { db: { "cache-dir": "/Users/example/cache" } },
     db: { status: { path: "/Users/example/cache/vulnerability.db", built: "2026-09-28" } } }, matches: [] };
   const redacted = redactScannerHostPaths(report);
   assert.equal(redacted.descriptor.configuration.db["cache-dir"], "<local-cache-redacted>");
   assert.equal(redacted.descriptor.db.status.path, "<local-cache-redacted>");
+  assert.deepEqual(redacted.unexpected.nested, ["<local-path-redacted>", "<local-path-redacted>", "/app/node_modules/component"]);
   assert.equal(redacted.descriptor.db.status.built, "2026-09-28");
   assert.equal(report.descriptor.db.status.path, "/Users/example/cache/vulnerability.db", "Input must not be mutated");
 });

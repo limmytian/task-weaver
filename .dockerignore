@@ -30,6 +30,18 @@ coverage/
 
 # Local attachment originals must never enter an image build context.
 .task-weaver/
+data/
+.config/
+.kube/
+.ssh/
+.codex/
+.agents/
+backups/
+*.dump
+*.sql.gz
+*.pem
+*.key
+*.kubeconfig
 
 # PDF preview assets are generated from the pinned dependency.
 apps/web/public/pdfjs/

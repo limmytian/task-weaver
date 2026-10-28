@@ -17,7 +17,15 @@ export function inspectLocalImage(image, platform, execute = spawnSync) {
 }
 
 export function redactScannerHostPaths(report) {
-  const redacted = structuredClone(report);
+  const redact = value => {
+    if (typeof value === "string") return value
+      .replace(/(?:\/Users\/|\/home\/)[^/\s"<>]+(?:\/[^\s"<>]*)?/g, "<local-path-redacted>")
+      .replace(/[A-Za-z]:[\\/]Users[\\/][^\s"<>]+/g, "<local-path-redacted>");
+    if (Array.isArray(value)) return value.map(redact);
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redact(item)]));
+    return value;
+  };
+  const redacted = redact(report);
   const databaseConfiguration = redacted.descriptor?.configuration?.db;
   if (databaseConfiguration && typeof databaseConfiguration["cache-dir"] === "string") {
     databaseConfiguration["cache-dir"] = "<local-cache-redacted>";

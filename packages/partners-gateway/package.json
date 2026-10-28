@@ -17,7 +17,7 @@
     "@task-weaver/contracts": "workspace:^",
     "@task-weaver/core": "workspace:*",
     "@task-weaver/db": "workspace:*",
-    "hono": "^4.13.9",
+    "hono": "^4.13.14",
     "zod": "4.6.6"
   },
   "devDependencies": {

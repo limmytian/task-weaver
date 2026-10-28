@@ -13,7 +13,7 @@
     "test:daemon-real-smoke": "tsx apps/cli/src/index.ts daemon pipeline smoke --providers github,gitea --json",
     "test:embedding-rollout-smoke": "pnpm --filter @task-weaver/db db:smoke-embedding",
     "check:repository-rollout": "node scripts/check-repository-rollout.mjs",
-    "test:release-gates": "node --test scripts/release-gates.test.mjs scripts/public-deployment.test.mjs scripts/binary-sources.test.mjs scripts/upstream-metadata.test.mjs scripts/build-reliability.test.mjs scripts/deployment-preflight.test.mjs scripts/native-replacement-evidence.test.mjs scripts/image-layer-listing.test.mjs scripts/check-ce-artifact-compatibility.test.mjs scripts/ce-publication.test.mjs scripts/ce-release-notes.test.mjs",
+    "test:release-gates": "node --test scripts/release-gates.test.mjs scripts/public-artifact-privacy.test.mjs scripts/public-deployment.test.mjs scripts/binary-sources.test.mjs scripts/upstream-metadata.test.mjs scripts/build-reliability.test.mjs scripts/deployment-preflight.test.mjs scripts/native-replacement-evidence.test.mjs scripts/image-layer-listing.test.mjs scripts/check-ce-artifact-compatibility.test.mjs scripts/ce-publication.test.mjs scripts/ce-release-notes.test.mjs",
     "release:licenses": "node scripts/release-gates.mjs licenses",
     "release:sbom": "node scripts/release-gates.mjs sbom",
     "release:provenance": "node scripts/release-gates.mjs provenance",
@@ -45,7 +45,7 @@
   "devDependencies": {
     "dotenv-cli": "^11.0.0",
     "tsx": "^4.19.0",
-    "turbo": "^2.4.0",
+    "turbo": "^2.9.14",
     "typescript": "^5.8.0"
   },
   "packageManager": "pnpm@9.15.0",
@@ -60,7 +60,26 @@
       "@codemirror/state": "6.7.6",
       "dompurify": "3.4.17",
       "body-parser": "2.4.0",
-      "zod": "4.6.6"
+      "zod": "4.6.6",
+      "hono": "4.13.14",
+      "ip-address": "10.7.5",
+      "fast-uri": "3.1.9",
+      "qs": "6.16.1",
+      "uuid@11": "11.1.1",
+      "postcss-selector-parser@6": "6.1.5",
+      "@babel/core": "7.29.7",
+      "mermaid>katex": "0.18.2",
+      "postcss-selector-parser@7": "7.1.6",
+      "flatted": "3.4.2",
+      "brace-expansion@1": "1.1.21",
+      "brace-expansion@>=3": "5.0.12",
+      "picomatch@2": "2.3.2",
+      "picomatch@4": "4.0.4",
+      "postcss": "8.5.23",
+      "nanoid@3": "3.3.18",
+      "@humanfs/node": "0.16.8",
+      "@esbuild-kit/core-utils>esbuild": "0.25.12",
+      "esbuild@0.27": "0.28.2"
     }
   },
   "engines": {

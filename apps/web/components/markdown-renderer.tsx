@@ -180,17 +180,25 @@ const MermaidBlock = memo(function MermaidBlock({ chart }: { chart: string }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const mermaid = (await import("mermaid")).default;
+      const [{ default: mermaid }, { default: DOMPurify }] = await Promise.all([
+        import("mermaid"), import("dompurify"),
+      ]);
       mermaid.initialize({
         startOnLoad: false,
         theme: "default",
-        securityLevel: "loose",
+        securityLevel: "strict",
+        suppressErrorRendering: true,
       });
       if (cancelled || !containerRef.current) return;
       try {
         const { svg } = await mermaid.render(`mermaid_${uniqueId}`, chart);
         if (!cancelled && containerRef.current) {
-          containerRef.current.innerHTML = svg;
+          containerRef.current.innerHTML = DOMPurify.sanitize(svg, {
+            USE_PROFILES: { html: true, svg: true, svgFilters: true, mathMl: true },
+            ADD_TAGS: ["foreignObject"],
+            HTML_INTEGRATION_POINTS: { foreignobject: true, "annotation-xml": true },
+            FORBID_TAGS: ["image", "img", "iframe", "object", "embed", "audio", "video"],
+          });
         }
       } catch {
         if (!cancelled && containerRef.current) {

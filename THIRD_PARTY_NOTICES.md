@@ -11,6 +11,9 @@ into this repository.
 ## shadcn/ui
 
 Some files under `apps/web/components/ui/` are derived from shadcn/ui.
+`apps/web/app/shadcn-tailwind.css` preserves the styles from the MIT-licensed
+`shadcn` 3.8.5 package (`dist/tailwind.css`) so builds do not install the optional
+component generator.
 
 Copyright (c) 2023 shadcn
 

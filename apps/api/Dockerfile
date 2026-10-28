@@ -14,7 +14,7 @@ RUN --mount=type=cache,id=tw-public-pnpm,target=/pnpm/store,sharing=locked pnpm 
 FROM node:24.21.0-alpine3.23@sha256:9ec4a2e289874ed0d722e1772ec2de45d2801541db8612f3638b26f128c69ac2 AS runtime-base
 USER root
 # Retain trust roots, then remove the OS package manager and its unused libraries.
-RUN apk add --no-network ca-certificates-bundle && apk del apk-tools
+RUN apk add --no-cache ca-certificates-bundle musl=1.2.5-r24 musl-utils=1.2.5-r24 && apk del apk-tools
 # Runtime does not install packages. Remove unused package managers and their dependencies.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-v1.22.22 \
     && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /usr/local/bin/pnpm /usr/local/bin/pnpx

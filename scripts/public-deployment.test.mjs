@@ -59,7 +59,7 @@ test("application base image is digest-pinned and package managers are absent fr
     assert.match(dockerfile, /FROM scratch AS runner\nCOPY --from=runtime-base \/ \//);
     assert.match(dockerfile, /ENTRYPOINT \["docker-entrypoint.sh"\]/);
     assert.match(dockerfile, /\/usr\/local\/lib\/node_modules\/npm/);
-    assert.match(dockerfile, /apk add --no-network ca-certificates-bundle && apk del apk-tools/);
+    assert.match(dockerfile, /apk add --no-cache ca-certificates-bundle musl=1\.2\.5-r24 musl-utils=1\.2\.5-r24 && apk del apk-tools/);
     assert.match(dockerfile, /USER node/);
   }
 });

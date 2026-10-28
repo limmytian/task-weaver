@@ -29,6 +29,8 @@ const ignoredDirectoryNames = new Set([
 const secretRules = [
   { name: "private-key", expression: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/i },
   { name: "github-token", expression: /\bgh[pousr]_[A-Za-z0-9]{20,}\b/ },
+  { name: "github-fine-grained-token", expression: /\bgithub_pat_[A-Za-z0-9_]{40,}\b/ },
+  { name: "task-weaver-token", expression: /\b(?:tw_|twb_|twd_)[a-f0-9]{64}\b/ },
   { name: "aws-access-key", expression: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/ },
   { name: "slack-token", expression: /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/ },
   {
@@ -85,14 +87,14 @@ function loadPolicy(root = repositoryRoot) {
   return policy;
 }
 
-function walkFiles(root, current = root, files = []) {
+function walkFiles(root, current = root, files = [], ignored = ignoredDirectoryNames) {
   for (const entry of readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-    if (entry.isDirectory() && ignoredDirectoryNames.has(entry.name)) continue;
+    if (entry.isDirectory() && ignored.has(entry.name)) continue;
     const absolutePath = resolve(current, entry.name);
     const repositoryPath = normalizePath(relative(root, absolutePath));
     const stats = lstatSync(absolutePath);
     if (stats.isSymbolicLink()) throw new Error(`Release gates do not accept symbolic links: ${repositoryPath}`);
-    if (stats.isDirectory()) walkFiles(root, absolutePath, files);
+    if (stats.isDirectory()) walkFiles(root, absolutePath, files, ignored);
     else if (stats.isFile()) files.push({ absolutePath, repositoryPath, stats });
     else throw new Error(`Release gates do not accept special files: ${repositoryPath}`);
   }
@@ -297,9 +299,9 @@ function generateSbom(root, outputDirectory, policy, suppliedComponents) {
   writeReport(outputDirectory, "sbom.cdx.json", bom);
 }
 
-export function scanSecrets(root, policy) {
+export function scanSecrets(root, policy, { includeGenerated = false } = {}) {
   const findings = [];
-  for (const file of walkFiles(root)) {
+  for (const file of walkFiles(root, root, [], includeGenerated ? new Set() : ignoredDirectoryNames)) {
     const content = readFileSync(file.absolutePath);
     if (content.subarray(0, Math.min(content.length, 8192)).includes(0)) continue;
     const lines = content.toString("utf8").split(/\r?\n/);

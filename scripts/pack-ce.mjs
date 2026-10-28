@@ -1,4 +1,5 @@
 import { verifyCompiledOutputs } from "./compiled-outputs.mjs";
+import { assertPublicArtifactTree } from "./public-artifact-privacy.mjs";
 import { withWorkspaceBuildLock } from "./workspace-build-lock.mjs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -97,6 +98,7 @@ export function stagePackage(root, stageRoot, packageName, version) {
   cpSync(join(root, "LICENSE"), join(stage, "LICENSE"));
   cpSync(join(root, "THIRD_PARTY_NOTICES.md"), join(stage, "THIRD_PARTY_NOTICES.md"));
   if (packageName === "db") cpSync(join(packageRoot, "drizzle"), join(stage, "drizzle"), { recursive: true });
+  assertPublicArtifactTree(stage);
   return stage;
 }
 
