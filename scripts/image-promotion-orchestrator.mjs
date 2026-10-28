@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { isDeepStrictEqual } from "node:util";
 import { preparePromotion, completePromotion } from "./image-promotion-policy.mjs";
 
 const apps = ["api", "web"];
@@ -13,6 +14,14 @@ export async function promoteImagePair(adapter, candidate) {
   assert.ok(snapshot?.revision, "Journal revision is unavailable");
   assert.equal(snapshot.state?.pending, null, "Pending promotion requires reconciliation");
   const latest = await adapter.readPair("latest");
+  const committed = snapshot.state.committed;
+  if (committed?.version === candidate.version && committed.commit === candidate.commit &&
+      isDeepStrictEqual(committed.order, candidate.order) &&
+      isDeepStrictEqual(committed.digests, candidate.digests)) {
+    assert.deepEqual(latest, candidate.digests, "Latest tags differ from committed journal");
+    assert.deepEqual(await adapter.readVersion(candidate.version), candidate.digests, "Version tags differ from committed journal");
+    return snapshot;
+  }
   const prepared = preparePromotion(snapshot.state, candidate, latest);
   const existing = await adapter.readVersion(candidate.version);
   for (const app of apps) {

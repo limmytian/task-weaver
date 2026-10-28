@@ -68,8 +68,10 @@ images with signed CycloneDX SBOM and source-provenance attestations, and
 Sigstore signatures. It accepts only a successful controlled candidate run
 at the tagged public commit, verifies archive hashes and image identities,
 recomputes the image-bound binary gate and corresponding-source package hash, and
-scans those same images again before pushing. It uses `VERSION-amd64` and
-`VERSION-arm64` tags plus a signed `VERSION` multi-platform index.
+scans those same images again before pushing. It publishes uniquely named
+per-run candidate platform images and a signed candidate multi-platform index,
+then promotes the exact signed index digest to `VERSION` and `latest` for each
+application. It verifies the registry references after promotion.
 The producer verifies the full acquired source tree before packaging. Raw
 acquisition archives, scratch directories, compilation tools, and replacement
 test binaries are omitted from the portable candidate artifact.
@@ -78,12 +80,45 @@ runtime configuration digest, allowing Docker manifest-based and config-based
 stores to load the same verified bytes. Neither a tag nor a changed archive
 can substitute for those identities.
 After the images and release bundle are verified, it publishes a GitHub
-Release. The registry mirror is a separate manual workflow that clones the
-same public tag and publishes signed packages and images to its own registry.
-Compare source commit, package hashes, and image digests across both runs.
+Release.
 Prerelease npm packages use the `next` dist-tag; stable packages use `latest`.
 GitHub distributes the five npm tarballs as release assets. Public npm-registry
 publication is a separate decision and is not performed by this workflow.
+
+## Image promotion journal
+
+Both main CI and the formal release job use the same non-cancelling Actions
+concurrency group and the protected `refs/heads/image-promotion-journal` Git ref.
+Main builds use a version containing the source version, Actions run ID and
+attempt; formal releases use the exact release version. Prereleases also move
+`latest`. Thus `latest` may be newer than the latest formal stable release. API
+and Web are distinct images: compare each application's version tag with its
+own `latest` digest, and use both digests as a pair.
+
+Before enabling these workflows, a maintainer must initialize the journal ref
+with a reviewed `journal.json` whose `schemaVersion` is `1`, `pending` is null,
+and `committed` contains the verified prior pair's `version`, source `commit`,
+`digests` (`api` and `web`), and the originating Actions `order` (`createdAt`,
+decimal `runId`, and positive integer `attempt`). Confirm that both live
+`latest` tags resolve to that exact signed and reviewed pair; do not infer a
+baseline from two unrelated tags. If a trustworthy pair or ordering cannot be
+established, resolve that discrepancy as a separate reviewed operation first.
+Protect the journal ref and registry packages so that only the authorized
+promotion workflow can write them, and permit its GitHub token to update the
+ref. Branch protection, registry access and initialization are operator-owned
+preconditions; the workflow fails closed if the journal is missing or cannot be
+updated. A workflow concurrency group cannot fence external registry writers.
+
+The journal records a pending intent before changing the version or latest
+tags. Because API and Web are separate repositories, those writes are not
+atomic. If a run fails or its result is uncertain, retain the journal and the
+candidate tags. The next authorized run first reconciles the exact pending pair,
+verifies all four tags, and commits the journal; unexpected tag changes or an
+immutable conflict stop it for operator investigation. Never manually overwrite
+an immutable version or start another publisher outside the common lock. A
+completed formal image promotion can be retried only for the same source and
+exact image digests. Retain the workflow, scan, signature and journal records
+with the release evidence.
 
 ## Verify and retain artifacts
 

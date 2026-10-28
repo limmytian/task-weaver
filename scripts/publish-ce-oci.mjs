@@ -7,6 +7,7 @@ import { imageArchiveConfig } from "./ce-image-archive.mjs";
 import { RELEASE_PLATFORMS, platformArchitecture } from "./release-platforms.mjs";
 import { inspectLocalImage } from "./image-inspection-lib.mjs";
 import { verifyOciIndex } from "./oci-index.mjs";
+import { createImagePromotionAdapter } from "./image-promotion-adapter.mjs";
 
 const [version, inputRepository] = process.argv.slice(2);
 assert.match(version ?? "", /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/);
@@ -23,12 +24,40 @@ const tags = ["api", "web"].flatMap(app => [version, ...RELEASE_PLATFORMS.map(pl
 // Preflight every immutable name before the first registry write. Authentication
 // or network failures are not evidence that a tag is available.
 for (const image of tags) {
-  const result = spawnSync("docker", ["buildx", "imagetools", "inspect", image], { encoding: "utf8" });
-  if (result.status === 0) throw new Error(`Immutable image tag already exists: ${image}`);
+  const result = spawnSync("docker", ["buildx", "imagetools", "inspect", image, "--format", "{{json .Manifest}}"], { encoding: "utf8" });
+  if (result.status === 0) {
+    // A retry may reuse only the exact pair already committed by our journal.
+    const app = ["api", "web"].find(name => image === `ghcr.io/${repository}-${name}:${version}`);
+    let safeRetry = false;
+    if (app) {
+      try {
+        const journal = await createImagePromotionAdapter({ repository }).readJournal();
+        const descriptor = JSON.parse(result.stdout);
+        safeRetry = journal.state.pending === null && journal.state.committed?.version === version &&
+          journal.state.committed.commit === set.commit && journal.state.committed.digests?.[app] === (descriptor.digest ?? descriptor.Digest);
+      } catch { /* Ambiguous journal or registry state must never authorize reuse. */ }
+    }
+    if (!safeRetry) throw new Error(`Immutable image tag already exists: ${image}`);
+    continue;
+  }
+  assert.doesNotMatch(result.stderr, /unauthorized|denied|forbidden/i, "Cannot establish registry tag availability");
   assert.match(result.stderr, /not found|manifest unknown|404/i, "Cannot establish registry tag availability");
 }
+const runId = process.env.GITHUB_RUN_ID;
+const attempt = process.env.GITHUB_RUN_ATTEMPT;
+assert.match(runId ?? "", /^[1-9]\d*$/, "A unique Actions run ID is required");
+assert.match(attempt ?? "", /^[1-9]\d*$/, "A unique Actions attempt is required");
+const stagingTag = `candidate-${runId}-${attempt}`;
+const stagingNames = ["api", "web"].flatMap(app => [stagingTag, ...RELEASE_PLATFORMS.map(platform => `${stagingTag}-${platformArchitecture(platform)}`)].map(tag => `ghcr.io/${repository}-${app}:${tag}`));
+for (const image of stagingNames) {
+  const result = spawnSync("docker", ["buildx", "imagetools", "inspect", image], { encoding: "utf8" });
+  if (result.status === 0) throw new Error(`Candidate image tag already exists: ${image}`);
+  assert.doesNotMatch(result.stderr, /unauthorized|denied|forbidden/i, "Cannot establish candidate tag availability");
+  assert.match(result.stderr, /not found|manifest unknown|404/i, "Cannot establish candidate tag availability");
+}
 for (const app of ["api", "web"]) {
-  const image = `ghcr.io/${repository}-${app}:${version}`;
+  const image = `ghcr.io/${repository}-${app}:${stagingTag}`;
+  const publishedImage = `ghcr.io/${repository}-${app}:${version}`;
   const expected = {};
   const platforms = {};
   for (const platform of RELEASE_PLATFORMS) {
@@ -78,7 +107,7 @@ for (const app of ["api", "web"]) {
   writeFileSync(`${output}/${app}-image-index.json`, JSON.stringify(index, null, 2) + "\n");
   run("cosign", ["sign", "--yes", reference]);
   run("cosign", ["attest", "--yes", "--type", "custom", "--predicate", `${output}/${app}-multiarch-provenance.json`, reference]);
-  writeFileSync(`${output}/${app}-image.json`, JSON.stringify({ image, digest, platforms }, null, 2) + "\n");
+  writeFileSync(`${output}/${app}-image.json`, JSON.stringify({ image: publishedImage, digest, platforms }, null, 2) + "\n");
   writeFileSync(`${output}/${app}-image.digest`, reference + "\n");
   console.log(`Signed reviewed multi-platform index: ${reference}`);
 }

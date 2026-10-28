@@ -22,6 +22,8 @@ function fixture() {
 test("promotes only the prepared pair and verifies all references", async () => {
   const f = fixture(); await promoteImagePair(f, candidate());
   assert.deepEqual(f.tags.latest, next); assert.deepEqual(f.tags[candidate().version], next); assert.equal(f.state.pending, null);
+  const writes = f.writes; await promoteImagePair(f, candidate()); assert.equal(f.writes, writes);
+  f.tags.latest.web = old.web; await assert.rejects(promoteImagePair(f, candidate()), /differ/);
 });
 
 test("each partial write retains intent and can be reconciled", async () => {
@@ -45,4 +47,14 @@ test("unknown external changes and tampered intents prevent reconciliation", asy
   const g = fixture(); g.fail(1); await assert.rejects(promoteImagePair(g, candidate()));
   const snapshot = await g.readJournal(); snapshot.state.pending.previous.api = d("f");
   await assert.rejects(reconcileImagePromotion(g, snapshot), /Journal content changed/);
+});
+
+test("competing promoters cannot both prepare the same journal revision", async () => {
+  const f = fixture();
+  const newer = { ...candidate(), version: "0.3.17-main.3.1", order: order(3, 3) };
+  const results = await Promise.allSettled([promoteImagePair(f, candidate()), promoteImagePair(f, newer)]);
+  assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter(result => result.status === "rejected").length, 1);
+  assert.equal(f.state.pending, null);
+  assert.deepEqual(f.tags.latest, next);
 });
