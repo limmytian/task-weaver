@@ -48,7 +48,7 @@ export function createImagePromotionAdapter({ repository, registry = "ghcr.io", 
     async writeTag(app, tag, digest) {
       assert.ok(["api", "web"].includes(app)); assert.match(digest, digestPattern);
       assert.match(tag, /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/);
-      run("docker", ["buildx", "imagetools", "create", "--tag", `${image(app)}:${tag}`, `${image(app)}@${digest}`]);
+      run("docker", ["buildx", "imagetools", "create", "--prefer-index=false", "--tag", `${image(app)}:${tag}`, `${image(app)}@${digest}`]);
     },
   };
 }
