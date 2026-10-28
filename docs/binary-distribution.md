@@ -148,7 +148,10 @@ static-library hashes. `node scripts/verify-busybox-build-image.mjs
 <source-lock.json> <image> <platform>` compares the built executable to the
 actual image file and binds the result to that image ID. These experimental
 reports do not establish independent build provenance, inspect all image layers,
-or replace the standard distribution checks.
+or replace the standard distribution checks. To inspect every saved layer entry
+at `bin/busybox` against the reviewed binary hash, run
+`node scripts/verify-busybox-layers.mjs <image> <platform> <sha256>`. This check
+does not inspect other paths or establish source provenance.
 
 ## Verify BusyBox wget request handling
 

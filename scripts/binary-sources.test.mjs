@@ -230,3 +230,10 @@ test("BusyBox image binding rejects a changed source lock before invoking Docker
     assert.doesNotMatch(result.stderr, /docker/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+test("BusyBox layer inspection rejects invalid expected hashes before Docker", () => {
+  const result = spawnSync(process.execPath, [resolve("scripts/verify-busybox-layers.mjs"), "fixture:latest", "linux/arm64", "invalid"], { encoding: "utf8", timeout: 5000 });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Expected BusyBox SHA-256 is required/);
+  assert.doesNotMatch(result.stderr, /docker/);
+});
