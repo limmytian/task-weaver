@@ -27,6 +27,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { AssistantDialog } from "@/components/assistant-dialog";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
 import { TaskRepositoryScope } from "@/components/repository-links";
+import { resourceAccessLost } from "@/lib/resource-access";
 
 const statusOptions = [
   { value: "todo", label: "To Do" },
@@ -79,10 +80,11 @@ export function TaskDetailSheet({
   const [detailTab, setDetailTab] = useState("activity");
   const utils = trpc.useUtils();
 
-  const { data: task } = trpc.task.get.useQuery(
+  const taskQuery = trpc.task.get.useQuery(
     { id: taskId! },
     { enabled: !!taskId },
   );
+  const task = taskQuery.data;
   const runs = trpc.tiAgent.listRuns.useQuery(
     { taskId: taskId!, limit: 1 },
     { enabled: open && !!taskId && task?.status === "in_review", retry: false },
@@ -137,7 +139,7 @@ export function TaskDetailSheet({
     onError: (err) => toast.error("Failed to unlink document", { description: err.message }),
   });
 
-  if (!task) {
+  if (!task || resourceAccessLost(taskQuery.error)) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent className="w-full overflow-y-auto p-0 sm:max-w-xl">
@@ -145,7 +147,14 @@ export function TaskDetailSheet({
             <SheetTitle>Task Details</SheetTitle>
           </SheetHeader>
           <div className="flex h-40 items-center justify-center">
-            <p className="text-muted-foreground">Loading...</p>
+            {taskQuery.isError ? (
+              <div role="alert" className="space-y-3 px-4 text-center">
+                <p>Task information is unavailable or access is denied. Check your connection and permissions before reviewing.</p>
+                <Button variant="outline" onClick={() => void taskQuery.refetch()} disabled={taskQuery.isFetching}>
+                  {taskQuery.isFetching ? "Retrying…" : "Retry"}
+                </Button>
+              </div>
+            ) : <p className="text-muted-foreground">Loading...</p>}
           </div>
         </SheetContent>
       </Sheet>
@@ -177,6 +186,7 @@ export function TaskDetailSheet({
               label="Ti"
             />
           </div>
+          {taskQuery.isError && <p role="alert" className="mt-2 text-xs text-destructive">Unable to refresh this task. The displayed details may be out of date; retry before deciding. <button className="underline" onClick={() => void taskQuery.refetch()}>Retry</button></p>}
           {(updateStatus.isPending || updateTask.isPending) && (
             <p className="mt-2 text-xs text-muted-foreground">Saving changes...</p>
           )}
