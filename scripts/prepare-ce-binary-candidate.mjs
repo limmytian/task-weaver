@@ -23,6 +23,8 @@ script("collect-image-license-evidence", `--platform=${platform}`, api, web);
 const root = "release-artifacts/binary-sources";
 script("prepare-binary-sources", "release-artifacts/binary-licenses");
 script("assemble-binary-sources", `${root}/source-plan.json`, "--acquire");
+script("prepare-busybox-build-sources", `${root}/source-lock.json`);
+script("assemble-binary-sources", `${root}/busybox-build-source-plan.json`, "--acquire");
 script("vendor-binary-rust-sources", `${root}/source-lock.json`);
 script("assemble-binary-sources", `${root}/rust-source-plan.json`);
 script("verify-librsvg-lock", `${root}/source-lock.json`);
