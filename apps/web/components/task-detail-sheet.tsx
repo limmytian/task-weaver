@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { trpc } from "@/trpc/client";
@@ -28,6 +28,12 @@ import { AssistantDialog } from "@/components/assistant-dialog";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
 import { TaskRepositoryScope } from "@/components/repository-links";
 import { resourceAccessLost } from "@/lib/resource-access";
+
+function subscribeOnlineStatus(callback: () => void) {
+  window.addEventListener("online", callback);
+  window.addEventListener("offline", callback);
+  return () => { window.removeEventListener("online", callback); window.removeEventListener("offline", callback); };
+}
 
 const statusOptions = [
   { value: "todo", label: "To Do" },
@@ -76,6 +82,7 @@ export function TaskDetailSheet({
   onOpenChange: (open: boolean) => void;
   onTaskSelect?: (taskId: string) => void;
 }) {
+  const online = useSyncExternalStore(subscribeOnlineStatus, () => navigator.onLine, () => true);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [detailTab, setDetailTab] = useState("activity");
   const utils = trpc.useUtils();
@@ -147,10 +154,10 @@ export function TaskDetailSheet({
             <SheetTitle>Task Details</SheetTitle>
           </SheetHeader>
           <div className="flex h-40 items-center justify-center">
-            {taskQuery.isError ? (
+            {taskQuery.isError || !online ? (
               <div role="alert" className="space-y-3 px-4 text-center">
-                <p>Task information is unavailable or access is denied. Check your connection and permissions before reviewing.</p>
-                <Button variant="outline" onClick={() => void taskQuery.refetch()} disabled={taskQuery.isFetching}>
+                <p>{online ? "Task information is unavailable or access is denied. Check your connection and permissions before reviewing." : "You are offline. Reconnect to load task information before reviewing."}</p>
+                <Button variant="outline" onClick={() => void taskQuery.refetch()} disabled={taskQuery.isFetching || !online}>
                   {taskQuery.isFetching ? "Retrying…" : "Retry"}
                 </Button>
               </div>
@@ -186,7 +193,8 @@ export function TaskDetailSheet({
               label="Ti"
             />
           </div>
-          {taskQuery.isError && <p role="alert" className="mt-2 text-xs text-destructive">Unable to refresh this task. The displayed details may be out of date; retry before deciding. <button className="underline" onClick={() => void taskQuery.refetch()}>Retry</button></p>}
+          {!online && <p role="alert" className="mt-2 text-xs text-destructive">You are offline. The displayed task details may be out of date; reconnect before deciding.</p>}
+          {online && taskQuery.isError && <p role="alert" className="mt-2 text-xs text-destructive">Unable to refresh this task. The displayed details may be out of date; retry before deciding. <button className="underline" onClick={() => void taskQuery.refetch()}>Retry</button></p>}
           {(updateStatus.isPending || updateTask.isPending) && (
             <p className="mt-2 text-xs text-muted-foreground">Saving changes...</p>
           )}
