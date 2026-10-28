@@ -114,6 +114,8 @@ for the full configuration contract. Use HTTPS outside loopback.
 
 1. From **Projects**, choose **New Project** and give the project a goal.
 2. Open the project and choose **Requirement**. Describe one outcome you want.
+   Requirements start in **Draft**; set one to **Approved** or **In Progress**
+   when it is ready for an agent to pick up work.
 3. In **Requirements**, use **Add task** to break that outcome into concrete work.
    Every project task belongs to a requirement.
 4. Use **Board** to follow progress, or **DAG** to inspect dependencies. A
