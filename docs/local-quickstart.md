@@ -37,6 +37,13 @@ shown in the startup output, and create your own account with an email address
 and password. The helper generates separate random database, auth, and
 bootstrap secrets on first run and reuses the private local file afterward.
 
+If you used the earlier trial configuration, its existing PostgreSQL volume
+still has the old database password. Back up any data you need and migrate the
+database password to the newly generated value before using that volume with
+this configuration. For a disposable trial, you can instead remove its volumes
+using the reset command below, then start again. The helper does not delete or
+change an existing database volume.
+
 The email and password are yours to choose; there is no shared demo login.
 After signing in, try this short workflow:
 
