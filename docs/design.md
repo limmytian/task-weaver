@@ -103,7 +103,7 @@ retries and lease recovery. `pnpm test:gateway-postgres` verifies disposable
 PostgreSQL and Gateway HTTP/SSE transport; `pnpm test:gateway-live` requires
 explicit test endpoints/credentials. The default worker does not invoke an AI model.
 
-External integrations use events/webhooks, REST and MCP. Scheduled work reuses schedules. The planned execution path keeps Ti model/tool orchestration in Task Weaver and uses Partners MCP for sandbox execution; the current Gateway worker remains a prompt-printing adapter. See [the runtime integration assessment](agent-runtime.md).
+External integrations use events/webhooks, REST and MCP. Scheduled work reuses schedules. Ti runs a bounded model/tool loop in Task Weaver and uses the configured Partners MCP backend for sandbox operations. The separate Gateway worker does not itself invoke a model. See [Ti execution and Partners integration](agent-runtime.md).
 
 See [architecture transition](architecture-transition.md) and [versioned packages](ce-packages.md).
 
