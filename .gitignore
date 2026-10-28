@@ -17,6 +17,17 @@ data/
 .idea/
 
 .task-weaver/
+.config/
+.kube/
+.ssh/
+.codex/
+.agents/
+backups/
+*.dump
+*.sql.gz
+*.pem
+*.key
+*.kubeconfig
 
 # PDF preview assets are generated from the pinned dependency.
 apps/web/public/pdfjs/
