@@ -130,6 +130,22 @@ permissions, and timestamps are deterministic. It does not include scratch trees
 database backups, replacement binaries, or local credentials. Packaging does not
 resolve missing notices or approve delivery conditions.
 
+## Verify BusyBox wget request handling
+
+For each delivered API and Web image and each supported platform, run:
+
+```bash
+node scripts/verify-busybox-wget.mjs task-weaver-api:local linux/arm64
+node scripts/verify-busybox-wget.mjs task-weaver-web:local linux/arm64
+```
+
+The network-isolated fixture requires an ordinary encoded URL and redirect to
+succeed, then checks that raw bytes 0x01 through 0x20 in URL paths do not reach
+a loopback HTTP server. It records the exact local image ID and fails on a
+missing wget applet, a request reaching the server, a timeout, or an image change.
+This is a behavioral regression check, not a substitute for source provenance,
+license review, vulnerability scanning, or testing other URL handling paths.
+
 ## Verify User Replacement
 
 The Web image dynamically loads a shared libvips object. Its bundled dependencies
