@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -7,6 +7,7 @@ import { mkdirSync } from "node:fs";
 import test from "node:test";
 import { alpineRemoteSources, assertChecksums, expandVersion, hash, publicUrl, safePath } from "./binary-source-lib.mjs";
 import { inspectLocalImage, redactScannerHostPaths } from "./image-inspection-lib.mjs";
+import { assertModifiedBusyboxEvidence } from "./busybox-modified-evidence.mjs";
 
 test("source paths cannot escape the bundle or introduce shell options", () => {
   for (const path of ["../secret", "/etc/passwd", "-option", "a/../../b", "a//b", "a/./b", "a\\b", "a b"]) assert.throws(() => safePath(path));
@@ -131,6 +132,31 @@ test("binary evidence verification fails on source, image, or license-text drift
     const extracted = spawnSync("tar", ["-xOf", archive, "--", "source"], { encoding: "utf8" });
     assert.equal(extracted.status, 0);
     assert.equal(extracted.stdout, "source");
+    const buildDirectory = join(directory, "release-artifacts/busybox-build/arm64");
+    const bindingDirectory = join(directory, "release-artifacts/busybox-build/images", imageId.slice(7));
+    const layerDirectory = join(directory, "release-artifacts/busybox-layers", imageId.slice(7));
+    mkdirSync(buildDirectory, { recursive: true });
+    mkdirSync(bindingDirectory, { recursive: true });
+    mkdirSync(layerDirectory, { recursive: true });
+    mkdirSync(join(directory, "scripts"), { recursive: true });
+    for (const name of ["build-reviewed-busybox.mjs", "binary-source-lib.mjs", "release-platforms.mjs"]) copyFileSync(resolve(`scripts/${name}`), join(directory, "scripts", name));
+    for (const [path, value] of [[join(buildDirectory, "Dockerfile"), "recipe"], [join(buildDirectory, "patch-list"), "patches"],
+      [join(buildDirectory, "verification.json"), "build-report"], [join(bindingDirectory, "verification.json"), "image-binding"],
+      [join(layerDirectory, "verification.json"), "layer-report"]]) writeFileSync(path, value);
+    const verified = JSON.parse(readFileSync(join(root, "binary-source-verification.json")));
+    verified.modifiedBusybox = [{ imageId, platform: "linux/arm64", binarySha256: hash("binary"),
+      buildScriptSha256: hash(readFileSync(join(directory, "scripts/build-reviewed-busybox.mjs"))), dockerfileSha256: hash("recipe"),
+      patchListSha256: hash("patches"), buildReportSha256: hash("build-report"), bindingSha256: hash("image-binding"), layerReportSha256: hash("layer-report") }];
+    save("binary-source-verification.json", verified);
+    assert.equal(pack().status, 0);
+    const listing = spawnSync("tar", ["-tzf", archive], { encoding: "utf8" });
+    assert.equal(listing.status, 0);
+    assert.match(listing.stdout, /busybox-build\/Dockerfile/);
+    assert.match(listing.stdout, /busybox-build\/build-reviewed-busybox.mjs/);
+    assert.match(listing.stdout, /busybox-build\/source-index.json/);
+    assert.doesNotMatch(listing.stdout, /^busybox-build\/busybox$/m, "Compiled BusyBox must not enter source sidecar");
+    writeFileSync(join(buildDirectory, "Dockerfile"), "changed");
+    assert.notEqual(pack().status, 0, "Changed build recipe must fail closed");
     save("source", "changed");
     assert.notEqual(run().status, 0);
     save("source", "source");
@@ -243,4 +269,41 @@ test("BusyBox image builder rejects unsafe image references before Docker", () =
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Unsupported image reference/);
   assert.doesNotMatch(result.stderr, /docker/);
+});
+
+
+test("modified BusyBox evidence binds source, build, image and layers", () => {
+  const original = process.cwd();
+  const directory = mkdtempSync(join(tmpdir(), "tw-busybox-modified-"));
+  try {
+    mkdirSync(join(directory, "scripts"), { recursive: true });
+    copyFileSync(resolve("scripts/build-reviewed-busybox.mjs"), join(directory, "scripts/build-reviewed-busybox.mjs"));
+    const image = { imageId: `sha256:${"a".repeat(64)}`, platform: "linux/arm64" };
+    const lockBytes = Buffer.from(JSON.stringify({ busyboxBuildInputs: { configuration: "original-alpine", patch: "alpine-busybox/patches/wget-CVE-2025-60876.patch", staticLibraries: ["alpine-utmps", "alpine-skalibs"] } }));
+    const lock = JSON.parse(lockBytes);
+    const root = join(directory, "release-artifacts");
+    const buildRoot = join(root, "busybox-build/arm64");
+    const bindingRoot = join(root, "busybox-build/images", image.imageId.slice(7));
+    const layerRoot = join(root, "busybox-layers", image.imageId.slice(7));
+    for (const path of [buildRoot, bindingRoot, layerRoot]) mkdirSync(path, { recursive: true });
+    for (const [name, contents] of [["busybox", "binary"], ["Dockerfile", "recipe"], ["patch-list", "patches"]]) writeFileSync(join(buildRoot, name), contents);
+    const build = { platform: image.platform, sourceLockSha256: hash(lockBytes), patchCount: 44, sourceDateEpoch: 1767225600,
+      builderImageId: `sha256:${"c".repeat(64)}`, compilerInputs: [`${"d".repeat(64)}  /usr/bin/gcc`, `${"e".repeat(64)}  /usr/bin/ld`, `${"f".repeat(64)}  /lib/apk/db/installed`],
+      staticLibrarySha256: ["a3505c4a591ffe7433c524676f36c34c2c5a09214919c342e134bf3a394a7b17", "d5ebd65ca3d2902e78b3fd87ae90c6bc51fa1ad865a11c52232b2d03617a6c5a"],
+      binarySha256: hash("binary"), dockerfileSha256: hash("recipe"), patchListSha256: hash("patches"),
+      buildScriptSha256: hash(readFileSync(join(directory, "scripts/build-reviewed-busybox.mjs"))) };
+    const buildBytes = Buffer.from(JSON.stringify(build));
+    writeFileSync(join(buildRoot, "verification.json"), buildBytes);
+    const binding = { passed: true, imageId: image.imageId, platform: image.platform, sourceLockSha256: hash(lockBytes), binarySha256: build.binarySha256, buildReportSha256: hash(buildBytes) };
+    const layers = { passed: true, imageId: image.imageId, platform: image.platform, expectedSha256: build.binarySha256, findings: [{ sha256: build.binarySha256 }] };
+    writeFileSync(join(bindingRoot, "verification.json"), JSON.stringify(binding));
+    writeFileSync(join(layerRoot, "verification.json"), JSON.stringify(layers));
+    const imageReport = { busyboxPackageIntegrity: { sha256: build.binarySha256 } };
+    process.chdir(directory);
+    assert.equal(assertModifiedBusyboxEvidence(image, imageReport, lock, lockBytes).binarySha256, build.binarySha256);
+    assert.throws(() => assertModifiedBusyboxEvidence(image, { busyboxPackageIntegrity: { sha256: "0".repeat(64) } }, lock, lockBytes));
+    assert.throws(() => assertModifiedBusyboxEvidence(image, imageReport, lock, Buffer.from("different")));
+    writeFileSync(join(layerRoot, "verification.json"), JSON.stringify({ ...layers, findings: [{ sha256: "0".repeat(64) }] }));
+    assert.throws(() => assertModifiedBusyboxEvidence(image, imageReport, lock, lockBytes));
+  } finally { process.chdir(original); rmSync(directory, { recursive: true, force: true }); }
 });

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { assertModifiedBusyboxEvidence } from "./busybox-modified-evidence.mjs";
 import { assertReplacementEvidence } from "./native-replacement-evidence.mjs";
 import { rustTargets, sourcePlatform } from "./release-platforms.mjs";
 
@@ -31,6 +32,7 @@ for (const file of lock.files) assertChecksums(file, resolve(root, safePath(file
 for (const text of licenses.evidence) {
   assert.equal(hash(readFileSync(resolve(root, safePath(text.path)))), text.sha256, "Extracted license text changed");
 }
+const modifiedBusybox = [];
 for (const image of inventory.inventory) {
   assert.ok(lock.images.some((entry) => entry.imageId === image.imageId && entry.platform === image.platform), "Image identity is not covered by this source lock");
   const report = JSON.parse(readFileSync(resolve(imageEvidence, safePath(image.report))));
@@ -48,8 +50,10 @@ for (const image of inventory.inventory) {
   if (report.osSourcePackages.some((pkg) => pkg.P === "busybox")) {
     const integrity = report.busyboxPackageIntegrity;
     assert.match(integrity?.packageChecksum ?? "", /^Q1[A-Za-z0-9+/]{27}=$/, "BusyBox package checksum missing");
-    assert.equal(integrity.actualPackageChecksum, integrity.packageChecksum, "BusyBox differs from installed package; modified source and build inputs require separate review");
     assert.match(integrity.sha256 ?? "", /^[a-f0-9]{64}$/);
+    if (integrity.actualPackageChecksum !== integrity.packageChecksum) {
+      modifiedBusybox.push(assertModifiedBusyboxEvidence(image, report, lock, lockBytes));
+    }
   }
   for (const pkg of report.osSourcePackages) {
     assert.ok(lock.components.some((entry) => entry.family === "alpine" && entry.origin === pkg.o && entry.commit === pkg.c &&
@@ -120,7 +124,7 @@ for (const replacement of replacements) {
   }
 }
 const report = { schemaVersion: 1, sourceLockSha256: hash(lockBytes), images: lock.images,
-  sourceFiles: lock.files.length, components: lock.components.length, preservedLicenseFiles: licenses.evidence.length,
+  sourceFiles: lock.files.length, components: lock.components.length, preservedLicenseFiles: licenses.evidence.length, modifiedBusybox,
   postEditRustDependencies: rust.postEditRegistryPackages, sourceIntegrityPassed: true, replacementPassed: true,
   explicitlyHandledArchiveNotices: noticeCases.resolutions, unresolvedArchiveNotices: [],
   distributionApproved: false,

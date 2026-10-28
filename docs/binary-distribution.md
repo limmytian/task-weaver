@@ -34,10 +34,10 @@ node scripts/package-binary-source-evidence.mjs release-artifacts/binary-sources
 The preparation tool is deliberately restricted to the reviewed Node 24.21.0,
 Alpine, Sharp 0.35.5, and sharp-libvips 1.3.4 baseline. Version or source-commit
 drift requires another review, not an automatic fallback. Image inspection
-compares the BusyBox binary to its installed APK file checksum; a replacement
-cannot reuse the package source evidence and must receive a separate build/source
-review. This comparison detects drift against the installed package database; it
-does not authenticate that database. The tool preserves Alpine
+compares the BusyBox binary to its installed APK file checksum. A replacement
+must have matching source-lock, build, image and saved-layer evidence; it cannot
+reuse the package source evidence alone. This comparison detects drift against
+the installed package database; it does not authenticate that database. The tool preserves Alpine
 recipes and their local patches/configuration at the installed source commit,
 checks recipe package versions against APK metadata, and validates SHA-512 and
 Git blob checksums. Native build recipes and patches come from the exact tagged
@@ -140,8 +140,9 @@ release-artifacts/binary-sources/source-lock.json` generates an additional
 source acquisition plan for the pinned security patch and static library
 sources. Review and acquire that plan with the normal source acquisition
 process. The plan does not bind a compiled binary to those inputs or authorize
-replacement of the packaged BusyBox; the standard source verification rejects
-such replacements until the build and corresponding-source evidence are reviewed.
+replacement of the packaged BusyBox; source verification requires matching
+build, image and layer reports for that exact source lock. Rebinding changes the
+lock, so rebuild and reverify against the rebound lock before final packaging.
 The experimental `node scripts/build-reviewed-busybox.mjs <source-lock.json>
 <platform>` builds from those locked inputs with a fixed timestamp and checked
 static-library hashes. `node scripts/build-busybox-image.mjs <base-image>

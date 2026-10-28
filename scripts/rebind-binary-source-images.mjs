@@ -1,15 +1,18 @@
 #!/usr/bin/env node
+import { assertModifiedBusyboxEvidence } from "./busybox-modified-evidence.mjs";
 
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { json, safePath } from "./binary-source-lib.mjs";
+import { assertChecksums, json, safePath } from "./binary-source-lib.mjs";
 
 const [manifest, evidence] = process.argv.slice(2);
 if (!manifest || !evidence) throw new Error("Usage: node scripts/rebind-binary-source-images.mjs <source-lock.json> <image-evidence-directory>");
-const lock = JSON.parse(readFileSync(resolve(manifest)));
+const lockBytes = readFileSync(resolve(manifest));
+const lock = JSON.parse(lockBytes);
 const inventory = JSON.parse(readFileSync(resolve(evidence, "inventory.json")));
 assert.equal(inventory.inventory.length, lock.images.length);
+for (const file of lock.files) assertChecksums(file, resolve("release-artifacts/binary-sources", safePath(file.path)));
 for (const image of inventory.inventory) {
   const report = JSON.parse(readFileSync(resolve(evidence, safePath(image.report))));
   assert.equal(report.imageId, image.imageId);
@@ -18,8 +21,10 @@ for (const image of inventory.inventory) {
   if (report.osSourcePackages.some((pkg) => pkg.P === "busybox")) {
     const integrity = report.busyboxPackageIntegrity;
     assert.match(integrity?.packageChecksum ?? "", /^Q1[A-Za-z0-9+/]{27}=$/, "BusyBox package checksum missing");
-    assert.equal(integrity.actualPackageChecksum, integrity.packageChecksum, "BusyBox differs from installed package; modified source and build inputs require separate review");
     assert.match(integrity.sha256 ?? "", /^[a-f0-9]{64}$/);
+    if (integrity.actualPackageChecksum !== integrity.packageChecksum) {
+      assertModifiedBusyboxEvidence(image, report, lock, lockBytes);
+    }
   }
   for (const pkg of report.osSourcePackages) {
     assert.ok(lock.components.some((entry) => entry.family === "alpine" && entry.origin === pkg.o && entry.commit === pkg.c &&
