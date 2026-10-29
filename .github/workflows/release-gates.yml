@@ -158,7 +158,11 @@ jobs:
           for platform in linux/amd64 linux/arm64; do
             for app in api web; do
               if [ "$app" = api ]; then digest="$API_DIGEST"; else digest="$WEB_DIGEST"; fi
-              image="ghcr.io/${GITHUB_REPOSITORY}-${app}@${digest}"
+              repository="ghcr.io/${GITHUB_REPOSITORY}-${app}"
+              architecture="${platform#linux/}"
+              platform_digest=$(docker buildx imagetools inspect "${repository}@${digest}" --raw |
+                jq -er --arg architecture "$architecture" '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $architecture) | .digest] | if length == 1 then .[0] else error("Expected exactly one platform manifest") end')
+              image="${repository}@${platform_digest}"
               docker pull --platform "$platform" "$image"
               node scripts/verify-busybox-wget.mjs "$image" "$platform"
             done
