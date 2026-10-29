@@ -1125,7 +1125,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
 3. Before working a task, set it to in_progress if needed. When finished, set it to done with a reason. Use in_review when human judgment is needed.
 4. Use the 'tw' CLI commands to fetch context, list requirements, fetch documents, search, and update progress.
 5. Follow the configured delivery instructions above. Git finalization is handled by the daemon only for legacy requirements.
-6. If this slice is complete, leave a concise summary in task comments or requirement notes as useful context for the next slice.
+6. Before setting the task to done or in_review, add a task comment describing the actual result, checks performed and missing, and where a reviewer can inspect persistent evidence. If no persistent evidence is available, say so explicitly. Do not include credentials or claim unverified success.
 7. Do not mark requirement ${requirement.id} done. The daemon advances its configured workflow when all tasks are terminal.
 `
 
@@ -1485,6 +1485,9 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
                 if (taskId) {
                   const active = reqTasks.find((candidate: any) => candidate.id === taskId)
                   if (active?.status === 'todo' || active?.status === 'in_progress') {
+                    await daemonPost(`/api/v1/tasks/${taskId}/comments`, {
+                      content: 'The worker exited without finalizing this task. The daemon has not verified the outcome, checks, or persistent evidence. Inspect any recorded evidence and request missing information before accepting the result.',
+                    })
                     await fencedPatch(`/api/v1/tasks/${taskId}/status`, {
                       status: 'in_review',
                       reason: 'Daemon requirement-lane agent exited cleanly but did not finalize active task status — needs review',

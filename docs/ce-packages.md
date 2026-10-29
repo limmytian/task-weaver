@@ -67,22 +67,15 @@ dependency inventory, SBOM, and release-gate reports with the release record.
 
 The public `CE release` workflow is manually dispatched for an existing
 annotated `vMAJOR.MINOR.PATCH` tag. Its `ce-release` environment must require
-maintainer approval. The workflow rebuilds and verifies the tag, assembles a
-source archive and six npm tarballs, scans local API and Web images, publishes
-versioned images to GHCR, signs images and files with GitHub OIDC, and creates
-the GitHub release from the signed bundle. Release credentials are provided by
-the protected workflow environment, not stored in source.
+maintainer approval. The workflow verifies the tag, assembles a source archive
+and five npm tarballs, and loads the reviewed binary candidate for that exact
+commit and version. It scans the candidate images, publishes versioned images
+to GHCR, signs images and files with GitHub OIDC, and creates the GitHub release
+from the signed bundle. Release credentials are provided by the protected
+workflow environment, not stored in source. Tarballs in a release bundle do not
+by themselves mean that packages have been published to npm.
 
-The private Gitea registry mirror is a separate manual workflow that clones
-the same public tag. It requires a repository variable `CE_PACKAGE_OWNER` and
-secrets `CE_PACKAGE_TOKEN`, `CE_COSIGN_KEY_B64`, and `CE_COSIGN_PASSWORD`. The
-package token needs only package write access to the intended owner. Its npm
-and OCI endpoints are derived from the Gitea server URL. Restrict workflow
-dispatch and secret access to release maintainers, then compare the public
-source and npm checksums before accepting the mirror. Keep the signing public
-key and both CI run records with the release record.
-
-Do not dispatch either publication workflow until the license, legal,
+Do not dispatch the publication workflow until the license, legal,
 third-party, vulnerability, and release decision gates have been approved.
 
 The CE prefix in tooling is a retained legacy distribution identifier, not an

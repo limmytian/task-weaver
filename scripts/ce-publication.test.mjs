@@ -1,3 +1,4 @@
+import { assertBusyboxWgetEvidence } from "./busybox-wget-evidence.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -172,12 +173,51 @@ test("registry preflight fails closed on existing tags or authentication errors 
     for (const [status, error, message] of [[0, "", /Immutable image tag already exists/], [1, "unauthorized", /Cannot establish registry tag availability/], [1, "manifest unknown", /ce-candidate-amd64.json/]]) {
       writeFileSync(calls, "");
       writeFileSync(join(root, "bin/docker"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$TW_TEST_CALLS"\nprintf '%s\\n' '${error}' >&2\nexit ${status}\n`, { mode: 0o755 });
-      const result = spawnSync(process.execPath, [script, "0.3.1", "example/task-weaver"], { cwd: root, env: { ...process.env, PATH: `${join(root, "bin")}:${process.env.PATH}`, TW_TEST_CALLS: calls }, encoding: "utf8" });
+      const result = spawnSync(process.execPath, [script, "0.3.1", "example/task-weaver"], { cwd: root, env: { ...process.env, PATH: `${join(root, "bin")}:${process.env.PATH}`, TW_TEST_CALLS: calls, GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "1" }, encoding: "utf8" });
       assert.notEqual(result.status, 0);
       assert.match(result.stderr, message);
       const commands = readFileSync(calls, "utf8");
       assert.doesNotMatch(commands, /push|imagetools create|tag /);
-      assert.equal(commands.trim().split("\n").length, error === "manifest unknown" ? 6 : 1);
+      assert.equal(commands.trim().split("\n").length, error === "manifest unknown" ? 12 : 1);
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("formal staging signs candidate indexes without writing stable or latest tags", () => {
+  const root = mkdtempSync(join(tmpdir(), "tw-ce-stage-"));
+  const script = resolve("scripts/publish-ce-oci.mjs");
+  const run = (...args) => spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  try {
+    assert.equal(run("init", "-q").status, 0);
+    assert.equal(run("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "Fixture").status, 0);
+    const commit = run("rev-parse", "HEAD").stdout.trim();
+    const out = join(root, "release-artifacts/bundle"); mkdirSync(out, { recursive: true }); mkdirSync(join(root, "bin"));
+    writeFileSync(join(out, "source-provenance.json"), "{}");
+    writeFileSync(join(out, "ce-candidate-set.json"), JSON.stringify({ version: "0.3.17", commit }));
+    const d = c => `sha256:${c.repeat(64)}`;
+    for (const [arch, value] of [["amd64", "a"], ["arm64", "b"]]) {
+      writeFileSync(join(out, `ce-candidate-${arch}.json`), JSON.stringify({ platform: `linux/${arch}`, commit, version: "0.3.17", images: ["api", "web"].map(app => ({ app, platform: `linux/${arch}`, imageId: d(value), configDigest: d(value) })) }));
+    }
+    const calls = join(root, "calls");
+    writeFileSync(join(root, "bin/docker"), `#!/usr/bin/env node\nconst fs=require('fs'),a=process.argv.slice(2),d=c=>'sha256:'+c.repeat(64);fs.appendFileSync(process.env.TW_TEST_CALLS,'docker '+a.join(' ')+'\\n');if(a[0]==='image'&&a[1]==='inspect'){const arch=a[3].split('/')[1];console.log(JSON.stringify([{Os:'linux',Architecture:arch,Id:d(arch==='amd64'?'a':'b')}]))}else if(a[0]==='buildx'&&a[1]==='imagetools'&&a[2]==='inspect'){const ref=a[3];if(ref.includes(':candidate-')&&a.includes('--format')){console.log(JSON.stringify({digest:d(ref.endsWith('-amd64')?'c':ref.endsWith('-arm64')?'d':'e')}))}else if(ref.includes('@')&&a.includes('--raw')){if(ref.endsWith(d('e')))console.log(JSON.stringify({schemaVersion:2,mediaType:'application/vnd.oci.image.index.v1+json',manifests:[{digest:d('c'),size:1,platform:{os:'linux',architecture:'amd64'}},{digest:d('d'),size:1,platform:{os:'linux',architecture:'arm64'}}]}));else console.log(JSON.stringify({config:{digest:ref.endsWith(d('c'))?d('a'):d('b')}}))}else {console.error('manifest unknown');process.exit(1)}}\n`, { mode: 0o755 });
+    writeFileSync(join(root, "bin/cosign"), `#!/bin/sh\nprintf 'cosign %s\\n' "$*" >> "$TW_TEST_CALLS"\n`, { mode: 0o755 });
+    const result = spawnSync(process.execPath, [script, "0.3.17", "example/task-weaver"], { cwd: root, env: { ...process.env, PATH: `${join(root, "bin")}:${process.env.PATH}`, TW_TEST_CALLS: calls, GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "1" }, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    const log = readFileSync(calls, "utf8");
+    assert.match(log, /imagetools create --tag ghcr.io\/example\/task-weaver-api:candidate-123-1/);
+    assert.doesNotMatch(log, /(?:push|create --tag) ghcr.io\/example\/task-weaver-(?:api|web):(?:0\.3\.17|latest)/);
+    assert.match(log, /cosign attest/);
+    assert.equal(JSON.parse(readFileSync(join(out, "api-image.json"), "utf8")).image, "ghcr.io/example/task-weaver-api:0.3.17");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("BusyBox verification must pass for the exact candidate image and platform", () => {
+  const image = `sha256:${"a".repeat(64)}`;
+  const report = { passed: true, imageId: image, platform: "linux/arm64" };
+  assert.doesNotThrow(() => assertBusyboxWgetEvidence(report, image, "linux/arm64"));
+  assert.throws(() => assertBusyboxWgetEvidence(null, image, "linux/arm64"));
+  assert.throws(() => assertBusyboxWgetEvidence({ ...report, passed: false }, image, "linux/arm64"));
+  assert.throws(() => assertBusyboxWgetEvidence(report, `sha256:${"b".repeat(64)}`, "linux/arm64"));
+  assert.throws(() => assertBusyboxWgetEvidence(report, image, "linux/amd64"));
 });

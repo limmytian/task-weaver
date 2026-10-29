@@ -1,3 +1,4 @@
+import { assertBusyboxWgetEvidence } from "./busybox-wget-evidence.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -25,6 +26,8 @@ const images = [];
 for (const [app, image] of [["api", apiImage], ["web", webImage]]) {
   const details = inspectLocalImage(image, platform);
   assert.ok(verification.images.some(entry => entry.imageId === details.Id && entry.platform === platform));
+  const wget = JSON.parse(readFileSync(`release-artifacts/busybox-wget/${details.Id.slice(7)}/verification.json`));
+  assertBusyboxWgetEvidence(wget, details.Id, platform);
   const archive = `${app}-image.tar`;
   execFileSync("docker", ["save", "--output", join(output, archive), image]);
   const digest = createHash("sha256");
@@ -33,6 +36,7 @@ for (const [app, image] of [["api", apiImage], ["web", webImage]]) {
 }
 for (const path of ["binary-licenses", "images", "deployment-verification.json", "binary-release-verification.json", "native-replacement/verification.json",
   ...verification.images.map(({ imageId }) => `runtime-layers/${imageId.slice(7)}/verification.json`),
+  ...verification.images.map(({ imageId }) => `busybox-wget/${imageId.slice(7)}/verification.json`),
   "binary-sources/source-lock.json", "binary-sources/source-package.json", "binary-sources/binary-source-verification.json", `binary-sources/${verification.correspondingSource.archive}`]) {
   cpSync(resolve("release-artifacts", path), join(output, "release-artifacts", path), { recursive: true });
 }

@@ -49,11 +49,10 @@ function notExpired() {
 }
 
 function buildSearchTerms(query: string): string[] {
-  return query
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => word.replace(/[%_\\]/g, "\\$&"));
+  const stopWords = new Set(["the", "and", "for", "with", "from", "that", "this", "what", "how", "can", "find", "get"]);
+  const terms = [...new Set((query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])
+    .filter((word) => word.length >= 3 && !stopWords.has(word)))].slice(0, 12);
+  return terms.length ? terms : [query.trim().replace(/[%_\\]/g, "\\$&")];
 }
 
 export const MAX_INCREMENT = Number(process.env.TW_MEM_MAX_INCREMENT_DAYS || 30) * 24 * 60 * 60 * 1000;
@@ -205,18 +204,9 @@ export async function searchMemories(db: Database, input: SearchMemoryInput, aut
     ? sql<number>`CASE WHEN ${memories.createdBy} = ${input.preferredActorId} THEN 0.1 ELSE 0 END`
     : sql<number>`0`;
 
-  if (terms.length > 0) {
-    conditions.push(
-      and(
-        ...terms.map((term) =>
-          or(
-            sql`${memories.title} ILIKE ${`%${term}%`} ESCAPE '\\'`,
-            sql`${memories.content} ILIKE ${`%${term}%`} ESCAPE '\\'`,
-          )!,
-        ),
-      ),
-    );
-  }
+  const termMatches = terms.map((term) => sql`(${memories.title} ILIKE ${`%${term}%`} ESCAPE '\\' OR ${memories.content} ILIKE ${`%${term}%`} ESCAPE '\\')`);
+  conditions.push(or(...termMatches));
+  const termScore = sql<number>`(${sql.join(termMatches.map((match) => sql`CASE WHEN ${match} THEN ${1 / terms.length}::double precision ELSE 0.0 END`), sql` + `)})`;
 
   // Filters
   conditions.push(buildMemoryScopeCondition(input));
@@ -249,6 +239,7 @@ export async function searchMemories(db: Database, input: SearchMemoryInput, aut
       createdAt: memories.createdAt,
       score: sql<number>`(
         CASE WHEN ${memories.title} ILIKE ${likePattern} ESCAPE '\\' OR ${memories.content} ILIKE ${likePattern} ESCAPE '\\' THEN 0.5 ELSE 0.0 END
+        + 0.5 * ${termScore}
         + ${projectBoost}
         + ${personalBoost}
         + ${actorBoost}

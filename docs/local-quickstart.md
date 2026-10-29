@@ -39,11 +39,46 @@ and password. The helper generates separate random database, auth, and
 bootstrap secrets on first run and reuses the private local file afterward.
 
 If you used the earlier trial configuration, its existing PostgreSQL volume
-still has the old database password. Back up any data you need and migrate the
-database password to the newly generated value before using that volume with
-this configuration. For a disposable trial, you can instead remove its volumes
-using the reset command below, then start again. The helper does not delete or
-change an existing database volume.
+still has the old database password. Follow the migration below before starting
+the new configuration. For a disposable trial, you can instead remove its
+volumes using the reset command below, then start again. The helper does not
+delete or change an existing database volume.
+
+### Preserve an earlier trial
+
+Run these commands in the same checkout and Compose project that owns the old
+trial. First prepare credentials without changing any containers, then stop
+application writes and save a database backup outside the checkout:
+
+```sh
+./scripts/local-compose-up.sh --prepare-only
+docker compose --env-file .task-weaver/local-trial/compose.env -f docker-compose.local.yml stop web api
+umask 077
+trial_backup=$(mktemp "$HOME/task-weaver-trial-backup.XXXXXX")
+docker compose --env-file .task-weaver/local-trial/compose.env -f docker-compose.local.yml exec -T database \
+  pg_dump -U task_weaver -d task_weaver -Fc > "$trial_backup"
+printf 'Database backup: %s\n' "$trial_backup"
+```
+
+Back up the skill and attachment volumes as well if they contain data. Verify
+the backups before continuing; see [deployment and recovery](deployment.md#upgrade-and-recovery).
+The existing database container must still be running. Read the new database
+password from the private file on a private terminal, then enter it twice at
+the PostgreSQL prompt (do not paste it into a shell command):
+
+```sh
+sed -n 's/^TW_LOCAL_DATABASE_PASSWORD=//p' .task-weaver/local-trial/compose.env
+docker compose --env-file .task-weaver/local-trial/compose.env -f docker-compose.local.yml exec database \
+  psql -U task_weaver -d task_weaver
+```
+
+At the `psql` prompt run `\password task_weaver`, enter the generated password
+twice, and exit with `\q`. The password is displayed by the first command, so
+do not run it on a shared screen or retain terminal logs. Start the trial with
+`./scripts/local-compose-up.sh`, sign in with your existing account and verify
+your data. The regenerated authentication secret invalidates old sessions;
+it does not change account passwords. If migration fails, keep the backup and
+restore it with the matching old images rather than deleting the volume.
 
 The email and password are yours to choose; there is no shared demo login.
 After signing in, try this short workflow:

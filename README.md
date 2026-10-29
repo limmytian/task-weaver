@@ -114,6 +114,8 @@ for the full configuration contract. Use HTTPS outside loopback.
 
 1. From **Projects**, choose **New Project** and give the project a goal.
 2. Open the project and choose **Requirement**. Describe one outcome you want.
+   Requirements start in **Draft**; set one to **Approved** or **In Progress**
+   when it is ready for an agent to pick up work.
 3. In **Requirements**, use **Add task** to break that outcome into concrete work.
    Every project task belongs to a requirement.
 4. Use **Board** to follow progress, or **DAG** to inspect dependencies. A
@@ -187,8 +189,9 @@ tw auth status
 The CLI defaults to `http://localhost:3001`. `TW_API_URL` and `TW_API_KEY` may
 override its saved configuration. Project tasks require a requirement; claim a
 task before starting work and release the claim when finished. Add `--json` for
-machine-readable output. npm package publication is not supported yet; use the
-checkout instructions above.
+machine-readable output. npm packages are not published yet; use the checkout
+instructions above. See the [npm distribution plan](docs/npm-distribution.md)
+for the release workflow and future installation commands.
 
 ## Documentation and community
 

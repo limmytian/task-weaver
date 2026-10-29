@@ -32,7 +32,8 @@ function buildTsQuery(query: string): string | null {
     .filter(Boolean)
     .map((w) => w.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, ""))
     .filter(Boolean)
-    .join(" & ");
+    .slice(0, 12)
+    .join(" | ");
   return tsQuery || null;
 }
 

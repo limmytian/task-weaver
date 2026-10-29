@@ -33,7 +33,11 @@ node scripts/package-binary-source-evidence.mjs release-artifacts/binary-sources
 
 The preparation tool is deliberately restricted to the reviewed Node 24.21.0,
 Alpine, Sharp 0.35.5, and sharp-libvips 1.3.4 baseline. Version or source-commit
-drift requires another review, not an automatic fallback. It preserves Alpine
+drift requires another review, not an automatic fallback. Image inspection
+compares the BusyBox binary to its installed APK file checksum. A replacement
+must have matching source-lock, build, image and saved-layer evidence; it cannot
+reuse the package source evidence alone. This comparison detects drift against
+the installed package database; it does not authenticate that database. The tool preserves Alpine
 recipes and their local patches/configuration at the installed source commit,
 checks recipe package versions against APK metadata, and validates SHA-512 and
 Git blob checksums. Native build recipes and patches come from the exact tagged
@@ -129,6 +133,48 @@ only manifest-selected inputs and reports. Its POSIX archive ordering, ownership
 permissions, and timestamps are deterministic. It does not include scratch trees,
 database backups, replacement binaries, or local credentials. Packaging does not
 resolve missing notices or approve delivery conditions.
+
+For a proposed custom BusyBox build using the reviewed Alpine baseline, the
+optional `node scripts/prepare-busybox-build-sources.mjs
+release-artifacts/binary-sources/source-lock.json` generates an additional
+source acquisition plan for the pinned security patch and static library
+sources. Review and acquire that plan with the normal source acquisition
+process. The plan does not bind a compiled binary to those inputs or authorize
+replacement of the packaged BusyBox; source verification requires matching
+build, image and layer reports for that exact source lock. Rebinding changes the
+lock, so rebuild and reverify against the rebound lock before final packaging.
+The experimental `node scripts/build-reviewed-busybox.mjs <source-lock.json>
+<platform>` builds from those locked inputs with a fixed timestamp and checked
+static-library hashes. `node scripts/build-busybox-image.mjs <base-image>
+<output-image> <platform>` can create a local experimental image while checking
+the original runtime configuration is preserved. `node
+scripts/verify-busybox-build-image.mjs <source-lock.json> <image> <platform>`
+compares the built executable to the actual image file and binds the result to
+that image ID. These experimental
+reports do not establish independent build provenance, inspect all image layers,
+or replace the standard distribution checks. To inspect every saved layer entry
+at `bin/busybox` against the reviewed binary hash, run
+`node scripts/verify-busybox-layers.mjs <image> <platform> <sha256>`. This check
+does not inspect other paths or establish source provenance.
+
+## Verify BusyBox wget request handling
+
+For each delivered API and Web image and each supported platform, run:
+
+```bash
+node scripts/verify-busybox-wget.mjs task-weaver-api:local linux/arm64
+node scripts/verify-busybox-wget.mjs task-weaver-web:local linux/arm64
+```
+
+The network-isolated fixture requires an ordinary encoded URL and redirect to
+succeed, then checks that raw bytes 0x01 through 0x20 in URL paths do not reach
+a loopback HTTP server. It records the exact local image ID and fails on a
+missing wget applet, a request reaching the server, a timeout, or an image change.
+This is a behavioral regression check, not a substitute for source provenance,
+license review, vulnerability scanning, or testing other URL handling paths.
+Candidate preparation runs the check for both images. Packaging and loading
+require passing reports for the exact candidate image IDs and platform; earlier
+candidates without those reports need to be rebuilt and verified.
 
 ## Verify User Replacement
 

@@ -22,15 +22,14 @@ permissions:
   packages: write
   id-token: write
 
-concurrency:
-  group: ce-release-${{ inputs.version }}
-  cancel-in-progress: false
-
 jobs:
   release:
     runs-on: ubuntu-latest
     environment: ce-release
     timeout-minutes: 90
+    concurrency:
+      group: task-weaver-image-promotion
+      cancel-in-progress: false
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       TURBO_TELEMETRY_DISABLED: "1"
@@ -47,7 +46,7 @@ jobs:
         with:
           ref: v${{ inputs.version }}
           fetch-depth: 0
-          persist-credentials: false
+          persist-credentials: true
       - uses: pnpm/action-setup@v4
         with:
           run_install: false
@@ -145,6 +144,13 @@ jobs:
           VERSION: ${{ inputs.version }}
           REPOSITORY: ${{ github.repository }}
         run: node scripts/publish-ce-oci.mjs "$VERSION" "$REPOSITORY"
+      - name: Promote version and latest from the signed indexes
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          API_DIGEST=$(node -p 'require("./release-artifacts/bundle/api-image.json").digest')
+          WEB_DIGEST=$(node -p 'require("./release-artifacts/bundle/web-image.json").digest')
+          node scripts/promote-image-pair.mjs release "$VERSION" "$API_DIGEST" "$WEB_DIGEST"
       - name: Finalize checksums and sign release files
         run: |
           pnpm release:finalize-ce

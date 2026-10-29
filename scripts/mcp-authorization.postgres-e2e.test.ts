@@ -138,6 +138,22 @@ test("MCP authorization isolates discovery, local execution and live credentials
     assert.ok(audits.every((row: any) => row.input === null && row.output === null));
     connected = 0;
   });
+  await t.test("natural-language tool search ranks relevant tools without widening visibility", async () => {
+    const [pricing] = await db.insert(mcpTools).values({ serverId: remote.id, name: "sample_quote_price", inputSchema: { type: "object" }, description: "Return current integer-cent pricing for a sample quote item." }).returning();
+    await db.insert(mcpTools).values({ serverId: remote.id, name: "quote_archive", inputSchema: { type: "object" }, description: "Find archived quotes." });
+    const foreign = await outsider.service.mcpRegistryService.registerServer(db, registerMcpServerSchema.parse({ projectId: other.id, name: randomUUID(), transport: "streamable-http", config: { url: "https://example.test/mcp" } }), outsider.actor);
+    await db.update(mcpServers).set({ status: "connected" }).where(eq(mcpServers.id, foreign.id));
+    const [hidden] = await db.insert(mcpTools).values({ serverId: foreign.id, name: "sample_quote_price", inputSchema: { type: "object" }, description: "Return current sample quote pricing." }).returning();
+    const key = await runtime.identity.issueKey(member.headers, member.actor.id, { name: "Search fixture", grants: [{ scope: "project", projectId: project.id, permissions: ["resource.read", "mcp.invoke"] }], expiresAt: null });
+    const context = await runtime.verify(new Headers({ authorization: `Bearer ${key.rawKey}` }));
+    const service = createResourceServices(context);
+    const found = await service.mcpRegistryService.searchTools(db, searchMcpToolsSchema.parse({ projectId: project.id, intent: "find current sample quote pricing for customer" }));
+    assert.equal(found[0]?.id, pricing.id);
+    assert.ok(!found.some((item: { id: string }) => item.id === hidden.id));
+    const exact = await service.mcpRegistryService.searchTools(db, searchMcpToolsSchema.parse({ projectId: project.id, intent: "sample_quote_price" }));
+    assert.equal(exact[0]?.id, pricing.id);
+    assert.equal((await viewer.service.mcpRegistryService.searchTools(db, searchMcpToolsSchema.parse({ projectId: project.id, intent: "find current sample quote pricing for customer" }))).length, 0);
+  });
   await t.test("tool targets, read-only state and approval policies cannot widen invocation scope", async () => {
     const key = await runtime.identity.issueKey(member.headers, member.actor.id, { name: "Scoped approval invocation", grants: [{ scope: "project", projectId: project.id, permissions: ["resource.read", "mcp.invoke"] }], expiresAt: null });
     const context = await runtime.verify(new Headers({ authorization: `Bearer ${key.rawKey}` }));

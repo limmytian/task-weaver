@@ -1,5 +1,8 @@
 # Unified Task Weaver Architecture Transition
 
+This document records the historical 0.3.0 transition. For current Ti execution,
+see [Ti execution and Partners integration](agent-runtime.md).
+
 Owner decision: 2026-10-01. Development now focuses on one Task Weaver application.
 The CE/Pro edition split and standalone private application implementation are
 retired. The old private experiments remain historical evidence; no repository
@@ -24,4 +27,4 @@ multiple product editions. The old Pro mainline-canary workflow is removed;
 the retired in-process SDK is not a supported extension surface. Public export still uses
 `open-source.manifest.json`; private `.env` tracking remains unchanged.
 
-External integrations use events/webhooks, REST and MCP. The planned agent runtime will reuse schedules and keep model/tool orchestration in Task Weaver.
+External integrations use events/webhooks, REST and MCP. The transition anticipated an agent runtime using schedules and Task Weaver model/tool orchestration; the current implementation is described in the Ti guide.

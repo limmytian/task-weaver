@@ -45,6 +45,7 @@ export function releasePackageJson(original, version) {
     version,
     type: "module",
     license: "Apache-2.0",
+    repository: { type: "git", url: "git+https://github.com/limmytian/task-weaver.git", directory: `packages/${original.name.slice("@task-weaver/".length)}` },
     exports,
     dependencies,
     files: ["dist", "drizzle", "LICENSE", "THIRD_PARTY_NOTICES.md"],
@@ -53,7 +54,7 @@ export function releasePackageJson(original, version) {
   };
 }
 
-function rewriteRelativeImports(contents, filePath) {
+export function rewriteRelativeImports(contents, filePath) {
   return contents.replace(/(\b(?:from\s+|import\s*\(|import\s+|export\s+[^;]*?from\s+)["'])(\.{1,2}\/[^"']+)(["'])/g,
     (_match, prefix, specifier, quote) => {
       if (/\.(?:js|json|node)$/.test(specifier)) return `${prefix}${specifier}${quote}`;

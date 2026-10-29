@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BASIC_WORKFLOW, requirementWorkflowSchema, evidencePreviewKind, type RequirementWorkflow } from "@task-weaver/contracts";
 import { readEvidencePreview } from "@/lib/evidence-preview-transfer";
+import { recordedReviewChecks, type ReviewCheckStatus } from "@/lib/review-checks";
 import { highlightGitDiffLine } from "@/lib/git-diff-highlight";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
@@ -33,7 +34,7 @@ export function RequirementWorkflowPanel({ requirement }: { requirement: Workflo
   const [editing, setEditing] = useState(false);
   const [definition, setDefinition] = useState<RequirementWorkflow>(BASIC_WORKFLOW);
   const [reason, setReason] = useState("");
-  const [checks, setChecks] = useState<Record<string, boolean>>({});
+  const [checks, setChecks] = useState<Record<string, ReviewCheckStatus | undefined>>({});
   const [outputValue, setOutputValue] = useState("");
   const [inputId, setInputId] = useState("");
   const refresh = () => { void utils.requirement.get.invalidate({ id: requirement.id }); void utils.requirement.recoveryState.invalidate({ id: requirement.id }); };
@@ -58,7 +59,7 @@ export function RequirementWorkflowPanel({ requirement }: { requirement: Workflo
     if (!nextStage || !reason.trim()) return;
     advance.mutate({ requirementId: requirement.id, data: {
       stage: nextStage, decision, reason: reason.trim(), expectedRevision: requirement.workflowStateRevision,
-      checks: (workflow?.acceptance.requiredChecks ?? []).map((name) => ({ name, status: checks[name] ? "passed" : "failed" })),
+      checks: recordedReviewChecks(workflow?.acceptance.requiredChecks ?? [], checks),
     } });
   };
   const method = workflow?.delivery.method;
@@ -88,7 +89,7 @@ export function RequirementWorkflowPanel({ requirement }: { requirement: Workflo
         {method === "local" && !terminal && <p className="text-muted-foreground">Register a file on its producing machine with <code>tw req output register {requirement.id} --type local --file /path/to/file</code>. The file stays on that node.</p>}
         {canAdvance && <div className="space-y-3">
           <Textarea aria-label="Stage decision reason" value={reason} onChange={(event) => setReason(event.target.value)} placeholder={`Reason for the ${nextStage} decision`} rows={2} />
-          {nextStage === "acceptance" && workflow.acceptance.requiredChecks.map((name) => <label key={name} className="flex items-center gap-2"><input type="checkbox" checked={Boolean(checks[name])} onChange={(event) => setChecks({ ...checks, [name]: event.target.checked })} />{name}</label>)}
+          {nextStage === "acceptance" && workflow.acceptance.requiredChecks.map((name) => <label key={name} className="flex flex-wrap items-center gap-2">{name}<select className="rounded border bg-background p-1" value={checks[name] ?? ""} onChange={(event) => setChecks({ ...checks, [name]: (event.target.value || undefined) as ReviewCheckStatus | undefined })}><option value="">Not recorded</option><option value="passed">Passed</option><option value="failed">Failed</option></select></label>)}
           <div className="flex flex-wrap gap-2"><Button onClick={() => decide("complete")} disabled={!reason.trim() || advance.isPending}>Complete {nextStage}</Button>{nextStage !== "delivery" && <Button variant="outline" onClick={() => decide("changes_requested")} disabled={!reason.trim() || advance.isPending}>Request changes</Button>}{nextStage && state[nextStage] === "failed" && <Button variant="outline" onClick={() => decide("retry")} disabled={!reason.trim() || advance.isPending}>Retry stage</Button>}</div>
         </div>}
       </>}
@@ -106,7 +107,8 @@ function EvidenceMetadata({ requirementId, outputId }: { requirementId: string; 
   useEffect(() => () => activeDownload.current?.abort(), []);
   useEffect(() => () => { if (localPreview) URL.revokeObjectURL(localPreview.url); }, [localPreview]);
   const evidence = trpc.requirement.evidence.useQuery({ requirementId, outputId }, { enabled: open, retry: false });
-  const capabilities = trpc.plan.capabilities.useQuery({ projectId: evidence.data?.projectId ?? '' }, { enabled: open && Boolean(evidence.data?.projectId), retry: false });
+  const capabilities = trpc.plan.capabilities.useQuery({ projectId: evidence.data?.projectId ?? '' }, { enabled: open && !evidence.error && Boolean(evidence.data?.projectId), retry: false });
+  useEffect(() => { if (evidence.error) activeDownload.current?.abort(); }, [evidence.error]);
   const transfer = async (purpose: 'preview' | 'download' | 'promotion') => {
     const abort = new AbortController(); activeDownload.current = abort; setController(abort); let requestId: string | undefined;
     try {
@@ -163,9 +165,9 @@ function EvidenceMetadata({ requirementId, outputId }: { requirementId: string; 
   };
   return <div className="mt-2 space-y-1"><Button size="sm" variant="outline" onClick={() => setOpen(value => !value)}>{open ? "Hide evidence details" : "Evidence details"}</Button>
     {open && evidence.isLoading && <p>Loading evidence…</p>}
-    {open && evidence.error && <p role="alert">Evidence is unavailable or access is denied.</p>}
-    {open && evidence.data && <div className="space-y-1 text-xs"><p>Source: {evidence.data.kind} · {evidence.data.availability}</p>
-      {evidence.data.kind === "local" && evidence.data.availability !== "retired" && <><p>{evidence.data.originalFilename} · {evidence.data.sizeBytes} bytes</p><p>SHA-256: {evidence.data.sha256}</p><p>Preview transfers and verifies the entire file from its node before displaying a bounded sample. A connected compatible producer and enabled evidence service are required.</p><div className="flex flex-wrap gap-2">{evidencePreviewKind(evidence.data.mimeType, evidence.data.sizeBytes) !== 'download' && <Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('preview'); }}>Preview</Button>}<Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('download'); }}>Download original</Button>{capabilities.data?.canWrite && <Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('promotion'); }}>Save as attachment</Button>}{controller && <Button size="sm" variant="ghost" onClick={() => controller.abort()}>Cancel request</Button>}</div>{localPreview && <LocalEvidencePreview preview={localPreview} />}</>}
+    {open && evidence.error && <div role="alert"><p>Evidence is unavailable or access is denied.</p><Button size="sm" variant="outline" disabled={evidence.isFetching} onClick={() => void evidence.refetch()}>Retry</Button></div>}
+    {open && !evidence.error && evidence.data && <div className="space-y-1 text-xs"><p>Source: {evidence.data.kind} · {evidence.data.availability}</p>
+      {evidence.data.kind === "local" && evidence.data.availability !== "retired" && <><p>{evidence.data.originalFilename} · {evidence.data.sizeBytes} bytes</p><p>SHA-256: {evidence.data.sha256}</p><p>Preview transfers and verifies the entire file from its node before displaying a bounded sample. A connected compatible producer and enabled evidence service are required.</p><div className="flex flex-wrap gap-2">{evidencePreviewKind(evidence.data.mimeType, evidence.data.sizeBytes) !== 'download' && <Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('preview'); }}>Preview</Button>}<Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('download'); }}>Download original</Button>{!capabilities.error && capabilities.data?.canWrite && <Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('promotion'); }}>Save as attachment</Button>}{controller && <Button size="sm" variant="ghost" onClick={() => controller.abort()}>Cancel request</Button>}</div>{localPreview && <LocalEvidencePreview preview={localPreview} />}</>}
       {evidence.data.kind === "attachment" && evidence.data.availability !== "retired" && <PinnedAttachmentEvidence file={evidence.data} />}
       {evidence.data.availability === "retired" && <p>This output has been retired.</p>}
       {evidence.data.kind === "git" && <GitEvidence requirementId={requirementId} outputId={outputId} headCommit={evidence.data.headCommit} />}
@@ -194,7 +196,7 @@ function GitEvidence({ requirementId, outputId, headCommit }: { requirementId: s
   const file = trpc.requirement.gitEvidenceFile.useQuery({ requirementId, outputId, comparisonId: comparison.data?.comparisonId ?? "", path: selectedFile?.path ?? "" }, { enabled: Boolean(comparison.data?.comparisonId && selectedFile), retry: false });
   return <div className="space-y-2"><p className="break-all">Head commit: {headCommit}</p><Button size="sm" variant="outline" disabled={comparison.isPending} onClick={() => { setSelected(null); comparison.mutate({ requirementId, outputId }); }}>Open Git comparison</Button>
     {comparison.isPending && <p>Opening comparison…</p>}{comparison.error && <p role="alert">Git comparison is unavailable or access is denied.</p>}
-    {comparison.data && <><p className="break-all">Base: {comparison.data.baseCommit}</p><p className="break-all">Merge base: {comparison.data.comparisonCommit}</p><p>Comparison mode: merge base to head</p>{comparison.data.truncated && <p role="status">The comparison exceeds the display limit; some changes are omitted.</p>}
+    {!comparison.error && comparison.data && <><p className="break-all">Base: {comparison.data.baseCommit}</p><p className="break-all">Merge base: {comparison.data.comparisonCommit}</p><p>Comparison mode: merge base to head</p>{comparison.data.truncated && <p role="status">The comparison exceeds the display limit; some changes are omitted.</p>}
       <div className="grid gap-3 md:grid-cols-3"><ul className="max-h-96 space-y-1 overflow-auto">{comparison.data.files.map((entry, index) => <li key={`${entry.path}-${index}`}><Button size="sm" variant={selected === index ? "secondary" : "ghost"} className="h-auto max-w-full justify-start whitespace-normal break-all text-left" onClick={() => setSelected(index)}>{entry.status}: {entry.previousPath ? `${entry.previousPath} → ` : ""}{entry.path}</Button></li>)}</ul><div className="min-w-0 md:col-span-2">{file.isFetching && <p>Loading file…</p>}{file.error && <p role="alert">File is unavailable or access is denied.</p>}{!file.isFetching && !file.error && file.data && <><p className="break-all">{file.data.path}</p>{file.data.patchState === "available" ? <GitPatch path={file.data.path} patch={file.data.patch ?? ""} /> : <p>Diff unavailable for this file ({file.data.patchState}).</p>}</>}</div></div>
     </>}
   </div>;

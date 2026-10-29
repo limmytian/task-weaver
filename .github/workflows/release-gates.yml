@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: release-gates-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   source-validation:
@@ -47,6 +47,10 @@ jobs:
         run: pnpm test:auth-postgres
       - name: Verify inbound MCP with disposable PostgreSQL
         run: pnpm test:mcp-postgres
+      - name: Verify execution recovery with disposable PostgreSQL
+        run: pnpm test:execution-recovery-postgres
+      - name: Verify workflow and evidence reads with disposable PostgreSQL
+        run: pnpm test:workflow-postgres
       - name: Check rollout and Web interaction safeguards
         run: |
           pnpm check:repository-rollout
@@ -79,11 +83,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
+      actions: read
       contents: read
       packages: write
       id-token: write
     concurrency:
-      group: publish-main-images
+      group: task-weaver-image-promotion
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -104,7 +109,7 @@ jobs:
           file: apps/api/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/${{ github.repository }}-api:main-candidate
+          tags: ghcr.io/${{ github.repository }}-api:candidate-${{ github.run_id }}-${{ github.run_attempt }}
           build-args: TW_BUILD_COMMIT=${{ github.sha }}
           provenance: mode=max
           sbom: true
@@ -116,7 +121,7 @@ jobs:
           file: apps/web/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/${{ github.repository }}-web:main-candidate
+          tags: ghcr.io/${{ github.repository }}-web:candidate-${{ github.run_id }}-${{ github.run_attempt }}
           build-args: TW_BUILD_COMMIT=${{ github.sha }}
           provenance: mode=max
           sbom: true
@@ -145,14 +150,11 @@ jobs:
         env:
           IMAGE_DIGEST: ${{ steps.web.outputs.digest }}
         run: cosign sign --yes "ghcr.io/${GITHUB_REPOSITORY}-web@${IMAGE_DIGEST}"
-      - name: Move latest tags to the scanned main images
+      - name: Promote the signed, scanned pair
         env:
           API_DIGEST: ${{ steps.api.outputs.digest }}
           WEB_DIGEST: ${{ steps.web.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          docker buildx imagetools create \
-            --tag "ghcr.io/${GITHUB_REPOSITORY}-api:latest" \
-            "ghcr.io/${GITHUB_REPOSITORY}-api@${API_DIGEST}"
-          docker buildx imagetools create \
-            --tag "ghcr.io/${GITHUB_REPOSITORY}-web:latest" \
-            "ghcr.io/${GITHUB_REPOSITORY}-web@${WEB_DIGEST}"
+          VERSION=$(node -p 'require("./packages/contracts/package.json").version')
+          node scripts/promote-image-pair.mjs main "$VERSION" "$API_DIGEST" "$WEB_DIGEST"

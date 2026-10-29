@@ -1,3 +1,4 @@
+import { assertBusyboxWgetEvidence } from "./busybox-wget-evidence.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -43,6 +44,10 @@ execFileSync(process.execPath, [resolve("scripts/verify-binary-release.mjs"), "r
 const verification = read("release-artifacts/binary-release-verification.json");
 assert.equal(verification.passed, true);
 assert.deepEqual(verification.images.map(({ imageId }) => imageId).sort(), candidate.images.map(({ imageId }) => imageId).sort());
+for (const entry of candidate.images) {
+  const wget = read(`release-artifacts/busybox-wget/${entry.imageId.slice(7)}/verification.json`);
+  assertBusyboxWgetEvidence(wget, entry.imageId, platform);
+}
 const output = resolve(outputDirectory ?? "release-artifacts/bundle");
 mkdirSync(output, { recursive: true });
 const loadedImages = [];

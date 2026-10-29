@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 // Works in both the preparation repository and an extracted public candidate.
@@ -72,6 +74,45 @@ test("local trial setup uses random ignored credentials instead of checked-in de
   assert.match(readme, /scripts\/local-compose-up\.sh/);
   assert.match(guide, /scripts\/local-compose-up\.sh/);
   assert.doesNotMatch(`${readme}\n${guide}\n${compose}`, /task-weaver-local-(?:first-admin-bootstrap|demo-secret-change|only)/);
+});
+
+test("Kubernetes API and Web receive the same required authentication secret keys", () => {
+  const apps = read(`${source}deploy/kubernetes/apps.yaml.in`);
+  const deployments = apps.split(/^---$/m);
+  assert.equal(deployments.length, 2);
+  for (const deployment of deployments) {
+    for (const [name, key] of [["TW_AUTH_SECRET", "secret"], ["TW_AUTH_BASE_URL", "base-url"], ["TW_AUTH_TRUSTED_ORIGINS", "trusted-origins"]]) {
+      assert.match(deployment, new RegExp(`name: ${name}\\s+valueFrom:\\s+secretKeyRef:\\s+name: task-weaver-auth\\s+key: ${key}`));
+    }
+    assert.match(deployment, /name: TW_AUTH_BOOTSTRAP_SECRET\s+valueFrom:\s+secretKeyRef:\s+name: task-weaver-auth\s+key: bootstrap-secret\s+optional: true/);
+  }
+});
+
+test("local credential preparation does not start or alter containers", () => {
+  const dir = mkdtempSync(join(tmpdir(), "tw-trial-prepare-"));
+  try {
+    mkdirSync(join(dir, "scripts"));
+    mkdirSync(join(dir, "bin"));
+    copyFileSync(resolve(root, "scripts/local-compose-up.sh"), join(dir, "scripts/local-compose-up.sh"));
+    const docker = join(dir, "bin/docker");
+    writeFileSync(docker, `#!/bin/sh\ntouch '${join(dir, "docker-called")}'\nexit 0\n`);
+    chmodSync(docker, 0o755);
+    const result = spawnSync("sh", [join(dir, "scripts/local-compose-up.sh"), "--prepare-only"], {
+      cwd: dir, env: { ...process.env, PATH: `${join(dir, "bin")}:${process.env.PATH}` }, encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(existsSync(join(dir, "docker-called")), false);
+    const credentials = readFileSync(join(dir, ".task-weaver/local-trial/compose.env"), "utf8");
+    assert.match(credentials, /^TW_LOCAL_DATABASE_PASSWORD=[A-Za-z0-9_-]{43}$/m);
+    assert.doesNotMatch(result.stdout, /TW_LOCAL_DATABASE_PASSWORD=/);
+    assert.equal(statSync(join(dir, ".task-weaver/local-trial/compose.env")).mode & 0o777, 0o600);
+    const again = spawnSync("sh", [join(dir, "scripts/local-compose-up.sh"), "--prepare-only"], {
+      cwd: dir, env: { ...process.env, PATH: `${join(dir, "bin")}:${process.env.PATH}` }, encoding: "utf8",
+    });
+    assert.equal(again.status, 0, again.stderr);
+    assert.equal(readFileSync(join(dir, ".task-weaver/local-trial/compose.env"), "utf8"), credentials);
+    assert.equal(spawnSync("sh", [join(dir, "scripts/local-compose-up.sh"), "--unknown"], { cwd: dir }).status, 2);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("application base image is digest-pinned and package managers are absent from runner", () => {

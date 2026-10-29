@@ -6,6 +6,8 @@ Use the notes for your installed and target versions when planning an upgrade.
 
 | Version | Summary | Notes |
 | --- | --- | --- |
+| 0.3.17 | CLI distribution, review evidence and verified version/latest image tagging. | [English](0.3.17.md) · [简体中文](0.3.17.zh-CN.md) |
+| 0.3.16 | Dependency security, rendering safeguards and artifact privacy checks. | [English](0.3.16.md) · [简体中文](0.3.16.zh-CN.md) |
 | 0.3.15 | Human-reviewed plan staging and verified evidence review for deliverables. | [English](0.3.15.md) · [简体中文](0.3.15.zh-CN.md) |
 | 0.3.14 | Bounded board reads, independent kanban columns, volatile worker console, scoped capability execution and update audit reasons. | [English](0.3.14.md) · [简体中文](0.3.14.zh-CN.md) |
 | 0.3.13 | Live planning controls, fenced execution, bounded multi-node recovery and agent-led Git synchronization. | [English](0.3.13.md) · [简体中文](0.3.13.zh-CN.md) |

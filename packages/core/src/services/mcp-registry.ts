@@ -1,4 +1,4 @@
-import { asc, and, eq, or, sql, inArray, isNull, type SQL } from "drizzle-orm";
+import { asc, desc, and, eq, or, sql, inArray, isNull, type SQL } from "drizzle-orm";
 import { type Database, mcpServers, mcpTools, mcpToolCalls } from "@task-weaver/db";
 import type { Actor } from "@task-weaver/contracts";
 import type {
@@ -315,13 +315,16 @@ export async function uploadTools(
 export async function searchTools(db: Database, input: SearchMcpToolsInput, authorizedServerPredicate?: SQL, authorizedToolPredicate?: SQL) {
   const likePattern = input.intent === "*" ? "%" : `%${input.intent}%`;
   const conditions = [authorizedToolPredicate, authorizedServerPredicate ? inArray(mcpTools.serverId, db.select({ id: mcpServers.id }).from(mcpServers).where(authorizedServerPredicate)) : undefined];
-
-  conditions.push(
-    or(
-      sql`${mcpTools.name} ILIKE ${likePattern}`,
-      sql`${mcpTools.description} ILIKE ${likePattern}`,
-    ),
-  );
+  const phrase = sql`(${mcpTools.name} ILIKE ${likePattern} OR ${mcpTools.description} ILIKE ${likePattern})`;
+  const stopWords = new Set(["the", "and", "for", "with", "from", "that", "this", "what", "how", "can", "use", "find", "get", "tool"]);
+  const terms = input.intent === "*" ? [] : [...new Set((input.intent.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])
+    .filter((term) => term.length >= 3 && !stopWords.has(term)))].slice(0, 12);
+  const matches = terms.map((term) => {
+    const pattern = `%${term}%`;
+    return sql`(${mcpTools.name} ILIKE ${pattern} OR ${mcpTools.description} ILIKE ${pattern})`;
+  });
+  conditions.push(or(phrase, ...matches));
+  const relevance = sql<number>`(CASE WHEN ${phrase} THEN 100 ELSE 0 END${sql.join(matches.map((match) => sql` + CASE WHEN ${match} THEN 1 ELSE 0 END`), sql``)})`;
 
   if (input.serverId) {
     conditions.push(eq(mcpTools.serverId, input.serverId));
@@ -370,6 +373,7 @@ export async function searchTools(db: Database, input: SearchMcpToolsInput, auth
     })
     .from(mcpTools)
     .where(and(...conditions))
+    .orderBy(desc(relevance), asc(mcpTools.name), asc(mcpTools.id))
     .limit(input.limit);
 
   // Enrich with server names

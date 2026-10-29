@@ -23,7 +23,8 @@ export function compareVersions(left: string, right: string): number {
 }
 export function installedBuild(environment: NodeJS.ProcessEnv = process.env): VersionStatus["installed"] {
   const commit = /^[a-f0-9]{40}$/.test(environment.TW_BUILD_COMMIT ?? "") ? environment.TW_BUILD_COMMIT! : null;
-  return { version: APPLICATION_VERSION, commit, development: environment.NODE_ENV !== "production" || !commit };
+  const developmentVersion = /^dev(?:\.|-|$)/.test(parseVersion(APPLICATION_VERSION).prerelease?.join(".") ?? "");
+  return { version: APPLICATION_VERSION, commit, development: environment.NODE_ENV !== "production" || !commit || developmentVersion };
 }
 export function createVersionChecker(options: { fetch?: typeof fetch; now?: () => number; enabled?: () => boolean; installed?: () => VersionStatus["installed"] } = {}) {
   const request = options.fetch ?? fetch;

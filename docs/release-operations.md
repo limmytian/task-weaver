@@ -68,8 +68,10 @@ images with signed CycloneDX SBOM and source-provenance attestations, and
 Sigstore signatures. It accepts only a successful controlled candidate run
 at the tagged public commit, verifies archive hashes and image identities,
 recomputes the image-bound binary gate and corresponding-source package hash, and
-scans those same images again before pushing. It uses `VERSION-amd64` and
-`VERSION-arm64` tags plus a signed `VERSION` multi-platform index.
+scans those same images again before pushing. It publishes uniquely named
+per-run candidate platform images and a signed candidate multi-platform index,
+then promotes the exact signed index digest to `VERSION` and `latest` for each
+application. It verifies the registry references after promotion.
 The producer verifies the full acquired source tree before packaging. Raw
 acquisition archives, scratch directories, compilation tools, and replacement
 test binaries are omitted from the portable candidate artifact.
@@ -78,12 +80,37 @@ runtime configuration digest, allowing Docker manifest-based and config-based
 stores to load the same verified bytes. Neither a tag nor a changed archive
 can substitute for those identities.
 After the images and release bundle are verified, it publishes a GitHub
-Release. The registry mirror is a separate manual workflow that clones the
-same public tag and publishes signed packages and images to its own registry.
-Compare source commit, package hashes, and image digests across both runs.
+Release.
 Prerelease npm packages use the `next` dist-tag; stable packages use `latest`.
 GitHub distributes the five npm tarballs as release assets. Public npm-registry
 publication is a separate decision and is not performed by this workflow.
+
+## Version and latest image tags
+
+Main CI and the formal release job use the same non-cancelling Actions
+concurrency group. After scanning and signing, each workflow assigns the
+version tag and `latest` to the same verified digest for each application,
+then reads all four registry references and checks them against those digests.
+No promotion journal, bootstrap branch, or dedicated GitHub App is required;
+the workflows use their existing GitHub Actions credentials.
+
+Main builds use a version containing the source version, Actions run ID and
+attempt; formal releases use the exact release version. Prereleases also move
+`latest`, so it may be newer than the latest formal stable release. An existing
+version tag is accepted only when it already points to the requested digest.
+Both applications are checked for version conflicts before any tag is written.
+
+API and Web are separate images, and registry tag writes are not atomic. A
+failure can leave a partially updated pair. Preserve the verified candidate
+digests and rerun the tagging operation with the same version and digests;
+do not rebuild or overwrite a conflicting version. The shared concurrency group
+serializes participating jobs but does not guarantee FIFO ordering or fence
+manual writers. `latest` identifies the last completed promotion, not necessarily
+the newest source commit. Review older reruns before allowing them to move it.
+Limit package write access to the release repository and trusted maintainers,
+and protect changes to publishing workflows. GitHub Packages grants Actions
+access per repository, rather than per workflow. Retain workflow, scan,
+signature, and final digest records with the release evidence.
 
 ## Verify and retain artifacts
 
