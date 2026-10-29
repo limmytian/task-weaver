@@ -78,6 +78,18 @@ export async function preflightRegistry(artifacts, version, transport = fetch) {
   return results;
 }
 
+export async function waitForPublishedVersion(item, version, {
+  transport = fetch, attempts = 60, delayMs = 10000,
+  sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+} = {}) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const [published] = await preflightRegistry([item], version, transport);
+    if (published.exists) return published;
+    if (attempt + 1 < attempts) await sleep(delayMs);
+  }
+  throw new Error(`Published version not visible after bounded registry processing wait: ${item.package}`);
+}
+
 export async function preflightTags(artifacts, version, tag, transport = fetch) {
   for (const item of artifacts) {
     const url = `https://registry.npmjs.org/${encodeURIComponent(item.package)}/${tag}`;
@@ -114,8 +126,7 @@ export async function publishCliSet(directory, version, execute = false, env = p
     if (execute) args.push("--provenance"); else args.push("--dry-run");
     execFileSync("npm", args, { stdio: "inherit", env });
     if (execute) {
-      const [published] = await preflightRegistry([item], version);
-      assert.equal(published.exists, true, `Published version not visible: ${item.package}`);
+      await waitForPublishedVersion(item, version);
     }
   }
   return { tag, packages: checked.length, dryRun: !execute };
