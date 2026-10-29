@@ -7,3 +7,5 @@ export { WorkerConsoleService } from './services/worker-console';
 export { EvidenceSessionService } from './services/evidence-session';
 
 export { createAttentionService } from "./services/attention";
+
+export { createFirstSuccessService } from "./services/first-success";

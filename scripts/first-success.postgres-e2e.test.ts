@@ -1,0 +1,58 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
+import { resourcePostgresFixture } from '../apps/api/src/resource-postgres-fixture';
+const require = createRequire(new URL('../apps/api/package.json', import.meta.url));
+const { createDb, runMigrations, requirements, tasks, projectMemberships } = require('@task-weaver/db');
+const { createFirstSuccessService, createResourceServices, firstSuccessSamplePlan, SAMPLE_PROJECT_NAME, SAMPLE_PROJECT_DESCRIPTION } = require('@task-weaver/core');
+const { eq, and } = require('drizzle-orm');
+const databaseUrl = process.env.TW_FIRST_SUCCESS_E2E_DATABASE_URL;
+
+test('first success resumes real state through explicit staged sample and reviewed comment output', { skip: !databaseUrl, timeout: 120_000 }, async t => {
+  assert.equal(new URL(databaseUrl!).hostname, '127.0.0.1');
+  assert.equal(new URL(databaseUrl!).pathname, '/tw_first_success_e2e');
+  await runMigrations(databaseUrl!);
+  const db = createDb(databaseUrl!);
+  t.after(() => db.$client.end());
+  const f = await resourcePostgresFixture(db, databaseUrl!);
+  const actor = f.owner.context.actor;
+  const services = createResourceServices(f.owner.context);
+  const state = createFirstSuccessService(f.owner.context);
+  const get = (projectId = f.project.id) => state.get(db, { projectId });
+  const empty = await get();
+  assert.equal(empty.requirement, null); assert.equal(empty.draftId, null); assert.equal(empty.appliedPlan, false);
+  await assert.rejects(createFirstSuccessService(f.outsider.context).get(db, { projectId: f.project.id }));
+  const sample = await services.projectService.createProject(db, { name: SAMPLE_PROJECT_NAME, description: SAMPLE_PROJECT_DESCRIPTION }, actor);
+  assert.equal((await get(sample.id)).canArchiveSample, true);
+  const draft = await services.planService.createPlanDraft(db, { plan: firstSuccessSamplePlan(sample.id), source: 'web' }, actor);
+  assert.equal((await get(sample.id)).draftId, draft.id);
+  assert.equal((await get(sample.id)).requirement, null);
+  await services.planService.validatePlanDraft(db, sample.id, draft.id, actor);
+  await services.planService.applyPlanDraft(db, sample.id, draft.id, draft.revision, randomUUID(), actor);
+  const applied = await get(sample.id);
+  assert.equal(applied.appliedPlan, true); assert.equal(applied.draftId, null);
+  assert.equal(applied.requirement.status, 'draft'); assert.equal(applied.requirement.hasTasks, true); assert.equal(applied.requirement.reviewed, false);
+  const reqId = applied.requirement.id;
+  await services.requirementService.updateRequirement(db, reqId, { status: 'approved' }, actor);
+  const task = await db.query.tasks.findFirst({ where: eq(tasks.requirementId, reqId) });
+  const comment = await services.taskService.addTaskComment(db, task.id, 'The sample produced a concise reviewed outcome.', actor);
+  await services.taskService.updateTaskStatus(db, task.id, 'done', actor, 'Sample outcome written');
+  assert.equal((await get(sample.id)).requirement.workComplete, true);
+  assert.equal((await get(sample.id)).requirement.reviewed, false);
+  await services.requirementService.registerWorkflowOutput(db, reqId, { type: 'comment', referenceId: comment.id, taskId: task.id }, actor);
+  assert.equal((await get(sample.id)).requirement.hasOutput, true);
+  for (const stage of ['delivery', 'acceptance']) {
+    const req = await db.query.requirements.findFirst({ where: eq(requirements.id, reqId) });
+    await services.requirementService.advanceWorkflowStage(db, reqId, { stage, decision: 'complete', reason: 'Fixture operator inspected the sample comment.', expectedRevision: req.workflowStateRevision, checks: [] }, actor);
+  }
+  assert.equal((await get(sample.id)).requirement.reviewed, true);
+  await services.projectService.deleteProject(db, sample.id, actor);
+  const archived = await get(sample.id);
+  assert.equal(archived.active, false); assert.equal(archived.canWrite, false); assert.equal(archived.requirement.reviewed, true);
+  assert.equal((await get()).active, true);
+  await db.update(projectMemberships).set({ role: 'viewer' }).where(and(eq(projectMemberships.projectId, f.project.id), eq(projectMemberships.actorId, actor.id)));
+  assert.equal((await get()).canWrite, false);
+  await db.delete(projectMemberships).where(and(eq(projectMemberships.projectId, f.project.id), eq(projectMemberships.actorId, actor.id)));
+  await assert.rejects(get());
+});

@@ -1,3 +1,4 @@
+import { firstSuccessRouter } from "./first-success";
 import { attentionRouter } from "./attention";
 import { planRouter } from "./plan";
 import { inboundRouter } from "./inbound-events";
@@ -25,6 +26,7 @@ import { embeddingRouter } from "./embedding";
 import { versionRouter } from "./version";
 
 export const appRouter = router({
+  firstSuccess: firstSuccessRouter,
   attention: attentionRouter,
   auth: authRouter,
   plan: planRouter,
