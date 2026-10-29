@@ -31,6 +31,7 @@ import { TaskRepositoryScope } from "@/components/repository-links";
 import { resourceAccessLost } from "@/lib/resource-access";
 import { requirementWorkflowSchema } from "@task-weaver/contracts";
 import { latestRequirementReviewChecks, type ReviewCheckRecord } from "@/lib/review-checks";
+import { reviewTextPreview } from "@/lib/review-summary";
 
 function subscribeOnlineStatus(callback: () => void) {
   window.addEventListener("online", callback);
@@ -88,6 +89,8 @@ export function TaskDetailSheet({
   const online = useSyncExternalStore(subscribeOnlineStatus, () => navigator.onLine, () => true);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [detailTab, setDetailTab] = useState("activity");
+  const [expandedRunOutputId, setExpandedRunOutputId] = useState<string | null>(null);
+  const [expandedCommentId, setExpandedCommentId] = useState<string | null>(null);
   const utils = trpc.useUtils();
 
   const taskQuery = trpc.task.get.useQuery(
@@ -401,6 +404,10 @@ export function TaskDetailSheet({
               return { ...metadata, actorId: entry.actorId, actorType: entry.actorType, createdAt: entry.createdAt } as ReviewCheckRecord;
             });
             const checkSummary = latestRequirementReviewChecks(requiredChecks, reviewHistory);
+            const latestRun = runs.data?.[0];
+            const runOutput = latestRun?.errorMessage || latestRun?.outputSummary || "No run result recorded.";
+            const runOutputPreview = reviewTextPreview(runOutput, latestRun?.id === expandedRunOutputId);
+            const commentPreview = latest ? reviewTextPreview(latest.content, latest.id === expandedCommentId) : null;
             return <section aria-labelledby="task-review-heading" className="mb-5 space-y-3 rounded-lg border p-3 text-sm">
               <h3 id="task-review-heading" className="font-semibold">Review summary</h3>
               <div><h4 className="font-medium">Goal</h4><p className="whitespace-pre-wrap break-words">{task.description || "No task goal recorded."}</p></div>
@@ -409,7 +416,8 @@ export function TaskDetailSheet({
                   <p className="text-xs text-muted-foreground">Status: {runs.data[0].status} · {new Date(runs.data[0].createdAt).toLocaleString()} · Run {runs.data[0].id}</p>
                   <p className="text-xs text-muted-foreground">Model: {runs.data[0].actualProvider && runs.data[0].actualModel ? `${runs.data[0].actualProvider} / ${runs.data[0].actualModel}` : "Not recorded"}</p>
                   {runs.data[0].requestedModel && <p className="text-xs text-muted-foreground">Requested model: {runs.data[0].requestedProvider ? `${runs.data[0].requestedProvider} / ` : ""}{runs.data[0].requestedModel}{runs.data[0].fallbackReason ? ` · Fallback: ${runs.data[0].fallbackReason}` : ""}</p>}
-                  <p className="whitespace-pre-wrap break-words">{runs.data[0].errorMessage || runs.data[0].outputSummary || "No run result recorded."}</p>
+                  <p className="whitespace-pre-wrap break-words">{runOutputPreview.text}{runOutputPreview.truncated && latestRun?.id !== expandedRunOutputId ? "…" : ""}</p>
+                  {runOutputPreview.truncated && <Button variant="ghost" size="sm" aria-expanded={latestRun?.id === expandedRunOutputId} onClick={() => setExpandedRunOutputId(latestRun?.id === expandedRunOutputId ? null : latestRun?.id ?? null)}>{latestRun?.id === expandedRunOutputId ? "Show less" : `Show full run output (${runOutputPreview.remainingCharacters.toLocaleString()} more characters)`}</Button>}
                 </> : <p className="text-muted-foreground">No accessible Ti run recorded for this task. Other agents may report through comments.</p>}
               </div>
               <div><h4 className="font-medium">Requirement acceptance checks</h4>
@@ -421,7 +429,8 @@ export function TaskDetailSheet({
               <p className="text-xs text-muted-foreground">Task revision {task.version}. Run IDs and requirement activity are the recorded sources; a reported result or passed check is not independently verified by this summary.</p>
               <div><h4 className="font-medium">Latest recorded comment</h4>{latest ? <>
                 <p className="text-xs text-muted-foreground">{latest.authorId} · {latest.authorType} · {new Date(latest.createdAt).toLocaleString()}</p>
-                <p className="whitespace-pre-wrap break-words">{latest.content}</p>
+                <p className="whitespace-pre-wrap break-words">{commentPreview?.text}{commentPreview?.truncated && latest.id !== expandedCommentId ? "…" : ""}</p>
+                {commentPreview?.truncated && <Button variant="ghost" size="sm" aria-expanded={latest.id === expandedCommentId} onClick={() => setExpandedCommentId(latest.id === expandedCommentId ? null : latest.id)}>{latest.id === expandedCommentId ? "Show less" : `Show full comment (${commentPreview.remainingCharacters.toLocaleString()} more characters)`}</Button>}
               </> : <p className="text-muted-foreground">No result comment recorded.</p>}</div>
               <p className="text-muted-foreground">Comments and check decisions are reported by their authors. Run output and check results have not been independently verified here.</p>
               <div className="flex flex-wrap items-center gap-3">
