@@ -373,9 +373,16 @@ Descriptions: plain text or Markdown. Documents: Markdown with `[[wiki-links]]` 
 
 ## Quick Start: CLI
 
+Install from the public npm registry with Node.js 20 or newer; no source checkout
+is required. Set the API origin to your Task Weaver instance and enter a scoped
+Key through the hidden login prompt.
+
 ```bash
+npm install --global @task-weaver/cli --registry=https://registry.npmjs.org
+tw --version
+
 # First-time setup
-tw auth login   # verify a scoped Key through hidden input
+tw auth login --api-url http://localhost:3001   # Use your instance API origin
 
 # Create project
 tw project create --name "My Project" --description "..."

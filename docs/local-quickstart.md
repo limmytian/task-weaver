@@ -92,6 +92,23 @@ The demo ports bind to `127.0.0.1`, so the Web UI and API are only reachable fro
 the same computer. Do not expose this Compose project to a network or use it for
 real data.
 
+## Connect the CLI
+
+With Node.js 20 or newer, install the CLI from the public npm registry and connect
+to the running local API:
+
+```sh
+npm install --global @task-weaver/cli --registry=https://registry.npmjs.org
+tw --version
+tw auth login --api-url http://localhost:3001
+tw auth whoami --json
+tw project list --json
+```
+
+Create a scoped Key in the Web UI and enter it through the hidden login prompt.
+For a remote instance, use that instance's API origin. See
+[npm CLI distribution](npm-distribution.md) for one-off runs and version pinning.
+
 ## Stop or reset
 
 Stop the containers and keep your local data:

@@ -1,7 +1,27 @@
 # npm CLI distribution
 
-The npm packages are not published yet. Until a release is available, use the
-[checkout instructions](../README.md#cli) or the documented binary release.
+Install the published CLI from the public npm registry (Node.js 20 or newer).
+A source checkout is only needed for development.
+
+```bash
+npm install --global @task-weaver/cli --registry=https://registry.npmjs.org
+tw --version
+tw auth login --api-url http://localhost:3001
+tw auth whoami --json
+```
+
+Replace the API origin with your instance URL and enter a scoped Key through the
+hidden prompt. The CLI is an API client; API/Web container images are distributed
+separately. There is no dedicated CLI container image.
+
+To pin an immutable release, append `@<version>` to the package name. To update,
+repeat the installation command. For a one-off command:
+
+```bash
+npx --registry=https://registry.npmjs.org --package @task-weaver/cli tw --help
+```
+
+## Release workflow
 
 A release candidate consists of `@task-weaver/cli` and its five shared runtime
 packages. The release pipeline builds the package set with
@@ -26,16 +46,6 @@ can expire if its first successful publish is delayed; configure it when the
 release is ready. An unpublished package staged on npm creates a public
 placeholder, so staging also requires publication authorization.
 
-After an authorized release is available, install or run the CLI with:
-
-```bash
-npm install --global @task-weaver/cli
-# or run a one-off command
-npx --package @task-weaver/cli tw --help
-```
-
-The `tw` CLI is an API client, not a Task Weaver server. Configure the API and a
-scoped Key with `tw auth login --api-url <api-origin>`, then verify access with
-`tw auth whoami --json`. The source checkout remains a fallback while npm
-publication is unavailable. The declared Node minimum is 20; platform coverage
-and the release's verified Node versions should be checked in its evidence.
+The source checkout and documented binary distribution remain alternatives.
+The declared Node minimum is 20; platform coverage and the release's verified
+Node versions should be checked in its evidence.

@@ -169,29 +169,35 @@ See [Contributing](CONTRIBUTING.md) for development and contribution guidelines.
 
 ## CLI
 
-Run the CLI directly from the checkout:
+Install the published CLI from the public npm registry (Node.js 20 or newer):
+
+```bash
+npm install --global @task-weaver/cli --registry=https://registry.npmjs.org
+tw --version
+tw auth login --api-url http://localhost:3001
+tw auth whoami --json
+tw project list --json
+```
+
+Use your deployed API origin instead of `http://localhost:3001` when connecting
+to a remote instance. Create a scoped Key in the Web UI and enter it through the
+login command's hidden prompt. No source checkout is needed. For a one-off run:
+
+```bash
+npx --registry=https://registry.npmjs.org --package @task-weaver/cli tw --help
+```
+
+Contributors can run the CLI directly from an installed source checkout:
 
 ```bash
 pnpm --filter @task-weaver/cli exec tsx src/index.ts --help
-pnpm --filter @task-weaver/cli exec tsx src/index.ts auth login
-pnpm --filter @task-weaver/cli exec tsx src/index.ts project list --json
-```
-
-For regular use, add an alias pointing to the checkout's installed `tsx`:
-
-```bash
-alias tw='/path/to/task-weaver/node_modules/.bin/tsx /path/to/task-weaver/apps/cli/src/index.ts'
-tw auth login
-tw auth whoami --json
-tw auth status
 ```
 
 The CLI defaults to `http://localhost:3001`. `TW_API_URL` and `TW_API_KEY` may
 override its saved configuration. Project tasks require a requirement; claim a
 task before starting work and release the claim when finished. Add `--json` for
-machine-readable output. npm packages are not published yet; use the checkout
-instructions above. See the [npm distribution plan](docs/npm-distribution.md)
-for the release workflow and future installation commands.
+machine-readable output. See [npm CLI distribution](docs/npm-distribution.md)
+for installation, version pinning and the release workflow.
 
 ## Documentation and community
 
