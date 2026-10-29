@@ -31,7 +31,7 @@ node scripts/verify-binary-source-evidence.mjs release-artifacts/binary-sources/
 node scripts/package-binary-source-evidence.mjs release-artifacts/binary-sources/source-lock.json
 ```
 
-The preparation tool is deliberately restricted to the reviewed Node 24.21.0,
+The preparation tool is deliberately restricted to the reviewed Node 24.22.2,
 Alpine, Sharp 0.35.5, and sharp-libvips 1.3.4 baseline. Version or source-commit
 drift requires another review, not an automatic fallback. Image inspection
 compares the BusyBox binary to its installed APK file checksum. A replacement

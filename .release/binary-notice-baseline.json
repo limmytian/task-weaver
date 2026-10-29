@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "noticeBundleSha256": "9bd850b7a6d2cdfeb34d8855339d5f2b5ee7827525d5d37406243d357f68d2cc",
-  "nodeVersion": "24.21.0",
+  "noticeBundleSha256": "5ea32ebe0bc552d4506f64d4df1dc8d1e4d5d929d362334888f691cb1f500afb",
+  "nodeVersion": "24.22.2",
   "sharpLibvipsVersion": "1.3.4",
   "rustCommit": "75a75c3e0a67d3fa3d03982775f5bb0356e7b510",
   "distributionApproved": false

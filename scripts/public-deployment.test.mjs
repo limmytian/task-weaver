@@ -119,6 +119,8 @@ test("application base image is digest-pinned and package managers are absent fr
   for (const name of ["api", "web"]) {
     const dockerfile = read(`${source}apps/${name}/Dockerfile`);
     assert.match(dockerfile, /FROM node:24\.21\.0-alpine3\.23@sha256:[a-f0-9]{64} AS runtime-base/);
+    assert.match(dockerfile, /FROM node:24\.22\.2-alpine3\.23@sha256:[a-f0-9]{64} AS patched-node/);
+    assert.equal((dockerfile.match(/COPY --from=patched-node \/usr\/local\/bin\/node/g) ?? []).length, 2);
     assert.match(dockerfile, /FROM scratch AS runner\nCOPY --from=runtime-base \/ \//);
     assert.match(dockerfile, /ENTRYPOINT \["docker-entrypoint.sh"\]/);
     assert.match(dockerfile, /\/usr\/local\/lib\/node_modules\/npm/);

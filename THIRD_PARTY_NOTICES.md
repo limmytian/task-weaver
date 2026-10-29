@@ -63,8 +63,8 @@ artifacts must inspect the actual filesystem, preserve applicable notices, and
 meet corresponding-source and relinking obligations. Licensing information is
 available at <https://sharp.pixelplumbing.com/install/#licensing>.
 
-The Node.js 24.21.0 runtime license and bundled-component notices are preserved
-in `THIRD_PARTY_LICENSES/Node-24.21.0-LICENSE.txt`, from the exact upstream tag:
-<https://github.com/nodejs/node/blob/v24.21.0/LICENSE>.
+The Node.js 24.22.2 runtime license and bundled-component notices are preserved
+in `THIRD_PARTY_LICENSES/Node-24.22.2-LICENSE.txt`, from the exact upstream tag:
+<https://github.com/nodejs/node/blob/v24.22.2/LICENSE>.
 
 This notice is informational and does not replace any third-party license text.

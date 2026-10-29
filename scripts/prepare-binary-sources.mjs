@@ -10,8 +10,8 @@ const root = resolve(evidenceDirectory);
 const inventory = JSON.parse(readFileSync(resolve(root, "inventory.json")));
 const reports = inventory.inventory.map((image) => JSON.parse(readFileSync(resolve(root, safePath(image.report)))));
 if (reports.some((report, index) => report.imageId !== inventory.inventory[index].imageId ||
-    report.runtime?.version !== "24.21.0" || !/^sha256:[a-f0-9]{64}$/.test(report.imageId ?? ""))) {
-  throw new Error("Collect current, image-ID-bound Node 24.21.0 runtime evidence first.");
+    report.runtime?.version !== "24.22.2" || !/^sha256:[a-f0-9]{64}$/.test(report.imageId ?? ""))) {
+  throw new Error("Collect current, image-ID-bound Node 24.22.2 runtime evidence first.");
 }
 const output = resolve("release-artifacts/binary-sources");
 mkdirSync(output, { recursive: true });
@@ -74,10 +74,10 @@ if (native.length) {
   components.push({ id: "sharp-addon", family: "native-addon", version: "0.35.5" });
   add("sharp-addon", "source", "https://codeload.github.com/lovell/sharp/tar.gz/v0.35.5", "sharp-0.35.5.tar.gz");
 }
-components.push({ id: "node-runtime", family: "runtime", version: "24.21.0" });
-add("node-runtime", "source", "https://nodejs.org/dist/v24.21.0/node-v24.21.0.tar.xz", "node-v24.21.0.tar.xz");
-const nodeSums = getText("https://nodejs.org/dist/v24.21.0/SHASUMS256.txt");
-files.at(-1).sha256 = nodeSums.match(/^([a-f0-9]{64})\s+node-v24\.21\.0\.tar\.xz$/m)?.[1];
+components.push({ id: "node-runtime", family: "runtime", version: "24.22.2" });
+add("node-runtime", "source", "https://nodejs.org/dist/v24.22.2/node-v24.22.2.tar.xz", "node-v24.22.2.tar.xz");
+const nodeSums = getText("https://nodejs.org/dist/v24.22.2/SHASUMS256.txt");
+files.at(-1).sha256 = nodeSums.match(/^([a-f0-9]{64})\s+node-v24\.22\.2\.tar\.xz$/m)?.[1];
 if (!files.at(-1).sha256) throw new Error("Node source checksum is unavailable.");
 components.push({ id: "common-license-texts", family: "license-texts", version: "SPDX-3.27.0" });
 for (const name of ["GPL-2.0-only", "GPL-3.0-only", "LGPL-2.1-only", "LGPL-3.0-only", "MIT", "BSD-2-Clause", "MPL-2.0"]) {

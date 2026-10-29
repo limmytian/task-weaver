@@ -53356,7 +53356,7 @@ third-party archives.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/nbytes/LICENSE
+Original upstream file: node-v24.22.2/deps/nbytes/LICENSE
 SHA-256: 782ab5b8ae1540c1a2b102fdd00990ed268d4a3a98e90ad7fe724b489d7bb0f2
 
 MIT License
@@ -53385,7 +53385,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/cares/LICENSE.md
+Original upstream file: node-v24.22.2/deps/cares/LICENSE.md
 SHA-256: 460f5e768fda3752ca2169a95df062578a10fb126bfd65f3b9b1a1bed2f84807
 
 MIT License
@@ -53417,7 +53417,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/cares/AUTHORS
+Original upstream file: node-v24.22.2/deps/cares/AUTHORS
 SHA-256: 10274d04e1aa59b340e84dbef26550bfc9827fc70908f78bfa755e1a8729939b
 
 c-ares is based on ares, and these are the people that have worked on it since
@@ -53509,7 +53509,7 @@ saghul
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/histogram/LICENSE.txt
+Original upstream file: node-v24.22.2/deps/histogram/LICENSE.txt
 SHA-256: c124afa369aae960fa33f6944c82e161e482f2e998d6f07b37ae2c018f3c6c69
 
 The code in this repository code was Written by Gil Tene, Michael Barker,
@@ -53558,7 +53558,7 @@ the Author.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/brotli/LICENSE
+Original upstream file: node-v24.22.2/deps/brotli/LICENSE
 SHA-256: 3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94
 
 Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.
@@ -53585,7 +53585,7 @@ THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/minimatch/LICENSE.md
+Original upstream file: node-v24.22.2/deps/minimatch/LICENSE.md
 SHA-256: 2c7c5d22ed5a8ee968c64757710979afcd77438c48b4a265b94e615babd8a901
 
 # Blue Oak Model License
@@ -53648,7 +53648,7 @@ software or this license, under any kind of legal claim._**
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/uv/LICENSE
+Original upstream file: node-v24.22.2/deps/uv/LICENSE
 SHA-256: 16de0c32b265cb7d46a6d3bd614f259dd4d693a5e26b3407b04aae8d73041f0c
 
 Copyright (c) 2015-present libuv project contributors.
@@ -53675,7 +53675,7 @@ IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/uv/LICENSE-docs
+Original upstream file: node-v24.22.2/deps/uv/LICENSE-docs
 SHA-256: cce5d01fa4a83b794271bd2c28cffdf99afd43c803e6ddefddae39b591ea7448
 
 Attribution 4.0 International
@@ -54079,7 +54079,7 @@ Creative Commons may be contacted at creativecommons.org.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/uv/LICENSE-extra
+Original upstream file: node-v24.22.2/deps/uv/LICENSE-extra
 SHA-256: 262c44bd2cdba037e6d2a82fba15f5800d292bc993a6f5d6b6ea487744d02836
 
 This license applies to parts of libuv originating from the
@@ -54123,7 +54123,7 @@ The externally maintained libraries used by libuv are:
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/uv/AUTHORS
+Original upstream file: node-v24.22.2/deps/uv/AUTHORS
 SHA-256: 215addc20f9d61eb4fdcfdb5b11296cb869d0e648b3fd1b32c9c4450f1c80642
 
 # Authors ordered by first contribution.
@@ -54767,7 +54767,7 @@ Rudi Heitbaum <rudi@heitbaum.com>
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/LIEF/LICENSE
+Original upstream file: node-v24.22.2/deps/LIEF/LICENSE
 SHA-256: 94a5b753e8d799c7aa0c0c4899c5d5f9be1a940cba73f61c6396f32db790a0be
 
                                  Apache License
@@ -54977,7 +54977,7 @@ SHA-256: 94a5b753e8d799c7aa0c0c4899c5d5f9be1a940cba73f61c6396f32db790a0be
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/LIEF/third-party/expected/COPYING
+Original upstream file: node-v24.22.2/deps/LIEF/third-party/expected/COPYING
 SHA-256: a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499
 
 Creative Commons Legal Code
@@ -55106,7 +55106,7 @@ express Statement of Purpose.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/LIEF/third-party/mbedtls/LICENSE
+Original upstream file: node-v24.22.2/deps/LIEF/third-party/mbedtls/LICENSE
 SHA-256: 9b405ef4c89342f5eae1dd828882f931747f71001cfba7d114801039b52ad09b
 
 Mbed TLS files are provided under a dual [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html)
@@ -55667,7 +55667,7 @@ Public License instead of this License.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/LIEF/third-party/frozen/LICENSE
+Original upstream file: node-v24.22.2/deps/LIEF/third-party/frozen/LICENSE
 SHA-256: f6099ed23682840ae60a76fce378faae9b5c75f7d162188883e13b790ca18b98
 
 
@@ -55877,7 +55877,7 @@ SHA-256: f6099ed23682840ae60a76fce378faae9b5c75f7d162188883e13b790ca18b98
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/LIEF/third-party/spdlog/LICENSE
+Original upstream file: node-v24.22.2/deps/LIEF/third-party/spdlog/LICENSE
 SHA-256: 4ccecab18d1ff0b61174fe3d6c430541625d3ddb865b0d5887db296f883c76e7
 
 The MIT License (MIT)
@@ -55911,7 +55911,7 @@ and users must comply to its license: https://raw.githubusercontent.com/fmtlib/f
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/LIEF/third-party/utfcpp/LICENSE
+Original upstream file: node-v24.22.2/deps/LIEF/third-party/utfcpp/LICENSE
 SHA-256: c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566
 
 Boost Software License - Version 1.0 - August 17th, 2003
@@ -55942,7 +55942,7 @@ DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/LICENSE
 SHA-256: 6ab33af8774a0f396ee3aeeb761e3229057682d6f9fa7f572e390c2cb3a6e509
 
 This license applies to all parts of V8 that are not externally
@@ -56011,7 +56011,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/src/compiler/turboshaft/copying-phase.cc
+Original upstream file: node-v24.22.2/deps/v8/src/compiler/turboshaft/copying-phase.cc
 SHA-256: 8050804c21e9547da764741ae0aa9b8a3fb8df1f7a24c8ba5f94e7fa7e3564d9
 
 // Copyright 2022 the V8 project authors. All rights reserved.
@@ -56045,7 +56045,7 @@ std::ostream& operator<<(std::ostream& os, PaddingSpace padding) {
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/src/compiler/turboshaft/copying-phase.h
+Original upstream file: node-v24.22.2/deps/v8/src/compiler/turboshaft/copying-phase.h
 SHA-256: fcc8c63b6ed4a6e9353b750651671f9847093eeff196192500b1feb55a3b05eb
 
 // Copyright 2022 the V8 project authors. All rights reserved.
@@ -57130,7 +57130,7 @@ class CopyingPhase {
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/valgrind/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/valgrind/LICENSE
 SHA-256: ebf25b8ce59c9e8883acd1ca75b6fc121937ca034f666c4077d2be739d2e1622
 
 ----------------------------------------------------------------
@@ -57192,7 +57192,7 @@ COPYING file in the source distribution for details.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/fp16/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/fp16/LICENSE
 SHA-256: c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d
 
 The MIT License (MIT)
@@ -57212,7 +57212,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/jsoncpp/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/jsoncpp/LICENSE
 SHA-256: 76c45ece83a26117f86f4e349e7df118708e061e87225328fb478ce1e8b3eb86
 
 The JsonCpp library's source code, including accompanying documentation, 
@@ -57275,7 +57275,7 @@ license you like.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/jinja2/LICENSE.rst
+Original upstream file: node-v24.22.2/deps/v8/third_party/jinja2/LICENSE.rst
 SHA-256: 3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b
 
 Copyright 2007 Pallets
@@ -57311,7 +57311,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/highway/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/highway/LICENSE
 SHA-256: 43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1
 
                                  Apache License
@@ -57519,7 +57519,7 @@ SHA-256: 43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/v8/codegen/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/v8/codegen/LICENSE
 SHA-256: 17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf
 
 The MIT License (MIT)
@@ -57538,7 +57538,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/v8/builtins/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/v8/builtins/LICENSE
 SHA-256: b9a6d9320b8f2693e8d41e496ce56caadacaddcca9be2a64a61749278f425cf2
 
 A. HISTORY OF THE SOFTWARE
@@ -57800,7 +57800,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/simdutf/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/simdutf/LICENSE
 SHA-256: fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f
 
 Copyright 2021 The simdutf authors
@@ -57826,7 +57826,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/abseil-cpp/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/abseil-cpp/LICENSE
 SHA-256: c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747
 
 
@@ -58037,7 +58037,7 @@ SHA-256: c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/abseil-cpp/AUTHORS
+Original upstream file: node-v24.22.2/deps/v8/third_party/abseil-cpp/AUTHORS
 SHA-256: 1fd39030c119b4c97014f59e0ad0ed65f23475bbdf55a52740f31eb82b34b4ee
 
 # This is the list of Abseil authors for copyright purposes.
@@ -58051,7 +58051,7 @@ Google Inc.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/colorama/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/colorama/LICENSE
 SHA-256: 15137d6c822e3ab097093a33c3a39a9df699f373f6438867ad534ff60762a947
 
 Copyright (c) 2010 Jonathan Hartley
@@ -58087,7 +58087,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/glibc/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/glibc/LICENSE
 SHA-256: b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe
 
                   GNU LESSER GENERAL PUBLIC LICENSE
@@ -58597,7 +58597,7 @@ That's all there is to it!
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/vtune/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/vtune/LICENSE
 SHA-256: 02aea3ade0c02470335987f7d93ffaed877bcefc8414a416e2e548665bb0bfd0
 
 All files in this directory are provided by the following license if not stated
@@ -58645,7 +58645,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/siphash/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/siphash/LICENSE
 SHA-256: 36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673
 
 CC0 1.0 Universal
@@ -58769,7 +58769,7 @@ For more information, please see
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/inspector_protocol/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/inspector_protocol/LICENSE
 SHA-256: 450ebb9e9e50c2809d9ca581931fc8946d8d5aa0c8c35aae9ac471342fe4a88e
 
 // Copyright 2016 The Chromium Authors
@@ -58804,7 +58804,7 @@ SHA-256: 450ebb9e9e50c2809d9ca581931fc8946d8d5aa0c8c35aae9ac471342fe4a88e
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/rapidhash-v8/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/rapidhash-v8/LICENSE
 SHA-256: db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0
 
 /*
@@ -58846,7 +58846,7 @@ SHA-256: db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/utf8-decoder/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/utf8-decoder/LICENSE
 SHA-256: 3f712e5fbdfdbd5ee7d9b8c8152580220df55de47f4eba2f26c95c4de19ad096
 
 Copyright (c) 2008-2009 Bjoern Hoehrmann <bjoern@hoehrmann.de>
@@ -58873,7 +58873,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/re2/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/re2/LICENSE
 SHA-256: 6040cda75d90b1738292a631d89934c411ef7ffd543c4d6a1b7edfc8edf29449
 
 // Copyright (c) 2009 The RE2 Authors. All rights reserved.
@@ -58908,7 +58908,7 @@ SHA-256: 6040cda75d90b1738292a631d89934c411ef7ffd543c4d6a1b7edfc8edf29449
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/markupsafe/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/markupsafe/LICENSE
 SHA-256: 0bbe88228fd63d20ec097f64e58d5a0a465123ae139140a18d406c60b48824b5
 
 Copyright (c) 2010 by Armin Ronacher and contributors.  See AUTHORS
@@ -58949,7 +58949,7 @@ DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/markupsafe/AUTHORS
+Original upstream file: node-v24.22.2/deps/v8/third_party/markupsafe/AUTHORS
 SHA-256: bca90e12c0bf6998d25eb74bc0aa76f1f781493ff81a8a71ad6fb0d692248c45
 
 MarkupSafe is written and maintained by Armin Ronacher and
@@ -58970,7 +58970,7 @@ Patches and Suggestions
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/wasm-api/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/wasm-api/LICENSE
 SHA-256: c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08
 
                                  Apache License
@@ -59180,7 +59180,7 @@ SHA-256: c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/third_party/zlib/LICENSE
+Original upstream file: node-v24.22.2/deps/v8/third_party/zlib/LICENSE
 SHA-256: e1cfcc55c325b3f78cf55df9664abaa066e2271dffe8213347d9fccdfbac8f2c
 
 version 1.2.12, March 27th, 2022
@@ -59207,8 +59207,8 @@ freely, subject to the following restrictions:
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/AUTHORS
-SHA-256: 424dbd17f45c76f87b8094784933bbad788cf014757eaa39451a21006c79dcc5
+Original upstream file: node-v24.22.2/deps/v8/AUTHORS
+SHA-256: 1d0b34e4a39dc7e99341e00d9552b6e0ac3690241afc9ce4521cd69362868a20
 
 # Below is a list of people and organizations that have contributed
 # to the V8 project.  Names should be added to the list like so:
@@ -59335,6 +59335,7 @@ Douglas Crosher <dtc-v8@scieneer.com>
 Dusan Milosavljevic <dusan.m.milosavljevic@gmail.com>
 Eden Wang <nedenwang@tencent.com>
 Edoardo Marangoni <edoardo@wasmer.io>
+Eliau Elkouby <eliau.elkouby@gmail.com>
 Elisha Hollander <just4now666666@gmail.com>
 Eric Rannaud <eric.rannaud@gmail.com>
 Erich Ocean <erich.ocean@me.com>
@@ -59554,7 +59555,7 @@ Domagoj Stolfa <domagoj.stolfa@gmail.com>
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/LICENSE.v8
+Original upstream file: node-v24.22.2/deps/v8/LICENSE.v8
 SHA-256: 4af93c12062c58058378de2397dc1c92bbff9ddfb1d583a01c84127557ce97ca
 
 Copyright 2006-2011, the V8 project authors. All rights reserved.
@@ -59588,7 +59589,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/LICENSE.strongtalk
+Original upstream file: node-v24.22.2/deps/v8/LICENSE.strongtalk
 SHA-256: 6a585a9f466654abc8fc0829d56b1bc987e3a073d31faa03bba37d33640a23cd
 
 Copyright (c) 1994-2006 Sun Microsystems Inc.
@@ -59625,7 +59626,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/v8/LICENSE.fdlibm
+Original upstream file: node-v24.22.2/deps/v8/LICENSE.fdlibm
 SHA-256: e7115e18444dae09d17f361ddc365fb1d342640fe500796209c63f7c80dfae10
 
 Copyright (C) 1993-2004 by Sun Microsystems, Inc. All rights reserved.
@@ -59639,7 +59640,7 @@ is preserved.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/llhttp/LICENSE
+Original upstream file: node-v24.22.2/deps/llhttp/LICENSE
 SHA-256: 628168d68bb5a8a17e0bbefb3bd74e326e1edc20583d76f52f457c82c921867d
 
 MIT License
@@ -59669,7 +59670,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/llhttp/LICENSE-MIT
+Original upstream file: node-v24.22.2/deps/llhttp/LICENSE-MIT
 SHA-256: ebca854e0134cd256d673627c20499f42577eb74bacf08b9f25b626a73c91277
 
 This software is licensed under the MIT License.
@@ -59699,7 +59700,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/ada/LICENSE-MIT
+Original upstream file: node-v24.22.2/deps/ada/LICENSE-MIT
 SHA-256: af0d7d2cef91fc243cf4ad98570b03d1f26f5e0227cad0f5f4a7376e2feb3160
 
 Copyright 2023 Yagiz Nizipli and Daniel Lemire
@@ -59725,7 +59726,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/simdjson/LICENSE
+Original upstream file: node-v24.22.2/deps/simdjson/LICENSE
 SHA-256: 5fa8894e890bd77958f93b165433e0fb0dffa5bc982bfb147e4748e95bad24e5
 
                                  Apache License
@@ -59934,7 +59935,7 @@ SHA-256: 5fa8894e890bd77958f93b165433e0fb0dffa5bc982bfb147e4748e95bad24e5
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/icu-small/LICENSE
+Original upstream file: node-v24.22.2/deps/icu-small/LICENSE
 SHA-256: e55522d81edc687a341a4411e0776e54ca654e90147f354a90458aaced4116af
 
 UNICODE LICENSE V3
@@ -60510,7 +60511,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/inspector_protocol/LICENSE
+Original upstream file: node-v24.22.2/deps/inspector_protocol/LICENSE
 SHA-256: c3ed274b3ee226cd391aae43edd5ecccfb6e3cf39f0026d4df1200c1e9bbc097
 
 // Copyright 2016 The Chromium Authors.
@@ -60545,7 +60546,7 @@ SHA-256: c3ed274b3ee226cd391aae43edd5ecccfb6e3cf39f0026d4df1200c1e9bbc097
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/amaro/LICENSE.md
+Original upstream file: node-v24.22.2/deps/amaro/LICENSE.md
 SHA-256: cba9aeb25bd2b45d01611a062df64db41b20302ffa81c4eb0d0d71b359e19e7c
 
 MIT License
@@ -60574,7 +60575,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/amaro/dist/LICENSE
+Original upstream file: node-v24.22.2/deps/amaro/dist/LICENSE
 SHA-256: d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91
 
                               Apache License
@@ -60782,7 +60783,7 @@ limitations under the License.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/googletest/LICENSE
+Original upstream file: node-v24.22.2/deps/googletest/LICENSE
 SHA-256: 9702de7e4117a8e2b20dafab11ffda58c198aede066406496bef670d40a22138
 
 Copyright 2008, Google Inc.
@@ -60818,7 +60819,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/acorn/acorn/LICENSE
+Original upstream file: node-v24.22.2/deps/acorn/acorn/LICENSE
 SHA-256: 76a876cf886ff9be2a8b5e2e86514fed06223c8c9f0c1e9ee9606e93841e00b7
 
 MIT License
@@ -60847,7 +60848,7 @@ THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/acorn/acorn-walk/LICENSE
+Original upstream file: node-v24.22.2/deps/acorn/acorn-walk/LICENSE
 SHA-256: c2d8184ea9becd063aa40be243e8c6ec2c4f72828fdfe4b0752664ef73e96ed3
 
 MIT License
@@ -60876,7 +60877,7 @@ THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/corepack/LICENSE.md
+Original upstream file: node-v24.22.2/deps/corepack/LICENSE.md
 SHA-256: 30a7b8ba5c4483d97d6123f5634da2362d578fb81f42ed6e1dfbb84fb1cd8fe4
 
 **Copyright © Corepack contributors**
@@ -60891,7 +60892,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/postject/LICENSE
+Original upstream file: node-v24.22.2/deps/postject/LICENSE
 SHA-256: 6546657539feb5b454f400db317e71fa39ff5cd048fa5d78ae0ada2df72f1ea7
 
 Postject is licensed for use as follows:
@@ -61135,7 +61136,7 @@ The externally maintained libraries used by Postject are:
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/zlib/LICENSE
+Original upstream file: node-v24.22.2/deps/zlib/LICENSE
 SHA-256: e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2
 
 Copyright notice:
@@ -61165,7 +61166,7 @@ Copyright notice:
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/zstd/LICENSE
+Original upstream file: node-v24.22.2/deps/zstd/LICENSE
 SHA-256: 7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8
 
 BSD License
@@ -61203,7 +61204,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/ngtcp2/LICENSE_ngtcp2
+Original upstream file: node-v24.22.2/deps/ngtcp2/LICENSE_ngtcp2
 SHA-256: 542dd526d2ea23565f0571cc68df6f05ed11248a90ff0f32de19d8ba589db513
 
 The MIT License
@@ -61233,7 +61234,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/ngtcp2/nghttp3/lib/sfparse/COPYING
+Original upstream file: node-v24.22.2/deps/ngtcp2/nghttp3/lib/sfparse/COPYING
 SHA-256: cd6d5feeacf9406fe915d3c23b85a6bf86deecfa1661396b63d2d2188b90beda
 
 The MIT License
@@ -61263,7 +61264,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/ngtcp2/LICENSE_nghttp3
+Original upstream file: node-v24.22.2/deps/ngtcp2/LICENSE_nghttp3
 SHA-256: 58cc3fc8c6d6cb2485ab35eb5918e849b5bf1e56522974e106d7a39a88d61dcd
 
 The MIT License
@@ -61293,7 +61294,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/ngtcp2/ngtcp2/third-party/urlparse/munit/COPYING
+Original upstream file: node-v24.22.2/deps/ngtcp2/ngtcp2/third-party/urlparse/munit/COPYING
 SHA-256: 551a04ab9278e48e3d4ef8b0381ad54e54e84fac1a225c50247fa3669dfdef75
 
 µnit Testing Framework
@@ -61322,7 +61323,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/ngtcp2/ngtcp2/third-party/urlparse/http-parser/LICENSE-MIT
+Original upstream file: node-v24.22.2/deps/ngtcp2/ngtcp2/third-party/urlparse/http-parser/LICENSE-MIT
 SHA-256: 79e6ba8b687cb54786207342b9b6fcee0ac10218453ed9009b84d949b2233cc0
 
 Copyright Joyent, Inc. and other Node contributors.
@@ -61349,7 +61350,7 @@ IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/ngtcp2/ngtcp2/third-party/urlparse/http-parser/AUTHORS
+Original upstream file: node-v24.22.2/deps/ngtcp2/ngtcp2/third-party/urlparse/http-parser/AUTHORS
 SHA-256: d1a15fcf0453796ee31e900dd5edff35ae86fb6ae4375c2afda8bde0f6fd2f03
 
 # Authors ordered by first contribution.
@@ -61425,7 +61426,7 @@ Olivier Mengué <dolmen@cpan.org>
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/ngtcp2/ngtcp2/third-party/urlparse/COPYING
+Original upstream file: node-v24.22.2/deps/ngtcp2/ngtcp2/third-party/urlparse/COPYING
 SHA-256: 2751a9e2545f4e971f7daf4e9fb3fb7a48770eac6b02d4f3cfa5ae3034f1c86f
 
 The MIT License
@@ -61455,7 +61456,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/ngtcp2/ngtcp2/third-party/urlparse/AUTHORS
+Original upstream file: node-v24.22.2/deps/ngtcp2/ngtcp2/third-party/urlparse/AUTHORS
 SHA-256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 
 
@@ -61463,7 +61464,7 @@ SHA-256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/ngtcp2/ngtcp2/third-party/http-parser/LICENSE-MIT
+Original upstream file: node-v24.22.2/deps/ngtcp2/ngtcp2/third-party/http-parser/LICENSE-MIT
 SHA-256: 2996a1c43ee757f9c997a829d82bdd584052323e73cf02ff8126c6fbd95c2d87
 
 http_parser.c is based on src/http/ngx_http_parse.c from NGINX copyright
@@ -61494,7 +61495,7 @@ IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/ngtcp2/ngtcp2/third-party/http-parser/AUTHORS
+Original upstream file: node-v24.22.2/deps/ngtcp2/ngtcp2/third-party/http-parser/AUTHORS
 SHA-256: d1a15fcf0453796ee31e900dd5edff35ae86fb6ae4375c2afda8bde0f6fd2f03
 
 # Authors ordered by first contribution.
@@ -61570,7 +61571,7 @@ Olivier Mengué <dolmen@cpan.org>
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/ngtcp2/ngtcp2/third-party/libev/LICENSE
+Original upstream file: node-v24.22.2/deps/ngtcp2/ngtcp2/third-party/libev/LICENSE
 SHA-256: c4dd1a5bc38b041a320b93c5d6c08f5c41a63f2ce718ee16cfcb757fad448199
 
 All files in libev are
@@ -61615,7 +61616,7 @@ file under either the BSD or the GPL.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/merve/LICENSE-MIT
+Original upstream file: node-v24.22.2/deps/merve/LICENSE-MIT
 SHA-256: cd7b1dbf8003a68f06d4fc84afa797d6e7a5d5d64b2ccd381485f711620dd60a
 
 Copyright 2026 Yagiz Nizipli
@@ -61641,7 +61642,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/uvwasi/LICENSE
+Original upstream file: node-v24.22.2/deps/uvwasi/LICENSE
 SHA-256: 3a94b84af77767e64afdf5fc31d4196810c9717ce2ac2be089f06fec4bfc0e99
 
 MIT License
@@ -61670,7 +61671,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/undici/LICENSE
+Original upstream file: node-v24.22.2/deps/undici/LICENSE
 SHA-256: a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27
 
 MIT License
@@ -61699,7 +61700,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/undici/src/LICENSE
+Original upstream file: node-v24.22.2/deps/undici/src/LICENSE
 SHA-256: a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27
 
 MIT License
@@ -61728,7 +61729,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/undici/src/lib/web/fetch/LICENSE
+Original upstream file: node-v24.22.2/deps/undici/src/lib/web/fetch/LICENSE
 SHA-256: a21d6c8d3fc631198b97e57584697f7f9c37805c71c6cf9a12e4442b40394b88
 
 MIT License
@@ -61757,7 +61758,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/nghttp2/COPYING
+Original upstream file: node-v24.22.2/deps/nghttp2/COPYING
 SHA-256: 6b94f3abc1aabd0c72a7c7d92a77f79dda7c8a0cb3df839a97890b4116a2de2a
 
 The MIT License
@@ -61788,7 +61789,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/LICENSE
 SHA-256: 7610d223851f421d315df5e77974f1c68a04b97e02060e5bbbcf13d95e3ca257
 
 The npm application
@@ -62031,7 +62032,7 @@ ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/libnpmexec/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/libnpmexec/LICENSE
 SHA-256: 7967f87257c7d5f0ef29012d472a8b99a0fb1c5202b6d861a2c81671329a2ee4
 
 The ISC License
@@ -62054,7 +62055,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/tiny-relative-date/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/tiny-relative-date/LICENSE.md
 SHA-256: b219efd4921cb32913a471269807d931b4973190d48269bedcfda6205c526100
 
 MIT License
@@ -62083,7 +62084,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/smart-buffer/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/smart-buffer/LICENSE
 SHA-256: c46e2c333e1c9e6fcfd130cf91b8e54bf67b60fabbc04996f7e199b990353ff3
 
 The MIT License (MIT)
@@ -62111,7 +62112,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/minipass/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/minipass/LICENSE.md
 SHA-256: 8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004
 
 # Blue Oak Model License
@@ -62174,7 +62175,7 @@ software or this license, under any kind of legal claim.***
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/path-scurry/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/path-scurry/LICENSE.md
 SHA-256: 8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004
 
 # Blue Oak Model License
@@ -62237,7 +62238,7 @@ software or this license, under any kind of legal claim.***
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/fs-minipass/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/fs-minipass/LICENSE
 SHA-256: 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b
 
 The ISC License
@@ -62260,7 +62261,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/debug/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/debug/LICENSE
 SHA-256: 3a61c6c96caf5c1d9b623fb9b04c822b783dfcb78aa7e49c76a3f643e6ed7f95
 
 (The MIT License)
@@ -62288,7 +62289,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/cmd-shim/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/cmd-shim/LICENSE
 SHA-256: ec361617c0473d39347b020eaa6dceedaebab43879fa1cd8b8f0f97a8e80a475
 
 The ISC License
@@ -62311,7 +62312,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/signal-exit/LICENSE.txt
+Original upstream file: node-v24.22.2/deps/npm/node_modules/signal-exit/LICENSE.txt
 SHA-256: b173e19b9a78df305577ace0e52ef45a4bcc915ea28b47b256dc3b68dcb1f7e7
 
 The ISC License
@@ -62335,7 +62336,7 @@ ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/init-package-json/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/init-package-json/LICENSE.md
 SHA-256: 7f75bb21103e77b7acfcf88a6ad0286741a18b5d13c4326160346e8cf7e356ad
 
 ISC License
@@ -62361,7 +62362,7 @@ USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/npm-package-arg/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/npm-package-arg/LICENSE
 SHA-256: 898c2bcff663681498ad1ca8235d45b6e70b10cdf1f869a5b5e69f6e46efedd3
 
 The ISC License
@@ -62384,7 +62385,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/ssri/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/ssri/LICENSE.md
 SHA-256: 3749709146345fa15546aaba4e3ab1b3b92a4d930077b5bc32d90815cb63afaf
 
 ISC License
@@ -62408,7 +62409,7 @@ USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/postcss-selector-parser/LICENSE-MIT
+Original upstream file: node-v24.22.2/deps/npm/node_modules/postcss-selector-parser/LICENSE-MIT
 SHA-256: 2998094b38f7ace25f141fb36f334d8338f65a1812978d618b1161f4d77ae10e
 
 Copyright (c) Ben Briggs <beneb.info@gmail.com> (http://beneb.info)
@@ -62438,7 +62439,7 @@ OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/env-paths/license
+Original upstream file: node-v24.22.2/deps/npm/node_modules/env-paths/license
 SHA-256: 48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0
 
 MIT License
@@ -62455,7 +62456,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/npm-audit-report/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/npm-audit-report/LICENSE
 SHA-256: 720836c9bdad386485a492ab41fe08007ecf85ca278ddd8f9333494dcac4949d
 
 ISC License
@@ -62479,7 +62480,7 @@ USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/read/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/read/LICENSE
 SHA-256: 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b
 
 The ISC License
@@ -62502,7 +62503,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@gar/promise-retry/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@gar/promise-retry/LICENSE
 SHA-256: 1c66b5311fc6328ab70616d2cf8e20a8e0a787f534831cf8a311b20098b617a5
 
 Copyright (c) 2011 Tim Koschützki (tim@debuggable.com), Felix Geisendörfer (felix@debuggable.com)
@@ -62530,7 +62531,7 @@ THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/npm-install-checks/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/npm-install-checks/LICENSE
 SHA-256: f674630c4d3e668dabac6d955fb5f74c75b4a63a707ac93a8833b74bdc57221e
 
 Copyright (c) Robert Kowalski and Isaac Z. Schlueter ("Authors")
@@ -62565,7 +62566,7 @@ IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/minizlib/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/minizlib/LICENSE
 SHA-256: df05697a04b8997c79d423930534e59cc18828f6e22d0c8c2d62fcbea1c4f50b
 
 Minizlib was created by Isaac Z. Schlueter.
@@ -62599,7 +62600,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/nopt/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/nopt/LICENSE
 SHA-256: 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b
 
 The ISC License
@@ -62622,7 +62623,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/safer-buffer/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/safer-buffer/LICENSE
 SHA-256: 4bc935e71be198c67ddf3c2b5fddb195f6edc182bfc155a96a6db61b44b494b9
 
 MIT License
@@ -62651,7 +62652,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/json-parse-even-better-errors/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/json-parse-even-better-errors/LICENSE.md
 SHA-256: 50627796eb4236cd05674e71d090e594447995225b7d94cd59e57c25fa3a0217
 
 Copyright 2017 Kat Marchán
@@ -62684,7 +62685,7 @@ distributed under the terms of the MIT license above.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/util-deprecate/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/util-deprecate/LICENSE
 SHA-256: 0154425673db15cdfa80ecba2c9b1f1a867f7197a006764712849bfc3a93cbb7
 
 (The MIT License)
@@ -62716,7 +62717,7 @@ OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/which/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/which/LICENSE
 SHA-256: 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b
 
 The ISC License
@@ -62739,7 +62740,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/agent-base/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/agent-base/LICENSE
 SHA-256: 8d8c55319c7729d57be811c747452636688d54f19701ee0752b6b15ad3771d9a
 
 (The MIT License)
@@ -62768,7 +62769,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/npm-registry-fetch/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/npm-registry-fetch/LICENSE.md
 SHA-256: 27d998b503b18cdb16c49e93da04069a99ba8a1d7e18d67146de8e242f9a6d21
 
 <!-- This file is automatically added by @npmcli/template-oss. Do not edit. -->
@@ -62796,7 +62797,7 @@ USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/hosted-git-info/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/hosted-git-info/LICENSE
 SHA-256: c1476ec53119cd4c8370f91f5152ac76312a29b4fae2d49b5e0e0970fe0fa5ee
 
 Copyright (c) 2015, Rebecca Turner
@@ -62817,7 +62818,7 @@ PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/iconv-lite/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/iconv-lite/LICENSE
 SHA-256: ac779f7314c74f232ef847ea86e714abe25cf6eeb5cc97b69451b74e2af6492d
 
 Copyright (c) 2011 Alexander Shtuchkin
@@ -62846,7 +62847,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/just-diff-apply/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/just-diff-apply/LICENSE
 SHA-256: ebb30d70f7ebd918f223ce6ed7621fa4cef3ec2d59d6707c23868b01def28ce2
 
 The MIT License (MIT)
@@ -62875,7 +62876,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/treeverse/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/treeverse/LICENSE
 SHA-256: ec361617c0473d39347b020eaa6dceedaebab43879fa1cd8b8f0f97a8e80a475
 
 The ISC License
@@ -62898,7 +62899,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/tinyglobby/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/tinyglobby/LICENSE
 SHA-256: 22c68811e174cbbfb3813d4135918df4f540959c14d872e601d9abe83d3cde8f
 
 MIT License
@@ -62927,7 +62928,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/tinyglobby/node_modules/fdir/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/tinyglobby/node_modules/fdir/LICENSE
 SHA-256: 9a39f2aadab11a3697edd668ff2d8ad885b649737b7ab4d3bf12b34e5ada0c86
 
 Copyright 2023 Abdullah Atta
@@ -62942,7 +62943,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/tinyglobby/node_modules/picomatch/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/tinyglobby/node_modules/picomatch/LICENSE
 SHA-256: d0cd141b0c322fded5dfad1d4645bb2fedfc05b7321fe1009469638190d59ef9
 
 The MIT License (MIT)
@@ -62971,7 +62972,7 @@ THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/ini/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/ini/LICENSE
 SHA-256: 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b
 
 The ISC License
@@ -62994,7 +62995,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/yallist/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/yallist/LICENSE.md
 SHA-256: a49c9ba464796f65b59fca3f1e6ca40912df1e859f575383223f7ec6c5baae09
 
 All packages under `src/` are licensed according to the terms in
@@ -63065,7 +63066,7 @@ software or this license, under any kind of legal claim.***
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/libnpmorg/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/libnpmorg/LICENSE
 SHA-256: 77d72758faff2d3a086b1c77f66f4dcfa63a1ee1a9bab5df4ab3c2e8f3eb646d
 
 Copyright npm, Inc
@@ -63086,7 +63087,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/p-map/license
+Original upstream file: node-v24.22.2/deps/npm/node_modules/p-map/license
 SHA-256: 5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3
 
 MIT License
@@ -63103,7 +63104,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/minimatch/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/minimatch/LICENSE.md
 SHA-256: 2c7c5d22ed5a8ee968c64757710979afcd77438c48b4a265b94e615babd8a901
 
 # Blue Oak Model License
@@ -63166,7 +63167,7 @@ software or this license, under any kind of legal claim._**
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/http-cache-semantics/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/http-cache-semantics/LICENSE
 SHA-256: ab868ad5a2ef5068560d9cd3b2180ec63c140bb4c5cae1ba779d300a0ac74fa3
 
 Copyright 2016-2018 Kornel Lesiński
@@ -63183,7 +63184,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/negotiator/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/negotiator/LICENSE
 SHA-256: 553d4d20029a24e315b428a1a54a9e109eaa340f2e958a4f50a92362c2c4070b
 
 (The MIT License)
@@ -63215,7 +63216,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/parse-conflict-json/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/parse-conflict-json/LICENSE.md
 SHA-256: 27d998b503b18cdb16c49e93da04069a99ba8a1d7e18d67146de8e242f9a6d21
 
 <!-- This file is automatically added by @npmcli/template-oss. Do not edit. -->
@@ -63243,7 +63244,7 @@ USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@isaacs/fs-minipass/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@isaacs/fs-minipass/LICENSE
 SHA-256: 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b
 
 The ISC License
@@ -63266,7 +63267,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@isaacs/string-locale-compare/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@isaacs/string-locale-compare/LICENSE
 SHA-256: 05dc4d785ac3a488676d3ed10e901b75ad89dafcc63f8e66610fd4a39cc5c7e8
 
 The ISC License
@@ -63289,7 +63290,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/cidr-regex/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/cidr-regex/LICENSE
 SHA-256: 23e60503dc06abf04b9e535e17797b4e0f9224e6c5abf9207317d5a67c88c743
 
 Copyright (c) silverwind
@@ -63319,7 +63320,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/cacache/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/cacache/LICENSE.md
 SHA-256: 720836c9bdad386485a492ab41fe08007ecf85ca278ddd8f9333494dcac4949d
 
 ISC License
@@ -63343,7 +63344,7 @@ USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/minipass-fetch/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/minipass-fetch/LICENSE
 SHA-256: 1dedee6f84f5875ce4dc398d4d767274eb952a43cfd510a6ada856b2ed347472
 
 The MIT License (MIT)
@@ -63379,7 +63380,7 @@ https://github.com/bitinn/node-fetch
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/glob/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/glob/LICENSE.md
 SHA-256: a49c9ba464796f65b59fca3f1e6ca40912df1e859f575383223f7ec6c5baae09
 
 All packages under `src/` are licensed according to the terms in
@@ -63450,7 +63451,7 @@ software or this license, under any kind of legal claim.***
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/aproba/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/aproba/LICENSE
 SHA-256: 0cef05dfff8b6aa7f35596984f5709f0d17c2582924a751efa471a76de7cdc11
 
 Copyright (c) 2015, Rebecca Turner <me@re-becca.org>
@@ -63472,7 +63473,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/libnpmaccess/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/libnpmaccess/LICENSE
 SHA-256: 77d72758faff2d3a086b1c77f66f4dcfa63a1ee1a9bab5df4ab3c2e8f3eb646d
 
 Copyright npm, Inc
@@ -63493,7 +63494,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/balanced-match/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/balanced-match/LICENSE.md
 SHA-256: d408f38ffa3355c5faec517153295338892eb0f1ea43f57874bb23c6075979b5
 
 (MIT)
@@ -63524,7 +63525,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/npm-bundled/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/npm-bundled/LICENSE
 SHA-256: ec361617c0473d39347b020eaa6dceedaebab43879fa1cd8b8f0f97a8e80a475
 
 The ISC License
@@ -63547,7 +63548,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/libnpmpack/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/libnpmpack/LICENSE
 SHA-256: 77d72758faff2d3a086b1c77f66f4dcfa63a1ee1a9bab5df4ab3c2e8f3eb646d
 
 Copyright npm, Inc
@@ -63568,7 +63569,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/binary-extensions/license
+Original upstream file: node-v24.22.2/deps/npm/node_modules/binary-extensions/license
 SHA-256: 96f0820026bd6dadc4af99c6dba7111d2e0190c092c376a746c13863e151d072
 
 MIT License
@@ -63586,7 +63587,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/ignore-walk/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/ignore-walk/LICENSE
 SHA-256: 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b
 
 The ISC License
@@ -63609,7 +63610,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/npm-packlist/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/npm-packlist/LICENSE
 SHA-256: 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b
 
 The ISC License
@@ -63632,7 +63633,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/libnpmteam/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/libnpmteam/LICENSE
 SHA-256: 77d72758faff2d3a086b1c77f66f4dcfa63a1ee1a9bab5df4ab3c2e8f3eb646d
 
 Copyright npm, Inc
@@ -63653,7 +63654,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/tuf-js/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/tuf-js/LICENSE
 SHA-256: 564bcb001d6e131452a8e9fba0f0ccc59e8b881f84ce3e46e319a5a33e191e10
 
 MIT License
@@ -63682,7 +63683,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/libnpmversion/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/libnpmversion/LICENSE
 SHA-256: 05dc4d785ac3a488676d3ed10e901b75ad89dafcc63f8e66610fd4a39cc5c7e8
 
 The ISC License
@@ -63705,7 +63706,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/brace-expansion/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/brace-expansion/LICENSE
 SHA-256: 9c63a23124d68cd30cd316a94a1a0bca34f032786df6df69fc4b5f136bac8d2e
 
 MIT License
@@ -63736,7 +63737,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/fastest-levenshtein/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/fastest-levenshtein/LICENSE.md
 SHA-256: b8baf91be313643f3e87a01da77704b68e12795184a62e51e537a5a43c2932f3
 
 MIT License
@@ -63764,7 +63765,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/tar/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/tar/LICENSE.md
 SHA-256: 8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004
 
 # Blue Oak Model License
@@ -63827,7 +63828,7 @@ software or this license, under any kind of legal claim.***
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/redact/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/redact/LICENSE
 SHA-256: d0b7cddf14a2005e05b397a950b9f69e1de412b8c6749e5b5d70610fb119e9ee
 
 MIT License
@@ -63856,7 +63857,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/promise-spawn/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/promise-spawn/LICENSE
 SHA-256: 565acf764f4583abe4cf4b02128f01b5d4d1b4c62c253e92df7ed6a8a8ad406b
 
 The ISC License
@@ -63879,7 +63880,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/name-from-folder/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/name-from-folder/LICENSE
 SHA-256: 802fae69bfe8fcb201f15b6a12505580028158679c3ed3254df5ea8f0912aed4
 
 The ISC License
@@ -63902,7 +63903,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/git/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/git/LICENSE
 SHA-256: 565acf764f4583abe4cf4b02128f01b5d4d1b4c62c253e92df7ed6a8a8ad406b
 
 The ISC License
@@ -63925,7 +63926,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/config/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/config/LICENSE
 SHA-256: 898c2bcff663681498ad1ca8235d45b6e70b10cdf1f869a5b5e69f6e46efedd3
 
 The ISC License
@@ -63948,7 +63949,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/fs/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/fs/LICENSE.md
 SHA-256: 27d998b503b18cdb16c49e93da04069a99ba8a1d7e18d67146de8e242f9a6d21
 
 <!-- This file is automatically added by @npmcli/template-oss. Do not edit. -->
@@ -63976,7 +63977,7 @@ USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/fs/lib/cp/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/fs/lib/cp/LICENSE
 SHA-256: 1e76029602ae9b21cc4e612db2496d92febed882ba13ba745f8b3309e85f9d39
 
 (The MIT License)
@@ -63999,7 +64000,7 @@ OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHE
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/metavuln-calculator/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/metavuln-calculator/LICENSE
 SHA-256: 898c2bcff663681498ad1ca8235d45b6e70b10cdf1f869a5b5e69f6e46efedd3
 
 The ISC License
@@ -64022,7 +64023,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/arborist/bin/license.js
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/arborist/bin/license.js
 SHA-256: 3c7c2b07a2591835cb6c60687a23e425540565d9ccb65fef17478c6073bf6841
 
 const localeCompare = require('@isaacs/string-locale-compare')('en')
@@ -64078,7 +64079,7 @@ module.exports = (options, time) => {
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/arborist/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/arborist/LICENSE.md
 SHA-256: 27d998b503b18cdb16c49e93da04069a99ba8a1d7e18d67146de8e242f9a6d21
 
 <!-- This file is automatically added by @npmcli/template-oss. Do not edit. -->
@@ -64106,7 +64107,7 @@ USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/run-script/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/run-script/LICENSE
 SHA-256: 898c2bcff663681498ad1ca8235d45b6e70b10cdf1f869a5b5e69f6e46efedd3
 
 The ISC License
@@ -64129,7 +64130,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/query/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/query/LICENSE
 SHA-256: 27d998b503b18cdb16c49e93da04069a99ba8a1d7e18d67146de8e242f9a6d21
 
 <!-- This file is automatically added by @npmcli/template-oss. Do not edit. -->
@@ -64157,7 +64158,7 @@ USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/package-json/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/package-json/LICENSE
 SHA-256: 65675229fc81818c9490a1942f361f7ef31cd525bef9111e62a6c84e9bd4769d
 
 ISC License
@@ -64183,7 +64184,7 @@ USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/package-json/lib/license.js
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/package-json/lib/license.js
 SHA-256: bc4c06b48b593b8b63f3e1557f52bdd37ebf40295033cfdb03d420d181809c11
 
 // This is an implementation of the validForNewPackage flag in validate-npm-package-license, which is no longer maintained
@@ -64218,7 +64219,7 @@ module.exports = function licenseValidForNewPackage (argument) {
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/node-gyp/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/node-gyp/LICENSE
 SHA-256: 8da13c785af46eb3d0bf2ce4c34bdf191b8c57bf43e410e9359d5b5eab5f4b0f
 
 ISC License:
@@ -64233,7 +64234,7 @@ THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH RE
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/installed-package-contents/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/installed-package-contents/LICENSE
 SHA-256: 898c2bcff663681498ad1ca8235d45b6e70b10cdf1f869a5b5e69f6e46efedd3
 
 The ISC License
@@ -64256,7 +64257,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@npmcli/map-workspaces/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@npmcli/map-workspaces/LICENSE.md
 SHA-256: 27d998b503b18cdb16c49e93da04069a99ba8a1d7e18d67146de8e242f9a6d21
 
 <!-- This file is automatically added by @npmcli/template-oss. Do not edit. -->
@@ -64284,7 +64285,7 @@ USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/cssesc/LICENSE-MIT.txt
+Original upstream file: node-v24.22.2/deps/npm/node_modules/cssesc/LICENSE-MIT.txt
 SHA-256: 483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a
 
 Copyright Mathias Bynens <https://mathiasbynens.be/>
@@ -64312,7 +64313,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/minipass-flush/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/minipass-flush/LICENSE.md
 SHA-256: 8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004
 
 # Blue Oak Model License
@@ -64375,7 +64376,7 @@ software or this license, under any kind of legal claim.***
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/jsonparse/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/jsonparse/LICENSE
 SHA-256: ed251dc3a48522399fffe95fe04d94fbcadcd9edd0e7689f3b71cf73403a6138
 
 The MIT License
@@ -64407,7 +64408,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/promzard/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/promzard/LICENSE
 SHA-256: 05dc4d785ac3a488676d3ed10e901b75ad89dafcc63f8e66610fd4a39cc5c7e8
 
 The ISC License
@@ -64430,7 +64431,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/ms/license.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/ms/license.md
 SHA-256: 1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801
 
 The MIT License (MIT)
@@ -64459,7 +64460,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@tufjs/models/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@tufjs/models/LICENSE
 SHA-256: 564bcb001d6e131452a8e9fba0f0ccc59e8b881f84ce3e46e319a5a33e191e10
 
 MIT License
@@ -64488,7 +64489,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@tufjs/canonical-json/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@tufjs/canonical-json/LICENSE
 SHA-256: 564bcb001d6e131452a8e9fba0f0ccc59e8b881f84ce3e46e319a5a33e191e10
 
 MIT License
@@ -64517,7 +64518,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/chalk/license
+Original upstream file: node-v24.22.2/deps/npm/node_modules/chalk/license
 SHA-256: 5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3
 
 MIT License
@@ -64534,7 +64535,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/mute-stream/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/mute-stream/LICENSE
 SHA-256: 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b
 
 The ISC License
@@ -64557,7 +64558,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/is-cidr/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/is-cidr/LICENSE
 SHA-256: 23e60503dc06abf04b9e535e17797b4e0f9224e6c5abf9207317d5a67c88c743
 
 Copyright (c) silverwind
@@ -64587,7 +64588,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/node-gyp/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/node-gyp/LICENSE
 SHA-256: 662a1b0115251cfb29c6aed0f221f8847bc49c6365d1c53a62c9f4bccc2489c3
 
 (The MIT License)
@@ -64619,7 +64620,7 @@ OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/node-gyp/gyp/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/node-gyp/gyp/LICENSE
 SHA-256: ca90abb6ed71de0774461ef9f928de33e748b617aeb79f9e52415cf08d69230e
 
 Copyright (c) 2020 Node.js contributors. All rights reserved.
@@ -64655,7 +64656,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/node-gyp/gyp/pylib/packaging/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/node-gyp/gyp/pylib/packaging/LICENSE
 SHA-256: cad1ef5bd340d73e074ba614d26f7deaca5c7940c3d8c34852e65c4909686c48
 
 This software is made available under the terms of *either* of the licenses
@@ -64666,7 +64667,7 @@ under the terms of *both* these licenses.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/node-gyp/gyp/pylib/packaging/LICENSE.APACHE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/node-gyp/gyp/pylib/packaging/LICENSE.APACHE
 SHA-256: 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594
 
 
@@ -64851,7 +64852,7 @@ SHA-256: 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/node-gyp/gyp/pylib/packaging/LICENSE.BSD
+Original upstream file: node-v24.22.2/deps/npm/node_modules/node-gyp/gyp/pylib/packaging/LICENSE.BSD
 SHA-256: b70e7e9b742f1cc6f948b34c16aa39ffece94196364bc88ff0d2180f0028fac5
 
 Copyright (c) Donald Stufft and individual contributors.
@@ -64882,7 +64883,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/just-diff/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/just-diff/LICENSE
 SHA-256: ebb30d70f7ebd918f223ce6ed7621fa4cef3ec2d59d6707c23868b01def28ce2
 
 The MIT License (MIT)
@@ -64911,7 +64912,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/sigstore/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/sigstore/LICENSE
 SHA-256: 364a130d2ca340bd56eb1e6d045fc6929bb0f9d0aa018f2c1949b29517e1cdd0
 
 
@@ -65121,7 +65122,7 @@ SHA-256: 364a130d2ca340bd56eb1e6d045fc6929bb0f9d0aa018f2c1949b29517e1cdd0
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/https-proxy-agent/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/https-proxy-agent/LICENSE
 SHA-256: 8d8c55319c7729d57be811c747452636688d54f19701ee0752b6b15ad3771d9a
 
 (The MIT License)
@@ -65150,7 +65151,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/semver/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/semver/LICENSE
 SHA-256: 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b
 
 The ISC License
@@ -65173,7 +65174,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/proggy/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/proggy/LICENSE
 SHA-256: dc32a0dee275e0a9aeffbc974dbf4899a30dcdc2e5ffa8934aecb69261065864
 
 The ISC License
@@ -65196,7 +65197,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/lru-cache/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/lru-cache/LICENSE.md
 SHA-256: 8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004
 
 # Blue Oak Model License
@@ -65259,7 +65260,7 @@ software or this license, under any kind of legal claim.***
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/ip-address/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/ip-address/LICENSE
 SHA-256: f8d791359a50cbcac82c29cb7b0b1b889b28be76fdd35b8ee33f0f7c8704702a
 
 Copyright (C) 2011 by Beau Gunderson
@@ -65286,7 +65287,7 @@ THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/libnpmfund/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/libnpmfund/LICENSE
 SHA-256: 9dd1bc5666fd1e32f086518046532e993f5307749327aff37cecf98355f2b9a0
 
 The ISC License
@@ -65309,7 +65310,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/minipass-pipeline/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/minipass-pipeline/LICENSE
 SHA-256: 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b
 
 The ISC License
@@ -65332,7 +65333,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/minipass-pipeline/node_modules/minipass/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/minipass-pipeline/node_modules/minipass/LICENSE
 SHA-256: a5a110eb524bf3217958e405b5e3411277e915a2f5902c330348877000337e53
 
 The ISC License
@@ -65355,7 +65356,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/minipass-pipeline/node_modules/yallist/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/minipass-pipeline/node_modules/yallist/LICENSE
 SHA-256: 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b
 
 The ISC License
@@ -65378,7 +65379,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/minipass-sized/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/minipass-sized/LICENSE
 SHA-256: 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b
 
 The ISC License
@@ -65401,7 +65402,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/supports-color/license
+Original upstream file: node-v24.22.2/deps/npm/node_modules/supports-color/license
 SHA-256: 5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3
 
 MIT License
@@ -65418,7 +65419,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/qrcode-terminal/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/qrcode-terminal/LICENSE
 SHA-256: b3c7a2fadb2515b8106eae58439a4b9c0581a4eaa88d6a265701f8d4dd7dadb8
 
 
@@ -65648,7 +65649,7 @@ Located in ./vendor/QRCode
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/socks/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/socks/LICENSE
 SHA-256: 4f4f28866154c8d758241a64296e8790d45d7d912ff7b029930778c06d8f2a72
 
 The MIT License (MIT)
@@ -65676,7 +65677,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/common-ancestor-path/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/common-ancestor-path/LICENSE.md
 SHA-256: 8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004
 
 # Blue Oak Model License
@@ -65739,7 +65740,7 @@ software or this license, under any kind of legal claim.***
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/minipass-collect/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/minipass-collect/LICENSE
 SHA-256: b630651f34d0e0284ea940601bbe0a58f306ad7e9819e351d9dfab812f8d0f38
 
 The ISC License
@@ -65762,7 +65763,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/http-proxy-agent/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/http-proxy-agent/LICENSE
 SHA-256: 71368fd0f5b4129191e9afcd1e1ef2dc89a9090d3e4d80bbab92dafd032b3bef
 
 (The MIT License)
@@ -65792,7 +65793,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/isexe/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/isexe/LICENSE.md
 SHA-256: 8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004
 
 # Blue Oak Model License
@@ -65855,7 +65856,7 @@ software or this license, under any kind of legal claim.***
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/spdx-expression-parse/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/spdx-expression-parse/LICENSE
 SHA-256: 7edb57f7065309027de249642341292a5b21410d5773cc55bba73ff9cf01060e
 
 The MIT License
@@ -65885,7 +65886,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/spdx-expression-parse/AUTHORS
+Original upstream file: node-v24.22.2/deps/npm/node_modules/spdx-expression-parse/AUTHORS
 SHA-256: 44ba6c2bc625f3b99bce248a62b29b088538f4f337f9e04679547c1195e634a4
 
 C. Scott Ananian <cscott@cscott.net> (http://cscott.net)
@@ -65897,7 +65898,7 @@ Antoine Motet <antoine.motet@gmail.com>
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/text-table/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/text-table/LICENSE
 SHA-256: 435a6722c786b0a56fbe7387028f1d9d3f3a2d0fb615bb8fee118727c3f59b7b
 
 This software is released under the MIT license:
@@ -65923,7 +65924,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@sigstore/protobuf-specs/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@sigstore/protobuf-specs/LICENSE
 SHA-256: 364a130d2ca340bd56eb1e6d045fc6929bb0f9d0aa018f2c1949b29517e1cdd0
 
 
@@ -66133,7 +66134,7 @@ SHA-256: 364a130d2ca340bd56eb1e6d045fc6929bb0f9d0aa018f2c1949b29517e1cdd0
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@sigstore/bundle/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@sigstore/bundle/LICENSE
 SHA-256: 364a130d2ca340bd56eb1e6d045fc6929bb0f9d0aa018f2c1949b29517e1cdd0
 
 
@@ -66343,7 +66344,7 @@ SHA-256: 364a130d2ca340bd56eb1e6d045fc6929bb0f9d0aa018f2c1949b29517e1cdd0
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@sigstore/tuf/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@sigstore/tuf/LICENSE
 SHA-256: 364a130d2ca340bd56eb1e6d045fc6929bb0f9d0aa018f2c1949b29517e1cdd0
 
 
@@ -66553,7 +66554,7 @@ SHA-256: 364a130d2ca340bd56eb1e6d045fc6929bb0f9d0aa018f2c1949b29517e1cdd0
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@sigstore/core/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@sigstore/core/LICENSE
 SHA-256: 364a130d2ca340bd56eb1e6d045fc6929bb0f9d0aa018f2c1949b29517e1cdd0
 
 
@@ -66763,7 +66764,7 @@ SHA-256: 364a130d2ca340bd56eb1e6d045fc6929bb0f9d0aa018f2c1949b29517e1cdd0
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/@sigstore/sign/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/@sigstore/sign/LICENSE
 SHA-256: 364a130d2ca340bd56eb1e6d045fc6929bb0f9d0aa018f2c1949b29517e1cdd0
 
 
@@ -66973,7 +66974,7 @@ SHA-256: 364a130d2ca340bd56eb1e6d045fc6929bb0f9d0aa018f2c1949b29517e1cdd0
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/npm-normalize-package-bin/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/npm-normalize-package-bin/LICENSE
 SHA-256: 898c2bcff663681498ad1ca8235d45b6e70b10cdf1f869a5b5e69f6e46efedd3
 
 The ISC License
@@ -66996,7 +66997,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/libnpmpublish/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/libnpmpublish/LICENSE
 SHA-256: 77d72758faff2d3a086b1c77f66f4dcfa63a1ee1a9bab5df4ab3c2e8f3eb646d
 
 Copyright npm, Inc
@@ -67017,7 +67018,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/proc-log/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/proc-log/LICENSE
 SHA-256: dc32a0dee275e0a9aeffbc974dbf4899a30dcdc2e5ffa8934aecb69261065864
 
 The ISC License
@@ -67040,7 +67041,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/socks-proxy-agent/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/socks-proxy-agent/LICENSE
 SHA-256: 8d8c55319c7729d57be811c747452636688d54f19701ee0752b6b15ad3771d9a
 
 (The MIT License)
@@ -67069,7 +67070,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/promise-all-reject-late/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/promise-all-reject-late/LICENSE
 SHA-256: 05dc4d785ac3a488676d3ed10e901b75ad89dafcc63f8e66610fd4a39cc5c7e8
 
 The ISC License
@@ -67092,7 +67093,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/diff/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/diff/LICENSE
 SHA-256: eda81a415869e67809f6a9f3fd6056062cb83a462118e07eec5e92b2e0c40ce9
 
 BSD 3-Clause License
@@ -67129,7 +67130,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/npm-profile/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/npm-profile/LICENSE.md
 SHA-256: 27d998b503b18cdb16c49e93da04069a99ba8a1d7e18d67146de8e242f9a6d21
 
 <!-- This file is automatically added by @npmcli/template-oss. Do not edit. -->
@@ -67157,7 +67158,7 @@ USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/validate-npm-package-name/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/validate-npm-package-name/LICENSE
 SHA-256: f3e1645267f7dd77ee6545283cc1766e5883e8fb3b5088fe2cfb995defbb3dde
 
 Copyright (c) 2015, npm, Inc
@@ -67171,7 +67172,7 @@ THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH RE
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/pacote/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/pacote/LICENSE
 SHA-256: 36ec394cd0f976603cfec687c19175a703c1c0d9db717a76915391e756522c8e
 
 The ISC License
@@ -67194,7 +67195,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/abbrev/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/abbrev/LICENSE
 SHA-256: 9e0d5c7989f7e9f07d7c4b158aceff270f235eb7464ace41c5e7b200834a43e0
 
 This software is dual-licensed under the ISC and MIT licenses.
@@ -67248,7 +67249,7 @@ OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/json-stringify-nice/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/json-stringify-nice/LICENSE
 SHA-256: 4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b
 
 The ISC License
@@ -67271,7 +67272,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/libnpmdiff/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/libnpmdiff/LICENSE
 SHA-256: 7967f87257c7d5f0ef29012d472a8b99a0fb1c5202b6d861a2c81671329a2ee4
 
 The ISC License
@@ -67294,7 +67295,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/promise-call-limit/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/promise-call-limit/LICENSE
 SHA-256: 05dc4d785ac3a488676d3ed10e901b75ad89dafcc63f8e66610fd4a39cc5c7e8
 
 The ISC License
@@ -67317,7 +67318,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/archy/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/archy/LICENSE
 SHA-256: 435a6722c786b0a56fbe7387028f1d9d3f3a2d0fb615bb8fee118727c3f59b7b
 
 This software is released under the MIT license:
@@ -67343,7 +67344,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/graceful-fs/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/graceful-fs/LICENSE
 SHA-256: f65c5d9f22a317b2a10803bd1868461ce6499c2ed7217bc80c0cc772a748789c
 
 The ISC License
@@ -67366,7 +67367,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/npm-pick-manifest/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/npm-pick-manifest/LICENSE.md
 SHA-256: 720836c9bdad386485a492ab41fe08007ecf85ca278ddd8f9333494dcac4949d
 
 ISC License
@@ -67390,7 +67391,7 @@ USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/walk-up-path/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/walk-up-path/LICENSE
 SHA-256: 825dacf686e3d026be4a5b3e4efb8ddd67a8676f9e96085a53cfa045a5bd0509
 
 The ISC License
@@ -67413,7 +67414,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/make-fetch-happen/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/make-fetch-happen/LICENSE
 SHA-256: a806e21000ee60cfd64a6f1416f29c7552b4834701974e86c0156f99c0cdd806
 
 ISC License
@@ -67437,7 +67438,7 @@ USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/libnpmsearch/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/libnpmsearch/LICENSE
 SHA-256: 77d72758faff2d3a086b1c77f66f4dcfa63a1ee1a9bab5df4ab3c2e8f3eb646d
 
 Copyright npm, Inc
@@ -67458,7 +67459,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/undici/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/undici/LICENSE
 SHA-256: a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27
 
 MIT License
@@ -67487,7 +67488,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/undici/lib/web/fetch/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/undici/lib/web/fetch/LICENSE
 SHA-256: a21d6c8d3fc631198b97e57584697f7f9c37805c71c6cf9a12e4442b40394b88
 
 MIT License
@@ -67516,7 +67517,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/bin-links/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/bin-links/LICENSE
 SHA-256: 898c2bcff663681498ad1ca8235d45b6e70b10cdf1f869a5b5e69f6e46efedd3
 
 The ISC License
@@ -67539,7 +67540,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/npm-user-validate/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/npm-user-validate/LICENSE
 SHA-256: 8b8404b77ea2a20e045fbad73de1661091a852bfe1f4997e0b646c688f3d18e4
 
 Copyright (c) Robert Kowalski
@@ -67573,7 +67574,7 @@ IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/read-cmd-shim/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/read-cmd-shim/LICENSE
 SHA-256: 0cef05dfff8b6aa7f35596984f5709f0d17c2582924a751efa471a76de7cdc11
 
 Copyright (c) 2015, Rebecca Turner <me@re-becca.org>
@@ -67595,7 +67596,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/exponential-backoff/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/exponential-backoff/LICENSE
 SHA-256: f5afc95c69e116ea6b1755f91a8763f53eadb78b4f1582a08d2d18586a03a117
 
 
@@ -67805,7 +67806,7 @@ SHA-256: f5afc95c69e116ea6b1755f91a8763f53eadb78b4f1582a08d2d18586a03a117
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/chownr/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/chownr/LICENSE.md
 SHA-256: a49c9ba464796f65b59fca3f1e6ca40912df1e859f575383223f7ec6c5baae09
 
 All packages under `src/` are licensed according to the terms in
@@ -67876,7 +67877,7 @@ software or this license, under any kind of legal claim.***
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/write-file-atomic/LICENSE.md
+Original upstream file: node-v24.22.2/deps/npm/node_modules/write-file-atomic/LICENSE.md
 SHA-256: ff75aaa5aaf56005eeea7723b287f9df3dd45b33b310a7eb347d3ab28ea26593
 
 Copyright (c) 2015, Rebecca Turner
@@ -67889,7 +67890,7 @@ THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH RE
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/npm/node_modules/ci-info/LICENSE
+Original upstream file: node-v24.22.2/deps/npm/node_modules/ci-info/LICENSE
 SHA-256: f58943cb354fb2707fea2f7b26b04e6014ddb56835cdfd414c9d2c6c59165b64
 
 The MIT License (MIT)
@@ -67918,7 +67919,7 @@ SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/openssl/openssl/AUTHORS.md
+Original upstream file: node-v24.22.2/deps/openssl/openssl/AUTHORS.md
 SHA-256: b9f638dfc06b59c2d3b808186c3b30f713805a5db390f5b77b1703ac58acb83e
 
 Authors
@@ -67979,7 +67980,7 @@ Individuals
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/openssl/openssl/LICENSE.txt
+Original upstream file: node-v24.22.2/deps/openssl/openssl/LICENSE.txt
 SHA-256: 7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a
 
 
@@ -68164,7 +68165,7 @@ SHA-256: 7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/openssl/openssl/util/perl/OpenSSL/copyright.pm
+Original upstream file: node-v24.22.2/deps/openssl/openssl/util/perl/OpenSSL/copyright.pm
 SHA-256: 04213b69dbebc8ba0dd8a6216af1d9422f9b63619c1cf2f1d8aa107b83bbb608
 
 #! /usr/bin/env perl
@@ -68215,7 +68216,7 @@ sub latest {
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/deps/openssl/openssl/external/perl/Text-Template-1.56/LICENSE
+Original upstream file: node-v24.22.2/deps/openssl/openssl/external/perl/Text-Template-1.56/LICENSE
 SHA-256: 9837f05336ef3cbacb6a96e1672a0426d81ad01191f214b8d48e22ca62338181
 
 This software is copyright (c) 2013 by Mark Jason Dominus <mjd@cpan.org>.
@@ -68602,7 +68603,7 @@ The End
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/LICENSE
+Original upstream file: node-v24.22.2/LICENSE
 SHA-256: 5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace
 
 Node.js is licensed for use as follows:
@@ -71556,7 +71557,7 @@ The externally maintained libraries used by Node.js are:
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/tools/inspector_protocol/jinja2/LICENSE
+Original upstream file: node-v24.22.2/tools/inspector_protocol/jinja2/LICENSE
 SHA-256: 7975c0027cfa5d08253fbb6ff4676acc38248bd5e046d0dbab3d810971e97970
 
 Copyright (c) 2009 by the Jinja Team, see AUTHORS for more details.
@@ -71595,7 +71596,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/tools/inspector_protocol/jinja2/AUTHORS
+Original upstream file: node-v24.22.2/tools/inspector_protocol/jinja2/AUTHORS
 SHA-256: 468c8c72543ea2eb5eedb37442ddf2e7df14f42ffec59a12e285c85bebbf83c0
 
 Jinja is written and maintained by the Jinja Team and various
@@ -71637,7 +71638,7 @@ Patches and suggestions:
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/tools/inspector_protocol/markupsafe/LICENSE
+Original upstream file: node-v24.22.2/tools/inspector_protocol/markupsafe/LICENSE
 SHA-256: 0bbe88228fd63d20ec097f64e58d5a0a465123ae139140a18d406c60b48824b5
 
 Copyright (c) 2010 by Armin Ronacher and contributors.  See AUTHORS
@@ -71678,7 +71679,7 @@ DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/tools/inspector_protocol/markupsafe/AUTHORS
+Original upstream file: node-v24.22.2/tools/inspector_protocol/markupsafe/AUTHORS
 SHA-256: bca90e12c0bf6998d25eb74bc0aa76f1f781493ff81a8a71ad6fb0d692248c45
 
 MarkupSafe is written and maintained by Armin Ronacher and
@@ -71699,7 +71700,7 @@ Patches and Suggestions
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/tools/doc/LICENSE
+Original upstream file: node-v24.22.2/tools/doc/LICENSE
 SHA-256: 6239c6144c31e58cf925c34483606969c555574d64ffa96518ab5d7f45c75d43
 
 Copyright Joyent, Inc. and other Node contributors. All rights reserved.
@@ -71725,7 +71726,7 @@ IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/tools/gyp/LICENSE
+Original upstream file: node-v24.22.2/tools/gyp/LICENSE
 SHA-256: ca90abb6ed71de0774461ef9f928de33e748b617aeb79f9e52415cf08d69230e
 
 Copyright (c) 2020 Node.js contributors. All rights reserved.
@@ -71761,7 +71762,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/tools/gyp/pylib/packaging/LICENSE
+Original upstream file: node-v24.22.2/tools/gyp/pylib/packaging/LICENSE
 SHA-256: cad1ef5bd340d73e074ba614d26f7deaca5c7940c3d8c34852e65c4909686c48
 
 This software is made available under the terms of *either* of the licenses
@@ -71772,7 +71773,7 @@ under the terms of *both* these licenses.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/tools/gyp/pylib/packaging/LICENSE.APACHE
+Original upstream file: node-v24.22.2/tools/gyp/pylib/packaging/LICENSE.APACHE
 SHA-256: 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594
 
 
@@ -71957,7 +71958,7 @@ SHA-256: 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/tools/gyp/pylib/packaging/LICENSE.BSD
+Original upstream file: node-v24.22.2/tools/gyp/pylib/packaging/LICENSE.BSD
 SHA-256: b70e7e9b742f1cc6f948b34c16aa39ffece94196364bc88ff0d2180f0028fac5
 
 Copyright (c) Donald Stufft and individual contributors.
@@ -71988,7 +71989,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/tools/gyp/AUTHORS
+Original upstream file: node-v24.22.2/tools/gyp/AUTHORS
 SHA-256: 99d86ac6b75d6cfa95b78ab52848738681327b1ae6ee3a8acea6923457b11565
 
 # Names should be added to this file like so:
@@ -72013,7 +72014,7 @@ Christian Clauss <cclauss@me.com>
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/test/fixtures/postject-copy/node_modules/commander/LICENSE
+Original upstream file: node-v24.22.2/test/fixtures/postject-copy/node_modules/commander/LICENSE
 SHA-256: 04512a63dce4d2d506ad612dc0bd7681ccf6e3655f7b6eaef7dfac8323d1ec0b
 
 (The MIT License)
@@ -72043,7 +72044,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/test/fixtures/postject-copy/node_modules/postject/LICENSE
+Original upstream file: node-v24.22.2/test/fixtures/postject-copy/node_modules/postject/LICENSE
 SHA-256: 6546657539feb5b454f400db317e71fa39ff5cd048fa5d78ae0ada2df72f1ea7
 
 Postject is licensed for use as follows:
@@ -72287,7 +72288,7 @@ The externally maintained libraries used by Postject are:
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/test/fixtures/test426/LICENSE.md
+Original upstream file: node-v24.22.2/test/fixtures/test426/LICENSE.md
 SHA-256: b44ad77dc900d7002f3b1cb3b3968adb404d013174e024305b2917b4f8927392
 
 The Source Map Tests suite ("Software") is protected by copyright and is being made available under the  "BSD License", included below. This Software may be subject to third party rights (rights from parties other than Ecma International), including patent rights, and no licenses under such third party rights are granted under this license even if the third party concerned is a member of Ecma International. SEE THE ECMA CODE OF CONDUCT IN PATENT MATTERS AVAILABLE AT https://www.ecma-international.org/ipr FOR INFORMATION REGARDING THE LICENSING OF PATENT CLAIMS THAT ARE REQUIRED TO IMPLEMENT ECMA INTERNATIONAL STANDARDS*.
@@ -72309,7 +72310,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/test/fixtures/wpt/compression/third_party/pako/LICENSE
+Original upstream file: node-v24.22.2/test/fixtures/wpt/compression/third_party/pako/LICENSE
 SHA-256: a04665b3b2de56c66730c1f720f528175739e4104f79073614aa611da1e85539
 
 (The MIT License)
@@ -72338,7 +72339,7 @@ THE SOFTWARE.
 ---
 
 Component: node-runtime
-Original upstream file: node-v24.21.0/test/fixtures/wpt/LICENSE.md
+Original upstream file: node-v24.22.2/test/fixtures/wpt/LICENSE.md
 SHA-256: 5fac07febb0e2a97fb0d7b0def149ec08b642e1ba4b9c345283ab1cbd2af6570
 
 # The 3-Clause BSD License
