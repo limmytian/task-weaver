@@ -15,3 +15,9 @@ Ownership remains with the existing modules:
 The runner preserves the delivery attempt's existing order: report busy, enter the attempt, perform work, release in `finally`, unregister the lease, clear worker fields, report aggregate status, then stop a successful `--once` run or schedule polling. Errors propagate after cleanup. Release failures remain best effort; they do not authorize a stale worker to advance. Cancellation and lease health are checked before guarded delivery updates and stage advancement. The outer lifecycle still owns tracking and cancellation; the extraction creates no second supervisor.
 
 The larger execution/review/merge loops remain in the command. Future extractions should retain these owners and add a seam only when it reduces coupling without changing cancellation, recovery, cleanup or credential behavior.
+
+## Operational Web view
+
+The Daemons page owns list/queue/overview/SLO/metrics queries, 30-second refresh, live clock, operator mutations and pending state. It passes typed data and callbacks to `worker-card.tsx` and `queue-panel.tsx`. Shared display shapes live in `daemon-view-model.ts`; formatting and role presentation live in `daemon-presentation.ts`.
+
+`timeline-dialog.tsx` retains its existing on-demand history query, cursor/filter/live state and 30-second refresh. `operator-action-dialog.tsx` renders the current action/reason and delegates confirmation to the page. The worker console stays inside the worker card, keyed by run ID with the same requirement/task/run/generation target. No second source of server state or additional console lifetime is introduced. Existing control-plane, console, recovery and evidence modules retain their responsibilities.

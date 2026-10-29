@@ -117,6 +117,7 @@ const checks = [
   },
   {
     file: "app/projects/daemons/page.tsx",
+    relatedFiles: ["app/projects/daemons/worker-card.tsx", "app/projects/daemons/queue-panel.tsx", "app/projects/daemons/timeline-dialog.tsx", "app/projects/daemons/operator-action-dialog.tsx"],
     label: "Daemon operational visibility feedback",
     patterns: [
       /QueryStatePanel/,
@@ -195,8 +196,8 @@ const checks = [
 const failures = [];
 
 for (const check of checks) {
-  const fullPath = resolve(webRoot, check.file);
-  const source = readFileSync(fullPath, "utf8");
+  const source = [check.file, ...(check.relatedFiles ?? [])]
+    .map(file => readFileSync(resolve(webRoot, file), "utf8")).join("\n");
 
   for (const pattern of check.patterns) {
     if (!pattern.test(source)) {
