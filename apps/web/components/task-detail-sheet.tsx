@@ -7,6 +7,7 @@ import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Sheet,
   SheetContent,
@@ -28,6 +29,8 @@ import { AssistantDialog } from "@/components/assistant-dialog";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
 import { TaskRepositoryScope } from "@/components/repository-links";
 import { resourceAccessLost } from "@/lib/resource-access";
+import { requirementWorkflowSchema } from "@task-weaver/contracts";
+import { latestRequirementReviewChecks, type ReviewCheckRecord } from "@/lib/review-checks";
 
 function subscribeOnlineStatus(callback: () => void) {
   window.addEventListener("online", callback);
@@ -96,6 +99,11 @@ export function TaskDetailSheet({
     { taskId: taskId!, limit: 1 },
     { enabled: open && !!taskId && task?.status === "in_review", retry: false },
   );
+  const requirementReviewHistory = trpc.activity.list.useQuery(
+    { entityType: "requirement", entityId: task?.requirementId ?? taskId!, action: "workflow_stage_advanced", limit: 25 },
+    { enabled: open && !!task?.requirementId && task.status === "in_review", retry: false },
+  );
+  const [reviewReason, setReviewReason] = useState("");
   const effectiveProjectId = task?.projectId ?? projectId;
   const candidates = trpc.auth.assignees.useQuery(
     { projectId: effectiveProjectId ?? undefined },
@@ -145,6 +153,12 @@ export function TaskDetailSheet({
     },
     onError: (err) => toast.error("Failed to unlink document", { description: err.message }),
   });
+
+  const decideTaskReview = (status: "done" | "in_progress") => {
+    const reason = reviewReason.trim();
+    if (!reason || !online || taskQuery.isError || !task || task.status !== "in_review") return;
+    updateStatus.mutate({ id: task.id, status, reason });
+  };
 
   if (!task || resourceAccessLost(taskQuery.error)) {
     return (
@@ -380,6 +394,13 @@ export function TaskDetailSheet({
             const latest = [...(task.comments ?? [])].sort(
               (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
             )[0];
+            const workflowResult = requirementWorkflowSchema.safeParse(task.requirement?.workflow);
+            const requiredChecks = workflowResult.success ? workflowResult.data.acceptance.requiredChecks : [];
+            const reviewHistory = (requirementReviewHistory.data ?? []).map((entry) => {
+              const metadata = entry.metadata && typeof entry.metadata === "object" ? entry.metadata as Record<string, unknown> : {};
+              return { ...metadata, actorId: entry.actorId, actorType: entry.actorType, createdAt: entry.createdAt } as ReviewCheckRecord;
+            });
+            const checkSummary = latestRequirementReviewChecks(requiredChecks, reviewHistory);
             return <section aria-labelledby="task-review-heading" className="mb-5 space-y-3 rounded-lg border p-3 text-sm">
               <h3 id="task-review-heading" className="font-semibold">Review summary</h3>
               <div><h4 className="font-medium">Goal</h4><p className="whitespace-pre-wrap break-words">{task.description || "No task goal recorded."}</p></div>
@@ -387,17 +408,34 @@ export function TaskDetailSheet({
                 {runs.isLoading ? <p>Loading run…</p> : runs.isError ? <p role="alert">Run information is unavailable or access is denied.</p> : runs.data?.[0] ? <>
                   <p className="text-xs text-muted-foreground">Status: {runs.data[0].status} · {new Date(runs.data[0].createdAt).toLocaleString()} · Run {runs.data[0].id}</p>
                   <p className="text-xs text-muted-foreground">Model: {runs.data[0].actualProvider && runs.data[0].actualModel ? `${runs.data[0].actualProvider} / ${runs.data[0].actualModel}` : "Not recorded"}</p>
+                  {runs.data[0].requestedModel && <p className="text-xs text-muted-foreground">Requested model: {runs.data[0].requestedProvider ? `${runs.data[0].requestedProvider} / ` : ""}{runs.data[0].requestedModel}{runs.data[0].fallbackReason ? ` · Fallback: ${runs.data[0].fallbackReason}` : ""}</p>}
                   <p className="whitespace-pre-wrap break-words">{runs.data[0].errorMessage || runs.data[0].outputSummary || "No run result recorded."}</p>
                 </> : <p className="text-muted-foreground">No accessible Ti run recorded for this task. Other agents may report through comments.</p>}
               </div>
+              <div><h4 className="font-medium">Requirement acceptance checks</h4>
+                {!workflowResult.success ? <p className="text-muted-foreground">Requirement check definitions are unavailable.</p> : requiredChecks.length === 0 ? <p className="text-muted-foreground">No required acceptance checks are configured for this requirement.</p> : requirementReviewHistory.isError ? <p role="alert">Check history is unavailable. Reconnect or verify access before deciding.</p> : requirementReviewHistory.isLoading ? <p>Loading check history…</p> : <>
+                  <ul className="list-inside list-disc space-y-1">{checkSummary.checks.map((check) => <li key={check.name}>{check.name}: {check.status === "not_recorded" ? "Not recorded" : check.status === "passed" ? "Passed" : "Failed"}</li>)}</ul>
+                  {checkSummary.record && <p className="text-xs text-muted-foreground">Latest acceptance record: {String(checkSummary.record.decision ?? "decision not recorded")} · {String(checkSummary.record.actorId ?? "unknown reviewer")} · {checkSummary.record.createdAt ? new Date(String(checkSummary.record.createdAt)).toLocaleString() : "time not recorded"}</p>}
+                </>}
+              </div>
+              <p className="text-xs text-muted-foreground">Task revision {task.version}. Run IDs and requirement activity are the recorded sources; a reported result or passed check is not independently verified by this summary.</p>
               <div><h4 className="font-medium">Latest recorded comment</h4>{latest ? <>
                 <p className="text-xs text-muted-foreground">{latest.authorId} · {latest.authorType} · {new Date(latest.createdAt).toLocaleString()}</p>
                 <p className="whitespace-pre-wrap break-words">{latest.content}</p>
               </> : <p className="text-muted-foreground">No result comment recorded.</p>}</div>
-              <p className="text-muted-foreground">Comments are reported by their authors. Checks and results have not been independently verified here.</p>
+              <p className="text-muted-foreground">Comments and check decisions are reported by their authors. Run output and check results have not been independently verified here.</p>
               <div className="flex flex-wrap items-center gap-3">
                 <Button variant="outline" size="sm" onClick={() => setDetailTab("comments")}>View all comments</Button>
                 {effectiveProjectId && task.requirementId && <Link className="text-primary underline underline-offset-4" href={`/projects/${effectiveProjectId}/requirements/${task.requirementId}`}>Review requirement outputs and evidence</Link>}
+              </div>
+              <div className="space-y-2 border-t pt-3">
+                <h4 className="font-medium">Reviewer decision</h4>
+                <label className="sr-only" htmlFor="task-review-reason">Decision reason</label>
+                <Textarea id="task-review-reason" aria-label="Decision reason" placeholder="Record why you accept this result or are returning it for changes." value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} rows={3} disabled={!online || taskQuery.isError || updateStatus.isPending} />
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" onClick={() => decideTaskReview("done")} disabled={!reviewReason.trim() || !online || taskQuery.isError || updateStatus.isPending}>Accept result</Button>
+                  <Button variant="outline" size="sm" onClick={() => decideTaskReview("in_progress")} disabled={!reviewReason.trim() || !online || taskQuery.isError || updateStatus.isPending}>Return to work</Button>
+                </div>
               </div>
             </section>;
           })()}
