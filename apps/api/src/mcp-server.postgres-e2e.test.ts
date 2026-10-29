@@ -692,6 +692,14 @@ test("MCP transports use live scoped authority and preserve collaboration guards
     process.env.TW_MCP_RUNTIME_PROFILES = JSON.stringify([hostedProfile]);
     const hostedServer = await registryService.registerServer(db, registerMcpServerSchema.parse({ name: "hosted-fixture", transport: "hosted-stdio", config: { profileId: hostedProfile.id, profileHash: capabilityDigest(hostedProfile) }, projectId: f.project.id, active: true, readOnly: false, tags: [] }), f.owner.context.actor);
     t.after(() => mcpPool.disconnect(hostedServer.id));
+    // A fixture-only probe exposes launch failures without printing runtime secrets.
+    const hostedProbe = await promisify(execFile)("docker", ["run", "--rm", "--pull=never", "--network=none", "--read-only", "--user=65534:65534", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=64", "--memory=256m", "--cpus=1", "--tmpfs=/tmp:rw,noexec,nosuid,size=32m", "--tmpfs=/var/lib/postgresql/data:ro,noexec,nosuid,size=1m", "--env=APP_SECRET", "--entrypoint=/bin/sh", process.env.TW_SKILL_RUNTIME_TEST_IMAGE!, "-c", hostedScript], {
+      env: { ...process.env, APP_SECRET: "fixture-private-token" }, timeout: 15_000,
+    }).catch(error => {
+      const failure = error as { code?: string | number; stderr?: string };
+      throw new Error(`Hosted fixture launch failed (${failure.code ?? "unknown"}): ${(failure.stderr ?? "No stderr").slice(0, 2000).replaceAll("fixture-private-token", "[redacted]")}`);
+    });
+    assert.equal(hostedProbe.stdout, "");
     const hostedTools = await registryService.syncTools(db, hostedServer.id, mcpPool);
     assert.equal(hostedTools[0]!.name, "hosted_echo");
     const hostedDetail = await registryCall("tw_mcp_tool", { toolId: hostedTools[0]!.id });
