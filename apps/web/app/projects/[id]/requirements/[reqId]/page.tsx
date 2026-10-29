@@ -529,7 +529,7 @@ export default function RequirementDetailPage({
               </div>
 
               {/* Burndown Chart */}
-              <RequirementWorkflowPanel requirement={requirement} />
+              <div id="workflow" className="scroll-mt-4"><RequirementWorkflowPanel requirement={requirement} /></div>
               <RequirementPlanDraft projectId={projectId} requirementId={reqId} disabled={isCancelled || requirement.projectId !== projectId} />
               <BurndownChart requirementId={reqId} />
 
@@ -1383,6 +1383,7 @@ function RequirementSidebar({
         </CardContent>
       </Card>
 
+      <span id="dependencies" className="scroll-mt-4" />
       {/* Requirement Dependencies */}
       <Card>
         <CardHeader className="pb-3">

@@ -5,3 +5,5 @@ export { createCapabilityReadinessService } from "./services/capability-readines
 export { createCapabilityEvidenceViewService } from "./services/capability-evidence-view";
 export { WorkerConsoleService } from './services/worker-console';
 export { EvidenceSessionService } from './services/evidence-session';
+
+export { createAttentionService } from "./services/attention";

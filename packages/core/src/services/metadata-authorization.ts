@@ -231,7 +231,7 @@ async function authorizeScheduleInput(db: Database, authority: ResourceAuthority
   return input;
 }
 
-function visibleTiRuns(db: Database, authority: ResourceAuthority) {
+export function visibleTiRuns(db: Database, authority: ResourceAuthority) {
   const visibleTasks = db.select({ id: tasks.id }).from(tasks).where(taskResourcePredicate(authority));
   const visibleSchedules = db.select({ id: schedules.id }).from(schedules).where(schedulePredicate(authority));
   const validScheduleRuns = db.select({ id: scheduleRuns.id }).from(scheduleRuns).where(inArray(scheduleRuns.scheduleId, visibleSchedules));
