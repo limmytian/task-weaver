@@ -28,18 +28,28 @@ for (const platform of RELEASE_PLATFORMS) {
   script("prepare-busybox-build-sources", `${sources}/source-lock.json`);
   script("assemble-binary-sources", `${sources}/busybox-build-source-plan.json`, "--acquire");
   script("build-reviewed-busybox", `${sources}/source-lock.json`, platform);
+  const patchedImages = [];
   for (const [index, app] of ["api", "web"].entries()) {
     const patched = `task-weaver-${app}:main-${arch}`;
     script("build-busybox-image", images[index], patched, platform);
     script("verify-busybox-wget", patched, platform);
+    patchedImages.push(patched);
+  }
+  run("grype", ["db", "update"]);
+  script("inspect-release-images", `--platform=${platform}`, ...patchedImages);
+  for (const [index, app] of ["api", "web"].entries()) {
+    const patched = patchedImages[index];
     const target = `ghcr.io/${repository}-${app}:${staging}-${arch}`;
     run("docker", ["tag", patched, target]);
     run("docker", ["push", target]);
   }
   const evidence = `release-artifacts/main-candidates/${arch}`;
   mkdirSync(evidence, { recursive: true });
+  cpSync("release-artifacts/images", `${evidence}/images`, { recursive: true });
   cpSync(sources, `${evidence}/binary-sources`, { recursive: true });
   cpSync(`release-artifacts/busybox-build/${arch}`, `${evidence}/busybox-build`, { recursive: true });
+  run("docker", ["image", "rm", ...images, ...patchedImages]);
+  run("docker", ["buildx", "prune", "--force"]);
 }
 for (const app of ["api", "web"]) {
   const image = `ghcr.io/${repository}-${app}:${staging}`;
