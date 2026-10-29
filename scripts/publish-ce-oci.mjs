@@ -7,7 +7,6 @@ import { imageArchiveConfig } from "./ce-image-archive.mjs";
 import { RELEASE_PLATFORMS, platformArchitecture } from "./release-platforms.mjs";
 import { inspectLocalImage } from "./image-inspection-lib.mjs";
 import { verifyOciIndex } from "./oci-index.mjs";
-import { createImagePromotionAdapter } from "./image-promotion-adapter.mjs";
 
 const [version, inputRepository] = process.argv.slice(2);
 assert.match(version ?? "", /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/);
@@ -25,21 +24,7 @@ const tags = ["api", "web"].flatMap(app => [version, ...RELEASE_PLATFORMS.map(pl
 // or network failures are not evidence that a tag is available.
 for (const image of tags) {
   const result = spawnSync("docker", ["buildx", "imagetools", "inspect", image, "--format", "{{json .Manifest}}"], { encoding: "utf8" });
-  if (result.status === 0) {
-    // A retry may reuse only the exact pair already committed by our journal.
-    const app = ["api", "web"].find(name => image === `ghcr.io/${repository}-${name}:${version}`);
-    let safeRetry = false;
-    if (app) {
-      try {
-        const journal = await createImagePromotionAdapter({ repository }).readJournal();
-        const descriptor = JSON.parse(result.stdout);
-        safeRetry = journal.state.pending === null && journal.state.committed?.version === version &&
-          journal.state.committed.commit === set.commit && journal.state.committed.digests?.[app] === (descriptor.digest ?? descriptor.Digest);
-      } catch { /* Ambiguous journal or registry state must never authorize reuse. */ }
-    }
-    if (!safeRetry) throw new Error(`Immutable image tag already exists: ${image}`);
-    continue;
-  }
+  if (result.status === 0) throw new Error(`Immutable image tag already exists: ${image}`);
   assert.doesNotMatch(result.stderr, /unauthorized|denied|forbidden/i, "Cannot establish registry tag availability");
   assert.match(result.stderr, /not found|manifest unknown|404/i, "Cannot establish registry tag availability");
 }
