@@ -786,6 +786,7 @@ test('daemon --once routes clean exits without task finalization to review', { t
   assert.equal(result.requirement.status, 'approved')
   assert.equal(result.executionSlice.status, 'in_review')
   assert.equal(result.tasks[0]!.status, 'in_review')
+  assert.match(result.comments.map((comment) => comment.content).join('\n'), /worker exited without finalizing.*not verified the outcome, checks, or persistent evidence/i)
   assert.equal(result.tasks[1]!.status, 'todo')
   assert.equal(result.branchPushed, false)
   assert.equal(result.secondaryBranchPushed, false)
