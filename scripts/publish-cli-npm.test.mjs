@@ -3,8 +3,27 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { compareVersions, inspectCliSet, preflightRegistry, preflightTags, publishCliSet } from "./publish-cli-npm.mjs";
+import { compareVersions, inspectCliSet, preflightRegistry, preflightTags, publishCliSet, waitForPublishedVersion } from "./publish-cli-npm.mjs";
 import { packCliSet } from "./pack-cli.mjs";
+
+test("registry processing wait is bounded and never accepts conflicting integrity", async () => {
+  const item = { package: "@task-weaver/contracts", integrity: "sha512-reviewed" };
+  let requests = 0;
+  let sleeps = 0;
+  const sleep = async () => { sleeps++; };
+  const transport = async () => ++requests < 3
+    ? new Response("", { status: 404 })
+    : Response.json({ name: item.package, version: "0.3.18", dist: { integrity: item.integrity } });
+  assert.equal((await waitForPublishedVersion(item, "0.3.18", { transport, sleep, attempts: 3 })).exists, true);
+  assert.equal(sleeps, 2);
+  await assert.rejects(waitForPublishedVersion(item, "0.3.18", {
+    transport: async () => new Response("", { status: 404 }), sleep, attempts: 2,
+  }), /bounded registry processing wait/);
+  await assert.rejects(waitForPublishedVersion(item, "0.3.18", {
+    transport: async () => Response.json({ name: item.package, version: "0.3.18", dist: { integrity: "sha512-wrong" } }),
+    sleep,
+  }), /immutable version conflicts/i);
+});
 
 test("publication preflight rejects archive tampering and enforces repository version and dependency order", async () => {
   const root = resolve(import.meta.dirname, "..");
