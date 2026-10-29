@@ -84,7 +84,7 @@ jobs:
     timeout-minutes: 90
     permissions:
       actions: read
-      contents: write
+      contents: read
       packages: write
       id-token: write
     concurrency:

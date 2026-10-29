@@ -1,60 +1,61 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { promoteImagePair, reconcileImagePromotion } from "./image-promotion-orchestrator.mjs";
+import { promoteImagePair } from "./image-promotion-orchestrator.mjs";
 const d = c => `sha256:${c.repeat(64)}`;
 const old = { api: d("a"), web: d("b") }, next = { api: d("c"), web: d("d") };
-const order = (hour, id) => ({ createdAt: `2026-10-28T0${hour}:00:00Z`, runId: String(id), attempt: 1 });
-const initial = () => ({ schemaVersion: 1, committed: { version: "0.3.16", commit: "a".repeat(40), order: order(1, 1), digests: old }, pending: null });
-const candidate = () => ({ version: "0.3.17-main.2.1", commit: "b".repeat(40), order: order(2, 2), digests: next });
+const candidate = () => ({ version: "0.3.17-main.2.1", digests: next });
 function fixture() {
-  let state = initial(), revision = 1, writes = 0, failAt = 0;
+  let writes = 0, failAt = 0;
   const tags = { latest: { ...old } };
   return {
-    tags, fail(n) { failAt = n; }, get state() { return state; }, get writes() { return writes; },
-    async readJournal() { return { revision: String(revision), state: structuredClone(state) }; },
-    async compareAndSwap(expected, value) { if (expected !== String(revision)) return null; state = structuredClone(value); return String(++revision); },
+    tags, fail(n) { failAt = n; }, get writes() { return writes; },
     async readPair(tag) { return structuredClone(tags[tag]); },
     async readVersion(tag) { return structuredClone(tags[tag] ?? { api: null, web: null }); },
     async writeTag(app, tag, digest) { writes++; tags[tag] ??= { api: null, web: null }; tags[tag][app] = digest; if (writes === failAt) throw Error("ambiguous write"); },
   };
 }
 
-test("promotes only the prepared pair and verifies all references", async () => {
-  const f = fixture(); await promoteImagePair(f, candidate());
-  assert.deepEqual(f.tags.latest, next); assert.deepEqual(f.tags[candidate().version], next); assert.equal(f.state.pending, null);
+test("promotes the verified pair and skips unchanged tags on retry", async () => {
+  const f = fixture(); const result = await promoteImagePair(f, candidate());
+  assert.deepEqual(result, candidate());
+  assert.deepEqual(f.tags.latest, next); assert.deepEqual(f.tags[candidate().version], next);
   const writes = f.writes; await promoteImagePair(f, candidate()); assert.equal(f.writes, writes);
-  f.tags.latest.web = old.web; await assert.rejects(promoteImagePair(f, candidate()), /differ/);
 });
 
-test("each partial write retains intent and can be reconciled", async () => {
+test("every ambiguous partial write can be retried with the same digests", async () => {
   for (const n of [1, 2, 3, 4]) {
-    const f = fixture(); f.fail(n); await assert.rejects(promoteImagePair(f, candidate()));
-    assert.ok(f.state.pending); f.fail(0); await reconcileImagePromotion(f, await f.readJournal());
-    assert.deepEqual(f.tags.latest, next); assert.equal(f.state.pending, null);
+    const f = fixture(); f.fail(n); await assert.rejects(promoteImagePair(f, candidate()), /ambiguous write/);
+    f.fail(0); await promoteImagePair(f, candidate());
+    assert.deepEqual(f.tags.latest, next); assert.deepEqual(f.tags[candidate().version], next);
   }
 });
 
-test("conflicts, stale observations and competing CAS fail before registry mutation", async () => {
-  const f = fixture(); f.tags[candidate().version] = { api: d("e"), web: null };
-  await assert.rejects(promoteImagePair(f, candidate()), /conflicts/); assert.equal(f.writes, 0);
-  const g = fixture(); g.tags.latest.web = d("e"); await assert.rejects(promoteImagePair(g, candidate()), /differ/); assert.equal(g.writes, 0);
-  const h = fixture(); h.compareAndSwap = async () => null; await assert.rejects(promoteImagePair(h, candidate()), /compare-and-swap/); assert.equal(h.writes, 0);
+test("either immutable version conflict prevents all registry writes", async () => {
+  for (const app of ["api", "web"]) {
+    const f = fixture(); f.tags[candidate().version] = { api: null, web: null, [app]: d("e") };
+    await assert.rejects(promoteImagePair(f, candidate()), /conflicts/); assert.equal(f.writes, 0);
+  }
 });
 
-test("unknown external changes and tampered intents prevent reconciliation", async () => {
-  const f = fixture(); f.fail(1); await assert.rejects(promoteImagePair(f, candidate()));
-  f.tags.latest.api = d("f"); await assert.rejects(reconcileImagePromotion(f, await f.readJournal()), /Unexpected/);
-  const g = fixture(); g.fail(1); await assert.rejects(promoteImagePair(g, candidate()));
-  const snapshot = await g.readJournal(); snapshot.state.pending.previous.api = d("f");
-  await assert.rejects(reconcileImagePromotion(g, snapshot), /Journal content changed/);
+test("version verification failure leaves latest unchanged", async () => {
+  const f = fixture(); f.readPair = async () => ({ api: d("e"), web: next.web });
+  await assert.rejects(promoteImagePair(f, candidate()), /Version tag verification failed/);
+  assert.deepEqual(f.tags.latest, old); assert.equal(f.writes, 2);
 });
 
-test("competing promoters cannot both prepare the same journal revision", async () => {
-  const f = fixture();
-  const newer = { ...candidate(), version: "0.3.17-main.3.1", order: order(3, 3) };
-  const results = await Promise.allSettled([promoteImagePair(f, candidate()), promoteImagePair(f, newer)]);
-  assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
-  assert.equal(results.filter(result => result.status === "rejected").length, 1);
-  assert.equal(f.state.pending, null);
-  assert.deepEqual(f.tags.latest, next);
+test("latest verification detects a lost or competing write", async () => {
+  const f = fixture(); const read = f.readPair;
+  f.readPair = async tag => tag === "latest" ? old : read(tag);
+  await assert.rejects(promoteImagePair(f, candidate()), /Latest tag verification failed/);
+});
+
+test("first publication works without previous latest tags", async () => {
+  const f = fixture(); delete f.tags.latest;
+  await promoteImagePair(f, candidate()); assert.deepEqual(f.tags.latest, next);
+});
+
+test("invalid versions and digests fail before registry writes", async () => {
+  for (const patch of [{ version: "latest" }, { version: "../bad" }, { digests: { api: "bad", web: next.web } }]) {
+    const f = fixture(); await assert.rejects(promoteImagePair(f, { ...candidate(), ...patch })); assert.equal(f.writes, 0);
+  }
 });

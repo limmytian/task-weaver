@@ -85,40 +85,32 @@ Prerelease npm packages use the `next` dist-tag; stable packages use `latest`.
 GitHub distributes the five npm tarballs as release assets. Public npm-registry
 publication is a separate decision and is not performed by this workflow.
 
-## Image promotion journal
+## Version and latest image tags
 
-Both main CI and the formal release job use the same non-cancelling Actions
-concurrency group and the protected `refs/heads/image-promotion-journal` Git ref.
+Main CI and the formal release job use the same non-cancelling Actions
+concurrency group. After scanning and signing, each workflow assigns the
+version tag and `latest` to the same verified digest for each application,
+then reads all four registry references and checks them against those digests.
+No promotion journal, bootstrap branch, or dedicated GitHub App is required;
+the workflows use their existing GitHub Actions credentials.
+
 Main builds use a version containing the source version, Actions run ID and
 attempt; formal releases use the exact release version. Prereleases also move
-`latest`. Thus `latest` may be newer than the latest formal stable release. API
-and Web are distinct images: compare each application's version tag with its
-own `latest` digest, and use both digests as a pair.
+`latest`, so it may be newer than the latest formal stable release. An existing
+version tag is accepted only when it already points to the requested digest.
+Both applications are checked for version conflicts before any tag is written.
 
-Before enabling these workflows, a maintainer must initialize the journal ref
-with a reviewed `journal.json` whose `schemaVersion` is `1`, `pending` is null,
-and `committed` contains the verified prior pair's `version`, source `commit`,
-`digests` (`api` and `web`), and the originating Actions `order` (`createdAt`,
-decimal `runId`, and positive integer `attempt`). Confirm that both live
-`latest` tags resolve to that exact signed and reviewed pair; do not infer a
-baseline from two unrelated tags. If a trustworthy pair or ordering cannot be
-established, resolve that discrepancy as a separate reviewed operation first.
-Protect the journal ref and registry packages so that only the authorized
-promotion workflow can write them, and permit its GitHub token to update the
-ref. Branch protection, registry access and initialization are operator-owned
-preconditions; the workflow fails closed if the journal is missing or cannot be
-updated. A workflow concurrency group cannot fence external registry writers.
-
-The journal records a pending intent before changing the version or latest
-tags. Because API and Web are separate repositories, those writes are not
-atomic. If a run fails or its result is uncertain, retain the journal and the
-candidate tags. The next authorized run first reconciles the exact pending pair,
-verifies all four tags, and commits the journal; unexpected tag changes or an
-immutable conflict stop it for operator investigation. Never manually overwrite
-an immutable version or start another publisher outside the common lock. A
-completed formal image promotion can be retried only for the same source and
-exact image digests. Retain the workflow, scan, signature and journal records
-with the release evidence.
+API and Web are separate images, and registry tag writes are not atomic. A
+failure can leave a partially updated pair. Preserve the verified candidate
+digests and rerun the tagging operation with the same version and digests;
+do not rebuild or overwrite a conflicting version. The shared concurrency group
+serializes participating jobs but does not guarantee FIFO ordering or fence
+manual writers. `latest` identifies the last completed promotion, not necessarily
+the newest source commit. Review older reruns before allowing them to move it.
+Limit package write access to the release repository and trusted maintainers,
+and protect changes to publishing workflows. GitHub Packages grants Actions
+access per repository, rather than per workflow. Retain workflow, scan,
+signature, and final digest records with the release evidence.
 
 ## Verify and retain artifacts
 

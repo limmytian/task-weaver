@@ -11,11 +11,9 @@ test("CLI validates GitHub run identity before moving verified tags", () => {
   const root = mkdtempSync(join(tmpdir(), "tw-promotion-cli-"));
   const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim();
   try {
-    git(root, "init", "-q", "--bare", "remote.git"); git(root, "init", "-q", "work"); const cwd = join(root, "work");
-    git(cwd, "config", "user.name", "Fixture"); git(cwd, "config", "user.email", "fixture@example.invalid"); git(cwd, "remote", "add", "origin", join(root, "remote.git"));
+    git(root, "init", "-q", "work"); const cwd = join(root, "work");
+    git(cwd, "config", "user.name", "Fixture"); git(cwd, "config", "user.email", "fixture@example.invalid");
     writeFileSync(join(cwd, "source"), "source"); git(cwd, "add", "source"); git(cwd, "commit", "-qm", "Source"); const commit = git(cwd, "rev-parse", "HEAD");
-    const initial = { schemaVersion: 1, committed: { version: "0.3.16", commit: "a".repeat(40), order: { createdAt: "2026-10-28T01:00:00Z", runId: "1", attempt: 1 }, digests: { api: digest("a"), web: digest("b") } }, pending: null };
-    writeFileSync(join(cwd, "journal.json"), JSON.stringify(initial)); git(cwd, "add", "journal.json"); git(cwd, "commit", "-qm", "Journal"); git(cwd, "push", "-q", "origin", "HEAD:refs/heads/image-promotion-journal"); git(cwd, "reset", "--hard", commit);
     const bin = join(root, "bin"); mkdirSync(bin); const registry = join(root, "registry.json");
     writeFileSync(registry, JSON.stringify({ "api:latest": digest("a"), "web:latest": digest("b") }));
     writeFileSync(join(bin, "docker"), `#!/usr/bin/env node\nconst fs=require('fs'),p=process.env.TW_TEST_REGISTRY,db=JSON.parse(fs.readFileSync(p)),a=process.argv.slice(2);const key=x=>{const m=x.match(/-((?:api|web)):(.+)$/);return m&&m[1]+':'+m[2]};if(a[2]==='inspect'){const k=key(a[3]);if(!db[k]){console.error('manifest unknown');process.exit(1)}console.log(JSON.stringify({digest:db[k]}))}else if(a[2]==='create'){db[key(a[5])]=a[6].split('@')[1];fs.writeFileSync(p,JSON.stringify(db))}else process.exit(2);\n`, { mode: 0o755 });

@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createImagePromotionAdapter } from "./image-promotion-adapter.mjs";
-import { promoteImagePair, reconcileImagePromotion } from "./image-promotion-orchestrator.mjs";
+import { promoteImagePair } from "./image-promotion-orchestrator.mjs";
 import { promotionIdentity } from "./image-promotion-identity.mjs";
 
 const [mode, ...args] = process.argv.slice(2);
-assert.ok(["recover", "main", "release"].includes(mode), "Expected recover, main, or release");
-assert.equal(args.length, mode === "recover" ? 1 : 3);
+assert.ok(["main", "release"].includes(mode), "Expected main or release");
+assert.equal(args.length, 3);
 const [version, apiDigest, webDigest] = args;
 const repository = process.env.GITHUB_REPOSITORY?.toLowerCase();
 assert.match(repository ?? "", /^[a-z0-9][a-z0-9_.-]*\/[a-z0-9][a-z0-9_.-]*$/);
@@ -32,14 +32,5 @@ if (mode === "release") {
 const run = JSON.parse(execFileSync("gh", ["api", `repos/${repository}/actions/runs/${runId}`], { encoding: "utf8", maxBuffer: 1024 * 1024 }));
 const identity = promotionIdentity(run, { repository, runId, attempt, kind: mode === "main" ? "main" : "release", commit, version });
 const adapter = createImagePromotionAdapter({ repository });
-const snapshot = await adapter.readJournal();
-if (snapshot.state.pending) {
-  console.log("Reconciling the previously prepared image pair");
-  await reconcileImagePromotion(adapter, snapshot);
-}
-if (mode === "recover") {
-  console.log("Promotion journal has no pending operation");
-} else {
-  const result = await promoteImagePair(adapter, { ...identity, digests: { api: apiDigest, web: webDigest } });
-  console.log(`Verified image pair ${result.state.committed.version} at ${result.revision}`);
-}
+const result = await promoteImagePair(adapter, { ...identity, digests: { api: apiDigest, web: webDigest } });
+console.log(`Verified version and latest image tags for ${result.version}: ${JSON.stringify(result.digests)}`);

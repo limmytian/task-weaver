@@ -19,9 +19,7 @@ export function promotionIdentity(run, { repository, runId, attempt, kind, commi
     assert.equal(run.path, ".github/workflows/ce-release.yml", "Unexpected workflow");
     assert.equal(run.event, "workflow_dispatch");
   }
-  assert.match(run.created_at ?? "", /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
-  assert.equal(new Date(run.created_at).toISOString(), run.created_at.replace("Z", ".000Z"));
   const imageVersion = kind === "main" ? `${version}-main.${runId}.${attempt}` : version;
   assert.ok(imageVersion.length <= 128, "Version tag exceeds OCI limits");
-  return { version: imageVersion, commit, order: { createdAt: run.created_at, runId, attempt } };
+  return { version: imageVersion, commit };
 }
