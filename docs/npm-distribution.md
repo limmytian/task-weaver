@@ -4,7 +4,7 @@ Install the published CLI from the public npm registry (Node.js 20 or newer).
 A source checkout is only needed for development.
 
 ```bash
-npm install --global @task-weaver/cli --registry=https://registry.npmjs.org
+npm install --global @task-weaver/cli
 tw --version
 tw auth login --api-url http://localhost:3001
 tw auth whoami --json
@@ -18,7 +18,7 @@ To pin an immutable release, append `@<version>` to the package name. To update,
 repeat the installation command. For a one-off command:
 
 ```bash
-npx --registry=https://registry.npmjs.org --package @task-weaver/cli tw --help
+npx --package @task-weaver/cli tw --help
 ```
 
 ## Release workflow

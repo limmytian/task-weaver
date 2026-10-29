@@ -98,7 +98,7 @@ With Node.js 20 or newer, install the CLI from the public npm registry and conne
 to the running local API:
 
 ```sh
-npm install --global @task-weaver/cli --registry=https://registry.npmjs.org
+npm install --global @task-weaver/cli
 tw --version
 tw auth login --api-url http://localhost:3001
 tw auth whoami --json

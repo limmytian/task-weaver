@@ -378,7 +378,7 @@ is required. Set the API origin to your Task Weaver instance and enter a scoped
 Key through the hidden login prompt.
 
 ```bash
-npm install --global @task-weaver/cli --registry=https://registry.npmjs.org
+npm install --global @task-weaver/cli
 tw --version
 
 # First-time setup

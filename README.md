@@ -172,7 +172,7 @@ See [Contributing](CONTRIBUTING.md) for development and contribution guidelines.
 Install the published CLI from the public npm registry (Node.js 20 or newer):
 
 ```bash
-npm install --global @task-weaver/cli --registry=https://registry.npmjs.org
+npm install --global @task-weaver/cli
 tw --version
 tw auth login --api-url http://localhost:3001
 tw auth whoami --json
@@ -184,7 +184,7 @@ to a remote instance. Create a scoped Key in the Web UI and enter it through the
 login command's hidden prompt. No source checkout is needed. For a one-off run:
 
 ```bash
-npx --registry=https://registry.npmjs.org --package @task-weaver/cli tw --help
+npx --package @task-weaver/cli tw --help
 ```
 
 Contributors can run the CLI directly from an installed source checkout:
