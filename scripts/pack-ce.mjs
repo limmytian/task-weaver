@@ -53,7 +53,7 @@ export function releasePackageJson(original, version) {
   };
 }
 
-function rewriteRelativeImports(contents, filePath) {
+export function rewriteRelativeImports(contents, filePath) {
   return contents.replace(/(\b(?:from\s+|import\s*\(|import\s+|export\s+[^;]*?from\s+)["'])(\.{1,2}\/[^"']+)(["'])/g,
     (_match, prefix, specifier, quote) => {
       if (/\.(?:js|json|node)$/.test(specifier)) return `${prefix}${specifier}${quote}`;

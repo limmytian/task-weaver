@@ -24,6 +24,7 @@
     "db:push": "turbo db:push",
     "db:migrate": "turbo db:migrate",
     "release:pack-ce": "node scripts/pack-ce.mjs",
+    "release:pack-cli": "node scripts/pack-cli.mjs",
     "release:notes": "node scripts/ce-release-notes.mjs",
     "release:assemble-ce": "node scripts/assemble-ce-release.mjs",
     "release:finalize-ce": "node scripts/finalize-ce-release.mjs",
