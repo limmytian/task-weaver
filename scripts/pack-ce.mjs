@@ -45,6 +45,7 @@ export function releasePackageJson(original, version) {
     version,
     type: "module",
     license: "Apache-2.0",
+    repository: { type: "git", url: "git+https://github.com/limmytian/task-weaver.git", directory: `packages/${original.name.slice("@task-weaver/".length)}` },
     exports,
     dependencies,
     files: ["dist", "drizzle", "LICENSE", "THIRD_PARTY_NOTICES.md"],

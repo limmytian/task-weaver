@@ -189,8 +189,9 @@ tw auth status
 The CLI defaults to `http://localhost:3001`. `TW_API_URL` and `TW_API_KEY` may
 override its saved configuration. Project tasks require a requirement; claim a
 task before starting work and release the claim when finished. Add `--json` for
-machine-readable output. npm package publication is not supported yet; use the
-checkout instructions above.
+machine-readable output. npm packages are not published yet; use the checkout
+instructions above. See the [npm distribution plan](docs/npm-distribution.md)
+for the release workflow and future installation commands.
 
 ## Documentation and community
 

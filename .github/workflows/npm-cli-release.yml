@@ -1,0 +1,77 @@
+name: Prepare and publish npm CLI packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version declared in the checked-out source
+        required: true
+        type: string
+      publish:
+        description: Publish the verified artifacts after npm-release environment approval
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-cli-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      TURBO_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Build and validate package artifacts
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+          node --test scripts/pack-cli.test.mjs scripts/publish-cli-npm.test.mjs
+          pnpm release:pack-cli "$VERSION" release-artifacts/cli-npm
+          pnpm release:publish-cli "$VERSION" release-artifacts/cli-npm --dry-run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-npm-artifacts
+          path: release-artifacts/cli-npm/
+          if-no-files-found: error
+
+  publish:
+    if: inputs.publish == true
+    needs: prepare
+    runs-on: ubuntu-latest
+    environment: npm-release
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-npm-artifacts
+          path: release-artifacts/cli-npm
+      - name: Publish approved immutable release artifacts
+        env:
+          VERSION: ${{ inputs.version }}
+          TW_NPM_PUBLISH_AUTHORIZED: "1"
+        run: node scripts/publish-cli-npm.mjs "$VERSION" release-artifacts/cli-npm --execute
