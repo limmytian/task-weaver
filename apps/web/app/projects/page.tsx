@@ -1,4 +1,5 @@
 "use client";
+import { FirstSuccessStart } from "@/components/first-success-guide";
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
@@ -133,6 +134,7 @@ export default function ProjectsPage() {
       </header>
 
       <div className="space-y-4 p-3 sm:p-4 md:p-6">
+        <FirstSuccessStart />
         <div className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
           <Metric label={statusFilter === "active" ? "Active projects" : "Archived projects"} value={totals.projectCount} />
           <Metric label="Pinned" value={totals.pinnedCount} muted={pinnedOnly} />

@@ -37,7 +37,7 @@ export function RequirementWorkflowPanel({ requirement }: { requirement: Workflo
   const [checks, setChecks] = useState<Record<string, ReviewCheckStatus | undefined>>({});
   const [outputValue, setOutputValue] = useState("");
   const [inputId, setInputId] = useState("");
-  const refresh = () => { void utils.requirement.get.invalidate({ id: requirement.id }); void utils.requirement.recoveryState.invalidate({ id: requirement.id }); };
+  const refresh = () => { void utils.attention.list.invalidate(); void utils.requirement.get.invalidate({ id: requirement.id }); void utils.requirement.recoveryState.invalidate({ id: requirement.id }); };
   const update = trpc.requirement.update.useMutation({ onSuccess: () => { refresh(); setEditing(false); toast.success("Workflow updated"); }, onError: (error) => toast.error(error.message) });
   const advance = trpc.requirement.advanceWorkflowStage.useMutation({ onSuccess: () => { refresh(); setReason(""); setChecks({}); toast.success("Stage updated"); }, onError: (error) => toast.error(error.message) });
   const registerOutput = trpc.requirement.registerWorkflowOutput.useMutation({ onSuccess: () => { refresh(); setOutputValue(""); toast.success("Output registered"); }, onError: (error) => toast.error(error.message) });

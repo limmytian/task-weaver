@@ -185,7 +185,7 @@ export default function ProjectDetailPage({
               </p>
             )}
           </div>
-          <ProjectWorkspaceLinks projectId={id} active="workspace" className="w-full sm:w-auto" />
+          <div className="flex flex-wrap items-center gap-3"><Link className="text-sm underline" href={`/projects/${id}/first-success`}>First success guide</Link><ProjectWorkspaceLinks projectId={id} active="workspace" className="w-full sm:w-auto" /></div>
         </div>
       </header>
 

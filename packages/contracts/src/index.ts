@@ -16,3 +16,7 @@ export * from "./schemas/recovery-view";
 export * from "./schemas/capability-readiness";
 export * from "./schemas/capability-evidence-view";
 export * from './evidence-preview';
+
+export * from "./schemas/attention";
+
+export * from "./schemas/first-success";

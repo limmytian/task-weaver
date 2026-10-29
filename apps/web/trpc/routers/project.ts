@@ -8,6 +8,11 @@ import {
 } from "@task-weaver/core";
 
 export const projectRouter = router({
+  listSummary: resourceProcedure.input(listProjectsSchema.extend({ view: z.literal("summary").default("summary") }))
+    .query(async ({ ctx, input }) => {
+      const result = await createResourceServices(ctx.identity).projectService.listProjects(ctx.db, input);
+      return z.object({ items: z.array(z.object({ id: z.string().uuid(), name: z.string() })), pageCount: z.number(), total: z.number() }).parse(result);
+    }),
   list: resourceProcedure
     .input(listProjectsSchema.optional())
     .query(async ({ ctx, input }) => {

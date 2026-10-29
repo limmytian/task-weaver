@@ -2,6 +2,7 @@ export interface NavigationItem { id: string; label: string; href: `/${string}`;
 export interface SettingsItem { id: string; href: `/${string}`; title: string; description: string; icon?: string }
 export const navigation: readonly NavigationItem[] = [
       { id: "projects", label: "Projects", href: "/projects", icon: "layout" },
+      { id: "attention", label: "Needs attention", href: "/projects/attention", icon: "inbox" },
       { id: "personal", label: "Personal", href: "/projects/personal", icon: "inbox" },
       { id: "documents", label: "Documents", href: "/projects/documents", icon: "document" },
       { id: "repositories", label: "Repositories", href: "/projects/repositories", icon: "repository" },
