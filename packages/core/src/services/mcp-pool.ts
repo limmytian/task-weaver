@@ -54,7 +54,7 @@ class McpConnectionPool {
       const client = new Client({ name: "task-weaver-proxy", version: APPLICATION_VERSION });
       const transport = await this.createTransport(server);
       try { await client.connect(transport, { timeout: 10000 }); }
-      catch { this.backoff.failed(key); await transport.close(); throw new Error("MCP server initialization failed"); }
+      catch (cause) { this.backoff.failed(key); await transport.close(); throw new Error("MCP server initialization failed", { cause }); }
       if (state.cancelled) { await client.close(); throw new Error("MCP connection was cancelled"); }
       const onclose = client.onclose;
       client.onclose = () => { if (this.connections.get(key)?.client === client) { this.connections.delete(key); this.backoff.failed(key); } onclose?.(); };

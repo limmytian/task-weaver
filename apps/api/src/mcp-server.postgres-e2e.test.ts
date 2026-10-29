@@ -700,7 +700,20 @@ test("MCP transports use live scoped authority and preserve collaboration guards
       throw new Error(`Hosted fixture launch failed (${failure.code ?? "unknown"}): ${(failure.stderr ?? "No stderr").slice(0, 2000).replaceAll("fixture-private-token", "[redacted]")}`);
     });
     assert.equal(hostedProbe.stdout, "");
-    const hostedTools = await registryService.syncTools(db, hostedServer.id, mcpPool);
+    const hostedTools = await registryService.syncTools(db, hostedServer.id, mcpPool).catch(error => {
+      const codes: Array<string | number> = [];
+      let current: unknown = error;
+      for (let depth = 0; depth < 5 && current && typeof current === "object"; depth++) {
+        const failure = current as { code?: unknown; cause?: unknown; message?: unknown };
+        if (typeof failure.code === "number") codes.push(failure.code);
+        if (typeof failure.message === "string") {
+          for (const label of ["Request timed out", "Connection closed", "Unsupported protocol version", "Invalid JSON"]) if (failure.message.includes(label)) codes.push(label);
+        }
+        current = failure.cause;
+      }
+      t.diagnostic(`Hosted MCP protocol failure categories: ${JSON.stringify(codes)}`);
+      throw error;
+    });
     assert.equal(hostedTools[0]!.name, "hosted_echo");
     const hostedDetail = await registryCall("tw_mcp_tool", { toolId: hostedTools[0]!.id });
     const hostedReadiness = await registryCall("tw_mcp_readiness", { serverId: hostedServer.id });
