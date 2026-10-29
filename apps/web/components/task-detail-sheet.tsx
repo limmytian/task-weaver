@@ -31,7 +31,7 @@ import { TaskRepositoryScope } from "@/components/repository-links";
 import { resourceAccessLost } from "@/lib/resource-access";
 import { requirementWorkflowSchema } from "@task-weaver/contracts";
 import { latestRequirementReviewChecks, type ReviewCheckRecord } from "@/lib/review-checks";
-import { reviewTextPreview } from "@/lib/review-summary";
+import { reviewRunText, reviewTextPreview } from "@/lib/review-summary";
 
 function subscribeOnlineStatus(callback: () => void) {
   window.addEventListener("online", callback);
@@ -170,7 +170,7 @@ export function TaskDetailSheet({
           <SheetHeader className="sr-only">
             <SheetTitle>Task Details</SheetTitle>
           </SheetHeader>
-          <div className="flex h-40 items-center justify-center">
+          <div className="flex min-h-48 items-center justify-center pt-12">
             {taskQuery.isError || !online ? (
               <div role="alert" className="space-y-3 px-4 text-center">
                 <p>{online ? "Task information is unavailable or access is denied. Check your connection and permissions before reviewing." : "You are offline. Reconnect to load task information before reviewing."}</p>
@@ -405,7 +405,7 @@ export function TaskDetailSheet({
             });
             const checkSummary = latestRequirementReviewChecks(requiredChecks, reviewHistory);
             const latestRun = runs.data?.[0];
-            const runOutput = latestRun?.errorMessage || latestRun?.outputSummary || "No run result recorded.";
+            const runOutput = reviewRunText(latestRun?.status ?? "", latestRun?.outputSummary);
             const runOutputPreview = reviewTextPreview(runOutput, latestRun?.id === expandedRunOutputId);
             const commentPreview = latest ? reviewTextPreview(latest.content, latest.id === expandedCommentId) : null;
             return <section aria-labelledby="task-review-heading" className="mb-5 space-y-3 rounded-lg border p-3 text-sm">
