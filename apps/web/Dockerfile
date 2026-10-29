@@ -1,4 +1,10 @@
+FROM node:24.22.2-alpine3.23@sha256:9b69af715c7f9d038150b54ccccbaeffa9064bbc93e2904c29591ca097316af1 AS patched-node
+
 FROM node:24.21.0-alpine3.23@sha256:9ec4a2e289874ed0d722e1772ec2de45d2801541db8612f3638b26f128c69ac2 AS installer
+# Preserve the reviewed Alpine package baseline while updating the Node runtime.
+COPY --from=patched-node /usr/local/bin/node /usr/local/bin/node
+COPY --from=patched-node /usr/local/include/node /usr/local/include/node
+COPY THIRD_PARTY_LICENSES/Node-24.22.2-LICENSE.txt /usr/local/LICENSE
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
 ENV npm_config_store_dir=/pnpm/store
@@ -11,6 +17,10 @@ RUN --mount=type=cache,id=tw-public-pnpm,target=/pnpm/store,sharing=locked \
 
 # Production runner
 FROM node:24.21.0-alpine3.23@sha256:9ec4a2e289874ed0d722e1772ec2de45d2801541db8612f3638b26f128c69ac2 AS runtime-base
+# Preserve the reviewed Alpine package baseline while updating the Node runtime.
+COPY --from=patched-node /usr/local/bin/node /usr/local/bin/node
+COPY --from=patched-node /usr/local/include/node /usr/local/include/node
+COPY THIRD_PARTY_LICENSES/Node-24.22.2-LICENSE.txt /usr/local/LICENSE
 USER root
 # Retain trust roots, then remove the OS package manager and its unused libraries.
 RUN apk add --no-cache ca-certificates-bundle musl=1.2.5-r24 musl-utils=1.2.5-r24 && apk del apk-tools

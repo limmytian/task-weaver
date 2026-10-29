@@ -79,7 +79,7 @@ const inspect = () => {
       actualPackageChecksum: `Q1${crypto.createHash("sha1").update(bytes).digest("base64")}`,
       sha256: hash(bytes) };
   }
-  const nodeLicensePath = ["/usr/local/LICENSE", "/app/THIRD_PARTY_LICENSES/Node-24.21.0-LICENSE.txt"].find((path) => fs.existsSync(path));
+  const nodeLicensePath = ["/usr/local/LICENSE", "/app/THIRD_PARTY_LICENSES/Node-24.22.2-LICENSE.txt"].find((path) => fs.existsSync(path));
   const dependencyTextsPath = "/app/release-artifacts/dependency-license-texts.txt";
   const dependencyTexts = fs.existsSync(dependencyTextsPath) ? fs.readFileSync(dependencyTextsPath, "utf8") : "";
   const notices = "/app/THIRD_PARTY_LICENSES/sharp-libvips-1.3.4-NOTICES.md";
