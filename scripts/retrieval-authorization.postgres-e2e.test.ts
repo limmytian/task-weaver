@@ -94,6 +94,8 @@ test("retrieval authorization filters before ranking, aggregates and relation ex
     const memory = await owner.service.memoryService.recordMemory(db, { title: "needle memory", content: "Visible", projectId: project.id, entityType: "task", entityId: task.id, expiresAt: new Date(Date.now() + 60000) }, owner.actor);
     const found = await member.service.memoryService.searchMemories(db, { query: "needle", projectId: project.id, includeGlobal: false, includeExpired: false, limit: 1 });
     assert.deepEqual(found.map((row: any) => row.id), [memory.id]);
+    const intent = await member.service.memoryService.searchMemories(db, { query: "find needle memory current handoff", projectId: project.id, includeGlobal: false, includeExpired: false, limit: 10 });
+    assert.deepEqual(intent.map((row: any) => row.id), [memory.id]);
     assert.equal((await owner.service.memoryService.getMemory(db, memory.id)).expiresAt.getTime(), memory.expiresAt.getTime());
   });
   await t.test("graphs, boards and statistics use scoped nodes and both visible endpoints", async () => {
@@ -124,6 +126,9 @@ test("retrieval authorization filters before ranking, aggregates and relation ex
     assert.ok(!result.recommendations.some((row: any) => row.id === personal.id || row.id === hiddenDoc.id));
     const skills = await member.service.contextService.searchContext(db, { intent: "needle", projectId: project.id, mode: "full", includeGlobal: false, limit: 1 });
     assert.deepEqual(skills.map((row: any) => row.id), [doc.id]);
+    const intentSkills = await member.service.contextService.searchContext(db, { intent: "retrieval needle guidance missing", projectId: project.id, mode: "full", includeGlobal: false, limit: 10 });
+    assert.ok(intentSkills.some((row: any) => row.id === doc.id));
+    assert.ok(!intentSkills.some((row: any) => row.id === hiddenDoc.id));
     const listing = await owner.service.contextService.listSkills(db, { allProjects: true, includeGlobal: false });
     assert.ok(!listing.some((row: any) => row.id === hiddenDoc.id));
   });
