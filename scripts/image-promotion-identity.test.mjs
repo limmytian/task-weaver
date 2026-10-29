@@ -20,7 +20,8 @@ test("both publisher workflows share a lock and promote only after their gates",
   const release = readFileSync(".github/workflows/ce-release.yml", "utf8");
   assert.match(main, /group: task-weaver-image-promotion/);
   assert.match(release, /group: task-weaver-image-promotion/);
-  assert.match(main, /candidate-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/);
+  assert.match(main, /candidate-\$\{GITHUB_RUN_ID\}-\$\{GITHUB_RUN_ATTEMPT\}/);
+  assert.ok(main.indexOf("Verify BusyBox request controls") < main.indexOf("Sign the Web candidate"));
   assert.ok(main.indexOf("Sign the Web candidate") < main.indexOf("promote-image-pair.mjs main"));
   assert.ok(release.indexOf("ce-consumption") < release.indexOf("publish-ce-oci.mjs"));
   assert.ok(release.indexOf("publish-ce-oci.mjs") < release.indexOf("promote-image-pair.mjs release"));

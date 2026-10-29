@@ -81,7 +81,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [source-validation, supply-chain]
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     permissions:
       actions: read
       contents: read
@@ -100,31 +100,40 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - uses: anchore/sbom-action/download-syft@v0
+        id: syft
       - uses: anchore/scan-action/download-grype@v7.4.0
-      - name: Build and publish the main API image candidate
+        id: grype
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Expose installed scanner tools
+        env:
+          SYFT_COMMAND: ${{ steps.syft.outputs.cmd }}
+          GRYPE_COMMAND: ${{ steps.grype.outputs.cmd }}
+        run: |
+          printf '%s\n' "$(dirname "$SYFT_COMMAND")" "$(dirname "$GRYPE_COMMAND")" >> "$GITHUB_PATH"
+      - name: Prepare patched multi-platform image candidates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pnpm install --frozen-lockfile
+          node scripts/prepare-main-image-candidates.mjs
+      - name: Read the API candidate digest
         id: api
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: apps/api/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ghcr.io/${{ github.repository }}-api:candidate-${{ github.run_id }}-${{ github.run_attempt }}
-          build-args: TW_BUILD_COMMIT=${{ github.sha }}
-          provenance: mode=max
-          sbom: true
-      - name: Build and publish the main Web image candidate
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY}-api:candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          digest=$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' | jq -r .digest)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Read the Web candidate digest
         id: web
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: apps/web/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ghcr.io/${{ github.repository }}-web:candidate-${{ github.run_id }}-${{ github.run_attempt }}
-          build-args: TW_BUILD_COMMIT=${{ github.sha }}
-          provenance: mode=max
-          sbom: true
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY}-web:candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          digest=$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' | jq -r .digest)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Scan the API candidate
         uses: anchore/scan-action@v7.4.0
         with:
@@ -141,6 +150,19 @@ jobs:
           severity-cutoff: high
           output-format: json
           output-file: web-vulnerabilities.json
+      - name: Verify BusyBox request controls on each published platform
+        env:
+          API_DIGEST: ${{ steps.api.outputs.digest }}
+          WEB_DIGEST: ${{ steps.web.outputs.digest }}
+        run: |
+          for platform in linux/amd64 linux/arm64; do
+            for app in api web; do
+              if [ "$app" = api ]; then digest="$API_DIGEST"; else digest="$WEB_DIGEST"; fi
+              image="ghcr.io/${GITHUB_REPOSITORY}-${app}@${digest}"
+              docker pull --platform "$platform" "$image"
+              node scripts/verify-busybox-wget.mjs "$image" "$platform"
+            done
+          done
       - uses: sigstore/cosign-installer@v4.0.0
       - name: Sign the API candidate
         env:
@@ -158,3 +180,14 @@ jobs:
         run: |
           VERSION=$(node -p 'require("./packages/contracts/package.json").version')
           node scripts/promote-image-pair.mjs main "$VERSION" "$API_DIGEST" "$WEB_DIGEST"
+      - name: Retain patched candidate source and build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: main-image-candidate-evidence
+          path: |
+            release-artifacts/main-candidates/
+            release-artifacts/busybox-wget/
+            api-vulnerabilities.json
+            web-vulnerabilities.json
+          if-no-files-found: warn
