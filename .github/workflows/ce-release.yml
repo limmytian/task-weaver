@@ -11,6 +11,14 @@ on:
         description: Reviewed public Actions run containing the ce-binary-candidate artifact
         required: true
         type: string
+      recovery_api_digest:
+        description: Existing signed API index digest; set with Web digest to recover files without registry writes
+        required: false
+        type: string
+      recovery_web_digest:
+        description: Existing signed Web index digest for file-only recovery
+        required: false
+        type: string
       previous_tag:
         description: Previous immutable tag, empty for the first package release
         required: false
@@ -42,6 +50,20 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]
+      - name: Check recovery inputs
+        env:
+          API_DIGEST: ${{ inputs.recovery_api_digest }}
+          WEB_DIGEST: ${{ inputs.recovery_web_digest }}
+        run: |
+          if [ -n "$API_DIGEST$WEB_DIGEST" ]; then
+            [[ "$API_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+            [[ "$WEB_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          fi
+      - uses: actions/checkout@v4
+        if: inputs.recovery_api_digest != ''
+      - name: Preserve reviewed recovery helper
+        if: inputs.recovery_api_digest != ''
+        run: cp scripts/recover-ce-oci.mjs "$RUNNER_TEMP/recover-ce-oci.mjs"
       - uses: actions/checkout@v4
         with:
           ref: v${{ inputs.version }}
@@ -139,12 +161,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - uses: docker/setup-buildx-action@v3
+      - name: Recover evidence for existing signed indexes without registry writes
+        if: inputs.recovery_api_digest != ''
+        env:
+          VERSION: ${{ inputs.version }}
+          REPOSITORY: ${{ github.repository }}
+          API_DIGEST: ${{ inputs.recovery_api_digest }}
+          WEB_DIGEST: ${{ inputs.recovery_web_digest }}
+        run: node "$RUNNER_TEMP/recover-ce-oci.mjs" "$VERSION" "$REPOSITORY" "$API_DIGEST" "$WEB_DIGEST"
       - name: Promote and sign reviewed platform images and OCI indexes
+        if: inputs.recovery_api_digest == ''
         env:
           VERSION: ${{ inputs.version }}
           REPOSITORY: ${{ github.repository }}
         run: node scripts/publish-ce-oci.mjs "$VERSION" "$REPOSITORY"
       - name: Promote version and latest from the signed indexes
+        if: inputs.recovery_api_digest == ''
         env:
           VERSION: ${{ inputs.version }}
         run: |
@@ -155,7 +187,14 @@ jobs:
         run: |
           pnpm release:finalize-ce
           for asset in release-artifacts/bundle/*; do
-            cosign sign-blob --yes --bundle "${asset}.sigstore.json" "$asset"
+            for attempt in 1 2 3; do
+              if cosign sign-blob --yes --bundle "${asset}.sigstore.json" "$asset"; then break; fi
+              if [ "$attempt" = 3 ]; then exit 1; fi
+              sleep 5
+            done
+            cosign verify-blob --bundle "${asset}.sigstore.json" \
+              --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/ce-release.yml@${GITHUB_REF}" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com "$asset"
           done
       - name: Create public release from reviewed artifacts
         env:
