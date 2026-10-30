@@ -299,7 +299,7 @@ export const reconcileHumanDirectRepositoryDeliverySchema = z.object({
   commit: z.string().regex(/^[a-f0-9]{40,64}$/).transform(value => value.toLowerCase()),
 }).strict();
 export const reconcileHumanRepositoryDeliverySchema = z.union([
-  z.object({ ...humanReconciliationFields, pullRequestUrl: z.string().url().max(2048) }).strict(),
+  z.object({ ...humanReconciliationFields, pullRequestUrl: z.string().url().max(2048), expectedHeadCommit: z.string().regex(/^[a-f0-9]{40,64}$/).optional() }).strict(),
   reconcileHumanDirectRepositoryDeliverySchema,
 ]);
 export type ReconcileHumanDirectRepositoryDeliveryInput = z.infer<typeof reconcileHumanDirectRepositoryDeliverySchema>;

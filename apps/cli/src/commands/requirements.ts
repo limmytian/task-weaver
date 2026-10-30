@@ -555,6 +555,7 @@ export function registerRequirements(program: Command): void {
     })
 
   repo.command('sync-pr <linkId>').description('register or synchronize a pull request using trusted server verification (human only)')
+    .option('--expected-head <sha>', 'explicitly confirm the current provider head before pending delivery reconciliation')
     .requiredOption('--url <url>', 'pull request URL for the linked repository')
     .requiredOption('--reason <text>', 'audited reason for reconciliation')
     .requiredOption('--revision <number>', 'current externalSyncRevision')
@@ -563,7 +564,7 @@ export function registerRequirements(program: Command): void {
     .option('--json', 'output raw JSON')
     .action(async (linkId, opts) => {
       const data = await post(`/api/v1/requirement-repositories/${linkId}/human-sync`, reconcileHumanRepositoryDeliverySchema.parse({
-        pullRequestUrl: opts.url, reason: opts.reason, expectedRevision: Number(opts.revision),
+        pullRequestUrl: opts.url, expectedHeadCommit: opts.expectedHead, reason: opts.reason, expectedRevision: Number(opts.revision),
         expectedUpdatedAt: opts.updatedAt, idempotencyKey: opts.requestId,
       }))
       if (opts.json) return printJson(data)

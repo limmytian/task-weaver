@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
-import { createDb, runMigrations, activityLog, requirements } from "@task-weaver/db";
+import { createDb, runMigrations, activityLog, requirements, reviewRuns } from "@task-weaver/db";
 import { eq } from "drizzle-orm";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 const databaseUrl = process.env.TW_HUMAN_DELIVERY_E2E_DATABASE_URL;
@@ -86,6 +86,42 @@ test("human PR reconciliation verifies server evidence, authority, leases, retri
     if (stage === "integration") assert.equal(advanced.status, "done");
   }
   assert.equal((await api(`/requirement-repositories/${current.id}/forge-sync`, "POST", { snapshot: row })).status, 400);
+  // An explicit current head can reconcile a pending delivery without inventing acceptance.
+  const changed = await create({ delivery: { method: "git_branch" }, acceptance: { mode: "manual" }, integration: { mode: "manual", method: "git_provider" } });
+  current = changed.link;
+  row.state = "open"; row.merged = false; row.merged_at = null; row.merge_commit_sha = null;
+  current = (await json(await sync())).link;
+  row.head.sha = "d".repeat(40);
+  assert.equal((await sync()).status, 409);
+  assert.equal((await sync({ ...input(), expectedHeadCommit: "e".repeat(40) } as any)).status, 409);
+  for (const status of ["running", "approved"] as const) {
+    const [review] = await db.insert(reviewRuns).values({ requirementId: changed.r.id, requirementRepositoryId: current.id, attempt: status === "running" ? 1 : 2, headCommit: "a".repeat(40), baseCommit: "b".repeat(40), status, reviewerActorId: f.owner.context.actor.id, reviewerActorType: "human" }).returning();
+    assert.equal((await sync({ ...input(), expectedHeadCommit: row.head.sha } as any)).status, 400, "Head reconciliation cannot carry active or approved review evidence");
+    await db.update(reviewRuns).set({ status: "superseded" }).where(eq(reviewRuns.id, review!.id));
+  }
+  const confirmedRequest = { ...input(), expectedHeadCommit: row.head.sha };
+  current = (await json(await sync(confirmedRequest))).link;
+  assert.equal(current.headCommit, row.head.sha); assert.equal(current.pushedCommit, row.head.sha);
+  assert.equal(current.reviewStatus, "pending"); assert.equal(current.reviewerActorId, null);
+  assert.equal((await json(await sync(confirmedRequest))).idempotent, true);
+  assert.equal((await sync({ ...confirmedRequest, expectedHeadCommit: "e".repeat(40) } as any)).status, 409);
+  const pending = await json(await api(`/requirements/${changed.r.id}`));
+  assert.deepEqual(pending.workflowState, { delivery: "pending", acceptance: "pending", integration: "pending" });
+  assert.ok(pending.workflowOutputs.some((output: any) => output.headCommit === row.head.sha));
+  await json(await api(`/requirements/${changed.r.id}/workflow-advance`, "POST", { stage: "delivery", expectedRevision: pending.workflowStateRevision, reason: "Verified current delivery" }));
+  row.head.sha = "e".repeat(40);
+  assert.equal((await sync({ ...input(), expectedHeadCommit: row.head.sha } as any)).status, 400, "Completed stages cannot retain stale head acceptance");
+  const mergedChanged = await create({ delivery: { method: "git_branch" }, acceptance: { mode: "manual" }, integration: { mode: "manual", method: "git_provider" } });
+  current = mergedChanged.link; row.head.sha = "a".repeat(40);
+  current = (await json(await sync())).link;
+  row.head.sha = "f".repeat(40); row.state = "closed"; row.merged = true; row.merged_at = "2026-10-15T10:00:00Z"; row.merge_commit_sha = "c".repeat(40);
+  current = (await json(await sync({ ...input(), expectedHeadCommit: row.head.sha } as any))).link;
+  assert.equal(current.deliveryStatus, "merged"); assert.equal(current.reviewStatus, "pending");
+  const reconciled = await json(await api(`/requirements/${mergedChanged.r.id}`));
+  assert.deepEqual(reconciled.workflowState, { delivery: "pending", acceptance: "pending", integration: "pending" });
+  row.head.sha = "d".repeat(40);
+  assert.equal((await sync({ ...input(), expectedHeadCommit: row.head.sha } as any)).status, 400, "Terminal delivery heads cannot be replaced");
+  row.head.sha = "a".repeat(40);
   // Reproduce the released defect: a legacy requirement directly integrated without a PR.
   const direct = await create();
   await db.update(requirements).set({ workflow: null, workflowSource: null }).where(eq(requirements.id, direct.r.id));
