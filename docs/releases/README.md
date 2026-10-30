@@ -6,6 +6,7 @@ Use the notes for your installed and target versions when planning an upgrade.
 
 | Version | Summary | Notes |
 | --- | --- | --- |
+| 0.3.20 | Explicit delivery head reconciliation and bounded Docker readiness inspection. | [English](0.3.20.md) · [简体中文](0.3.20.zh-CN.md) |
 | 0.3.19 | Permission-aware attention, resumable first success and bounded daemon maintenance. | [English](0.3.19.md) · [简体中文](0.3.19.zh-CN.md) |
 | 0.3.18 | Node runtime security update and completion of the 0.3.17 distribution changes. | [English](0.3.18.md) · [简体中文](0.3.18.zh-CN.md) |
 | 0.3.17 source preparation | Binary publication withheld by the Node runtime security gate. | [English](0.3.17.md) · [简体中文](0.3.17.zh-CN.md) |

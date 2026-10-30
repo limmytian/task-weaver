@@ -1,6 +1,6 @@
 {
   "name": "@task-weaver/realtime",
-  "version": "0.3.19",
+  "version": "0.3.20",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
