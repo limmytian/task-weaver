@@ -51,7 +51,8 @@ export function recoverPublishedEvidence(version, repository, digests, execute =
       assert.equal(JSON.parse(childRaw).config.digest, selected.configDigest);
       const childSignatures = JSON.parse(run("cosign", ["verify", ...signatureArgs, "--output", "json", `${base}@${child.digest}`]));
       assert.ok(childSignatures.some(entry => entry.critical?.image?.["docker-manifest-digest"] === child.digest));
-      const tagRaw = run("docker", ["buildx", "imagetools", "inspect", `${base}:${version}-${arch}`, "--raw"]);
+      assert.ok(recorded.image.startsWith(`${base}:candidate-`) && new RegExp(`^candidate-[1-9]\\d*-[1-9]\\d*-${arch}$`).test(recorded.image.slice(base.length + 1)), "Original signed platform tag is required");
+      const tagRaw = run("docker", ["buildx", "imagetools", "inspect", recorded.image, "--raw"]);
       assert.equal(`sha256:${createHash("sha256").update(tagRaw).digest("hex")}`, child.digest, "Existing immutable platform tag differs");
     }
     const tagRaw = run("docker", ["buildx", "imagetools", "inspect", `${base}:${version}`, "--raw"]);

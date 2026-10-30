@@ -16,7 +16,7 @@ test("file-only recovery verifies both original signed indexes and reviewed chil
       const children = Object.fromEntries(Object.entries(configs).map(([arch, digest]) => [arch, JSON.stringify({ config: { digest } })]));
       const index = JSON.stringify({ schemaVersion: 2, mediaType: "application/vnd.oci.image.index.v1+json", manifests: Object.entries(children).map(([arch, raw]) => ({ platform: { os: "linux", architecture: arch }, digest: hash(raw), size: raw.length })) });
       const digests = { api: hash(index), web: hash(index) };
-      const platforms = Object.fromEntries(Object.entries(children).map(([arch, raw]) => [`linux/${arch}`, { digest: hash(raw), configDigest: configs[arch], image: `fixture-${arch}`, localImageId: configs[arch] }]));
+      const platforms = Object.fromEntries(Object.entries(children).map(([arch, raw]) => [`linux/${arch}`, { digest: hash(raw), configDigest: configs[arch], image: `ghcr.io/limmytian/task-weaver-api:candidate-123-1-${arch}`, localImageId: configs[arch] }]));
       writeFileSync(join(directory, "ce-candidate-set.json"), JSON.stringify({ version, commit }));
       for (const arch of ["amd64", "arm64"]) writeFileSync(join(directory, `ce-candidate-${arch}.json`), JSON.stringify({ version, commit, images: ["api", "web"].map(app => ({ app, platform: `linux/${arch}`, configDigest: failure === "config" && app === "web" ? configs[arch].replace(/b|c/g, "d") : configs[arch] })) }));
       const calls = [];
@@ -37,7 +37,9 @@ test("file-only recovery verifies both original signed indexes and reviewed chil
         const digest = args.at(-1).split("@")[1];
         if (args[0] === "verify") return JSON.stringify([{ critical: { image: { "docker-manifest-digest": digest } } }]);
         assert.equal(args[0], "verify-attestation");
-        const statement = { subject: [{ digest: { sha256: digest.slice(7) } }], predicate: { Data: JSON.stringify({ version, commit: failure === "provenance" ? "d".repeat(40) : commit, platforms }) } };
+        const app = args.at(-1).includes("task-weaver-web") ? "web" : "api";
+        const signedPlatforms = Object.fromEntries(Object.entries(platforms).map(([platform, entry]) => [platform, {...entry, image: entry.image.replace("task-weaver-api", `task-weaver-${app}`)}]));
+        const statement = { subject: [{ digest: { sha256: digest.slice(7) } }], predicate: { Data: JSON.stringify({ version, commit: failure === "provenance" ? "d".repeat(40) : commit, platforms: signedPlatforms }) } };
         return JSON.stringify({ payload: Buffer.from(JSON.stringify(statement)).toString("base64") });
       };
       if (failure === "digest") digests.web = `sha256:${"e".repeat(64)}`;
