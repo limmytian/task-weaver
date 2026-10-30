@@ -8,12 +8,13 @@ import { capabilityDigest } from "./capability-digest";
 
 export type SkillRuntimeProfile = z.infer<typeof skillRuntimeProfileSchema>;
 const exec = promisify(execFile);
+const DOCKER_INSPECTION_TIMEOUT_MS = 5000;
 
 export async function readonlyImageVolumes(image: string, workspace: boolean): Promise<string[]> {
-  const info = await exec("docker", ["info", "--format", "{{json .}}"], { timeout: 1500, maxBuffer: 65536 });
+  const info = await exec("docker", ["info", "--format", '{"OSType":{{json .OSType}},"MemoryLimit":{{json .MemoryLimit}},"CpuCfsQuota":{{json .CpuCfsQuota}},"PidsLimit":{{json .PidsLimit}}}'], { timeout: DOCKER_INSPECTION_TIMEOUT_MS, maxBuffer: 65536 });
   const limits = JSON.parse(info.stdout) as { OSType: string; MemoryLimit: boolean; CpuCfsQuota: boolean; PidsLimit: boolean };
   if (limits.OSType !== "linux" || !limits.MemoryLimit || !limits.CpuCfsQuota || !limits.PidsLimit) throw new ValidationError("Skill execution requires a Linux engine with enforced memory, CPU and process limits");
-  const result = await exec("docker", ["image", "inspect", image, "--format", "{{json .Config.Volumes}}"], { timeout: 1500, maxBuffer: 16384 });
+  const result = await exec("docker", ["image", "inspect", image, "--format", "{{json .Config.Volumes}}"], { timeout: DOCKER_INSPECTION_TIMEOUT_MS, maxBuffer: 16384 });
   const value = JSON.parse(result.stdout) as Record<string, unknown> | null;
   const paths = Object.keys(value ?? {});
   if (paths.length > 16 || paths.some(path => path.length > 512 || !/^\/[a-zA-Z0-9_./-]+$/.test(path) || path.split("/").includes(".."))) throw new ValidationError("Runtime image declares unsupported volume paths");

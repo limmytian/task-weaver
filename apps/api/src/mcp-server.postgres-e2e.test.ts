@@ -704,7 +704,8 @@ test("MCP transports use live scoped authority and preserve collaboration guards
       const codes: Array<string | number> = [];
       let current: unknown = error;
       for (let depth = 0; depth < 5 && current && typeof current === "object"; depth++) {
-        const failure = current as { code?: unknown; cause?: unknown; message?: unknown };
+        const failure = current as { code?: unknown; cause?: unknown; message?: unknown; cmd?: unknown; killed?: unknown };
+        if (failure.killed === true && typeof failure.cmd === "string" && /^docker (info|image inspect) /.test(failure.cmd)) codes.push("Docker inspection timeout");
         if (typeof failure.code === "number") codes.push(failure.code);
         if (typeof failure.message === "string") {
           for (const label of ["Request timed out", "Connection closed", "Unsupported protocol version", "Invalid JSON"]) if (failure.message.includes(label)) codes.push(label);
