@@ -11,7 +11,7 @@ const exec = promisify(execFile);
 const DOCKER_INSPECTION_TIMEOUT_MS = 5000;
 
 export async function readonlyImageVolumes(image: string, workspace: boolean): Promise<string[]> {
-  const info = await exec("docker", ["info", "--format", '{"OSType":{{json .OSType}},"MemoryLimit":{{json .MemoryLimit}},"CpuCfsQuota":{{json .CpuCfsQuota}},"PidsLimit":{{json .PidsLimit}}}'], { timeout: DOCKER_INSPECTION_TIMEOUT_MS, maxBuffer: 65536 });
+  const info = await exec("docker", ["info", "--format", '{"OSType":{{json .OSType}},"MemoryLimit":{{json .MemoryLimit}},"CpuCfsQuota":{{json .CPUCfsQuota}},"PidsLimit":{{json .PidsLimit}}}'], { timeout: DOCKER_INSPECTION_TIMEOUT_MS, maxBuffer: 65536 });
   const limits = JSON.parse(info.stdout) as { OSType: string; MemoryLimit: boolean; CpuCfsQuota: boolean; PidsLimit: boolean };
   if (limits.OSType !== "linux" || !limits.MemoryLimit || !limits.CpuCfsQuota || !limits.PidsLimit) throw new ValidationError("Skill execution requires a Linux engine with enforced memory, CPU and process limits");
   const result = await exec("docker", ["image", "inspect", image, "--format", "{{json .Config.Volumes}}"], { timeout: DOCKER_INSPECTION_TIMEOUT_MS, maxBuffer: 16384 });
