@@ -20,9 +20,13 @@ export function verifyDeploymentPair(directory, policy, execute = execFileSync) 
     try { return execute("cosign", args, { encoding: "utf8", timeout: 60_000, maxBuffer: 4 * 1024 * 1024 }); }
     catch { throw new Error("Deployment signature verification failed; no workload changes are permitted"); }
   };
+  const manifestIdentity = policy.manifestIdentity ?? policy.identity;
+  const recoveryPrefix = `https://github.com/limmytian/task-weaver/.github/workflows/ce-release.yml@refs/tags/v${policy.version}-recovery.`;
+  assert.ok(manifestIdentity === policy.identity || (manifestIdentity.startsWith(recoveryPrefix) && /^[1-9]\d*$/.test(manifestIdentity.slice(recoveryPrefix.length))), "Release files require the exact original or version-scoped recovery tag identity");
+  const manifestSignatureArgs = ["--certificate-identity", manifestIdentity, "--certificate-oidc-issuer", "https://token.actions.githubusercontent.com"];
   const manifestPath = join(directory, "ce-release.json");
   const manifestBytes = readFileSync(manifestPath);
-  verify(["verify-blob", ...signatureArgs, "--bundle", join(directory, "ce-release.json.sigstore.json"), join(directory, "ce-release.json")]);
+  verify(["verify-blob", ...manifestSignatureArgs, "--bundle", join(directory, "ce-release.json.sigstore.json"), join(directory, "ce-release.json")]);
   assert.equal(sha256(readFileSync(manifestPath)), sha256(manifestBytes), "Release manifest changed during signature verification");
   const manifest = JSON.parse(manifestBytes);
   assert.equal(manifest.schemaVersion, 1);

@@ -55,6 +55,13 @@ test("both exact signed public indexes and signed source/version artifacts must 
   try {
     assert.deepEqual(verifyDeploymentPair(directory, { version, commit, identity }, execute), verified);
     assert.equal(calls.length, 3);
+    const manifestIdentity = `${identity}-recovery.1`;
+    assert.deepEqual(verifyDeploymentPair(directory, { version, commit, identity, manifestIdentity }, execute), verified);
+    assert.ok(calls.at(-3).args.includes(manifestIdentity));
+    assert.ok(calls.at(-2).args.includes(identity));
+    for (const invalid of [identity + "-recovery.0", identity.replace("v1.2.3", "v1.2.4") + "-recovery.1", identity.replace("refs/tags/v1.2.3", "refs/heads/main")]) {
+      assert.throws(() => verifyDeploymentPair(directory, { version, commit, identity, manifestIdentity: invalid }, execute), /version-scoped recovery/);
+    }
     assert.throws(() => verifyDeploymentPair(directory, { version, commit: "b".repeat(40), identity }, execute));
     assert.throws(() => verifyDeploymentPair(directory, { version, commit, identity: identity + "-untrusted" }, execute));
     assert.throws(() => verifyDeploymentPair(directory, { version, commit, identity }, () => { throw Error("secret transport detail"); }), /signature verification failed/);
