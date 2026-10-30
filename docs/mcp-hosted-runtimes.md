@@ -65,3 +65,11 @@ transaction. Scope, registration and profile are rechecked before a bounded,
 atomic schema update, so a slow server does not hold the global authorization
 lock. Authorization and pinned runtime state are rechecked before releasing call
 results. Registered metadata alone does not certify current runtime health.
+
+Docker engine capability and image-volume inspection each have a five-second
+administrative deadline. Engine inspection reads only the isolation capability
+fields. These checks run before the separate MCP protocol initialization deadline;
+a slow inspection is not evidence of a server protocol failure. No retry or cached
+capability approval bypasses Linux, memory, CPU, process-limit or read-only volume
+checks. An unresponsive engine fails closed. Public failures stay sanitized while
+internal error causes support bounded diagnostic classification.

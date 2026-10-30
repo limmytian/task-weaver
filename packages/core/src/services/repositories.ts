@@ -1312,7 +1312,7 @@ export async function reconcileHumanRepositoryDelivery(
   const repository = await db.query.repositories.findFirst({ where: eq(repositories.id, link.repositoryId) });
   if (!repository || repository.status !== "active") throw new ValidationError("Repository must be active");
   const reference = parseTrustedPullRequestUrl(repository, input.pullRequestUrl);
-  const requestHash = createHash("sha256").update(JSON.stringify({ actorId: actor.id, url: reference.url, reason: input.reason })).digest("hex");
+  const requestHash = createHash("sha256").update(JSON.stringify({ actorId: actor.id, url: reference.url, reason: input.reason, ...(input.expectedHeadCommit ? { expectedHeadCommit: input.expectedHeadCommit } : {}) })).digest("hex");
   const key = `human:${input.idempotencyKey}`;
   if (link.externalState.idempotencyKey === key) {
     if (link.externalState.manualRequestHash !== requestHash) throw new ConflictError("Idempotency key was used for a different reconciliation request", link.externalSyncRevision);
@@ -1329,13 +1329,23 @@ export async function reconcileHumanRepositoryDelivery(
   if (link.workingBranch && link.workingBranch !== snapshot.headBranch) throw new ValidationError("Pull request source does not match the requirement repository working branch");
   const workflow = requirement.workflow ? requirementWorkflowSchema.parse(requirement.workflow) : null;
   const accepted = workflow && ["complete", "skipped"].includes(requirement.workflowState?.acceptance ?? "");
-  if ((link.pushedCommit || link.headCommit) && snapshot.headCommit !== (link.pushedCommit || link.headCommit)) throw new ConflictError("Pull request head differs from the recorded delivery; reopen execution and register the new head before synchronizing", link.externalSyncRevision);
+  if (input.expectedHeadCommit && input.expectedHeadCommit !== snapshot.headCommit) throw new ConflictError("Provider head changed; inspect it before reconciling", link.externalSyncRevision);
+  const headChanged = Boolean((link.pushedCommit || link.headCommit) && snapshot.headCommit !== (link.pushedCommit || link.headCommit));
+  if (headChanged) {
+    if (!input.expectedHeadCommit) throw new ConflictError("Pull request head differs from the recorded delivery; explicitly confirm the inspected provider head before synchronizing", link.externalSyncRevision);
+    if (!link.pullRequestExternalId || ["merged", "unchanged"].includes(link.deliveryStatus)) throw new ValidationError("Head reconciliation requires an existing nonterminal pull request delivery");
+    if (workflow && ["delivery", "acceptance", "integration"].some(stage => ["complete", "skipped"].includes(requirement.workflowState?.[stage as "delivery" | "acceptance" | "integration"] ?? ""))) throw new ValidationError("Reopen completed workflow stages before reconciling a changed delivery head");
+    if (!["pending", "in_review"].includes(link.reviewStatus)) throw new ValidationError("Resolve existing review evidence before reconciling a changed delivery head");
+    const approvedReview = await db.query.reviewRuns.findFirst({ where: and(eq(reviewRuns.requirementRepositoryId, link.id), inArray(reviewRuns.status, ["running", "approved"])) });
+    if (approvedReview) throw new ValidationError("Resolve active or approved review evidence before reconciling a changed delivery head");
+  }
   if (link.deliveryStatus === "merged" && snapshot.state !== "merged") throw new ValidationError("Merged delivery cannot regress to an unmerged pull request");
   const deliveryStatus = snapshot.state === "merged" ? "merged" as const : snapshot.state === "closed" ? "failed" as const : "in_review" as const;
   const before = { deliveryStatus: link.deliveryStatus, headCommit: link.headCommit, pushedCommit: link.pushedCommit, pullRequestUrl: link.pullRequestUrl, reviewStatus: link.reviewStatus, mergeStatus: link.mergeStatus, externalSyncRevision: link.externalSyncRevision };
   const [updated] = await db.update(requirementRepositories).set({
     headCommit: snapshot.headCommit, pushedCommit: snapshot.headCommit, pushStatus: "pushed", pushedAt: link.pushedAt ?? snapshot.observedAt,
     pullRequestProvider: snapshot.provider, pullRequestExternalId: snapshot.externalId, pullRequestUrl: snapshot.url,
+    ...(headChanged ? { reviewStatus: "pending" as const, reviewerActorId: null, reviewerActorType: null, reviewerDaemonId: null } : {}),
     deliveryStatus, mergeStatus: snapshot.state === "merged" ? "merged" : snapshot.state === "closed" ? "failed" : "pending",
     // Observed external merges do not fabricate a Task Weaver review approval.
     ...(snapshot.state === "merged" ? { mergerActorId: actor.id, mergerActorType: actor.type, mergerDaemonId: null, mergeMode: "manual", mergedAt: new Date(snapshot.mergedAt!) } : {}),
@@ -1359,7 +1369,7 @@ export async function reconcileHumanRepositoryDelivery(
   }
   await db.insert(activityLog).values({ entityType: "requirement", entityId: requirement.id, action: "repository_delivery_human_reconciled", actorId: actor.id, actorType: actor.type,
     metadata: { repositoryId: repository.id, linkId: link.id, reason: redactDeliverySummary(input.reason), source: snapshot.source, observedAt: snapshot.observedAt.toISOString(), idempotencyKey: key,
-      before, after: { deliveryStatus: updated.deliveryStatus, headCommit: updated.headCommit, pushedCommit: updated.pushedCommit, pullRequestUrl: updated.pullRequestUrl, reviewStatus: updated.reviewStatus, mergeStatus: updated.mergeStatus, externalSyncRevision: updated.externalSyncRevision },
+      headChanged, confirmedHeadCommit: input.expectedHeadCommit ?? null, before, after: { deliveryStatus: updated.deliveryStatus, headCommit: updated.headCommit, pushedCommit: updated.pushedCommit, pullRequestUrl: updated.pullRequestUrl, reviewStatus: updated.reviewStatus, mergeStatus: updated.mergeStatus, externalSyncRevision: updated.externalSyncRevision },
       mergeCommit: snapshot.mergeCommit, baseBranch: snapshot.baseBranch, mergedAt: snapshot.mergedAt } });
   emit({ type: "requirement_updated", projectId: requirement.projectId, requirementId: requirement.id });
   return { link: updated, idempotent: false, revision: updated.externalSyncRevision };

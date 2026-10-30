@@ -26,14 +26,16 @@ export async function synchronizeAuthorizedMcpTools(db: Database, context: Verif
     if (Buffer.byteLength(JSON.stringify(result)) > 1048576) throw new Error("Schema catalog exceeds its byte limit");
     tools = uploadMcpToolsSchema.parse({ tools: result.tools.map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })) }).tools;
     if (new Set(tools.map(tool => tool.name)).size !== tools.length) throw new Error("Schema catalog contains duplicate names");
-  } catch {
+  } catch (cause) {
     // Do not overwrite a concurrently edited registration with a stale failure.
     await db.transaction(async tx => {
       await lockIdentityLifecycle(tx);
       const current = await snapshot(tx as unknown as Database);
       if (current.fingerprint === before.fingerprint) await tx.update(mcpServers).set({ status: "error", statusMessage: "MCP initialization or schema synchronization failed", updatedAt: new Date() }).where(eq(mcpServers.id, id));
     });
-    throw new ValidationError("MCP initialization or schema synchronization failed; inspect runtime readiness");
+    const failure = new ValidationError("MCP initialization or schema synchronization failed; inspect runtime readiness");
+    Object.defineProperty(failure, "cause", { value: cause });
+    throw failure;
   }
   return db.transaction(async tx => {
     await lockIdentityLifecycle(tx);

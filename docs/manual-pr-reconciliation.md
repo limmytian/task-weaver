@@ -78,3 +78,19 @@ Set `TW_FORGE_CONNECTIONS_FILE` to a mounted JSON configuration file. Each entry
 Use a read-only provider credential with access limited to the configured repositories. Missing connections, provider failures, identity mismatches and incomplete evidence leave delivery unchanged. Audit records include the human operator, reason, trusted source, observation time, before/after delivery state, revision, and merge commit. This feature performs read-only forge requests; it does not create or merge PRs.
 
 Provider references: [GitHub pull request REST API](https://docs.github.com/en/rest/pulls/pulls), [Gitea get pull request API](https://docs.gitea.com/api/operations/repo-get-pull-request/).
+
+## Explicitly confirm a changed PR head
+
+A normal synchronization rejects a head that differs from the recorded delivery.
+Inspect the provider diff and current full head SHA before passing
+`--expected-head "$INSPECTED_HEAD_SHA"` to `tw req repo sync-pr`. The server reads
+the provider again and requires that exact SHA, the same registered PR and source
+and target branches, a nonterminal delivery, pending workflow stages and no active
+or approved review. Stale revisions, timestamps, provider heads and daemon leases
+still fail closed. The audit records the old and confirmed head and the reason.
+
+This reconciles externally changed delivery facts; it does not accept the new code.
+The new head receives a new output record and pending review state. Completed
+workflow stages and active or approved reviews must be resolved through their
+normal controls before a changed head can be reconciled. A retry must reuse the
+same request ID and exact inputs. Existing public Git tags are not changed.
