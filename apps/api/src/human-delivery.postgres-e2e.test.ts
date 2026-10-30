@@ -99,6 +99,11 @@ test("human PR reconciliation verifies server evidence, authority, leases, retri
     assert.equal((await sync({ ...input(), expectedHeadCommit: row.head.sha } as any)).status, 400, "Head reconciliation cannot carry active or approved review evidence");
     await db.update(reviewRuns).set({ status: "superseded" }).where(eq(reviewRuns.id, review!.id));
   }
+  for (const state of ["failed", "changes_requested", "skipped"] as const) {
+    await db.update(requirements).set({ workflowState: { delivery: "pending", acceptance: state, integration: "pending" } }).where(eq(requirements.id, changed.r.id));
+    assert.equal((await sync({ ...input(), expectedHeadCommit: row.head.sha } as any)).status, 400, "Only pending workflows may adopt a changed head");
+  }
+  await db.update(requirements).set({ workflowState: { delivery: "pending", acceptance: "pending", integration: "pending" } }).where(eq(requirements.id, changed.r.id));
   const confirmedRequest = { ...input(), expectedHeadCommit: row.head.sha };
   current = (await json(await sync(confirmedRequest))).link;
   assert.equal(current.headCommit, row.head.sha); assert.equal(current.pushedCommit, row.head.sha);
