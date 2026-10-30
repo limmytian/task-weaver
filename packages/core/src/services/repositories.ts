@@ -1334,7 +1334,7 @@ export async function reconcileHumanRepositoryDelivery(
   if (headChanged) {
     if (!input.expectedHeadCommit) throw new ConflictError("Pull request head differs from the recorded delivery; explicitly confirm the inspected provider head before synchronizing", link.externalSyncRevision);
     if (!link.pullRequestExternalId || ["merged", "unchanged"].includes(link.deliveryStatus)) throw new ValidationError("Head reconciliation requires an existing nonterminal pull request delivery");
-    if (workflow && ["delivery", "acceptance", "integration"].some(stage => ["complete", "skipped"].includes(requirement.workflowState?.[stage as "delivery" | "acceptance" | "integration"] ?? ""))) throw new ValidationError("Reopen completed workflow stages before reconciling a changed delivery head");
+    if (workflow && ["delivery", "acceptance", "integration"].some(stage => (requirement.workflowState?.[stage as "delivery" | "acceptance" | "integration"] ?? "pending") !== "pending")) throw new ValidationError("All workflow stages must be pending before reconciling a changed delivery head");
     if (!["pending", "in_review"].includes(link.reviewStatus)) throw new ValidationError("Resolve existing review evidence before reconciling a changed delivery head");
     const approvedReview = await db.query.reviewRuns.findFirst({ where: and(eq(reviewRuns.requirementRepositoryId, link.id), inArray(reviewRuns.status, ["running", "approved"])) });
     if (approvedReview) throw new ValidationError("Resolve active or approved review evidence before reconciling a changed delivery head");
