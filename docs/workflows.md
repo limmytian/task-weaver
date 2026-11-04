@@ -52,3 +52,36 @@ A project owner or maintainer using a recently confirmed browser session can iss
 For externally delivered pull requests, use the human-only trusted synchronization flow described in [Human PR reconciliation](manual-pr-reconciliation.md). Verified merge facts and configured workflow decisions remain separate.
 
 For human integration without a PR, use `tw req repo sync-direct` to verify the delivered commit against the configured target branch, then complete the normal requirement/workflow controls. See [human delivery reconciliation](manual-pr-reconciliation.md).
+
+## Reviewing delivery and reconciling completed work
+
+The requirement page separates Delivery, Acceptance and Integration. Finishing tasks
+prepares delivery; it does not grant human acceptance. Read-only viewers can inspect
+states and evidence. Contributors record a reason for each decision, and acceptance
+requires all configured checks. Refresh after a revision conflict before retrying.
+Completed stages collapse; historical evidence and recovery diagnostics remain available.
+
+Automatic delivery with method `none` and no delivery instructions reconciles when the
+last ordinary task reaches `done` or `cancelled`. Draft requirements, live executor
+leases, open tasks, unresolved recovery controls, unavailable inputs, stale evidence
+and blocking requirements prevent automatic reconciliation. Manual acceptance and
+integration remain separate gates. Existing completed requirements can use
+`tw req advance <id> --help` to advance delivery with the observed revision and an audit
+reason. Repeating a terminal task update does not repeat workflow completion.
+
+Git evidence offers three review choices:
+
+- Historical delivery baseline, pinned by the trusted server when a new Git output is
+  registered. Target-branch movement cannot change this comparison. Registration during
+  a forge outage or on an unsupported provider leaves the baseline explicitly absent.
+- Current target branch, resolved separately when requested. An already-contained head
+  produces an explained empty comparison rather than an invented historical diff.
+- Delivered commit, compared with its parent. Merge commits require an explicit parent;
+  root commits use the forge's empty-tree result.
+
+Historical baselines are not reconstructed for older outputs or already-merged external
+reconciliations. Use the catalog-derived commit link when a baseline or supported preview
+is unavailable. GitHub previews are bounded to a 2 MB response, 200 displayed files,
+1 MB of patches and 2,000 rendered lines per patch. Root commit previews request at most
+100 files and flag that boundary as potentially truncated. Missing patches may represent
+binary files or forge omissions. Other forges retain trusted commit navigation.

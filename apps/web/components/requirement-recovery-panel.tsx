@@ -10,8 +10,9 @@ export function RequirementRecoveryPanel({ requirementId }: { requirementId: str
   const query = trpc.requirement.recoveryState.useQuery({ id: requirementId }, {
     retry: false, refetchInterval: 15_000, refetchOnReconnect: true, refetchOnWindowFocus: true,
   });
-  return <section aria-label="Execution recovery" className="space-y-3 rounded-md border p-3">
+  const needsAttention = Boolean(query.error || query.data?.evidenceNeedsReview || query.data?.controls.some(control => control.phase !== "resumed"));
+  return <details open={needsAttention}><summary className="cursor-pointer">{needsAttention ? "Execution needs attention" : "Execution diagnostics"}</summary><section aria-label="Execution recovery" className="space-y-3 rounded-md border p-3">
     <div className="flex items-center justify-between gap-2"><h3 className="font-medium">Execution recovery</h3><Button variant="outline" size="sm" disabled={query.isFetching} onClick={() => { void query.refetch(); }}>Refresh recovery state</Button></div>
     {query.error ? <p role="alert">Recovery state is unavailable or access changed. Refresh after verifying your project access; previous observations cannot authorize an action.</p> : query.data ? <><RecoveryObservationView view={query.data} /><RecoveryOperatorActions key={recoveryDecisionKey(query.data)} requirementId={requirementId} view={query.data} refreshing={query.isFetching} /></> : <p role="status">Loading recovery observations…</p>}
-  </section>;
+  </section></details>;
 }

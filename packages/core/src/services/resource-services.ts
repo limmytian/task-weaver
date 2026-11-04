@@ -94,7 +94,7 @@ const archivedReadOperations = new Set([
 const writeById: Record<string, ResourceKind> = {
   updateProject: "project", deleteProject: "project", togglePin: "project",
   updateRequirement: "requirement", deleteRequirement: "requirement", createExecutionSlice: "requirement",
-  registerWorkflowOutput: "requirement", advanceWorkflowStage: "requirement",
+  reconcileCompletedRequirement: "requirement", registerWorkflowOutput: "requirement", advanceWorkflowStage: "requirement",
   retireWorkflowOutput: "requirement",
   updateExecutionSlice: "slice", deleteExecutionSlice: "slice", updateTask: "task", updateTaskStatus: "task",
   deleteTask: "task", addTaskComment: "task", addTaskNote: "task", updateDocument: "document",

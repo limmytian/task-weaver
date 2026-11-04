@@ -3,6 +3,8 @@ import { router, ordinaryResourceProcedure as resourceProcedure } from "../init"
 import {
   createResourceServices,
   createGitEvidenceService,
+  gitEvidenceComparisonSchema,
+  gitEvidenceCommitSchema,
   createExecutionRecoveryViewService,
   createExecutionControlService,
   executionRevalidationSchema,
@@ -23,8 +25,10 @@ import {
 export const requirementRouter = router({
   evidence: resourceProcedure.input(z.object({ requirementId: z.string().uuid(), outputId: z.string().uuid() })).query(({ ctx, input }) =>
     createResourceServices(ctx.identity).requirementService.describeWorkflowEvidence(ctx.db, input.requirementId, input.outputId)),
-  compareGitEvidence: resourceProcedure.input(z.object({ requirementId: z.string().uuid(), outputId: z.string().uuid() })).mutation(({ ctx, input }) =>
-    createGitEvidenceService(ctx.identity).compare(ctx.db, input.requirementId, input.outputId)),
+  compareGitEvidence: resourceProcedure.input(gitEvidenceComparisonSchema.extend({ requirementId: z.string().uuid(), outputId: z.string().uuid() })).mutation(({ ctx, input }) =>
+    createGitEvidenceService(ctx.identity).compare(ctx.db, input.requirementId, input.outputId, input.mode)),
+  gitEvidenceCommit: resourceProcedure.input(gitEvidenceCommitSchema.extend({ requirementId: z.string().uuid(), outputId: z.string().uuid() })).mutation(({ ctx, input }) =>
+    createGitEvidenceService(ctx.identity).commit(ctx.db, input.requirementId, input.outputId, input.parent)),
   gitEvidenceFile: resourceProcedure.input(z.object({ requirementId: z.string().uuid(), outputId: z.string().uuid(), comparisonId: z.string().uuid(), path: z.string().min(1).max(4096) })).query(({ ctx, input }) =>
     createGitEvidenceService(ctx.identity).file(ctx.db, input.requirementId, input.outputId, input.comparisonId, input.path)),
   revalidateExecution: resourceProcedure.input(z.object({ requirementId: z.string().uuid(), data: executionRevalidationSchema }))

@@ -1,3 +1,4 @@
+import { captureDeliveryBaseline } from "./trusted-forge";
 import { verifyEvidenceRegistration } from "./evidence-proof";
 import { evidenceAttachmentMetadata } from "./evidence-metadata";
 import { executionControls, executionSynchronizations } from "@task-weaver/db";
@@ -147,7 +148,12 @@ export async function describeWorkflowEvidence(db: Database, requirementId: stri
     if (file) return { ...base, kind: "attachment" as const, documentId: file.documentId, fileVersionId: file.id, fileVersion: file.version, mimeType: file.mimeType, originalFilename: file.originalFilename, sizeBytes: file.sizeBytes, sha256: file.sha256 };
   }
   if ((output.type === "git_branch" || output.type === "git_pr") && output.requirementRepositoryId && output.headCommit && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(output.headCommit)) {
-    return { ...base, kind: "git" as const, requirementRepositoryId: output.requirementRepositoryId, headCommit: output.headCommit };
+    const link = await db.query.requirementRepositories.findFirst({ where: and(eq(requirementRepositories.id, output.requirementRepositoryId), eq(requirementRepositories.requirementId, requirementId)) });
+    const repository = link && await db.query.repositories.findFirst({ where: eq(repositories.id, link.repositoryId) });
+    const commitUrl = repository && /^[a-zA-Z0-9.-]+(?::[0-9]+)?$/.test(repository.host)
+      ? `https://${repository.host}/${encodeURIComponent(repository.namespace)}/${encodeURIComponent(repository.name)}/commit/${output.headCommit}` : null;
+    return { ...base, kind: "git" as const, requirementRepositoryId: output.requirementRepositoryId, headCommit: output.headCommit, gitBaseline: output.gitBaseline,
+      repositoryName: repository ? `${repository.namespace}/${repository.name}` : null, branch: link?.workingBranch, baseBranch: link?.baseBranch, commitUrl };
   }
   // Legacy attachments do not identify an immutable file version on the output.
   return { ...base, kind: "unsupported" as const, availability: output.availability === "retired" ? "retired" as const : "unsupported" as const };
@@ -274,6 +280,10 @@ export async function registerWorkflowOutput(
   }
   const gitLink = input.requirementRepositoryId && await db.query.requirementRepositories.findFirst({ where: eq(requirementRepositories.id, input.requirementRepositoryId) });
   if (["git_branch", "git_pr"].includes(input.type) && gitLink && gitLink.deliveryStatus !== "unchanged" && (!gitLink.pushedCommit || (input.type === "git_pr" && !gitLink.pullRequestUrl))) throw new ValidationError("Repository has no verified delivery for this output type");
+  const baselineRepository = gitLink && ["git_branch", "git_pr"].includes(input.type)
+    ? await db.query.repositories.findFirst({ where: eq(repositories.id, gitLink.repositoryId) }) : null;
+  const gitBaseline = baselineRepository && gitLink && (gitLink.pushedCommit ?? gitLink.headCommit) && gitLink.baseBranch
+    ? await captureDeliveryBaseline(baselineRepository, gitLink.baseBranch, (gitLink.pushedCommit ?? gitLink.headCommit)!) : null;
   const [revision] = await db.update(requirements).set({ workflowStateRevision: requirement.workflowStateRevision + 1, updatedAt: new Date() })
     .where(and(eq(requirements.id, requirementId), eq(requirements.workflowStateRevision, requirement.workflowStateRevision))).returning({ id: requirements.id });
   if (!revision) throw new ConflictError("Workflow state changed", requirement.workflowStateRevision);
@@ -285,6 +295,7 @@ export async function registerWorkflowOutput(
     referenceId: input.referenceId, attachmentFileVersionId, url: input.url, nodeId: input.nodeId,
     relativePath: input.relativePath, sizeBytes: input.sizeBytes, sha256: input.sha256, nodePublicKey: input.nodePublicKey,
     headCommit: gitLink ? gitLink.pushedCommit ?? gitLink.headCommit : null,
+    gitBaseline,
     summary: input.summary, createdBy: actor.id, createdByType: actor.type,
     verifiedAt: input.type === "local" ? new Date() : undefined,
     retainUntil: input.type === "local" ? new Date(Date.now() + workflow.localArtifactRetentionDays * 86_400_000) : undefined,
@@ -306,6 +317,7 @@ export async function advanceWorkflowStage(
 ) {
   const requirement = await getRequirementOrThrow(db, requirementId);
   if (!requirement.workflow) throw new ValidationError("Legacy requirements do not use workflow stages");
+  if (requirement.status === "draft") throw new ValidationError("Draft requirements cannot advance delivery");
   if (["done", "cancelled", "archived"].includes(requirement.status)) throw new ValidationError("Requirement is terminal");
   if (requirement.workflowStateRevision !== input.expectedRevision) throw new ConflictError("Workflow state changed", requirement.workflowStateRevision);
   await assertRequirementLease(db, requirementId, actor, input);
@@ -403,6 +415,31 @@ export async function advanceWorkflowStage(
   });
   await emitDurable(db, { type: "requirement_updated", projectId: requirement.projectId, requirementId });
   return updated;
+}
+
+/** Reconcile no-artifact delivery without synthesizing approval or integration. */
+export async function reconcileCompletedRequirement(db: Database, requirementId: string, actor: Actor) {
+  const requirement = await getRequirementOrThrow(db, requirementId);
+  const workflow = requirementWorkflowSchema.safeParse(requirement.workflow);
+  if (!["approved", "in_progress"].includes(requirement.status) || requirement.evidenceNeedsReview
+    || !workflow.success || workflow.data.delivery.mode !== "automatic" || workflow.data.delivery.method !== "none"
+    || workflow.data.delivery.instructions.trim() || (requirement.workflowState?.delivery ?? "pending") !== "pending"
+    || requirement.workflowState?.acceptance === "failed") return;
+  // A live executor owns delivery and may still need to register evidence after its last task.
+  const claim = await db.query.requirementClaims.findFirst({ where: eq(requirementClaims.requirementId, requirementId) });
+  if (claim && claim.expiresAt > new Date()) return;
+  const inputs = await db.query.workflowInputs.findMany({ where: eq(workflowInputs.requirementId, requirementId), with: { output: true } });
+  if (inputs.some(input => input.output.availability !== "available")) return;
+  const controls = await db.query.executionControls.findMany({ where: eq(executionControls.requirementId, requirementId) });
+  if (controls.some(control => control.phase !== "resumed")) return;
+  const children = await db.query.tasks.findMany({ where: eq(tasks.requirementId, requirementId) });
+  if (!children.length || children.some(task => !["done", "cancelled"].includes(task.status))) return;
+  const dependencies = await db.query.requirementDependencies.findMany({ where: and(eq(requirementDependencies.requirementId, requirementId), eq(requirementDependencies.type, "blocks")), with: { dependsOn: true } });
+  if (dependencies.some(link => !["done", "cancelled"].includes(link.dependsOn.status))) return;
+  await advanceWorkflowStage(db, requirementId, {
+    stage: "delivery", decision: "complete", expectedRevision: requirement.workflowStateRevision,
+    reason: "All tasks are terminal; reconciled automatic no-artifact delivery through workflow guards", checks: [],
+  }, actor);
 }
 
 const TERMINAL_REQ_STATUSES = ["done", "cancelled", "archived"] as const;

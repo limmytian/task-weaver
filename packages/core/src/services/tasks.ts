@@ -32,7 +32,7 @@ import { checkBlockingDependencies } from "./claims";
 import { assertRequirementLease } from "./claims";
 import type { RequirementLeaseFence } from "@task-weaver/contracts";
 import { requirementStatusAfterTaskCreation } from "./daemon-state-machine";
-import { updateRequirement } from "./requirements";
+import { reconcileCompletedRequirement, updateRequirement } from "./requirements";
 import { recordTaskStatusProgress } from "./daemon-progress";
 import { assertExecutionSliceCanAdvance } from "./execution-slice-policy";
 
@@ -516,6 +516,8 @@ export async function updateTaskStatus(
     activeRequirementClaim = await assertRequirementLease(db, task.requirementId, actor, leaseFence);
   }
 
+  if (task.requirementId && !activeRequirementClaim) await db.select({ id: requirements.id }).from(requirements).where(eq(requirements.id, task.requirementId)).for("update");
+
   if (task.status === "cancelled") {
     throw new ValidationError(
       "Cannot change status of a cancelled task. Create a new task instead.",
@@ -604,6 +606,8 @@ export async function updateTaskStatus(
       actor,
     });
   }
+
+  if (task.requirementId && !activeRequirementClaim && ["done", "cancelled"].includes(newStatus)) await reconcileCompletedRequirement(db, task.requirementId, actor);
 
   await emitDurable(db, { type: "task_status_changed", projectId: task.projectId, taskId: id, from: task.status, to: newStatus });
 
@@ -882,85 +886,15 @@ export async function batchUpdateTasks(
   input: BatchUpdateTasksInput,
   actor: Actor,
 ) {
-  const results = await db.transaction(async (tx) => {
-    const updated = [];
-    for (const update of input.updates) {
-      const existing = await tx.query.tasks.findFirst({
-        where: eq(tasks.id, update.id),
-      });
-      if (!existing) throw new NotFoundError(`Task not found: ${update.id}`);
-
-      const { id, status, reason, ...fields } = update;
-      const hasFieldUpdates = Object.keys(fields).length > 0;
-      const hasStatusChange = status !== undefined && status !== existing.status;
-
-      if (hasStatusChange) {
-        if (existing.status === "cancelled") {
-          throw new ValidationError(
-            `Cannot change status of cancelled task ${id}`,
-          );
-        }
-
-        const now = new Date();
-        const [result] = await tx
-          .update(tasks)
-          .set({
-            ...fields,
-            status,
-            completedAt: status === "done" ? now : null,
-            updatedAt: now,
-          })
-          .where(eq(tasks.id, id))
-          .returning();
-
-        await tx.insert(taskStatusLog).values({
-          taskId: id,
-          fromStatus: existing.status,
-          toStatus: status,
-          changedBy: actor.id,
-          changedByType: actor.type,
-          reason,
-        });
-
-        await tx.insert(activityLog).values({
-          entityType: "task",
-          entityId: id,
-          action: "status_changed",
-          actorId: actor.id,
-          actorType: actor.type,
-          metadata: { from: existing.status, to: status, reason, batch: true },
-        });
-
-        updated.push(result!);
-      } else if (hasFieldUpdates) {
-        const [result] = await tx
-          .update(tasks)
-          .set({ ...fields, updatedAt: new Date() })
-          .where(eq(tasks.id, id))
-          .returning();
-
-        await tx.insert(activityLog).values({
-          entityType: "task",
-          entityId: id,
-          action: "updated",
-          actorId: actor.id,
-          actorType: actor.type,
-          metadata: { changes: fields, batch: true },
-        });
-
-        updated.push(result!);
-      } else {
-        updated.push(existing);
-      }
+  return db.transaction(async tx => {
+    const txDb = tx as unknown as Database;
+    const results = [];
+    for (const { id, status, reason, ...fields } of input.updates) {
+      if (Object.keys(fields).length) await updateTask(txDb, id, fields, actor);
+      results.push(status === undefined ? await getTask(txDb, id) : await updateTaskStatus(txDb, id, status, actor, reason));
     }
-    return updated;
+    return results;
   });
-
-  for (const task of results) {
-    await emitDurable(db, { type: "task_updated", projectId: task.projectId, taskId: task.id });
-  }
-
-  return results;
 }
 
 export async function getKanbanBoard(

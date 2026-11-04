@@ -17,10 +17,10 @@ import { PdfAttachmentPreview } from "@/components/pdf-attachment-preview";
 import { RequirementRecoveryPanel } from "@/components/requirement-recovery-panel";
 import { WorkflowEditor } from "@/components/workflow-editor";
 
-type Output = { id: string; type: string; summary: string | null; url: string | null; relativePath: string | null; nodeId: string | null; availability: string };
+type Output = { workflowRevision?: number; planRevision?: number; verifiedAt?: Date | string | null; id: string; type: string; summary: string | null; url: string | null; relativePath: string | null; nodeId: string | null; availability: string };
 type WorkflowRequirement = {
-  id: string; status: string; workflow: unknown; workflowSource: string | null;
-  workflowState: unknown; workflowStateRevision: number;
+  id: string; projectId?: string; tasks?: Array<{ status: string }>; status: string; workflow: unknown; workflowSource: string | null;
+  workflowState: unknown; workflowRevision?: number; workflowStateRevision: number;
   planRevision?: number; evidenceNeedsReview?: boolean; recoveryAttempts?: number;
   recoveryPolicy?: { retrySafe: boolean; maxAttempts: number; graceMs: number };
   executionRecovery?: Array<{ id: string; runId: string; daemonId: string; phase: string; reason: string; revision: number; deadline: Date | string; workspace: Record<string, unknown> | null }>;
@@ -31,6 +31,10 @@ type WorkflowRequirement = {
 
 export function RequirementWorkflowPanel({ requirement }: { requirement: WorkflowRequirement }) {
   const utils = trpc.useUtils();
+  const permissions = trpc.plan.capabilities.useQuery({ projectId: requirement.projectId ?? "" }, { enabled: Boolean(requirement.projectId), retry: false });
+  const canWrite = Boolean(permissions.data?.canWrite) && !permissions.error;
+  const openTasks = requirement.tasks?.filter(task => !["done", "cancelled"].includes(task.status)).length;
+  const [showHistory, setShowHistory] = useState(false);
   const [editing, setEditing] = useState(false);
   const [definition, setDefinition] = useState<RequirementWorkflow>(BASIC_WORKFLOW);
   const [reason, setReason] = useState("");
@@ -47,9 +51,9 @@ export function RequirementWorkflowPanel({ requirement }: { requirement: Workflo
   const state = (requirement.workflowState ?? {}) as Record<string, string>;
   const terminal = ["done", "cancelled", "archived"].includes(requirement.status);
   const stages = ["delivery", "acceptance", "integration"] as const;
-  const nextStage = stages.find((stage) => !["complete", "skipped"].includes(state[stage] ?? "pending"));
-  const canEdit = ["draft", "approved"].includes(requirement.status);
-  const canAdvance = workflow && nextStage && !terminal && (workflow[nextStage].mode === "manual" || state[nextStage] === "failed");
+  const nextStage = state.acceptance === "failed" && state.delivery === "complete" ? "delivery" : stages.find((stage) => !["complete", "skipped"].includes(state[stage] ?? "pending"));
+  const canEdit = canWrite && ["draft", "approved"].includes(requirement.status);
+  const canAdvance = canWrite && workflow && nextStage && !terminal && requirement.status !== "draft" && !requirement.evidenceNeedsReview && (nextStage !== "delivery" || openTasks === 0) && (workflow[nextStage].mode === "manual" || state[nextStage] === "failed");
   const save = () => {
     const validated = requirementWorkflowSchema.safeParse(definition);
     if (!validated.success) { toast.error("Invalid workflow", { description: validated.error.issues.map((issue) => issue.message).join("; ") }); return; }
@@ -63,36 +67,48 @@ export function RequirementWorkflowPanel({ requirement }: { requirement: Workflo
     } });
   };
   const method = workflow?.delivery.method;
+  const isHistorical = (output: Output) => output.availability === "retired" || (output.workflowRevision !== undefined && requirement.workflowRevision !== undefined && output.workflowRevision !== requirement.workflowRevision);
+  const outputs = (requirement.workflowOutputs ?? []).filter(output => showHistory || !isHistorical(output));
+  const stageFailed = Boolean(nextStage && state[nextStage] === "failed");
+  const checksPassed = nextStage !== "acceptance" || (workflow?.acceptance.requiredChecks ?? []).every(name => checks[name] === "passed");
   const registerable = method === "url" || method === "comment" || method === "attachment";
 
   return <Card>
     <CardHeader><CardTitle>{workflow ? "Delivery, acceptance and integration" : "Legacy Git workflow"}</CardTitle></CardHeader>
     <CardContent className="space-y-4 text-sm">
-      <p className="text-muted-foreground">Plan revision {requirement.planRevision ?? 0}. Execution input edits stop affected runs. Notification receipt does not confirm that execution has stopped.</p>
-      {requirement.evidenceNeedsReview && <p role="alert" className="rounded border border-amber-500 p-3">The plan changed after work completed. Inspect historical evidence against the latest acceptance criteria and record explicit revalidation before delivery.</p>}
-      <RequirementRecoveryPanel key={requirement.id} requirementId={requirement.id} />
-      {requirement.executionSynchronizations?.slice(0, 3).map(sync => <p key={sync.id} className="break-all text-xs text-muted-foreground">Observed target baseline: {sync.remoteTip} · plan {sync.planRevision} · fetched {new Date(sync.fetchedAt).toISOString()} · run {sync.runId}. The remote branch may advance after this observation.</p>)}
-
-
       {!workflow && <p className="text-muted-foreground">This requirement keeps its existing Git delivery flow. Unstarted requirements can migrate to a configurable workflow.</p>}
       {workflow && <>
-        <p className="text-muted-foreground">Source: {requirement.workflowSource ?? "explicit"} · {terminal ? "Workflow closed" : `Next action: ${nextStage ?? "complete"}`}</p>
+        <div className="rounded-md bg-muted p-3"><p className="font-medium">{terminal ? `Requirement ${requirement.status}` : requirement.status === "draft" ? "Approve the plan before delivery" : requirement.evidenceNeedsReview ? "Review evidence for the updated plan" : openTasks ? `${openTasks} tasks still need completion` : nextStage ? `Next: ${nextStage}` : "Workflow complete"}</p><p className="text-muted-foreground">Task completion prepares delivery. Acceptance and integration follow the configured workflow.</p>{!canWrite && <p className="text-muted-foreground">Read-only view. A project contributor must record decisions.</p>}</div>
+        <details open={!terminal}><summary className="cursor-pointer">Workflow stages and decisions</summary>
         {stages.map((stage) => <div key={stage} className="rounded-md border p-3">
           <div className="font-medium capitalize">{stage}: {state[stage] ?? "pending"}</div>
           <p className="text-muted-foreground">{workflow[stage].mode === "manual" ? "Human decision" : workflow[stage].mode === "skip" ? "No additional action" : stage === "delivery" ? "Executor" : stage === "acceptance" ? "Reviewer" : "Integrator"}{stage === "delivery" ? ` · ${workflow.delivery.method}` : stage === "integration" ? ` · ${workflow.integration.method}` : ""}</p>
           {workflow[stage].instructions && <p className="mt-1 whitespace-pre-wrap">{workflow[stage].instructions}</p>}
         </div>)}
-        {requirement.workflowOutputs?.length ? <div className="space-y-2"><div className="font-medium">Outputs</div>{requirement.workflowOutputs.map((output) => <div key={output.id} className="break-all rounded border p-2"><div>{output.type} · {output.availability}{output.nodeId ? ` · ${output.nodeId}` : ""}</div><div className="text-muted-foreground">{output.summary || (output.type === "url" ? output.url : null) || output.id}</div><div className="text-xs text-muted-foreground">{output.id}</div>{["local", "git_branch", "git_pr", "attachment"].includes(output.type) && <EvidenceMetadata requirementId={requirement.id} outputId={output.id} />}</div>)}</div> : null}
+        </details>
+        {requirement.workflowOutputs?.length ? <div className="space-y-2"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-medium">Delivery evidence</h3><Button size="sm" variant="ghost" onClick={() => setShowHistory(value => !value)}>{showHistory ? "Show current evidence" : "Include historical evidence"}</Button></div>{outputs.length === 0 && <p>No current evidence. Historical records remain available.</p>}{outputs.map((output) => <div key={output.id} className="break-all rounded border p-2"><div>{output.type.replaceAll("_", " ")} · {output.availability}{isHistorical(output) ? " · historical" : ""}</div><p className="text-xs text-muted-foreground">{output.verifiedAt ? `Last verified ${new Date(output.verifiedAt).toLocaleString()}` : "Validation freshness not recorded"}{requirement.evidenceNeedsReview ? " · review required after plan change" : ""}</p>{output.type === "url" && <p className="text-xs">External link supplied by the author; contents are not verified.</p>}<div className="text-muted-foreground">{output.summary || (output.type === "url" ? output.url : null) || `${output.type.replaceAll("_", " ")} evidence`}</div><details><summary className="cursor-pointer text-xs">Technical identity</summary><p className="select-all text-xs">{output.id}{output.nodeId ? ` · node ${output.nodeId}` : ""}</p></details>{["local", "git_branch", "git_pr", "attachment"].includes(output.type) && <EvidenceMetadata requirementId={requirement.id} outputId={output.id} />}</div>)}</div> : null}
         {requirement.workflowInputs?.length ? <div className="space-y-1"><div className="font-medium">Required inputs</div>{requirement.workflowInputs.map((input) => <p key={input.id} className="break-all text-muted-foreground">{input.output.summary || input.output.id} · {input.output.availability}{input.output.nodeId ? ` · node ${input.output.nodeId}` : ""}</p>)}</div> : null}
-        {!terminal && <div className="flex gap-2"><Input aria-label="Required output ID" placeholder="Output ID needed by this requirement" value={inputId} onChange={(event) => setInputId(event.target.value)} /><Button variant="outline" disabled={!inputId.trim() || addInput.isPending} onClick={() => addInput.mutate({ requirementId: requirement.id, data: { outputId: inputId.trim() } })}>Add input</Button></div>}
-        {!terminal && !["complete", "skipped"].includes(state.acceptance ?? "pending") && registerable && <div className="flex gap-2"><Input aria-label="Delivery output" placeholder={method === "url" ? "Delivered output URL" : `${method} ID`} value={outputValue} onChange={(event) => setOutputValue(event.target.value)} /><Button variant="outline" disabled={!outputValue.trim() || registerOutput.isPending} onClick={() => registerOutput.mutate({ requirementId: requirement.id, data: { type: method, ...(method === "url" ? { url: outputValue.trim() } : { referenceId: outputValue.trim() }) } })}>Register output</Button></div>}
+        {canWrite && !terminal && <details><summary className="cursor-pointer">Add a required input</summary><div className="flex flex-wrap gap-2"><Input aria-label="Required output ID" placeholder="Output ID needed by this requirement" value={inputId} onChange={(event) => setInputId(event.target.value)} /><Button variant="outline" disabled={!inputId.trim() || addInput.isPending} onClick={() => addInput.mutate({ requirementId: requirement.id, data: { outputId: inputId.trim() } })}>Add input</Button></div></details>}
+        {canWrite && !terminal && !["complete", "skipped"].includes(state.acceptance ?? "pending") && registerable && <div className="flex gap-2"><Input aria-label="Delivery output" placeholder={method === "url" ? "Delivered output URL" : `${method} ID`} value={outputValue} onChange={(event) => setOutputValue(event.target.value)} /><Button variant="outline" disabled={!outputValue.trim() || registerOutput.isPending} onClick={() => registerOutput.mutate({ requirementId: requirement.id, data: { type: method, ...(method === "url" ? { url: outputValue.trim() } : { referenceId: outputValue.trim() }) } })}>Register output</Button></div>}
         {method === "local" && !terminal && <p className="text-muted-foreground">Register a file on its producing machine with <code>tw req output register {requirement.id} --type local --file /path/to/file</code>. The file stays on that node.</p>}
+        {!terminal && nextStage && workflow[nextStage].mode === "automatic" && !stageFailed && <p role="status" className="text-muted-foreground">{nextStage === "delivery" && workflow.delivery.method === "none" ? "Automatic delivery reconciles after the final task completes. Existing completed records can be advanced through the guarded workflow command." : `Waiting for the ${nextStage === "delivery" ? "executor to register delivery evidence" : nextStage === "acceptance" ? "reviewer to evaluate delivery" : "integrator to complete integration"}.`}</p>}
+        {advance.error && <div role="alert" className="rounded border border-destructive p-3"><p>{advance.error.message}</p><Button size="sm" variant="outline" onClick={refresh}>Refresh current state</Button><p>Review the refreshed state before retrying the decision.</p></div>}
         {canAdvance && <div className="space-y-3">
           <Textarea aria-label="Stage decision reason" value={reason} onChange={(event) => setReason(event.target.value)} placeholder={`Reason for the ${nextStage} decision`} rows={2} />
           {nextStage === "acceptance" && workflow.acceptance.requiredChecks.map((name) => <label key={name} className="flex flex-wrap items-center gap-2">{name}<select className="rounded border bg-background p-1" value={checks[name] ?? ""} onChange={(event) => setChecks({ ...checks, [name]: (event.target.value || undefined) as ReviewCheckStatus | undefined })}><option value="">Not recorded</option><option value="passed">Passed</option><option value="failed">Failed</option></select></label>)}
-          <div className="flex flex-wrap gap-2"><Button onClick={() => decide("complete")} disabled={!reason.trim() || advance.isPending}>Complete {nextStage}</Button>{nextStage !== "delivery" && <Button variant="outline" onClick={() => decide("changes_requested")} disabled={!reason.trim() || advance.isPending}>Request changes</Button>}{nextStage && state[nextStage] === "failed" && <Button variant="outline" onClick={() => decide("retry")} disabled={!reason.trim() || advance.isPending}>Retry stage</Button>}</div>
+          <p className="text-muted-foreground">Record a reason before submitting.{!checksPassed ? " All required checks must pass before acceptance." : ""}</p><div className="flex flex-wrap gap-2">{!stageFailed && <Button onClick={() => decide("complete")} disabled={!reason.trim() || advance.isPending || !checksPassed}>{advance.isPending ? "Saving decision…" : nextStage === "acceptance" ? "Accept delivery" : nextStage === "integration" ? "Confirm integration" : "Confirm delivery"}</Button>}{nextStage !== "delivery" && <Button variant="outline" onClick={() => decide("changes_requested")} disabled={!reason.trim() || advance.isPending}>Request changes</Button>}{nextStage && state[nextStage] === "failed" && <Button variant="outline" onClick={() => decide("retry")} disabled={!reason.trim() || advance.isPending}>Retry stage</Button>}</div>
         </div>}
       </>}
+      <details><summary className="cursor-pointer">Execution diagnostics and recovery</summary>
+      <p className="text-muted-foreground">Plan revision {requirement.planRevision ?? 0}. Execution input edits stop affected runs. Notification receipt does not confirm that execution has stopped.</p>
+      {requirement.evidenceNeedsReview && <p role="alert" className="rounded border border-amber-500 p-3">The plan changed after work completed. Inspect historical evidence against the latest acceptance criteria and record explicit revalidation before delivery.</p>}
+
+      {requirement.executionSynchronizations?.slice(0, 3).map(sync => <p key={sync.id} className="break-all text-xs text-muted-foreground">Observed target baseline: {sync.remoteTip} · plan {sync.planRevision} · fetched {new Date(sync.fetchedAt).toISOString()} · run {sync.runId}. The remote branch may advance after this observation.</p>)}
+
+
+      </details>
+      <RequirementRecoveryPanel key={requirement.id} requirementId={requirement.id} />
+      {requirement.evidenceNeedsReview && <p role="alert">Evidence needs review against the changed plan. Open execution diagnostics to revalidate it.</p>}
       {canEdit && (editing ? <div className="space-y-3"><WorkflowEditor value={definition} onChange={setDefinition} /><div className="flex gap-2"><Button onClick={save} disabled={update.isPending}>Save workflow</Button><Button variant="outline" onClick={() => setEditing(false)}>Cancel</Button></div></div> : <Button variant="outline" onClick={() => { setDefinition(workflow ?? BASIC_WORKFLOW); setEditing(true); }}>{workflow ? "Edit workflow" : "Configure workflow"}</Button>)}
     </CardContent>
   </Card>;
@@ -170,7 +186,7 @@ function EvidenceMetadata({ requirementId, outputId }: { requirementId: string; 
       {evidence.data.kind === "local" && evidence.data.availability !== "retired" && <><p>{evidence.data.originalFilename} · {evidence.data.sizeBytes} bytes</p><p>SHA-256: {evidence.data.sha256}</p><p>Preview transfers and verifies the entire file from its node before displaying a bounded sample. A connected compatible producer and enabled evidence service are required.</p><div className="flex flex-wrap gap-2">{evidencePreviewKind(evidence.data.mimeType, evidence.data.sizeBytes) !== 'download' && <Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('preview'); }}>Preview</Button>}<Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('download'); }}>Download original</Button>{!capabilities.error && capabilities.data?.canWrite && <Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('promotion'); }}>Save as attachment</Button>}{controller && <Button size="sm" variant="ghost" onClick={() => controller.abort()}>Cancel request</Button>}</div>{localPreview && <LocalEvidencePreview preview={localPreview} />}</>}
       {evidence.data.kind === "attachment" && evidence.data.availability !== "retired" && <PinnedAttachmentEvidence file={evidence.data} />}
       {evidence.data.availability === "retired" && <p>This output has been retired.</p>}
-      {evidence.data.kind === "git" && <GitEvidence requirementId={requirementId} outputId={outputId} headCommit={evidence.data.headCommit} />}
+      {evidence.data.kind === "git" && <><p>{evidence.data.repositoryName} · {evidence.data.branch ?? "delivered commit"} → {evidence.data.baseBranch}</p>{!evidence.data.gitBaseline && <p>Historical delivery baseline was not captured. Current-target comparisons may be empty after integration.</p>}{evidence.data.commitUrl && <a className="underline" href={evidence.data.commitUrl} target="_blank" rel="noopener noreferrer">Open delivered commit on the forge</a>}<GitEvidence requirementId={requirementId} outputId={outputId} headCommit={evidence.data.headCommit} /></>}
       {evidence.data.kind === "unsupported" && <p>This output does not have a supported immutable evidence identity.</p>}
       {state && <p role="status">{state}</p>}
     </div>}
@@ -191,13 +207,19 @@ function LocalEvidencePreview({ preview }: { preview: { url: string; kind: strin
 
 function GitEvidence({ requirementId, outputId, headCommit }: { requirementId: string; outputId: string; headCommit: string }) {
   const comparison = trpc.requirement.compareGitEvidence.useMutation();
+  const commit = trpc.requirement.gitEvidenceCommit.useMutation();
+  const [mode, setMode] = useState<"historical" | "current">("historical");
   const [selected, setSelected] = useState<number | null>(null);
-  const selectedFile = selected === null ? undefined : comparison.data?.files[selected];
+  const selectedIndex = selected ?? (comparison.data?.files.length ? Math.max(0, comparison.data.files.findIndex(file => file.patchState === "available")) : null);
+  const selectedFile = selectedIndex === null ? undefined : comparison.data?.files[selectedIndex];
   const file = trpc.requirement.gitEvidenceFile.useQuery({ requirementId, outputId, comparisonId: comparison.data?.comparisonId ?? "", path: selectedFile?.path ?? "" }, { enabled: Boolean(comparison.data?.comparisonId && selectedFile), retry: false });
-  return <div className="space-y-2"><p className="break-all">Head commit: {headCommit}</p><Button size="sm" variant="outline" disabled={comparison.isPending} onClick={() => { setSelected(null); comparison.mutate({ requirementId, outputId }); }}>Open Git comparison</Button>
-    {comparison.isPending && <p>Opening comparison…</p>}{comparison.error && <p role="alert">Git comparison is unavailable or access is denied.</p>}
-    {!comparison.error && comparison.data && <><p className="break-all">Base: {comparison.data.baseCommit}</p><p className="break-all">Merge base: {comparison.data.comparisonCommit}</p><p>Comparison mode: merge base to head</p>{comparison.data.truncated && <p role="status">The comparison exceeds the display limit; some changes are omitted.</p>}
-      <div className="grid gap-3 md:grid-cols-3"><ul className="max-h-96 space-y-1 overflow-auto">{comparison.data.files.map((entry, index) => <li key={`${entry.path}-${index}`}><Button size="sm" variant={selected === index ? "secondary" : "ghost"} className="h-auto max-w-full justify-start whitespace-normal break-all text-left" onClick={() => setSelected(index)}>{entry.status}: {entry.previousPath ? `${entry.previousPath} → ` : ""}{entry.path}</Button></li>)}</ul><div className="min-w-0 md:col-span-2">{file.isFetching && <p>Loading file…</p>}{file.error && <p role="alert">File is unavailable or access is denied.</p>}{!file.isFetching && !file.error && file.data && <><p className="break-all">{file.data.path}</p>{file.data.patchState === "available" ? <GitPatch path={file.data.path} patch={file.data.patch ?? ""} /> : <p>Diff unavailable for this file ({file.data.patchState}).</p>}</>}</div></div>
+  return <div className="space-y-2"><p className="break-all">Head commit: {headCommit}</p><label>Compare <select className="rounded border bg-background p-1" value={mode} onChange={event => { setMode(event.target.value as "historical" | "current"); comparison.reset(); }}><option value="historical">Historical delivery baseline</option><option value="current">Current target branch</option></select></label><Button size="sm" variant="outline" disabled={comparison.isPending} onClick={() => { setSelected(null); comparison.mutate({ requirementId, outputId, mode }); }}>Open Git comparison</Button>
+    <Button size="sm" variant="outline" disabled={commit.isPending} onClick={() => commit.mutate({ requirementId, outputId })}>Inspect delivered commit</Button>
+    {commit.isPending && <p role="status">Loading commit…</p>}{commit.error && <p role="alert">{commit.error.message}</p>}
+    {!commit.error && commit.data && <details open><summary>Delivered commit · {commit.data.files.length} files</summary>{commit.data.needsParent ? <div><p>This is a merge commit. Choose a parent explicitly.</p>{commit.data.parents.map(parent => <Button key={parent} size="sm" variant="outline" onClick={() => commit.mutate({ requirementId, outputId, parent })}>Parent {parent.slice(0, 12)}</Button>)}</div> : <><p>{commit.data.parent ? `Compared with parent ${commit.data.parent.slice(0, 12)}` : "Root commit compared with the empty tree"}</p>{commit.data.files.length === 0 && <p>No changed files.</p>}{commit.data.truncated && <p role="status">This bounded preview omits some content.</p>}{commit.data.files.map(entry => <details key={entry.path}><summary className="cursor-pointer break-all">{entry.status}: {entry.path}</summary>{entry.patchState === "available" ? <GitPatch path={entry.path} patch={entry.patch ?? ""} /> : <p>Patch {entry.patchState}; the forge may omit binary content.</p>}</details>)}</>}</details>}
+    {comparison.isPending && <p>Opening comparison…</p>}{comparison.error && <p role="alert">{comparison.error.message}</p>}
+    {!comparison.error && comparison.data && <><p className="break-all">Base: {comparison.data.baseCommit}</p><p className="break-all">Merge base: {comparison.data.comparisonCommit}</p><p>Comparison mode: merge base to delivered head · {comparison.data.files.length} changed files</p>{comparison.data.files.length === 0 && <p role="status">No changed files.{comparison.data.comparisonCommit === headCommit ? " The delivered head is already contained in this target baseline." : " The compared trees have no displayable changes."}</p>}{comparison.data.truncated && <p role="status">The comparison exceeds the display limit; some changes are omitted.</p>}
+      <div className="grid gap-3 md:grid-cols-3"><ul className="max-h-96 space-y-1 overflow-auto">{comparison.data.files.map((entry, index) => <li key={`${entry.path}-${index}`}><Button size="sm" variant={selectedIndex === index ? "secondary" : "ghost"} className="h-auto max-w-full justify-start whitespace-normal break-all text-left" aria-pressed={selectedIndex === index} onClick={() => setSelected(index)}>{entry.status}: {entry.previousPath ? `${entry.previousPath} → ` : ""}{entry.path}</Button></li>)}</ul><div className="min-w-0 md:col-span-2">{file.isFetching && <p>Loading file…</p>}{file.error && <div role="alert"><p>File is unavailable or access is denied.</p><Button size="sm" variant="outline" onClick={() => void file.refetch()}>Retry file</Button></div>}{!file.isFetching && !file.error && file.data && <><p className="break-all">{file.data.path}</p>{file.data.patchState === "available" ? <GitPatch path={file.data.path} patch={file.data.patch ?? ""} /> : <p>Diff unavailable for this file ({file.data.patchState}).</p>}</>}</div></div>
     </>}
   </div>;
 }
