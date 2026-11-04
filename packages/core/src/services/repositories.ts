@@ -1,3 +1,4 @@
+import { captureDeliveryBaseline } from "./trusted-forge";
 import { and, asc, desc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import {
   type Database,
@@ -1363,6 +1364,7 @@ export async function reconcileHumanRepositoryDelivery(
     if (!existing) {
       await db.insert(workflowOutputs).values({ requirementId: requirement.id, requirementRepositoryId: link.id, workflowRevision: requirement.workflowRevision,
         type: workflow.delivery.method as "git_pr" | "git_branch", url: snapshot.url, headCommit: snapshot.headCommit,
+        gitBaseline: snapshot.state === "open" ? await captureDeliveryBaseline(repository, link.baseBranch!, snapshot.headCommit) : null,
         summary: "Pull request delivery verified by the server forge connection", createdBy: actor.id, createdByType: actor.type });
       await db.update(requirements).set({ workflowStateRevision: requirement.workflowStateRevision + 1, updatedAt: new Date() }).where(eq(requirements.id, requirement.id));
     }

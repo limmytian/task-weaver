@@ -3,6 +3,8 @@ import { z } from "zod";
 import {
   createResourceServices,
   createGitEvidenceService,
+  gitEvidenceComparisonSchema,
+  gitEvidenceCommitSchema,
   createExecutionControlService,
   createExecutionRecoveryViewService,
   executionRevalidationSchema,
@@ -147,7 +149,12 @@ requirements.get("/requirements/:id/workflow-outputs/:outputId/evidence", async 
 });
 
 requirements.post("/requirements/:id/workflow-outputs/:outputId/git-comparison", async c => {
-  return c.json(await createGitEvidenceService(c.get("identity")).compare(c.get("db"), c.req.param("id"), c.req.param("outputId")));
+  const input = gitEvidenceComparisonSchema.parse(await c.req.json());
+  return c.json(await createGitEvidenceService(c.get("identity")).compare(c.get("db"), c.req.param("id"), c.req.param("outputId"), input.mode));
+});
+requirements.post("/requirements/:id/workflow-outputs/:outputId/git-commit", async c => {
+  const input = gitEvidenceCommitSchema.parse(await c.req.json());
+  return c.json(await createGitEvidenceService(c.get("identity")).commit(c.get("db"), c.req.param("id"), c.req.param("outputId"), input.parent));
 });
 requirements.get("/requirements/:id/workflow-outputs/:outputId/git-comparison/file", async c => {
   const input = z.object({ comparisonId: z.string().uuid(), path: z.string().min(1).max(4096) }).safeParse(c.req.query());

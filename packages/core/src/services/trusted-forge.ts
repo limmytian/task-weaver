@@ -177,3 +177,44 @@ export async function readTrustedDirectMerge(repository: ForgeRepositoryIdentity
   }
   return { provider, headCommit: deliveredCommit, targetCommit, baseBranch, source, observedAt: new Date() };
 }
+
+export function gitRepositoryIdentity(repository: ForgeRepositoryIdentity) {
+  return JSON.stringify([repository.provider, repository.host, repository.namespace, repository.name]);
+}
+
+/** Pin at registration, never reconstruct a historical baseline when opening a review. */
+export async function captureDeliveryBaseline(repository: ForgeRepositoryIdentity, baseBranch: string, headCommit: string) {
+  try {
+    const pinned = await pinTrustedGitComparison(repository, baseBranch, headCommit);
+    return { ...pinned, repositoryKey: gitRepositoryIdentity(repository), capturedAt: new Date().toISOString() };
+  } catch {
+    // Forge outages and unsupported providers do not invalidate otherwise verified delivery.
+    // A missing baseline is explicitly reported to reviewers and is never invented later.
+    return null;
+  }
+}
+
+export async function readTrustedCommit(repository: ForgeRepositoryIdentity, headCommit: string, parent?: string, options: ForgeReadOptions = {}) {
+  if (repository.provider !== "github" && repository.host !== "github.com") throw new ValidationError("Single-commit preview is supported for GitHub; use the repository commit link for this forge");
+  const head = fullObjectId.parse(headCommit);
+  const response = await trustedForgeRequest(repository, "github", `commits/${head}?per_page=100`, options);
+  const parsed = z.object({ sha: fullObjectId, parents: z.array(z.object({ sha: fullObjectId })).max(100), files: comparisonSchema.shape.files.optional() }).safeParse(response.data);
+  if (!parsed.success || parsed.data.sha !== head) throw new ValidationError("Trusted forge returned an invalid commit identity");
+  const parents = parsed.data.parents.map(item => item.sha);
+  if (parents.length > 1 && !parent) return { headCommit: head, parents, parent: null, files: [], truncated: false, needsParent: true };
+  const chosen = parent ?? parents[0];
+  if (parent && !parents.includes(parent)) throw new ValidationError("Selected parent does not belong to the delivered commit");
+  if (chosen) {
+    const result = await readTrustedGitComparison(repository, { baseCommit: chosen, headCommit: head, comparisonCommit: chosen, mode: "merge-base" }, options);
+    return { ...result, parents, parent: chosen, needsParent: false };
+  }
+  // GitHub's root commit files describe the empty-tree comparison; no synthetic SHA is used.
+  let remaining = 1024 * 1024;
+  const files = (parsed.data.files ?? []).slice(0, 200).map(file => {
+    const bytes = file.patch === undefined ? 0 : Buffer.byteLength(file.patch);
+    const available = file.patch !== undefined && bytes <= remaining;
+    if (available) remaining -= bytes;
+    return { path: file.filename, previousPath: file.previous_filename, status: file.status, patch: available ? file.patch! : null, patchState: file.patch === undefined ? "unavailable" : available ? "available" : "too_large" };
+  });
+  return { headCommit: head, parents, parent: null, files, needsParent: false, truncated: (parsed.data.files?.length ?? 0) >= 100 || files.some(file => file.patchState === "too_large") };
+}

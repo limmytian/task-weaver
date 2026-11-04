@@ -64,7 +64,12 @@ export default function LoginPage() {
       setError(
         "Unable to complete this request. Check your details or contact your administrator.",
       );
-      form.reset();
+      if (mode === "login") {
+        const password = form.elements.namedItem("password");
+        if (password instanceof HTMLInputElement) { password.value = ""; password.focus(); }
+      } else {
+        form.reset();
+      }
     } finally {
       login.reset();
       activate.reset();

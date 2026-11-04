@@ -71,3 +71,6 @@ export function evidenceDemandPayload(raw: EvidenceNodeDemand): string {
   const demand = evidenceNodeDemandSchema.parse(raw);
   return JSON.stringify(['task-weaver:evidence-read:v1', demand.requestId, demand.outputId, demand.projectId, demand.requirementId, demand.daemonId, demand.nodeId, demand.nonce, demand.purpose, demand.sizeBytes, demand.sha256, demand.expiresAt]);
 }
+
+export const gitEvidenceComparisonSchema = z.object({ mode: z.enum(["historical", "current"]).default("historical") });
+export const gitEvidenceCommitSchema = z.object({ parent: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/).optional() });

@@ -33,7 +33,7 @@ const handler = async (req: Request) => {
       router: appRouter,
       createContext: createTRPCContext,
     });
-    if (new URL(req.url).pathname.split("/").pop()?.split(",").some(name => ["requirement.evidence", "requirement.compareGitEvidence", "requirement.gitEvidenceFile"].includes(name))) {
+    if (new URL(req.url).pathname.split("/").pop()?.split(",").some(name => ["requirement.evidence", "requirement.compareGitEvidence", "requirement.gitEvidenceFile", "requirement.gitEvidenceCommit"].includes(name))) {
       response.headers.set("cache-control", "no-store");
       response.headers.set("x-content-type-options", "nosniff");
     }

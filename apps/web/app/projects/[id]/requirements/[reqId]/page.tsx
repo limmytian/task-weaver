@@ -1454,11 +1454,8 @@ function RequirementSidebar({
 
           {requirement.dependencies && requirement.dependencies.length > 0 ? (
             requirement.dependencies.map((dep) => (
-              <div
-                key={dep.id}
-                className="flex items-center gap-2 rounded-md border p-2 text-sm transition-colors hover:bg-muted"
-              >
-                <Link
+              <div key={dep.id} className="rounded-md border p-2 text-sm">
+                <div className="flex items-center gap-2"><Link
                   href={`/projects/${projectId}/requirements/${dep.dependsOnRequirementId}`}
                   className="min-w-0 flex-1"
                 >
@@ -1481,7 +1478,7 @@ function RequirementSidebar({
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
-                )}
+                )}</div>
               </div>
             ))
           ) : (

@@ -1,4 +1,4 @@
-import { bigint, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { jsonb, bigint, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { actorTypeEnum } from "./enums";
 import { requirements, executionSlices } from "./requirements";
 import { tasks } from "./tasks";
@@ -24,6 +24,7 @@ export const workflowOutputs = pgTable("workflow_outputs", {
   sha256: text("sha256"),
   nodePublicKey: text("node_public_key"),
   headCommit: text("head_commit"),
+  gitBaseline: jsonb("git_baseline").$type<{ baseCommit: string; headCommit: string; comparisonCommit: string; repositoryKey: string; capturedAt: string }>(),
   summary: text("summary"),
   availability: text("availability", { enum: ["available", "missing", "changed", "retired"] }).default("available").notNull(),
   verifiedAt: timestamp("verified_at", { withTimezone: true }),

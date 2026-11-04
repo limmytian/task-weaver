@@ -99,3 +99,16 @@ test("Gitea direct integration verifies parent objects and refuses unverifiable 
     else await assert.rejects(action(), /ancestry limit/);
   }
 });
+
+test("single-commit inspection requires an actual parent and handles roots explicitly", async () => {
+  const { readTrustedCommit } = await import("./trusted-forge");
+  const head = "a".repeat(40), first = "b".repeat(40), second = "c".repeat(40);
+  const fetcher: typeof fetch = async url => String(url).includes("/compare/")
+    ? Response.json({ base_commit: { sha: second }, merge_base_commit: { sha: second }, files: [{ filename: "merge.txt", status: "added", patch: "+merge" }] })
+    : Response.json({ sha: head, parents: [{ sha: first }, { sha: second }] });
+  assert.equal((await readTrustedCommit(repository, head, undefined, { fetch: fetcher })).needsParent, true);
+  assert.equal((await readTrustedCommit(repository, head, second, { fetch: fetcher })).files[0]?.patch, "+merge");
+  await assert.rejects(readTrustedCommit(repository, head, "d".repeat(40), { fetch: fetcher }), /does not belong/);
+  const root = await readTrustedCommit(repository, head, undefined, { fetch: async () => Response.json({ sha: head, parents: [], files: [{ filename: "root.txt", status: "added", patch: "+root" }] }) });
+  assert.equal(root.parent, null); assert.equal(root.files[0]?.patch, "+root");
+});

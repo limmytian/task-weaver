@@ -17,6 +17,8 @@ import {
   BarChart3,
   Network,
   LayoutGrid,
+  ListTree,
+  Activity,
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
@@ -194,29 +196,29 @@ export default function ProjectDetailPage({
         <Tabs defaultValue="board">
           <TabsList className="scrollbar-none h-10 max-w-full flex-nowrap justify-start overflow-x-auto">
             <TabsTrigger value="board">
-              <LayoutGrid className="mr-1 h-3.5 w-3.5" />
+              <LayoutGrid aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
               Board
             </TabsTrigger>
             <TabsTrigger value="timeline">
-              <Clock className="mr-1 h-3.5 w-3.5" />
+              <Clock aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
               Timeline
             </TabsTrigger>
-            <TabsTrigger value="requirements">Requirements</TabsTrigger>
-            <TabsTrigger value="plans">Plans</TabsTrigger>
+            <TabsTrigger value="requirements"><ClipboardList aria-hidden="true" className="mr-1 h-3.5 w-3.5" />Requirements</TabsTrigger>
+            <TabsTrigger value="plans"><ListTree aria-hidden="true" className="mr-1 h-3.5 w-3.5" />Plans</TabsTrigger>
             <TabsTrigger value="analytics">
-              <BarChart3 className="mr-1 h-3.5 w-3.5" />
+              <BarChart3 aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
               Analytics
             </TabsTrigger>
             <TabsTrigger value="dag">
-              <GitBranch className="mr-1 h-3.5 w-3.5" />
+              <GitBranch aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
               DAG
             </TabsTrigger>
             <TabsTrigger value="graph">
-              <Network className="mr-1 h-3.5 w-3.5" />
+              <Network aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
               Graph
             </TabsTrigger>
-            <TabsTrigger value="activity">Activity</TabsTrigger>
-            <TabsTrigger value="settings">Settings</TabsTrigger>
+            <TabsTrigger value="activity"><Activity aria-hidden="true" className="mr-1 h-3.5 w-3.5" />Activity</TabsTrigger>
+            <TabsTrigger value="settings"><Settings aria-hidden="true" className="mr-1 h-3.5 w-3.5" />Settings</TabsTrigger>
           </TabsList>
 
           <TabsContent value="plans" className="mt-4"><PlanDrafts projectId={id} /></TabsContent>

@@ -48,10 +48,34 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   await json(await api(`/execution-slices/${firstSlice.id}`, "PATCH", { status: "done" }));
   assert.equal((await api(`/tasks/${blockedTask.id}/status`, "PATCH", { status: "in_progress" })).status, 200);
 
-  const basic = await create({});
+  const basic = await create({ status: "approved",});
   assert.equal(basic.workflow.delivery.method, "none");
   assert.equal(basic.workflowSource, "basic");
   assert.equal((await json(await advance(basic.id, { stage: "delivery", expectedRevision: 0 }))).status, "done");
+
+  const auto = await create({ status: "approved",});
+  const autoTasks = [];
+  for (const title of ["First", "Last"]) autoTasks.push(await json(await api(`/projects/${fixture.project.id}/tasks`, "POST", { requirementId: auto.id, title }), 201));
+  await json(await api(`/tasks/${autoTasks[0].id}/status`, "PATCH", { status: "done" }));
+  assert.notEqual((await json(await api(`/requirements/${auto.id}`))).status, "done");
+  await json(await api(`/tasks/${autoTasks[1].id}/status`, "PATCH", { status: "cancelled" }));
+  const autoDone = await json(await api(`/requirements/${auto.id}`));
+  assert.equal(autoDone.status, "done");
+  assert.equal(autoDone.workflowState.acceptance, "skipped");
+  await json(await api(`/tasks/${autoTasks[0].id}/status`, "PATCH", { status: "done" }));
+  assert.equal((await json(await api(`/requirements/${auto.id}`))).workflowStateRevision, autoDone.workflowStateRevision);
+  const draft = await create({ status: "draft" });
+  assert.equal((await advance(draft.id, { stage: "delivery", expectedRevision: 0 })).status, 400);
+  const draftTask = await json(await api(`/projects/${fixture.project.id}/tasks`, "POST", { requirementId: draft.id, title: "Draft task" }), 201);
+  await json(await api(`/tasks/${draftTask.id}/status`, "PATCH", { status: "done" }));
+  assert.equal((await json(await api(`/requirements/${draft.id}`))).status, "draft");
+  const gated = await create({ status: "approved", workflow: { delivery: { mode: "automatic", method: "none" }, acceptance: { mode: "manual", minimumHumanApprovals: 1 }, integration: { mode: "manual", method: "none" } } });
+  const gatedTask = await json(await api(`/projects/${fixture.project.id}/tasks`, "POST", { requirementId: gated.id, title: "Needs human review" }), 201);
+  await json(await api(`/tasks/${gatedTask.id}/status`, "PATCH", { status: "done" }));
+  const gatedState = await json(await api(`/requirements/${gated.id}`));
+  assert.equal(gatedState.status, "in_review");
+  assert.equal(gatedState.workflowState.acceptance, "pending");
+  assert.equal(gatedState.workflowState.integration, "pending");
 
   const projectDefault = { delivery: { method: "url" }, acceptance: {}, integration: {} };
   await json(await api(`/projects/${fixture.project.id}`, "PATCH", { defaultWorkflow: projectDefault }));
@@ -70,7 +94,7 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
   assert.equal((await api("/plans/apply", "POST", { dryRun: true, plan }, fixture.outsider.headers)).status, 404);
   await json(await api(`/projects/${fixture.project.id}`, "PATCH", { defaultWorkflow: null }));
 
-  const manual = await create({ workflow: { delivery: { method: "url" }, acceptance: { mode: "manual", requiredChecks: ["Complete report"], minimumHumanApprovals: 1 }, integration: {} } });
+  const manual = await create({ status: "approved", workflow: { delivery: { method: "url" }, acceptance: { mode: "manual", requiredChecks: ["Complete report"], minimumHumanApprovals: 1 }, integration: {} } });
   assert.equal((await advance(manual.id, { stage: "delivery", expectedRevision: 0 })).status, 400);
   const output = await json(await api(`/requirements/${manual.id}/workflow-outputs`, "POST", { type: "url", url: "https://example.test/report" }), 201);
   assert.equal(output.workflowRevision, 1);
@@ -276,12 +300,15 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
     assert.ok(String(url).endsWith(`/compare/${base}...${head}`));
     return Response.json({ base_commit: { sha: base }, merge_base_commit: { sha: mergeBase }, files: [{ filename: "src/example.ts", status: "modified", patch: "+example" }] });
   };
-  const comparison = await createGitEvidenceService(fixture.owner.context, { fetch: forgeFetch }).compare(db, boundRequirement.id, gitOutput!.id);
+  const comparison = await createGitEvidenceService(fixture.owner.context, { fetch: forgeFetch }).compare(db, boundRequirement.id, gitOutput!.id, "current");
   assert.equal(comparison.headCommit, head); assert.equal("patch" in comparison.files[0]!, false);
-  assert.equal((await createGitEvidenceService(fixture.owner.context, { fetch: forgeFetch }).compare(db, boundRequirement.id, gitOutput!.id)).comparisonId, comparison.comparisonId);
+  assert.equal((await createGitEvidenceService(fixture.owner.context, { fetch: forgeFetch }).compare(db, boundRequirement.id, gitOutput!.id, "current")).comparisonId, comparison.comparisonId);
+  await assert.rejects(createGitEvidenceService(fixture.owner.context, { fetch: forgeFetch }).compare(db, boundRequirement.id, gitOutput!.id), /no trusted historical/);
+  await db.update(workflowOutputs).set({ gitBaseline: { baseCommit: base, headCommit: head, comparisonCommit: mergeBase, repositoryKey: JSON.stringify([gitRepo!.provider, gitRepo!.host, gitRepo!.namespace, gitRepo!.name]), capturedAt: new Date().toISOString() } }).where(eq(workflowOutputs.id, gitOutput!.id));
   branchTip = "d".repeat(40);
+  assert.equal((await createGitEvidenceService(fixture.owner.context, { fetch: forgeFetch }).compare(db, boundRequirement.id, gitOutput!.id)).baseCommit, base);
   assert.equal((await createGitEvidenceService(fixture.owner.context, { fetch: forgeFetch }).file(db, boundRequirement.id, gitOutput!.id, comparison.comparisonId, "src/example.ts")).patch, "+example");
-  await assert.rejects(createGitEvidenceService(fixture.outsider.context, { fetch: async () => { throw new Error("Unauthorized forge fetch"); } }).compare(db, boundRequirement.id, gitOutput!.id));
+  await assert.rejects(createGitEvidenceService(fixture.outsider.context, { fetch: async () => { throw new Error("Unauthorized forge fetch"); } }).compare(db, boundRequirement.id, gitOutput!.id, "current"));
   await assert.rejects(createGitEvidenceService(fixture.outsider.context, { fetch: async () => { throw new Error("Unauthorized forge fetch"); } }).file(db, boundRequirement.id, gitOutput!.id, comparison.comparisonId, "src/example.ts"));
   assert.notEqual((await api(`/requirements/${boundRequirement.id}/workflow-outputs/${gitOutput!.id}/git-comparison`, "POST", {}, fixture.outsider.headers)).status, 200);
   await fixture.identity.setMembership(fixture.owner.headers, fixture.project.id, fixture.outsider.context.actor.id, { role: "viewer", explicitPermissions: [] });
@@ -292,7 +319,7 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
     forgeRequests++;
     if (forgeRequests === 3) await fixture.identity.removeMembership(fixture.owner.headers, fixture.project.id, fixture.outsider.context.actor.id);
     return forgeFetch(url);
-  } }).compare(db, boundRequirement.id, gitOutput!.id));
+  } }).compare(db, boundRequirement.id, gitOutput!.id, "current"));
   assert.equal(forgeRequests, 3);
   await assert.rejects(createGitEvidenceService(fixture.outsider.context, { fetch: forgeFetch }).file(db, boundRequirement.id, gitOutput!.id, comparison.comparisonId, "src/example.ts"));
   await fixture.identity.setMembership(fixture.owner.headers, fixture.project.id, fixture.outsider.context.actor.id, { role: "viewer", explicitPermissions: [] });
@@ -300,7 +327,7 @@ test("workflow REST stages, delivery delegations and explicit artifact locality 
     await fixture.identity.removeMembership(fixture.owner.headers, fixture.project.id, fixture.outsider.context.actor.id);
     return forgeFetch(url);
   } }).file(db, boundRequirement.id, gitOutput!.id, comparison.comparisonId, "src/example.ts"));
-  const producer = await create({ workflowPreset: "local" });
+  const producer = await create({ status: "approved", workflowPreset: "local" });
   const local = await json(await api(`/requirements/${producer.id}/workflow-outputs`, "POST", { type: "local", nodeId: "node-a", relativePath: `${producer.id}/file.bin`, sizeBytes: 42, sha256: "a".repeat(64) }), 201);
   const evidence = await json(await api(`/requirements/${producer.id}/workflow-outputs/${local.id}/evidence`));
   assert.equal(evidence.kind, "local");
