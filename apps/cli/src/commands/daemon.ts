@@ -1,3 +1,4 @@
+import { dependencyContext } from "./dependency-context.js";
 import { createDeliveryWorkerRunner } from '../daemon-delivery-worker.js'
 import type { WorkerState, RequirementLane } from '../daemon-worker-types.js'
 import { createEvidenceCoordinator } from '../evidence-coordinator.js'
@@ -960,6 +961,8 @@ ${workspace.repositories.length > 0
           `${index + 1}. [${t.status}] ${t.title} (${t.id})${t.description ? `\n   ${t.description}` : ''}`,
         ).join('\n')
 
+        const dependencySection = await dependencyContext(daemonGet, requirement.id);
+
         const gitWorkflowSection = requirement.workflow
           ? `Configured Requirement Workflow:
 - Delivery mode: ${requirement.workflow.delivery.mode}; method: ${requirement.workflow.delivery.method}.
@@ -1015,6 +1018,9 @@ Initial Active Task:
 
 Current Slice Task Roadmap:
 ${taskRoadmap}
+
+Upstream requirement context:
+${dependencySection}
 
 ${workspaceSection}
 
