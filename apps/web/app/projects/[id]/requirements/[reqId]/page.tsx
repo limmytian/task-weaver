@@ -55,7 +55,6 @@ import { GanttChart } from "@/components/gantt-chart";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
 import { ProjectWorkspaceLinks, WorkspaceBreadcrumbs } from "@/components/project-navigation";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
-import { DependencyDeliveryInputs } from "@/components/dependency-delivery-inputs";
 import { RequirementWorkflowPanel } from "@/components/requirement-workflow-panel";
 import { RequirementPlanDraft } from "@/components/plan-drafts";
 import { RepositoryChips, RequirementRepositories } from "@/components/repository-links";
@@ -1218,7 +1217,6 @@ function RequirementSidebar({
 }: {
   requirement: {
     id: string;
-    workflowInputs?: Array<{ output: { id: string } }>;
     tasks?: Array<{ id: string; title: string; status: string }>;
     dependencies?: Array<{
       id: string;
@@ -1481,7 +1479,6 @@ function RequirementSidebar({
                     <X className="h-3.5 w-3.5" />
                   </button>
                 )}</div>
-                <DependencyDeliveryInputs requirementId={requirement.id} sourceId={dep.dependsOnRequirementId} projectId={projectId} existingOutputIds={requirement.workflowInputs?.map(input => input.output.id) ?? []} disabled={isCancelled} />
               </div>
             ))
           ) : (
