@@ -1,3 +1,4 @@
+import { writeChildExitObservation } from '../child-exit-observation.js'
 import { createDaemonEventConsumer } from "../daemon-event-consumer.js";
 import { activateContinuation } from '../daemon-continuation'
 import { dependencyContext } from "./dependency-context.js";
@@ -1109,6 +1110,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         consoleObserver = consoleCoordinator.observe({
           target: { requirementId: requirement.id, taskId: task.id, runId: lane.runId!, workerIndex: w.index, leaseGeneration: lane.leaseGeneration! }, buffer: consoleBuffer, signal: access.signal,
         })
+        let childIdentity: { pid: number; processIdentity: string } | undefined
         let childResult: Awaited<ReturnType<typeof runMeteredAgent>>
         try {
         const bootstrapText = await loadWorkerCapabilityBootstrap({ apiUrl: access.environment.TW_API_URL!, apiKey: access.environment.TW_API_KEY! }, access.signal, requirement.projectId)
@@ -1130,7 +1132,12 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           buildArgv(toolCmd, prompt, workspacePath, selectedModel, selectedReasoningEffort),
           {
             cwd: workspacePath,
-            onSpawn: pid => { try { if (pid) recordLocalExecution({ requirementId: requirement.id, daemonId, runId: lane.runId!, leaseGeneration: lane.leaseGeneration, pid, workspacePath }) } catch (error) { executionController.abort(error) } },
+            onSpawn: pid => { try { if (pid) childIdentity = { pid, processIdentity: recordLocalExecution({ requirementId: requirement.id, daemonId, runId: lane.runId!, leaseGeneration: lane.leaseGeneration, pid, workspacePath }) } } catch (error) { executionController.abort(error) } },
+            onExit: (status, signal) => {
+              if (!childIdentity) return
+              try { writeChildExitObservation({ runId: lane.runId!, daemonId, leaseGeneration: lane.leaseGeneration, ...childIdentity, status, signal }) }
+              catch { console.warn('[Daemon] Direct child exit observation could not be saved.') }
+            },
             env: access.environment,
             timeoutMs: Number.isFinite(configuredAgentTimeout) && configuredAgentTimeout > 0
               ? configuredAgentTimeout
