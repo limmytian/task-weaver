@@ -9,3 +9,5 @@ export { EvidenceSessionService } from './services/evidence-session';
 export { createAttentionService } from "./services/attention";
 
 export { createFirstSuccessService } from "./services/first-success";
+
+export { resolveWorkflowInputs, type ResolvedWorkflowInput } from "./services/workflow-input-resolution";

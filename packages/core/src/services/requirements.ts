@@ -195,6 +195,8 @@ export async function retireWorkflowOutput(db: Database, requirementId: string, 
 }
 
 export async function addWorkflowInput(db: Database, requirementId: string, input: AddWorkflowInputInput, actor: Actor) {
+  // Serialize input registration with transactional input resolution.
+  await db.select({ id: requirements.id }).from(requirements).where(eq(requirements.id, requirementId)).for("update");
   const requirement = await getRequirementOrThrow(db, requirementId);
   if (!requirement.workflow) throw new ValidationError("Workflow inputs require a configured workflow");
   await assertRequirementLease(db, requirementId, actor, input);
