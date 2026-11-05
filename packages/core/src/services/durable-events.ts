@@ -193,10 +193,16 @@ export async function acknowledgeDurableEventsFenced(db: Database, input: { proj
 }
 
 /** Record an expired cursor without modifying the consumer checkpoint. */
-export async function recordEventCursorIncident(db: Database, input: { projectId: string; consumer: string; cursor: string; retentionFloor: string }, context: VerifiedRequestContext) {
-  const position = cursor(input.cursor), floor = cursor(input.retentionFloor);
-  if (!input.consumer.trim() || position >= floor) throw new Error("An expired cursor and consumer name are required");
+export async function recordEventCursorIncident(db: Database, input: { projectId: string; consumer: string; owner: string; generation: string }, context: VerifiedRequestContext) {
+  validateLeaseInput({ ...input, durationMs: 1000 });
+  const generation = cursor(input.generation);
   return withEventAuthority(db, context, input.projectId, async (tx, authority) => {
+    const [stream] = await tx.select().from(eventStreams).where(eq(eventStreams.projectId, input.projectId)).for("update");
+    const [lease] = await tx.select().from(eventConsumers).where(and(eq(eventConsumers.projectId, input.projectId), eq(eventConsumers.principalType, authority.actor.type), eq(eventConsumers.principalId, authority.actor.id), eq(eventConsumers.name, input.consumer))).for("update");
+    const [live] = lease && await tx.select({ id: eventConsumers.id }).from(eventConsumers).where(and(eq(eventConsumers.id, lease.id), eq(eventConsumers.leaseOwner, input.owner), eq(eventConsumers.leaseGeneration, generation), sql`${eventConsumers.leaseExpiresAt} > clock_timestamp()`)) || [];
+    if (!stream || !lease || !live) throw new Error("Consumer lease is stale or expired");
+    const position = lease.acknowledgedSequence, floor = stream.retentionFloor;
+    if (position >= floor) throw new Error("Consumer checkpoint is not expired");
     const [incident] = await tx.insert(eventCursorIncidents).values({ projectId: input.projectId, principalType: authority.actor.type, principalId: authority.actor.id, consumer: input.consumer, cursor: position, retentionFloor: floor }).onConflictDoUpdate({
       target: [eventCursorIncidents.projectId, eventCursorIncidents.principalType, eventCursorIncidents.principalId, eventCursorIncidents.consumer],
       targetWhere: sql`${eventCursorIncidents.resolvedAt} IS NULL`,

@@ -157,9 +157,52 @@ test("live event authorization and principal-owned checkpoints", { skip: !url, t
   assert.equal((await replayDurableEvents(db, { projectId: project!.id, cursor: "2" }, owner.context)).status, "valid");
   assert.deepEqual(await acknowledgeDurableEvents(db, { projectId: project!.id, consumer: "expired", cursor: "1" }, owner.context), { status: "expired", cursor: "1", retentionFloor: "2" });
   assert.equal((await getDurableEventCheckpoint(db, { projectId: project!.id, consumer: "expired" }, owner.context)).cursor, "0");
-  const incidentInput = { projectId: project!.id, consumer: "incident-worker", cursor: "1", retentionFloor: "2" };
+  const incidentLease = await acquireDurableConsumerLease(db, { projectId: project!.id, consumer: "incident-worker", owner: randomUUID(), durationMs: 30000 }, owner.context);
+  assert.equal(incidentLease.status, "acquired");
+  if (incidentLease.status !== "acquired") throw new Error("Missing incident lease");
+  // Use a separate known owner so the fence is explicit.
+  const incidentOwner = randomUUID();
+  await db.execute(sql`UPDATE task_weaver.event_consumers SET lease_expires_at = clock_timestamp() - interval '1 second' WHERE project_id = ${project!.id} AND name = 'incident-worker'`);
+  const incidentTakeover = await acquireDurableConsumerLease(db, { projectId: project!.id, consumer: "incident-worker", owner: incidentOwner, durationMs: 30000 }, owner.context);
+  if (incidentTakeover.status !== "acquired") throw new Error("Missing incident takeover");
+  const incidentInput = { projectId: project!.id, consumer: "incident-worker", owner: incidentOwner, generation: incidentTakeover.generation };
+  await assert.rejects(recordEventCursorIncident(db, { ...incidentInput, generation: incidentLease.generation }, owner.context), /stale/);
+  await assert.rejects(recordEventCursorIncident(db, incidentInput, other.context), /stale/);
+  await assert.rejects(recordEventCursorIncident(db, { ...fence, owner: rival, generation: takeover.generation, ...({ cursor: "0", retentionFloor: "999" }) }, owner.context), /not expired/);
+  // The incident waits for retention and uses the committed floor.
+  let unlockFloor!: () => void, floorLocked!: () => void;
+  const floorReady = new Promise<void>(resolve => { floorLocked = resolve; });
+  const floorRelease = new Promise<void>(resolve => { unlockFloor = resolve; });
+  const floorUpdate = db.transaction(async tx => {
+    await tx.select().from(eventStreams).where(eq(eventStreams.projectId, project!.id)).for("update");
+    floorLocked(); await floorRelease;
+    await tx.update(eventStreams).set({ retentionFloor: 3n }).where(eq(eventStreams.projectId, project!.id));
+  });
+  await floorReady;
+  const racingIncident = recordEventCursorIncident(db, incidentInput, owner.context);
+  await waitForBlockedTransaction(); unlockFloor(); await floorUpdate;
+  assert.equal((await racingIncident).retentionFloor, "3");
+  // A takeover committed while the writer waits must fence the old owner.
+  let unlockLease!: () => void, leaseLocked!: () => void;
+  const leaseReady = new Promise<void>(resolve => { leaseLocked = resolve; });
+  const leaseRelease = new Promise<void>(resolve => { unlockLease = resolve; });
+  const leaseChange = db.transaction(async tx => {
+    await tx.execute(sql`SELECT 1 FROM task_weaver.event_consumers WHERE project_id = ${project!.id} AND principal_id = ${owner.actor.id} AND name = 'incident-worker' FOR UPDATE`);
+    leaseLocked(); await leaseRelease;
+    await tx.execute(sql`UPDATE task_weaver.event_consumers SET lease_owner = ${randomUUID()}, lease_generation = lease_generation + 1 WHERE project_id = ${project!.id} AND principal_id = ${owner.actor.id} AND name = 'incident-worker'`);
+  });
+  await leaseReady;
+  const staleIncident = recordEventCursorIncident(db, incidentInput, owner.context);
+  await waitForBlockedTransaction(); unlockLease(); await leaseChange;
+  await assert.rejects(staleIncident, /stale/);
+  await db.execute(sql`UPDATE task_weaver.event_consumers SET lease_expires_at = clock_timestamp() - interval '1 second' WHERE project_id = ${project!.id} AND principal_id = ${owner.actor.id} AND name = 'incident-worker'`);
+  const renewedIncidentLease = await acquireDurableConsumerLease(db, { ...incidentInput, durationMs: 30000 }, owner.context);
+  if (renewedIncidentLease.status !== "acquired") throw new Error("Missing incident lease");
+  incidentInput.generation = renewedIncidentLease.generation;
   const incidents = await Promise.all(Array.from({ length: 8 }, () => recordEventCursorIncident(db, incidentInput, owner.context)));
   assert.equal(new Set(incidents.map(row => row.id)).size, 1);
+  assert.equal(incidents[0]!.cursor, "0");
+  assert.equal(incidents[0]!.retentionFloor, "3");
   const reopenedDb = createDb(url!);
   try {
     assert.equal((await inspectEventCursorIncidents(reopenedDb, { projectId: project!.id }, owner.context))[0]!.id, incidents[0]!.id);
@@ -182,13 +225,15 @@ test("live event authorization and principal-owned checkpoints", { skip: !url, t
   });
   await revocationReady;
   const revokedReplay = replayDurableEvents(db, { projectId: project!.id, cursor: "2" }, other.context);
+  const revokedIncident = recordEventCursorIncident(db, incidentInput, other.context);
   await waitForBlockedTransaction();
   releaseRevocation(); await revocation;
   await assert.rejects(revokedReplay);
+  await assert.rejects(revokedIncident);
   await assert.rejects(replayDurableEvents(db, { projectId: project!.id, cursor: "0" }, other.context));
   await assert.rejects(getDurableEventCheckpoint(db, { projectId: project!.id, consumer: "worker" }, other.context));
   await db.delete(requirements).where(eq(requirements.id, requirement!.id));
-  const deleted = await replayDurableEvents(db, { projectId: project!.id, cursor: "2" }, owner.context);
+  const deleted = await replayDurableEvents(db, { projectId: project!.id, cursor: "3" }, owner.context);
   if (deleted.status === "valid") assert.deepEqual(deleted.events, []); else assert.fail("unexpected expiration");
   await db.update(projectMemberships).set({ removedAt: new Date() }).where(eq(projectMemberships.id, membership!.id));
   await assert.rejects(inspectEventCursorIncidents(db, { projectId: project!.id }, owner.context));
