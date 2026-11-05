@@ -20,16 +20,18 @@ export function monitorExecutionControl(options: {
   let polling = false
   let stopped = false
   const tick = async () => {
-    if (closed || polling || stopped) return
+    if (closed || stopped) return true
+    if (polling) return false
     polling = true
     try {
       const control = (await options.list()).find(row => row.runId === options.runId)
-      if (!control || closed) return
+      if (!control || closed) return true
       // Even a lost acknowledgment must not leave invalidated work running.
       await options.acknowledge(control, 'received').catch(() => undefined)
       await options.acknowledge(control, 'stopping').catch(() => undefined)
       if (!closed) { stopped = true; options.stop() }
-    } catch { /* The access broker independently fails closed when authority cannot be verified. */ }
+      return true
+    } catch { return false /* The access broker independently fails closed when authority cannot be verified. */ }
     finally { polling = false }
   }
   const timer = setInterval(() => { void tick() }, options.intervalMs ?? 1000)

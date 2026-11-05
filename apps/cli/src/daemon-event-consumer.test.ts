@@ -33,3 +33,26 @@ test('revoked parent cannot handle or acknowledge events', async () => {
   })
   await settle(); consumer.close(); assert.equal(handled, 0); assert.equal(ack, 0); assert.match(reports[0]!, /revoked/)
 })
+
+test('failed handling is replayed before acknowledgment after reconnect', async () => {
+  let checkpoint = '0', handled = 0, acknowledgments = 0
+  const consumer = createDaemonEventConsumer({ projectId: 'p', consumer: 'd', intervalMs: 100000,
+    get: async <T>(path: string) => (path.includes('checkpoint') ? { cursor: checkpoint } : { status: 'valid', cursor: '1', retentionFloor: '0', events: checkpoint === '0' ? [{ sequence: '1' }] : [] }) as T,
+    post: async <T>() => { acknowledgments++; checkpoint = '1'; return { status: 'valid', cursor: checkpoint } as T },
+    handle: async events => { if (events.length && ++handled === 1) throw new Error('refresh failed') }, report: () => {},
+  })
+  await settle(); assert.equal(acknowledgments, 0)
+  await consumer.tick(); assert.equal(handled, 2); assert.equal(acknowledgments, 1)
+  consumer.close()
+})
+
+test('closing during replay prevents handling and acknowledgment', async () => {
+  let resolveReplay!: (value: unknown) => void, handled = 0, acknowledged = 0
+  const consumer = createDaemonEventConsumer({ projectId: 'p', consumer: 'd', intervalMs: 100000,
+    get: async <T>(path: string) => path.includes('checkpoint') ? { cursor: '0' } as T : await new Promise<T>(resolve => { resolveReplay = resolve as (value: unknown) => void }),
+    post: async <T>() => { acknowledged++; return {} as T }, handle: async () => { handled++ }, report: () => {},
+  })
+  await settle(); consumer.close()
+  resolveReplay({ status: 'valid', cursor: '1', retentionFloor: '0', events: [{}] })
+  await settle(); assert.equal(handled, 0); assert.equal(acknowledged, 0)
+})

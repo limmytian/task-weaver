@@ -737,7 +737,11 @@ export function registerDaemon(program: Command): void {
           const consumer = createDaemonEventConsumer({ projectId, consumer: `daemon:${daemonId}`,
             get: <T>(path: string) => request<T>('GET', path, undefined, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal: AbortSignal.timeout(5000) }),
             post: <T>(path: string, body: unknown) => request<T>('POST', path, body, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal: AbortSignal.timeout(5000) }),
-            handle: async events => { if (events.length) await Promise.all([...controlMonitors].map(monitor => monitor.tick())) },
+            handle: async events => {
+              if (events.length && (await Promise.all([...controlMonitors].map(monitor => monitor.tick()))).some(success => !success)) {
+                throw new Error('Execution control refresh incomplete')
+              }
+            },
             report: message => console.warn(`[Daemon] ${message}`),
           })
           entry = { refs: 0, consumer }
