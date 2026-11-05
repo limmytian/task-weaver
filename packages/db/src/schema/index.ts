@@ -42,3 +42,5 @@ export * from "./inbound-events";
 export * from "./execution-controls";
 
 export * from "./plan-drafts";
+
+export * from "./durable-events";

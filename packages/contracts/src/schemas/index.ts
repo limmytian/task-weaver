@@ -35,3 +35,5 @@ export * from "./capability-readiness";
 export * from "./capability-evidence-view";
 export * from './worker-console';
 export * from "./evidence";
+
+export * from "./durable-events";
