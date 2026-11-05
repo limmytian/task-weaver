@@ -120,6 +120,7 @@ test("live event authorization and principal-owned checkpoints", { skip: !url, t
   await assert.rejects(acknowledgeDurableEvents(db, { projectId: project!.id, consumer: "leased", cursor: "6" }, owner.context), /fenced/);
   await db.execute(sql`UPDATE task_weaver.event_consumers SET lease_expires_at = clock_timestamp() - interval '1 second' WHERE project_id = ${project!.id} AND name = 'leased'`);
   await assert.rejects(renewDurableConsumerLease(db, { ...fence, durationMs: 30000 }, owner.context), /stale/);
+  await assert.rejects(acknowledgeDurableEventsFenced(db, { ...fence, cursor: "6" }, owner.context), /stale/);
   await assert.rejects(acknowledgeDurableEvents(db, { projectId: project!.id, consumer: "leased", cursor: "6" }, owner.context), /fenced/);
   const [takeover, legacyRace] = await Promise.all([
     acquireDurableConsumerLease(db, { ...leaseInput, owner: rival }, owner.context),
@@ -130,7 +131,12 @@ test("live event authorization and principal-owned checkpoints", { skip: !url, t
   if (takeover.status !== "acquired") throw new Error("Missing takeover");
   assert.equal(BigInt(takeover.generation), BigInt(acquired.generation) + 1n);
   await assert.rejects(acknowledgeDurableEventsFenced(db, { ...fence, cursor: "6" }, owner.context), /stale/);
-  assert.equal((await acknowledgeDurableEventsFenced(db, { ...fence, owner: rival, generation: takeover.generation, cursor: "6" }, owner.context)).cursor, "6");
+  const restarted = createDb(url!);
+  try {
+    assert.equal((await getDurableEventCheckpoint(restarted, { projectId: project!.id, consumer: "leased" }, owner.context)).cursor, "5");
+    assert.equal((await acquireDurableConsumerLease(restarted, leaseInput, owner.context)).status, "busy");
+    assert.equal((await acknowledgeDurableEventsFenced(restarted, { ...fence, owner: rival, generation: takeover.generation, cursor: "6" }, owner.context)).cursor, "6");
+  } finally { await restarted.$client.end(); }
   assert.equal((await acquireDurableConsumerLease(db, leaseInput, other.context)).status, "acquired");
   // A retention transaction holding the stream lock must be observed before
   // replay decides whether its cursor is still valid.

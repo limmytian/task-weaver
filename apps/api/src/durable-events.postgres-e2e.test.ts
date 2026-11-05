@@ -27,6 +27,16 @@ test("REST and MCP event interfaces preserve replay, checkpoints and live author
   const ack = await rest("/ack", owner.rawKey, { projectId: f.project.id, consumer: "worker", cursor: "1" }); assert.equal((await ack.json() as any).cursor, "1");
   assert.equal((await (await rest(`/checkpoint?${query}&consumer=worker`)).json() as any).cursor, "1");
   assert.equal((await (await rest(`/checkpoint?${query}&consumer=worker`, worker.rawKey)).json() as any).cursor, "0");
+  const leaseOwner = randomUUID();
+  const leaseInput = { projectId: f.project.id, consumer: "fenced", owner: leaseOwner, durationMs: 30000 };
+  const acquired = await (await rest("/lease/acquire", owner.rawKey, leaseInput)).json() as any;
+  assert.equal(acquired.status, "acquired");
+  assert.equal((await (await rest("/lease/acquire", owner.rawKey, { ...leaseInput, owner: randomUUID() })).json() as any).status, "busy");
+  const fenced = { projectId: f.project.id, consumer: "fenced", owner: leaseOwner, generation: acquired.generation };
+  assert.equal((await (await rest("/lease/renew", owner.rawKey, { ...fenced, durationMs: 30000 })).json() as any).generation, acquired.generation);
+  assert.equal((await (await rest("/ack/fenced", owner.rawKey, { ...fenced, cursor: "1" })).json() as any).cursor, "1");
+  assert.notEqual((await rest("/ack/fenced", owner.rawKey, { ...fenced, owner: randomUUID(), cursor: "2" })).status, 200);
+  assert.notEqual((await rest("/ack", owner.rawKey, { projectId: f.project.id, consumer: "fenced", cursor: "2" })).status, 200);
   const mcp = async (name: string, args: object, key = owner.rawKey) => (await (await f.app.request(`http://127.0.0.1:3001/api/v1/mcp-server/tools/${name}`, { method: "POST", headers: headers(key), body: JSON.stringify(args) })).json() as any).structuredContent;
   const resumed = await mcp("tw_events_list", { projectId: f.project.id, cursor: "1", limit: 1 }); assert.equal(resumed.ok, true); assert.equal(resumed.data.events[0].sequence, "2");
   assert.equal((await mcp("tw_events_ack", { projectId: f.project.id, consumer: "worker", cursor: "2" })).data.cursor, "2");
