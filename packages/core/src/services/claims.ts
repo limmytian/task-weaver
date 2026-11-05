@@ -151,30 +151,24 @@ export async function heartbeatClaim(
   actor: Actor,
   extendMinutes: number = DEFAULT_DURATION_MINUTES,
 ) {
-  const existing = await db.query.taskClaims.findFirst({
-    where: eq(taskClaims.taskId, taskId),
-  });
-
-  if (!existing) {
-    throw new NotFoundError("No active claim found for this task");
-  }
-
-  if (existing.claimedBy !== actor.id) {
-    throw new ValidationError(
-      `Only the claim holder '${existing.claimedBy}' can send heartbeat`,
-    );
-  }
-
-  const now = new Date();
-  const newExpiry = new Date(now.getTime() + extendMinutes * 60_000);
-
+  // Test expiry in the update itself, so a delayed heartbeat cannot revive
+  // an expired lease. Attempt-specific fencing requires a separate protocol.
   const [updated] = await db
     .update(taskClaims)
-    .set({ heartbeatAt: now, expiresAt: newExpiry })
-    .where(eq(taskClaims.id, existing.id))
+    .set({
+      heartbeatAt: sql`clock_timestamp()`,
+      expiresAt: sql`clock_timestamp() + ${extendMinutes * 60_000} * interval '1 millisecond'`,
+    })
+    .where(and(
+      eq(taskClaims.taskId, taskId),
+      eq(taskClaims.claimedBy, actor.id),
+      eq(taskClaims.claimedByType, actor.type),
+      sql`${taskClaims.expiresAt} > clock_timestamp()`,
+    ))
     .returning();
 
-  return updated!;
+  if (!updated) throw new NotFoundError("No active claim found for this task");
+  return updated;
 }
 
 export async function getTaskClaim(db: Database, taskId: string) {
