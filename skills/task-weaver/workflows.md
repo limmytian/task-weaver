@@ -625,3 +625,7 @@ For larger teams, partition work at the requirement level:
 This reduces contention and makes parallel work natural.
 
 For human integration without a PR, use `tw req repo sync-direct` to verify the delivered commit against the configured target branch, then complete the normal requirement/workflow controls. See [human delivery reconciliation](../../docs/manual-pr-reconciliation.md).
+
+### Consuming durable events
+
+A separately authorized parent or external agent can use `tw events cursor --project <id> --consumer <name>` to read its checkpoint, then `tw events list --project <id> --cursor <sequence>` to replay events. Process each returned batch before calling `tw events ack --project <id> --consumer <name> --cursor <returned-cursor>`. The cursor also advances across events the caller cannot access. `tw events watch --project <id> --consumer <name>` polls from the checkpoint and does not acknowledge automatically; acknowledge only after processing. Restarting may redeliver unacknowledged events. An expired cursor requires resynchronization from authoritative state; do not silently skip lost history. MCP clients can use `tw_events_cursor`, `tw_events_list`, and `tw_events_ack`. Each operation checks current access. Check before consequential steps and after reconnecting; push and mid-run interruption are not guaranteed. Keep parent credentials out of worker processes and never treat notification as permission to bypass an execution fence.

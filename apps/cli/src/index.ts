@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerEvents } from "./commands/events.js"
 import { registerExecution } from "./commands/execution.js";
 import { Command } from 'commander'
 import { APPLICATION_VERSION } from '@task-weaver/contracts'
@@ -30,6 +31,7 @@ const program = new Command()
   .version(APPLICATION_VERSION)
 
 registerInboundEvents(program)
+registerEvents(program)
 registerWebhooks(program)
 registerAgentUsage(program)
 registerAuth(program)

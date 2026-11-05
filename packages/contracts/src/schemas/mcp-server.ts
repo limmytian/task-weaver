@@ -45,6 +45,7 @@ export const mcpServerToolErrorSchema = z.object({
 }).strict();
 
 export const mcpServerReadTools = [
+  "tw_events_list", "tw_events_cursor",
   "tw_projects_discover", "tw_projects_list", "tw_projects_get",
   "tw_requirements_list", "tw_requirements_get", "tw_requirement_dependencies_list",
   "tw_tasks_list", "tw_tasks_get", "tw_task_comments_list", "tw_task_dependencies_list",
@@ -62,6 +63,7 @@ export const mcpServerReadTools = [
 ] as const;
 
 export const mcpServerWriteTools = [
+  "tw_events_ack",
   "tw_skills_run", "tw_mcp_call",
   "tw_requirements_create", "tw_requirements_update",
   "tw_requirement_dependencies_add", "tw_requirement_dependencies_remove",

@@ -1,3 +1,4 @@
+import { eventCursorSchema } from "./durable-events";
 import { repositoryReadinessInputSchema } from "./repositories";
 import { mcpRegistrySearchSchema, mcpRegistryToolSchema, mcpRegistryCallSchema, mcpRegistryReadinessSchema } from "./mcp-bridge";
 import { mcpRetrievalScopeSchema, mcpPackageFilesSchema, mcpPackageReadSchema, mcpSliceCreateSchema, mcpSliceUpdateSchema, mcpPlanValidateSchema, mcpPlanApplySchema, mcpAggregateContextSchema, mcpDependencyGraphSchema, mcpDocumentHistorySchema, mcpDocumentVersionSchema, mcpRepositoryListSchema, mcpScheduleListSchema, mcpUsageSummarySchema } from "./mcp-server-planning";
@@ -24,6 +25,9 @@ function tool(name: McpServerToolName, description: string, schema: z.ZodObject)
 
 /** One catalog for both transports. Business refinements are applied again before dispatch. */
 export const mcpServerCatalog = [
+  tool("tw_events_list", "Replay scoped durable events after an exclusive cursor; expired cursors require resynchronization.", z.object({ projectId: id, cursor: eventCursorSchema.default("0"), limit: z.number().int().min(1).max(100).default(50) }).strict()),
+  tool("tw_events_cursor", "Read the authenticated consumer's durable checkpoint.", z.object({ projectId: id, consumer: z.string().trim().min(1).max(200) }).strict()),
+  tool("tw_events_ack", "Acknowledge processed events monotonically for the authenticated consumer.", z.object({ projectId: id, consumer: z.string().trim().min(1).max(200), cursor: eventCursorSchema }).strict()),
   tool("tw_repositories_list", "List bounded visible repository catalog summaries; project membership alone does not grant private catalog visibility.", mcpRepositoryListSchema),
   tool("tw_repository_readiness", "Read repository policy readiness without cloning or exposing credential/checkout configuration; unknown is not execution-ready.", repositoryReadinessInputSchema.extend({ id }).strict()),
   tool("tw_schedules_list", "List bounded authorized schedule summaries without task prompts, execution or schedule changes.", mcpScheduleListSchema),

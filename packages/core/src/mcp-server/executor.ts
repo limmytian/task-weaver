@@ -1,3 +1,4 @@
+import { replayDurableEvents, getDurableEventCheckpoint, acknowledgeDurableEvents } from "../services/durable-events";
 import { readOperationalContext } from "./operational-context";
 import { readDocumentHistory } from "./document-history";
 import { readDependencyGraph } from "./dependency-graph";
@@ -47,6 +48,9 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
     const id = raw.id as string;
     const page = { page: raw.page as number, pageSize: raw.pageSize as number };
     switch (name) {
+      case "tw_events_list": return replayDurableEvents(db, raw as unknown as Parameters<typeof replayDurableEvents>[1], identity);
+      case "tw_events_cursor": return getDurableEventCheckpoint(db, raw as unknown as Parameters<typeof getDurableEventCheckpoint>[1], identity);
+      case "tw_events_ack": return acknowledgeDurableEvents(db, raw as unknown as Parameters<typeof acknowledgeDurableEvents>[1], identity);
       case "tw_repositories_list": return readOperationalContext(db, identity, "repositories", raw);
       case "tw_repository_readiness": return readOperationalContext(db, identity, "readiness", raw);
       case "tw_schedules_list": return readOperationalContext(db, identity, "schedules", raw);

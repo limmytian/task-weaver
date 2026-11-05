@@ -21,7 +21,7 @@ test("durable event migration enforces project-local identities and bounds", { s
       await tx.unsafe(`INSERT INTO task_weaver.event_consumers (project_id, name) VALUES ('${a}', 'worker'), ('${b}', 'worker')`);
       const binding = await readFile(new URL("../drizzle/0086_event_consumer_principals.sql", import.meta.url), "utf8");
       for (const statement of binding.split("--> statement-breakpoint")) await tx.unsafe(statement);
-      assert.equal((await tx`SELECT count(*)::int AS count FROM task_weaver.event_consumers`)[0]!.count, 0);
+      assert.equal((await tx.unsafe<{ count: number }[]>("SELECT count(*)::int AS count FROM task_weaver.event_consumers"))[0]!.count, 0);
       await tx.unsafe(`INSERT INTO task_weaver.event_consumers (project_id, principal_type, principal_id, name) VALUES ('${a}', 'agent', 'one', 'worker'), ('${a}', 'agent', 'two', 'worker'), ('${b}', 'agent', 'one', 'worker')`);
       await assert.rejects(tx.savepoint(s => s.unsafe(`INSERT INTO task_weaver.event_consumers (project_id, principal_type, principal_id, name) VALUES ('${a}', 'agent', 'one', 'worker')`)));
       await assert.rejects(tx.savepoint(s => s.unsafe(`INSERT INTO task_weaver.durable_events (project_id, sequence, type, version, scope, payload, occurred_at) VALUES ('${a}', 1, 'duplicate', 1, '{}', '{}', now())`)));
