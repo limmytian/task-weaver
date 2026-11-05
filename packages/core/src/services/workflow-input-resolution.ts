@@ -16,7 +16,7 @@ export type ResolvedWorkflowInput =
  * rows within each group are locked by ID. Callers must retain the transaction
  * until they have consumed the result. No source metadata is returned on denial.
  */
-export async function resolveWorkflowInputs(tx: Transaction, context: VerifiedRequestContext, requirementId: string): Promise<ResolvedWorkflowInput[]> {
+export async function resolveWorkflowInputs(tx: Transaction, context: VerifiedRequestContext, requirementId: string, options: { exclusiveRequirements?: boolean } = {}): Promise<ResolvedWorkflowInput[]> {
   await lockIdentityLifecycle(tx);
   const authority = await resourceAuthority(tx, context);
   const db = tx as unknown as Database;
@@ -27,7 +27,9 @@ export async function resolveWorkflowInputs(tx: Transaction, context: VerifiedRe
   const discoveredInputs = await tx.select({ outputId: workflowInputs.outputId }).from(workflowInputs).where(eq(workflowInputs.requirementId, requirementId));
   const discoveredOutputs = discoveredInputs.length ? await tx.select({ requirementId: workflowOutputs.requirementId }).from(workflowOutputs).where(inArray(workflowOutputs.id, discoveredInputs.map(i => i.outputId))) : [];
   const requirementIds = [...new Set([requirementId, ...discoveredOutputs.map(o => o.requirementId)])].sort();
-  await tx.select({ id: requirements.id }).from(requirements).where(inArray(requirements.id, requirementIds)).orderBy(asc(requirements.id)).for("share");
+  const requirementLocks = tx.select({ id: requirements.id }).from(requirements).where(inArray(requirements.id, requirementIds)).orderBy(asc(requirements.id));
+  if (options.exclusiveRequirements) await requirementLocks.for("update");
+  else await requirementLocks.for("share");
   const inputs = await tx.select().from(workflowInputs).where(eq(workflowInputs.requirementId, requirementId)).orderBy(asc(workflowInputs.id)).for("share");
   if (!inputs.length) return [];
   const outputs = await tx.select().from(workflowOutputs).where(inArray(workflowOutputs.id, inputs.map(i => i.outputId))).orderBy(asc(workflowOutputs.id)).for("share");

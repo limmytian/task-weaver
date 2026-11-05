@@ -197,11 +197,11 @@ test(
       releaseChange(); await change; await staleRace;
       await db.update(executionControls).set({ phase: "stopped" }).where(eq(executionControls.id, control!.id));
       const contenders = await Promise.allSettled([interrupted.consume(db, consume), interrupted.consume(db, consume)]);
-      assert.equal(contenders.filter(result => result.status === "fulfilled").length, 1);
-      assert.equal(contenders.filter(result => result.status === "rejected").length, 1);
-      const [consumption] = await db.select().from(activityLog).where(eq(activityLog.action, "interrupted_execution_assessment_consumed"));
-      assert.equal(consumption!.actorId, agent.id);
-      assert.equal(consumption!.actorType, "agent");
+      // A stopped phase alone is not authoritative managed-child stop evidence.
+      assert.equal(contenders.filter(result => result.status === "fulfilled").length, 0);
+      assert.equal(contenders.filter(result => result.status === "rejected").length, 2);
+      const consumptions = await db.select().from(activityLog).where(eq(activityLog.action, "interrupted_execution_assessment_consumed"));
+      assert.equal(consumptions.length, 0);
       const [verifiedAudit] = await db.select().from(activityLog).where(eq(activityLog.id, verifiedAssessment.id));
       const verifiedInputs = (verifiedAudit!.metadata as { inputs: Array<{ sha256?: string; fileVersionId?: string }> }).inputs;
       assert.equal(verifiedInputs[0]!.sha256, file!.sha256);
