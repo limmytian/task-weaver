@@ -228,7 +228,7 @@ export function resolveRepositoryCredential(
 
 export function redactSensitiveOutput(value: string): string {
   return value
-    .replace(/\b(?:tw|twd|twb)_[0-9a-f]{64}\b/gi, '[redacted]')
+    .replace(/\b(?:tw|twd|twb|twa)_[0-9a-f]{64}\b/gi, '[redacted]')
     .replace(/:\/\/[^/@\s]+:[^/@\s]+@/g, '://[redacted]@')
     .replace(/([?&](?:access_?token|api_?key|password|secret|token)=)[^&\s]+/gi, '$1[redacted]')
     .replace(/\b(?:ghp|glpat|github_pat)_[A-Za-z0-9_-]+\b/g, '[redacted]')
