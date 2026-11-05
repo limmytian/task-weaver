@@ -603,6 +603,13 @@
       "when": 1793761564100,
       "tag": "0085_durable_events",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1793761564101,
+      "tag": "0086_event_consumer_principals",
+      "breakpoints": true
     }
   ]
 }

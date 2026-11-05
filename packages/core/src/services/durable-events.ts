@@ -26,6 +26,8 @@ import { eventCursorSchema } from "@task-weaver/contracts";
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type EventRow = typeof durableEvents.$inferSelect;
 export type EventAuthorization = {
+  // Set only by the trusted authentication boundary, never from request input.
+  principal: Actor;
   // Implementations must consult current grants and validate every resource in scope.
   project(projectId: string): Promise<void>;
   event(event: EventRow): Promise<boolean>;
@@ -98,6 +100,7 @@ export async function replayDurableEvents(db: Database, input: { projectId: stri
 /** Acknowledgments are monotonic and idempotent per project and consumer. */
 export async function acknowledgeDurableEvents(db: Database, input: { projectId: string; consumer: string; cursor: string }, auth: EventAuthorization) {
   const position = cursor(input.cursor);
+  const principal = verifiedPrincipal(auth);
   if (!input.consumer.trim()) throw new Error("Consumer name is required");
   await auth.project(input.projectId);
   await auth.consumer(input.projectId, input.consumer);
@@ -109,8 +112,8 @@ export async function acknowledgeDurableEvents(db: Database, input: { projectId:
     if (position >= stream.nextSequence) throw new Error("Event cursor is ahead of the stream");
     await auth.project(input.projectId);
     await auth.consumer(input.projectId, input.consumer);
-    const [consumer] = await tx.insert(eventConsumers).values({ projectId: input.projectId, name: input.consumer, acknowledgedSequence: position }).onConflictDoUpdate({
-      target: [eventConsumers.projectId, eventConsumers.name],
+    const [consumer] = await tx.insert(eventConsumers).values({ projectId: input.projectId, principalType: principal.type, principalId: principal.id, name: input.consumer, acknowledgedSequence: position }).onConflictDoUpdate({
+      target: [eventConsumers.projectId, eventConsumers.principalType, eventConsumers.principalId, eventConsumers.name],
       set: { acknowledgedSequence: sql`greatest(${eventConsumers.acknowledgedSequence}, ${position})`, updatedAt: new Date() },
     }).returning();
     return { status: "valid" as const, cursor: consumer!.acknowledgedSequence.toString(), retentionFloor: stream.retentionFloor.toString() };
@@ -119,11 +122,18 @@ export async function acknowledgeDurableEvents(db: Database, input: { projectId:
 
 /** Read the durable checkpoint only after authorizing its consumer identity. */
 export async function getDurableEventCheckpoint(db: Database, input: { projectId: string; consumer: string }, auth: EventAuthorization) {
+  const principal = verifiedPrincipal(auth);
   if (!input.consumer.trim()) throw new Error("Consumer name is required");
   await auth.project(input.projectId);
   await auth.consumer(input.projectId, input.consumer);
-  const [row] = await db.select().from(eventConsumers).where(and(eq(eventConsumers.projectId, input.projectId), eq(eventConsumers.name, input.consumer)));
+  const [row] = await db.select().from(eventConsumers).where(and(eq(eventConsumers.projectId, input.projectId), eq(eventConsumers.principalType, principal.type), eq(eventConsumers.principalId, principal.id), eq(eventConsumers.name, input.consumer)));
   await auth.project(input.projectId);
   await auth.consumer(input.projectId, input.consumer);
   return { cursor: (row?.acknowledgedSequence ?? 0n).toString() };
+}
+
+function verifiedPrincipal(auth: EventAuthorization): Actor {
+  const principal = auth.principal;
+  if (!principal || !principal.id?.trim() || (principal.type !== "human" && principal.type !== "agent")) throw new Error("Verified principal is required");
+  return { id: principal.id, type: principal.type };
 }

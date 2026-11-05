@@ -10,7 +10,7 @@ export const durableEventSchema = z.object({
   scope: object, payload: object, occurredAt: z.string().datetime({ offset: true }), recordedAt: z.string().datetime({ offset: true }),
 }).strict();
 export const eventConsumerSchema = z.object({
-  id: z.string().uuid(), projectId: z.string().uuid(), name: z.string().min(1),
+  id: z.string().uuid(), projectId: z.string().uuid(), principalType: z.enum(["human", "agent"]), principalId: z.string().min(1), name: z.string().min(1),
   acknowledgedSequence: eventCursorSchema, createdAt: z.string().datetime({ offset: true }), updatedAt: z.string().datetime({ offset: true }),
 }).strict();
 // A cursor below the floor has lost history; clients must explicitly resynchronize.

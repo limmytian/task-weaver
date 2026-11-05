@@ -26,8 +26,10 @@ export const durableEvents = pgTable("durable_events", {
 export const eventConsumers = pgTable("event_consumers", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id").notNull().references(() => eventStreams.projectId, { onDelete: "cascade" }),
+  principalType: text("principal_type").notNull(),
+  principalId: text("principal_id").notNull(),
   name: text("name").notNull(),
   acknowledgedSequence: bigint("acknowledged_sequence", { mode: "bigint" }).notNull().default(0n),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, t => [uniqueIndex("event_consumers_project_name").on(t.projectId, t.name), index("event_consumers_project").on(t.projectId), check("event_consumer_valid", sql`${t.acknowledgedSequence} >= 0 AND length(${t.name}) > 0`)]);
+}, t => [uniqueIndex("event_consumers_project_principal_name").on(t.projectId, t.principalType, t.principalId, t.name), index("event_consumers_project").on(t.projectId), check("event_consumer_valid", sql`${t.acknowledgedSequence} >= 0 AND length(${t.name}) > 0 AND length(${t.principalId}) > 0 AND ${t.principalType} IN ('human', 'agent')`)]);
