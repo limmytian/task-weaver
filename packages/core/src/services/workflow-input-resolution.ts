@@ -12,7 +12,7 @@ export type ResolvedWorkflowInput =
 
 /**
  * Resolve within the caller's transaction. Lock order: identity lifecycle, target
- * requirement, inputs, outputs, source requirements, documents, file versions;
+ * and source requirements together by ID, then inputs, outputs, documents, file versions;
  * rows within each group are locked by ID. Callers must retain the transaction
  * until they have consumed the result. No source metadata is returned on denial.
  */
@@ -21,12 +21,19 @@ export async function resolveWorkflowInputs(tx: Transaction, context: VerifiedRe
   const authority = await resourceAuthority(tx, context);
   const db = tx as unknown as Database;
   await requireResource(db, authority, "requirement", requirementId);
-  await tx.select({ id: requirements.id }).from(requirements).where(eq(requirements.id, requirementId)).for("share");
+  // Discover without locks, then lock all requirements in one global order. A
+  // concurrent registration can change this set before the target lock is held;
+  // detect that below and let the caller retry in a fresh transaction.
+  const discoveredInputs = await tx.select({ outputId: workflowInputs.outputId }).from(workflowInputs).where(eq(workflowInputs.requirementId, requirementId));
+  const discoveredOutputs = discoveredInputs.length ? await tx.select({ requirementId: workflowOutputs.requirementId }).from(workflowOutputs).where(inArray(workflowOutputs.id, discoveredInputs.map(i => i.outputId))) : [];
+  const requirementIds = [...new Set([requirementId, ...discoveredOutputs.map(o => o.requirementId)])].sort();
+  await tx.select({ id: requirements.id }).from(requirements).where(inArray(requirements.id, requirementIds)).orderBy(asc(requirements.id)).for("share");
   const inputs = await tx.select().from(workflowInputs).where(eq(workflowInputs.requirementId, requirementId)).orderBy(asc(workflowInputs.id)).for("share");
   if (!inputs.length) return [];
   const outputs = await tx.select().from(workflowOutputs).where(inArray(workflowOutputs.id, inputs.map(i => i.outputId))).orderBy(asc(workflowOutputs.id)).for("share");
-  const sourceIds = [...new Set(outputs.map(o => o.requirementId))].sort();
-  if (sourceIds.length) await tx.select({ id: requirements.id }).from(requirements).where(inArray(requirements.id, sourceIds)).orderBy(asc(requirements.id)).for("share");
+  if (outputs.some(o => !requirementIds.includes(o.requirementId))) {
+    throw new Error("Workflow inputs changed during resolution; retry the transaction");
+  }
   const documentIds = [...new Set(outputs.flatMap(o => o.type === "attachment" && o.referenceId ? [o.referenceId] : o.type === "local" && o.promotedDocumentId ? [o.promotedDocumentId] : []))].sort();
   const docs = documentIds.length ? await tx.select().from(documents).where(inArray(documents.id, documentIds)).orderBy(asc(documents.id)).for("share") : [];
   const versionIds = [...new Set(outputs.flatMap(o => o.attachmentFileVersionId ? [o.attachmentFileVersionId] : []))].sort();
