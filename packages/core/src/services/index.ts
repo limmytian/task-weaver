@@ -93,3 +93,4 @@ export * from "./reassessment-decisions";
 export * from "./interrupted-reassessment";
 
 export { createManagedChildObservationService } from "./managed-child-observations";
+export * from './thin-worker';

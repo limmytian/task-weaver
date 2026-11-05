@@ -47,3 +47,4 @@ export * from "./durable-events";
 export * from "./reassessment-grants";
 
 export * from "./managed-child-observations";
+export * from "./worker-attempts";

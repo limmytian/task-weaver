@@ -37,3 +37,5 @@ export * from './worker-console';
 export * from "./evidence";
 
 export * from "./durable-events";
+
+export * from "./thin-worker";

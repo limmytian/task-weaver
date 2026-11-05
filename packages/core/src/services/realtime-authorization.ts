@@ -92,8 +92,9 @@ function authorityFingerprint(authority: ResourceAuthority) {
 }
 
 /** Reconnects replay current durable execution controls; ordinary resource events request a resync. */
-export async function createAuthorizedEventStream(db: Database, context: VerifiedRequestContext, request: Request, options: { daemon?: boolean; heartbeatMs?: number } = {}): Promise<Response> {
+export async function createAuthorizedEventStream(db: Database, context: VerifiedRequestContext, request: Request, options: { daemon?: boolean; heartbeatMs?: number; projectId?: string } = {}): Promise<Response> {
   const initial = await resourceAuthority(db, context);
+  if (options.projectId) await requireResource(db, initial, 'project', options.projectId);
   const fingerprint = authorityFingerprint(initial);
   const connectionId = randomUUID();
   let sequence = 0;
@@ -144,6 +145,7 @@ export async function createAuthorizedEventStream(db: Database, context: Verifie
         }
         if (options.daemon && !["task_created", "task_released", "requirement_created", "requirement_released", "repository_retry_requested", "requirement_execution_invalidated"].includes(event.type)) return;
         const payload = await authorizedRealtimeEvent(tx as unknown as Database, authority, event);
+        if (options.projectId && payload?.projectId !== options.projectId) return;
         if (payload) write(event.type, { ...payload, sequence: ++sequence }, `${connectionId}-${sequence}`);
       });
     }).catch(() => close()).finally(() => { pending--; });

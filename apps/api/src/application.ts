@@ -27,6 +27,7 @@ import apiKeyRoutes from "./routes/api-keys.js";
 import assistantRoutes from "./routes/assistant.js";
 import contextRoutes from "./routes/context.js";
 import daemonRoutes from "./routes/daemons.js";
+import thinWorkerRoutes from "./routes/thin-workers.js";
 import documentRoutes from "./routes/documents.js";
 import embeddingRoutes from "./routes/embeddings.js";
 import graphqlRoutes from "./graphql/index.js";
@@ -212,6 +213,7 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
       },
       { id: "reassessment", method: "GET", path: "/api/v1/reassessment", route: reassessmentRoutes },
       { id: "durable-events", method: "GET", path: "/api/v1/events", route: durableEventRoutes },
+      { id: "thin-workers", method: "GET", path: "/api/v1/thin-workers", route: thinWorkerRoutes },
       { id: "verified-inbound-events", method: "GET", path: "/api/v1/inbound", route: inboundRoutes },
       { id: "ti-agent", method: "GET", path: "/api/v1/ti", route: tiRoutes },
       {

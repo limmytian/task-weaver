@@ -25,6 +25,21 @@ import type { RequirementStatus } from "@task-weaver/contracts";
 
 const DEFAULT_DURATION_MINUTES = 30;
 
+/** Serialize legacy acquisition with a project mode change or thin acquisition. */
+async function lockLegacyProjects(db: Database, taskIds: string[], requirementId?: string) {
+  if (!taskIds.length && !requirementId) return;
+  const taskIdsSql = taskIds.length ? sql.join(taskIds.map(id => sql`${id}::uuid`), sql`, `) : sql`NULL::uuid`;
+  const rows = await db.execute(sql`
+    SELECT p.id, p.worker_mode FROM projects p
+    WHERE p.id IN (SELECT project_id FROM tasks WHERE id IN (${taskIdsSql}))
+       OR p.id IN (SELECT project_id FROM requirements WHERE id = ${requirementId ?? null}::uuid)
+    ORDER BY p.id FOR UPDATE
+  `);
+  if ((rows as unknown as Array<{ worker_mode: string }>).some(row => row.worker_mode === 'thin')) {
+    throw new ValidationError('Legacy acquisition is disabled for this project');
+  }
+}
+
 export async function claimTask(
   db: Database,
   taskId: string,
@@ -35,6 +50,7 @@ export async function claimTask(
   const expiresAt = new Date(now.getTime() + durationMinutes * 60_000);
 
   const { claim, projectId } = await db.transaction(async (tx) => {
+    await lockLegacyProjects(tx as unknown as Database, [taskId]);
     // Lock the task row to serialize concurrent claims
     const rows = await tx.execute(
       sql`SELECT id, status, assignee, project_id FROM tasks WHERE id = ${taskId} FOR UPDATE`,
@@ -222,6 +238,7 @@ export async function claimRequirement(
   const expiresAt = new Date(now.getTime() + durationMinutes * 60_000);
 
   const { claim, projectId } = await db.transaction(async (tx) => {
+    await lockLegacyProjects(tx as unknown as Database, [], requirementId);
     const rows = await tx.execute(
       sql`SELECT id, status, project_id, lease_generation FROM requirements WHERE id = ${requirementId} FOR UPDATE`,
     );
@@ -539,6 +556,7 @@ export async function batchClaimTasks(
   const expiresAt = new Date(now.getTime() + durationMinutes * 60_000);
 
   const { claimed, projectIds } = await db.transaction(async (tx) => {
+    await lockLegacyProjects(tx as unknown as Database, taskIds);
     // Clean expired claims for requested tasks
     for (const taskId of taskIds) {
       await tx

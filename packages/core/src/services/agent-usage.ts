@@ -172,8 +172,8 @@ export function normalizeOutcomeSummary(
 ): AgentUsageSummary {
   return {
     ...summary,
-    provider: summary.provider.replace(/(?:tw|twd|twb)_[0-9a-f]{64}/gi, "redacted"),
-    model: summary.model.replace(/(?:tw|twd|twb)_[0-9a-f]{64}/gi, "redacted"),
+    provider: summary.provider.replace(/(?:tw|twd|twb|twa)_[0-9a-f]{64}/gi, "redacted"),
+    model: summary.model.replace(/(?:tw|twd|twb|twa)_[0-9a-f]{64}/gi, "redacted"),
     completeness:
       outcome !== "succeeded" && summary.completeness === "complete"
         ? "partial"
