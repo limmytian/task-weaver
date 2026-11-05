@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  BellRing,
   Brain,
   CalendarClock,
   Cpu,
@@ -41,6 +42,7 @@ import type { NavigationItem } from "@/lib/navigation";
 const navigationIcons: Readonly<Record<string, LucideIcon>> = {
   agent: Sparkles,
   analytics: ChartNoAxesCombined,
+  attention: BellRing,
   brain: Brain,
   cpu: Cpu,
   document: FileText,
