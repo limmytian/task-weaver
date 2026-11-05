@@ -26,6 +26,8 @@ export default function AttentionPage() {
   const query = trpc.attention.list.useQuery({ projectId: projectId || undefined, category, after, limit: 25 }, {
     retry: false, refetchInterval: 30_000, refetchOnWindowFocus: true,
   });
+  const incidents = trpc.attention.incidents.useQuery({ projectId: projectId || undefined }, { retry: false, refetchInterval: 30_000, refetchOnWindowFocus: true });
+  const resolveIncident = trpc.attention.resolveIncident.useMutation({ onSuccess: () => { void incidents.refetch(); } });
   const resetPage = () => { setAfter(undefined); setPrevious([]); };
   // A failed refresh hides cached rows, including after permission revocation.
   const page = query.isError ? undefined : query.data;
@@ -35,7 +37,7 @@ export default function AttentionPage() {
         <SidebarTrigger className="mt-1 shrink-0" />
         <div className="space-y-2"><h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Needs attention</h1><p className="max-w-2xl text-sm leading-6 text-muted-foreground">Shared decisions across your authorized projects. These are not assignments, and opening this page does not approve or retry work.</p></div>
       </div>
-      <div className="flex flex-wrap items-center gap-3"><Link className="rounded text-sm font-medium underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" href="/projects/personal">My personal tasks</Link><Button variant="outline" disabled={query.isFetching} onClick={() => { void query.refetch(); }}><RefreshCw aria-hidden="true" className="size-4" /> Refresh</Button></div>
+      <div className="flex flex-wrap items-center gap-3"><Link className="rounded text-sm font-medium underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" href="/projects/personal">My personal tasks</Link><Button variant="outline" disabled={query.isFetching} onClick={() => { void query.refetch(); void incidents.refetch(); }}><RefreshCw aria-hidden="true" className="size-4" /> Refresh</Button></div>
     </header>
     <section aria-label="Filter decisions" className="rounded-xl border bg-muted/30 p-4">
       <div className="flex flex-wrap items-end gap-3">
@@ -45,6 +47,21 @@ export default function AttentionPage() {
       </div>
       {projects.isError && <p role="alert" className="mt-3 text-sm">Project filter options are unavailable. <button className="underline underline-offset-4" onClick={() => { void projects.refetch(); }}>Retry project list</button></p>}
     </section>
+    {(!category || category === "recovery") && <section aria-labelledby="cursor-incidents" className="space-y-3">
+      <h2 id="cursor-incidents" className="text-lg font-semibold">Event history gaps</h2>
+      <p className="text-sm text-muted-foreground">Open cursor expiration incidents for projects you manage, including agent consumers.</p>
+      {incidents.isLoading && <p role="status">Loading event incidents…</p>}
+      {incidents.isError && <QueryStatePanel title="Event incident state is unknown" description="The query failed or access changed. Retry to check current incidents." onAction={() => { void incidents.refetch(); }} />}
+      {!incidents.isError && incidents.data?.length === 0 && <p className="text-sm text-muted-foreground">No open event incidents in your managed projects.</p>}
+      {!incidents.isError && incidents.data && <ul className="space-y-3">{incidents.data.map(incident => <li key={incident.id} className="min-w-0 break-words rounded-lg border border-l-4 border-l-amber-500 bg-card p-4 sm:p-5">
+        <p className="text-sm font-medium">{incident.projectName} · {incident.principalType} {incident.principalId}</p>
+        <h3 className="mt-2 font-semibold">Expired event cursor: {incident.consumer}</h3>
+        <p className="mt-2 text-sm">Checkpoint {incident.cursor}; retention floor {incident.retentionFloor}. Some event history is no longer available for replay.</p>
+        <p className="mt-2 text-sm">{incident.guidance}</p>
+        <div className="mt-4 flex flex-wrap items-center gap-3"><Button variant="outline" disabled={resolveIncident.isPending} onClick={() => { resolveIncident.mutate({ projectId: incident.projectId, incidentId: incident.id }); }}>Mark review complete</Button><span className="text-xs text-muted-foreground">Resolution does not mark missed events processed.</span></div>
+      </li>)}</ul>}
+      {resolveIncident.isError && <p role="alert" className="text-sm">Could not resolve the incident. Refresh and check your access before retrying.</p>}
+    </section>}
     {query.isLoading && <div role="status" className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">Loading current decisions…</div>}
     {query.isError && <QueryStatePanel title="Attention state is unknown" description="The query failed or access changed. Previous observations cannot establish that there are no decisions." onAction={() => { void query.refetch(); }} />}
     {page && <>
