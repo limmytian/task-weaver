@@ -175,7 +175,7 @@ test(
       await assert.rejects(interrupted.record(db, { ...executionAssessment, expectedLeaseGeneration: 2 }));
       await assert.rejects(interrupted.record(db, { ...executionAssessment, expectedRunId: randomUUID() }));
       await assert.rejects(interrupted.record(db, { ...executionAssessment, projectId: otherProject.id }), AuthorizationError);
-      assert.equal((await interrupted.record(db, executionAssessment)).disposition, "accept");
+      assert.equal((await interrupted.record(db, executionAssessment)).disposition, "escalate");
       const verifiedAssessment = await interrupted.record(db, executionAssessment);
       const consume = { grantId: executionGrant.id, projectId: grantProject.id, requirementId: requirement!.id, assessmentId: verifiedAssessment.id };
       const freshForStale = await interrupted.record(db, executionAssessment);
@@ -203,6 +203,7 @@ test(
       const consumptions = await db.select().from(activityLog).where(eq(activityLog.action, "interrupted_execution_assessment_consumed"));
       assert.equal(consumptions.length, 0);
       const [verifiedAudit] = await db.select().from(activityLog).where(eq(activityLog.id, verifiedAssessment.id));
+      assert.equal((verifiedAudit!.metadata as { managedChildExitEvidence: string }).managedChildExitEvidence, "unavailable");
       const verifiedInputs = (verifiedAudit!.metadata as { inputs: Array<{ sha256?: string; fileVersionId?: string }> }).inputs;
       assert.equal(verifiedInputs[0]!.sha256, file!.sha256);
       assert.equal(verifiedInputs[0]!.fileVersionId, file!.id);
