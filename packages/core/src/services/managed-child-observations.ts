@@ -17,7 +17,7 @@ export function createManagedChildObservationService(context: VerifiedRequestCon
       const tx = transaction as unknown as Database;
       const authority = await resourceAuthority(tx, context);
       const [daemon] = await tx.select().from(daemons).where(eq(daemons.id, daemonId)).for('share');
-      if (authority.bounds || authority.actor.type !== 'agent' || context.credential.kind !== 'api_key' || !daemon || daemon.actorType !== 'agent' || daemon.actorId !== authority.actor.id || daemon.role !== 'executor') throw new AuthorizationError();
+      if (authority.bounds || authority.actor.type !== 'agent' || context.credential.kind !== 'api_key' || !daemon || daemon.actorType !== 'agent' || daemon.actorId !== authority.actor.id || daemon.role !== 'executor' || daemon.registrationCredentialId !== context.credential.id) throw new AuthorizationError();
       await requireResource(tx, authority, 'requirement', input.requirementId, 'execution.run');
       await requireResource(tx, authority, 'requirement', input.requirementId, 'resource.write');
       // Lock in the same order as lease mutations, so a concurrent rotation cannot

@@ -198,6 +198,10 @@ function bindServices(context?: VerifiedRequestContext) {
               result.push(status === undefined ? await taskImplementation.getTask(txDb, id) : await taskImplementation.updateTaskStatus(txDb, id, status, actor, reason));
             }
           } else {
+            if (group === "daemon" && name === "registerDaemon") {
+              if (context.credential.kind !== "api_key" || authority.bounds) throw new AuthorizationError();
+              call[3] = context.credential.id;
+            }
             result = await withEventActor(actor, () => implementation(...call));
             if (name === "recordMemory") {
               await requireResource(txDb, authority, "memory", result.id, "resource.write");
