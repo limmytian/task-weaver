@@ -734,7 +734,7 @@ export function registerDaemon(program: Command): void {
       const retainProjectConsumer = (projectId: string) => {
         let entry = projectConsumers.get(projectId)
         if (!entry) {
-          const consumer = createDaemonEventConsumer({ projectId, consumer: `daemon:${daemonId}`,
+          const consumer = createDaemonEventConsumer({ projectId, consumer: `daemon-node:${cliConfig.nodeId}`,
             get: <T>(path: string) => request<T>('GET', path, undefined, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal: AbortSignal.timeout(5000) }),
             post: <T>(path: string, body: unknown) => request<T>('POST', path, body, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal: AbortSignal.timeout(5000) }),
             handle: async events => {

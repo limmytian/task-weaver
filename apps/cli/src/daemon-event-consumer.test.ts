@@ -4,55 +4,76 @@ import { createDaemonEventConsumer } from './daemon-event-consumer.js'
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 20))
 
-test('replays from checkpoint, retries uncertain acknowledgement, and closes', async () => {
-  let checkpoint = '0', attempts = 0, handled = 0, reads = 0
-  const consumer = createDaemonEventConsumer({ projectId: 'p', consumer: 'd', intervalMs: 100000,
-    get: async <T>(path: string) => { reads++; return (path.includes('checkpoint') ? { cursor: checkpoint } : { status: 'valid', cursor: '1', retentionFloor: '0', events: checkpoint === '0' ? [{ sequence: '1' }] : [] }) as T },
-    post: async <T>() => { if (++attempts === 1) throw new Error('disconnected'); checkpoint = '1'; return { status: 'valid', cursor: '1' } as T },
-    handle: async events => { handled += events.length }, report: () => {},
-  })
-  await settle(); await consumer.tick(); await settle()
-  assert.equal(handled, 2); assert.equal(checkpoint, '1'); assert.equal(attempts, 2)
-  consumer.close(); const before = reads; await consumer.tick(); assert.equal(reads, before)
+function server() {
+  let owner = '', generation = 0, live = false, checkpoint = '0'
+  let revoked = false, expired = false
+  const acknowledgments: string[] = []
+  return {
+    acknowledgments,
+    expireLease() { live = false },
+    revoke() { revoked = true },
+    expireCursor() { expired = true },
+    get checkpoint() { return checkpoint },
+    get: async <T>(path: string): Promise<T> => {
+      if (revoked) throw new Error('403 revoked')
+      return (path.includes('checkpoint') ? { cursor: checkpoint } : expired
+        ? { status: 'expired', cursor: checkpoint, retentionFloor: '2' }
+        : { status: 'valid', cursor: '1', retentionFloor: '0', events: checkpoint === '0' ? [{ sequence: '1' }] : [] }) as T
+    },
+    post: async <T>(path: string, body: unknown): Promise<T> => {
+      if (revoked) throw new Error('403 revoked')
+      const input = body as { owner: string; generation: string; cursor: string }
+      if (path.endsWith('/acquire')) {
+        if (live) return { status: 'busy' } as T
+        owner = input.owner; live = true; generation++
+        return { status: 'acquired', generation: String(generation) } as T
+      }
+      if (!live || owner !== input.owner || String(generation) !== input.generation) throw new Error('stale lease')
+      if (path.endsWith('/renew')) return { generation: String(generation) } as T
+      assert.ok(path.endsWith('/ack/fenced'))
+      checkpoint = input.cursor; acknowledgments.push(input.owner)
+      return { status: 'valid', cursor: checkpoint, retentionFloor: '0' } as T
+    },
+  }
+}
+
+test('competing instances, restart takeover and stale owner are fenced', async () => {
+  const api = server(); let firstHandled = 0, secondHandled = 0
+  let release!: () => void
+  const first = createDaemonEventConsumer({ projectId: 'p', consumer: 'node', ...api, intervalMs: 100000,
+    handle: async events => { if (events.length) { firstHandled++; await new Promise<void>(resolve => { release = resolve }) } }, report: () => {} })
+  await settle()
+  const second = createDaemonEventConsumer({ projectId: 'p', consumer: 'node', ...api, intervalMs: 100000,
+    handle: async events => { secondHandled += events.length }, report: () => {} })
+  await settle(); assert.equal(secondHandled, 0)
+  api.expireLease(); await second.tick(); assert.equal(secondHandled, 1); assert.equal(api.checkpoint, '1')
+  release(); await settle(); assert.equal(firstHandled, 1); assert.equal(api.acknowledgments.length, 1)
+  first.close(); second.close()
+  api.expireLease()
+  const restarted = createDaemonEventConsumer({ projectId: 'p', consumer: 'node', ...api, intervalMs: 100000,
+    handle: async events => { secondHandled += events.length }, report: () => {} })
+  await settle(); assert.equal(secondHandled, 1); restarted.close()
 })
 
-test('expired cursor stops replay and never acknowledges', async () => {
-  let calls = 0, acknowledgments = 0; const reports: string[] = []
-  const consumer = createDaemonEventConsumer({ projectId: 'p', consumer: 'd', intervalMs: 100000,
-    get: async <T>(path: string) => { calls++; return (path.includes('checkpoint') ? { cursor: '0' } : { status: 'expired', cursor: '0', retentionFloor: '4' }) as T },
-    post: async <T>() => { acknowledgments++; return {} as T }, handle: async () => {}, report: message => reports.push(message),
-  })
-  await settle(); await consumer.tick(); assert.equal(calls, 2); assert.equal(acknowledgments, 0); assert.match(reports[0]!, /expired/); consumer.close()
-})
-
-test('revoked parent cannot handle or acknowledge events', async () => {
-  let handled = 0, ack = 0; const reports: string[] = []
-  const consumer = createDaemonEventConsumer({ projectId: 'p', consumer: 'd', intervalMs: 100000,
-    get: async () => { throw new Error('403 revoked') }, post: async <T>() => { ack++; return {} as T },
-    handle: async () => { handled++ }, report: message => reports.push(message),
-  })
-  await settle(); consumer.close(); assert.equal(handled, 0); assert.equal(ack, 0); assert.match(reports[0]!, /revoked/)
-})
-
-test('failed handling is replayed before acknowledgment after reconnect', async () => {
-  let checkpoint = '0', handled = 0, acknowledgments = 0
-  const consumer = createDaemonEventConsumer({ projectId: 'p', consumer: 'd', intervalMs: 100000,
-    get: async <T>(path: string) => (path.includes('checkpoint') ? { cursor: checkpoint } : { status: 'valid', cursor: '1', retentionFloor: '0', events: checkpoint === '0' ? [{ sequence: '1' }] : [] }) as T,
-    post: async <T>() => { acknowledgments++; checkpoint = '1'; return { status: 'valid', cursor: checkpoint } as T },
-    handle: async events => { if (events.length && ++handled === 1) throw new Error('refresh failed') }, report: () => {},
-  })
-  await settle(); assert.equal(acknowledgments, 0)
-  await consumer.tick(); assert.equal(handled, 2); assert.equal(acknowledgments, 1)
+test('failed handling and revocation never acknowledge; reconnect replays', async () => {
+  const api = server(); let handled = 0
+  const consumer = createDaemonEventConsumer({ projectId: 'p', consumer: 'node', ...api, intervalMs: 100000,
+    handle: async events => { if (events.length && ++handled === 1) throw new Error('failed') }, report: () => {} })
+  await settle(); assert.equal(api.acknowledgments.length, 0)
+  await consumer.tick(); assert.equal(handled, 2); assert.equal(api.acknowledgments.length, 1)
+  api.revoke(); await consumer.tick(); assert.equal(api.acknowledgments.length, 1)
   consumer.close()
 })
 
-test('closing during replay prevents handling and acknowledgment', async () => {
-  let resolveReplay!: (value: unknown) => void, handled = 0, acknowledged = 0
-  const consumer = createDaemonEventConsumer({ projectId: 'p', consumer: 'd', intervalMs: 100000,
-    get: async <T>(path: string) => path.includes('checkpoint') ? { cursor: '0' } as T : await new Promise<T>(resolve => { resolveReplay = resolve as (value: unknown) => void }),
-    post: async <T>() => { acknowledged++; return {} as T }, handle: async () => { handled++ }, report: () => {},
-  })
-  await settle(); consumer.close()
-  resolveReplay({ status: 'valid', cursor: '1', retentionFloor: '0', events: [{}] })
-  await settle(); assert.equal(handled, 0); assert.equal(acknowledged, 0)
+test('expired cursor and close during replay prevent acknowledgment', async () => {
+  const api = server(); api.expireCursor(); const reports: string[] = []
+  const consumer = createDaemonEventConsumer({ projectId: 'p', consumer: 'node', ...api, intervalMs: 100000,
+    handle: async () => assert.fail('expired'), report: message => reports.push(message) })
+  await settle(); await consumer.tick(); assert.match(reports[0]!, /expired/); assert.equal(api.acknowledgments.length, 0); consumer.close()
+  const other = server(); let resolve!: (value: unknown) => void; let handled = 0
+  const closing = createDaemonEventConsumer({ projectId: 'p', consumer: 'node', ...other, intervalMs: 100000,
+    get: async <T>(path: string) => path.includes('checkpoint') ? { cursor: '0' } as T : await new Promise<T>(r => { resolve = r as (value: unknown) => void }),
+    handle: async () => { handled++ }, report: () => {} })
+  await settle(); closing.close(); resolve({ status: 'valid', cursor: '1', retentionFloor: '0', events: [{}] }); await settle()
+  assert.equal(handled, 0); assert.equal(other.acknowledgments.length, 0)
 })

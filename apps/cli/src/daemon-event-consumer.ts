@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 /** Parent-owned replay. Notifications only request a replay; they confer no authority. */
 export function createDaemonEventConsumer(options: {
   projectId: string
@@ -13,12 +15,36 @@ export function createDaemonEventConsumer(options: {
   let pending = false
   let expired = false
   let cursor: string | undefined
+  const owner = randomUUID()
+  const durationMs = 30000
+  let generation: string | undefined
+  const leaseInput = { projectId: options.projectId, consumer: options.consumer, owner, durationMs }
+  const renew = async () => {
+    try {
+      const result = await options.post<{ generation: string }>('/api/v1/events/lease/renew', { ...leaseInput, generation })
+      if (result.generation !== generation) throw new Error('Invalid lease renewal')
+    } catch (error) {
+      generation = undefined
+      throw error
+    }
+  }
   const query = (extra: Record<string, string>) => new URLSearchParams({ projectId: options.projectId, ...extra }).toString()
   const tick = async () => {
     if (closed || expired) return
     if (running) { pending = true; return }
     running = true
     try {
+      if (!generation) {
+        const lease = await options.post<{ status: string; generation?: string }>('/api/v1/events/lease/acquire', leaseInput)
+        if (closed) return
+        if (lease.status === 'busy') return
+        if (lease.status !== 'acquired' || !lease.generation) throw new Error('Invalid lease acquisition')
+        generation = lease.generation
+        cursor = undefined
+      } else {
+        await renew()
+        if (closed) return
+      }
       if (cursor === undefined) cursor = (await options.get<{ cursor: string }>(`/api/v1/events/checkpoint?${query({ consumer: options.consumer })}`)).cursor
       do {
         pending = false
@@ -30,10 +56,14 @@ export function createDaemonEventConsumer(options: {
           return
         }
         if (batch.status !== 'valid' || !batch.events) throw new Error('Invalid event replay response')
+        await renew()
+        if (closed) return
         await options.handle(batch.events)
         if (closed) return
         if (batch.cursor !== cursor) {
-          const ack: { status: string; cursor: string; retentionFloor: string } = await options.post('/api/v1/events/ack', { projectId: options.projectId, consumer: options.consumer, cursor: batch.cursor })
+          await renew()
+          if (closed) return
+          const ack: { status: string; cursor: string; retentionFloor: string } = await options.post('/api/v1/events/ack/fenced', { projectId: options.projectId, consumer: options.consumer, owner, generation, cursor: batch.cursor })
           if (closed) return
           if (ack.status === 'expired') {
             expired = true
