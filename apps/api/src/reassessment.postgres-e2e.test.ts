@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { eq } from "drizzle-orm";
-import { createDb, runMigrations, requirements, apiKeys } from "@task-weaver/db";
+import { createDb, runMigrations, requirements, apiKeys, workflowOutputs, activityLog } from "@task-weaver/db";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 
 const url = process.env.TW_REASSESSMENT_E2E_DATABASE_URL;
@@ -26,6 +26,25 @@ test("reassessment REST enforces live authority, revisions and revocation", { sk
   const decision = { grantId: grant.id, projectId: f.project.id, requirementId: requirement!.id, expectedRevision: requirement!.planRevision, decision: "accept", evidence: [], rationale: "private rationale", inputsAvailable: false, uncertainExternalEffects: true };
   assert.notEqual((await request("/decisions", f.owner.headers, decision)).status, 201);
   assert.notEqual((await request("/decisions", agentHeaders, { ...decision, expectedRevision: decision.expectedRevision + 1 })).status, 201);
+  const [otherRequirement] = await db.insert(requirements).values({ projectId: f.project.id, title: "Other", createdBy: f.owner.context.actor.id }).returning();
+  const [output] = await db.insert(workflowOutputs).values({ requirementId: requirement!.id, type: "url", url: "https://example.com/evidence", createdBy: f.owner.context.actor.id, createdByType: "human" }).returning();
+  const supported = { ...decision, evidence: [{ outputId: output!.id, rationale: "Reviewed the evidence" }], inputsAvailable: true, uncertainExternalEffects: false };
+  assert.notEqual((await request("/decisions", agentHeaders, { ...supported, requirementId: otherRequirement!.id, expectedRevision: otherRequirement!.planRevision })).status, 201);
+  const accepted = await request("/decisions", agentHeaders, supported);
+  assert.equal(accepted.status, 201, await accepted.clone().text());
+  const acceptedBody = await accepted.json() as any;
+  assert.equal(acceptedBody.disposition, "accept");
+  const [audit] = await db.select().from(activityLog).where(eq(activityLog.id, acceptedBody.id));
+  assert.equal(audit!.actorId, agent.id);
+  assert.equal(audit!.actorType, "agent");
+  assert.deepEqual((audit!.metadata as any).evidence, supported.evidence);
+  await db.update(workflowOutputs).set({ availability: "missing" }).where(eq(workflowOutputs.id, output!.id));
+  const missing = await request("/decisions", agentHeaders, supported);
+  assert.equal(missing.status, 201);
+  assert.equal((await missing.json() as any).disposition, "escalate");
+  await db.update(requirements).set({ planRevision: requirement!.planRevision + 1 }).where(eq(requirements.id, requirement!.id));
+  assert.equal((await request("/decisions", agentHeaders, supported)).status, 409);
+  await db.update(requirements).set({ planRevision: requirement!.planRevision }).where(eq(requirements.id, requirement!.id));
   const recorded = await request("/decisions", agentHeaders, decision); assert.equal(recorded.status, 201); assert.equal((await recorded.json() as any).disposition, "escalate");
   const inspected = await request(`/decisions?requirementId=${requirement!.id}`, agentHeaders); assert.equal(inspected.status, 200); assert.doesNotMatch(await inspected.text(), /private rationale/);
   assert.notEqual((await request(`/decisions?requirementId=${requirement!.id}`, f.outsider.headers)).status, 200);
