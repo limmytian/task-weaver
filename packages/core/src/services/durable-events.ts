@@ -125,7 +125,9 @@ export async function acknowledgeDurableEvents(db: Database, input: { projectId:
     const [consumer] = await tx.insert(eventConsumers).values({ projectId: input.projectId, principalType: authority.actor.type, principalId: authority.actor.id, name: input.consumer, acknowledgedSequence: position }).onConflictDoUpdate({
       target: [eventConsumers.projectId, eventConsumers.principalType, eventConsumers.principalId, eventConsumers.name],
       set: { acknowledgedSequence: sql`greatest(${eventConsumers.acknowledgedSequence}, ${position})`, updatedAt: new Date() },
+      setWhere: eq(eventConsumers.leaseGeneration, 0n),
     }).returning();
+    if (!consumer) throw new Error("Consumer requires a fenced acknowledgment");
     return { status: "valid" as const, cursor: consumer!.acknowledgedSequence.toString(), retentionFloor: stream.retentionFloor.toString() };
   });
 }

@@ -117,9 +117,15 @@ test("live event authorization and principal-owned checkpoints", { skip: !url, t
   assert.equal((await renewDurableConsumerLease(db, { ...fence, durationMs: 30000 }, owner.context)).generation, acquired.generation);
   assert.equal((await acknowledgeDurableEventsFenced(db, { ...fence, cursor: "5" }, owner.context)).cursor, "5");
   await assert.rejects(acknowledgeDurableEventsFenced(db, { ...fence, owner: randomUUID(), cursor: "6" }, owner.context), /stale/);
+  await assert.rejects(acknowledgeDurableEvents(db, { projectId: project!.id, consumer: "leased", cursor: "6" }, owner.context), /fenced/);
   await db.execute(sql`UPDATE task_weaver.event_consumers SET lease_expires_at = clock_timestamp() - interval '1 second' WHERE project_id = ${project!.id} AND name = 'leased'`);
   await assert.rejects(renewDurableConsumerLease(db, { ...fence, durationMs: 30000 }, owner.context), /stale/);
-  const takeover = await acquireDurableConsumerLease(db, { ...leaseInput, owner: rival }, owner.context);
+  await assert.rejects(acknowledgeDurableEvents(db, { projectId: project!.id, consumer: "leased", cursor: "6" }, owner.context), /fenced/);
+  const [takeover, legacyRace] = await Promise.all([
+    acquireDurableConsumerLease(db, { ...leaseInput, owner: rival }, owner.context),
+    acknowledgeDurableEvents(db, { projectId: project!.id, consumer: "leased", cursor: "6" }, owner.context).then(() => "accepted", () => "rejected"),
+  ]);
+  assert.equal(legacyRace, "rejected");
   assert.equal(takeover.status, "acquired");
   if (takeover.status !== "acquired") throw new Error("Missing takeover");
   assert.equal(BigInt(takeover.generation), BigInt(acquired.generation) + 1n);
