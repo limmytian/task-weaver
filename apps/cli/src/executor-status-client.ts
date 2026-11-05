@@ -5,6 +5,13 @@ import { loadConfig } from './config.js'
 import { runCommand } from './async-command.js'
 import { failureObservation, queryCodexQuota, ExecutorResourceBlocked } from './executor-availability.js'
 
+export function allExecutorsBlocked(tools: string[], profiles: Array<{ tool: string; blocked: boolean; observation: ExecutorObservation }>) {
+  return tools.length > 0 && tools.every(tool => {
+    const profile = profiles.find(item => item.tool === tool)
+    return profile ? profile.blocked || executorObservationBlocks(profile.observation) : tool === 'codex'
+  })
+}
+
 /** One configured credential context per tool; never switch accounts/models or enable paid fallback. */
 export class ExecutorStatusClient {
   private refreshes = new Map<string, Promise<void>>()

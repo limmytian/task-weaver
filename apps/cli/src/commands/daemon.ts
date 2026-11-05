@@ -8,7 +8,7 @@ import { createWorkerConsoleCoordinator } from '../worker-console-coordinator.js
 import { recordLocalExecution, clearLocalExecution, reconcileLocalExecution, observedLocalStop, localExecutionInventory } from "../local-execution-inventory.js";
 import { createControlledGit } from "../controlled-git.js";
 import { monitorExecutionControl, type ExecutionControl } from "../execution-control-monitor.js";
-import { ExecutorStatusClient } from '../executor-status-client.js'
+import { allExecutorsBlocked, ExecutorStatusClient } from '../executor-status-client.js'
 import { ExecutorResourceBlocked } from '../executor-availability.js'
 import { loadWorkerCapabilityBootstrap } from '../worker-capability-bootstrap.js'
 import { createTaskWorkerAccess } from '../task-worker-access.js'
@@ -1466,7 +1466,19 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
             }
           }
 
-          await executorStatus.refresh()
+          const executorProfiles = await executorStatus.refresh()
+          // Older servers may still admit a blocked executor. Do not claim and
+          // immediately release a lane while all configured executors are blocked.
+          if (allExecutorsBlocked(tools, executorProfiles)) {
+            if (w.lastEligibilitySummary !== 'executors unavailable') {
+              console.log(`[Daemon] Worker ${w.index} idle: executors unavailable; waiting for status refresh`)
+              w.lastEligibilitySummary = 'executors unavailable'
+            }
+            backoff(w)
+            if (opts.once) await stopDaemon('idle', 0)
+            else schedulePoll(w)
+            return
+          }
           const acquireNextLane = () => daemonPost<{ requirement: any | null; stage?: 'execution' | 'delivery'; executionSlice?: any | null; task: any | null; tasks: any[]; repositories: RequirementRepositoryEntry[]; executorTool?: string | null; eligibility?: SchedulerEligibilityDiagnostics; leaseGeneration?: number; runId?: string }>(`/api/v1/daemons/${daemonId}/apply-requirement`, {
             projectId: opts.project,
             workerIndex: w.index,
