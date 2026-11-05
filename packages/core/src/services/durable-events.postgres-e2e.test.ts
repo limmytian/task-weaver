@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { createDb, runMigrations, authActors, authUsers, authSessions, projects, projectMemberships, requirements, eventStreams, durableEvents } from "@task-weaver/db";
 import { requestIdentitySnapshotSchema, type VerifiedRequestContext } from "@task-weaver/contracts";
-import { invalidatePlanningExecutions } from "./planning-impact";
+import { invalidatePlanningExecutions, planningChangeSnapshot } from "./planning-impact";
 import { lockIdentityLifecycle } from "./auth-security";
 import { appendDurableEvent, replayDurableEvents, acknowledgeDurableEvents, getDurableEventCheckpoint } from "./durable-events";
 
@@ -41,11 +41,18 @@ test("live event authorization and principal-owned checkpoints", { skip: !url, t
   const [foreignRequirement] = await db.insert(requirements).values({ projectId: foreign!.id, title: "Foreign requirement", createdBy: other.actor.id }).returning();
   // Publishing is atomic with revision changes and independent of a daemon claim.
   await db.transaction(async tx => {
-    await invalidatePlanningExecutions(tx as unknown as typeof db, [requirement!.id], "updateRequirement");
+    const txDb = tx as unknown as typeof db;
+    const snapshot = await planningChangeSnapshot(txDb, "updateRequirement", [txDb, requirement!.id, { title: "sensitive title", status: "approved" }]);
+    await tx.update(requirements).set({ title: "sensitive title", status: "approved" }).where(eq(requirements.id, requirement!.id));
+    await invalidatePlanningExecutions(txDb, [requirement!.id], "updateRequirement", [], undefined, snapshot, "approved");
     await invalidatePlanningExecutions(tx as unknown as typeof db, [requirement!.id], "updateRequirement");
   });
   const published = await db.select().from(durableEvents).where(eq(durableEvents.projectId, project!.id)).orderBy(durableEvents.sequence);
   assert.deepEqual(published.map(event => [event.type, event.payload.oldRevision, event.payload.newRevision]), [["plan.changed", 0, 1], ["plan.changed", 1, 2]]);
+  assert.deepEqual(published[0]!.payload.changedFields, { status: "available", fields: ["title", "status"] });
+  assert.deepEqual(published[0]!.payload.before, { status: "available", values: { status: "draft" } });
+  assert.deepEqual(published[0]!.payload.after, { status: "available", values: { status: "approved" } });
+  assert.ok(!JSON.stringify(published[0]!.payload).includes("sensitive title"));
   await assert.rejects(db.transaction(async tx => {
     await invalidatePlanningExecutions(tx as unknown as typeof db, [requirement!.id], "updateRequirement");
     throw new Error("rollback plan");

@@ -195,3 +195,15 @@ They do not substitute for acceptance on separate machines with independent
 filesystems, actual network partitions and the owner's agent/Git providers.
 
 Linux supervisors inspect process identity and process groups through procfs, including boot identity and kernel start ticks, so minimal BusyBox hosts do not require procps. Procfs must be readable; an unreadable process record blocks termination confirmation rather than being treated as a stopped process. Other POSIX hosts use their native process inspection.
+
+Plan change events retain one durable record for each revision. Consumers may group
+consecutive records for presentation, but should retain each revision and resume
+from their acknowledged cursor. A `plan.changed` payload identifies the affected
+requirement, reports the cause and links to current inputs and evidence. A directly
+changed task is identified when it is still in the requirement; the task list is
+partial, since dependent tasks may also be affected. Changed field names and
+before/after status are included when safely available. Content values and other
+unavailable context are explicitly marked unavailable; consult the linked resources
+with current authorization. Downstream events do not expose source change details.
+Delivery may be repeated, and receiving an event does not establish that a process
+has stopped.

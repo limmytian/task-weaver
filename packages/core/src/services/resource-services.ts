@@ -2,7 +2,7 @@ import { preflightPlan } from "./plan-preflight";
 import { capabilityOperationEvidence } from "./capability-evidence";
 import { capabilityDigest } from "./capability-digest";
 import { requireExecutionSynchronization } from "./execution-synchronization";
-import { planningImpact, invalidatePlanningExecutions } from "./planning-impact";
+import { planningImpact, invalidatePlanningExecutions, planningChangeSnapshot } from "./planning-impact";
 import { withEventActor } from "./durable-events";
 import { synchronizeAuthorizedMcpTools } from "./mcp-sync";
 import { getArchivedResourceReadAuthority } from "./api-keys";
@@ -155,6 +155,7 @@ function bindServices(context?: VerifiedRequestContext) {
             await requireExecutionSynchronization(txDb, authority.bounds.requirementId, authority.bounds.runId);
           }
           const impact = name === "updateTaskStatus" && call[6]?.daemonId ? [] : await planningImpact(txDb, name, call);
+          const changeSnapshot = impact.length ? await planningChangeSnapshot(txDb, name, call) : undefined;
           const previousClaims = impact.length ? await tx.select().from(requirementClaims).where(inArray(requirementClaims.requirementId, impact)) : [];
           let result: any;
           if (name === "createProject") {
@@ -208,7 +209,7 @@ function bindServices(context?: VerifiedRequestContext) {
           }
           const changedTaskId = ["updateTask", "updateTaskStatus", "addTaskDependency", "addTaskRepository", "removeTaskRepository"].includes(name)
             ? call[1] : name === "createTask" ? result?.id : undefined;
-          await invalidatePlanningExecutions(txDb, impact, name, previousClaims, changedTaskId);
+          await invalidatePlanningExecutions(txDb, impact, name, previousClaims, changedTaskId, changeSnapshot, result?.status);
           if (group === "requirement" && result?.id && impact.includes(result.id)) {
             const currentPlan = await tx.query.requirements.findFirst({ where: eq(requirements.id, result.id) });
             if (currentPlan) result = { ...result, planRevision: currentPlan.planRevision, evidenceNeedsReview: currentPlan.evidenceNeedsReview };

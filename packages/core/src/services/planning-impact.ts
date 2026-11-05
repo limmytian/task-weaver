@@ -78,8 +78,26 @@ export async function planningImpact(db: Database, operation: string, call: any[
   return [...affected];
 }
 
+/** Capture only non-content metadata. Text, identities and cross-resource references are
+ * deliberately omitted: event readers may have narrower access than the editor. */
+export async function planningChangeSnapshot(db: Database, operation: string, call: any[]) {
+  const fields: Record<string, string[]> = {
+    updateTask: ['title', 'description', 'requirementId', 'executionSliceId', 'assignee', 'assigneeType', 'branchName', 'tags', 'requestedProvider', 'requestedModel'],
+    updateRequirement: ['title', 'description', 'branchName', 'workflow', 'workflowPreset', 'tags', 'status'],
+    updateTaskStatus: ['status'],
+  };
+  const allowed = fields[operation];
+  if (!allowed) return undefined;
+  const row = operation === 'updateRequirement' ? await db.query.requirements.findFirst({ where: eq(requirements.id, call[1]) })
+    : await db.query.tasks.findFirst({ where: eq(tasks.id, call[1]) });
+  if (!row) return undefined;
+  const input = operation === 'updateTaskStatus' ? { status: call[2] } : (call[2] ?? {});
+  const changedFields = allowed.filter(key => key in input && JSON.stringify(input[key]) !== JSON.stringify((row as any)[key]));
+  return { changedFields, status: 'status' in row ? row.status : undefined, requirementId: operation === 'updateRequirement' ? call[1] : 'requirementId' in row ? row.requirementId : undefined };
+}
+
 /** Called after a successful mutation, in its transaction. Notification delivery is not the fence. */
-export async function invalidatePlanningExecutions(db: Database, ids: string[], reason: string, previousClaims: Array<typeof requirementClaims.$inferSelect> = [], changedTaskId?: string) {
+export async function invalidatePlanningExecutions(db: Database, ids: string[], reason: string, previousClaims: Array<typeof requirementClaims.$inferSelect> = [], changedTaskId?: string, change?: { changedFields: string[]; status?: string; requirementId?: string | null }, afterStatus?: string) {
   for (const id of [...new Set(ids)].sort()) {
     const [requirement] = await db.update(requirements).set({ planRevision: sql`${requirements.planRevision} + 1` }).where(eq(requirements.id, id)).returning();
     if (!requirement) continue;
@@ -87,14 +105,19 @@ export async function invalidatePlanningExecutions(db: Database, ids: string[], 
     // records: consumers can aggregate consecutive revisions without losing history.
     const changedTask = changedTaskId ? await db.query.tasks.findFirst({ where: and(eq(tasks.id, changedTaskId), eq(tasks.requirementId, id)) }) : undefined;
     const scope = changedTask ? { requirementId: id, taskId: changedTask.id } : { requirementId: id };
+    // A downstream consumer may not be allowed to inspect the changed source.
+    const localChange = change?.requirementId === id && (!['updateTask', 'updateTaskStatus'].includes(reason) || changedTask) ? change : undefined;
     await appendDurableEvent(db as unknown as Parameters<typeof appendDurableEvent>[0], {
       id: randomUUID(), projectId: requirement.projectId, type: 'plan.changed', version: 1, scope,
       occurredAt: new Date(), payload: {
         oldRevision: requirement.planRevision - 1, newRevision: requirement.planRevision,
         cause: reason,
-        affectedTasks: { status: 'unavailable' },
+        affectedTasks: changedTask ? { status: 'partial', ids: [changedTask.id] } : { status: 'unavailable' },
         subjectTask: changedTask ? { status: 'available', id: changedTask.id } : { status: 'unavailable' },
-        before: { status: 'unavailable' }, after: { status: 'unavailable' },
+        changedFields: localChange ? { status: 'available', fields: localChange.changedFields } : { status: 'unavailable' },
+        contentValues: { status: 'unavailable' },
+        before: localChange?.changedFields.includes('status') && localChange.status ? { status: 'available', values: { status: localChange.status } } : { status: 'unavailable' },
+        after: localChange?.changedFields.includes('status') && afterStatus ? { status: 'available', values: { status: afterStatus } } : { status: 'unavailable' },
         links: { requirement: `/api/v1/requirements/${id}`, inputs: `/api/v1/requirements/${id}/workflow-inputs`, evidence: `/api/v1/requirements/${id}/workflow-outputs` },
       },
     });
