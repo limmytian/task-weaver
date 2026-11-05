@@ -17,12 +17,14 @@ export async function captureThinPatches(workspace: CompositeWorkspace, assertAu
     if (!head.ok || head.stdout.trim() !== repository.headCommit) throw new Error('Workspace HEAD changed; inspect the attempt before delivery')
     const stage = await runCommand('git', ['add', '-A', '--', '.'], { cwd: repository.worktreePath, env: environment })
     if (!stage.ok) throw new Error('Failed to stage task workspace changes')
-    const diff = await runCommand('git', ['diff', '--cached', '--binary', '--full-index', repository.headCommit, '--'], { cwd: repository.worktreePath, env: environment, maxOutputBytes: 50 * 1024 * 1024 })
+    const chunks: Buffer[] = []
+    let size = 0
+    const diff = await runCommand('git', ['diff', '--cached', '--binary', '--full-index', repository.headCommit, '--'], { cwd: repository.worktreePath, env: environment, maxOutputBytes: 50 * 1024 * 1024, onStdout: chunk => { size += chunk.length; if (size <= 50 * 1024 * 1024) chunks.push(chunk) } })
     if (!diff.ok || diff.outputTruncated) throw new Error('Task patch could not be captured within the artifact limit')
-    if (!diff.stdout) continue
+    if (!size) continue
     await assertAuthority()
     const path = join(directory, `${repository.repositoryId}.patch`)
-    await writeFile(path, diff.stdout, { mode: 0o600, flag: 'wx' })
+    await writeFile(path, Buffer.concat(chunks), { mode: 0o600, flag: 'wx' })
     artifacts.push({ repositoryId: repository.repositoryId, baseCommit: repository.headCommit, branch: repository.workingBranch, path })
   }
   return artifacts
@@ -112,4 +114,67 @@ export async function publishThinArtifact(options: {
   const output = await registered.json() as { id?: string }
   if (!output.id || !/^[0-9a-f-]{36}$/i.test(output.id)) throw new Error('Task artifact binding returned an invalid output')
   return { documentId: document.id, outputId: output.id }
+}
+
+/** Apply reviewed delivery packages sequentially to a dedicated integration attempt. */
+export async function applyThinDeliveries(options: {
+  workspace: CompositeWorkspace
+  projectId: string
+  requirementId: string
+  taskId: string
+  attemptId: string
+  planRevision: number
+  packages: string[]
+  assertAuthority: () => Promise<void>
+  assertBaseline: () => Promise<void>
+}) {
+  const { open, realpath } = await import('node:fs/promises')
+  const { constants } = await import('node:fs')
+  const { homedir } = await import('node:os')
+  const { resolve } = await import('node:path')
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  if (![options.projectId, options.requirementId, options.taskId, options.attemptId].every(value => uuid.test(value)) || !Number.isSafeInteger(options.planRevision) || options.planRevision < 0) throw new Error('Invalid integration attempt identity')
+  if (options.packages.length > 100) throw new Error('Too many task delivery packages')
+  const root = resolve(homedir(), '.task-weaver', 'task-workspaces', options.projectId, options.taskId, options.attemptId)
+  if (await realpath(options.workspace.rootPath) !== await realpath(root)) throw new Error('Integration requires its own task attempt workspace')
+  const env = buildAiEnvironment(process.env)
+  await options.assertAuthority()
+  await options.assertBaseline()
+  for (const repository of options.workspace.repositories) {
+    if (!/^[a-zA-Z0-9._-]+$/.test(repository.relativePath) || repository.relativePath === '.' || repository.relativePath === '..') throw new Error('Invalid integration repository path')
+    if (await realpath(repository.worktreePath) !== await realpath(join(root, repository.relativePath))) throw new Error('Integration worktree is outside its attempt')
+    const head = await runCommand('git', ['rev-parse', 'HEAD'], { cwd: repository.worktreePath, env })
+    const status = await runCommand('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: repository.worktreePath, env })
+    if (!head.ok || head.stdout.trim() !== repository.headCommit || !status.ok || status.stdout.trim()) throw new Error('Integration workspace must be clean and match its frozen base')
+  }
+  const patchRoot = join(root, 'integration-inputs')
+  await mkdir(patchRoot, { mode: 0o700 })
+  const applied: Array<{ repositoryId: string; sourceAttemptId: string }> = []
+  for (let index = 0; index < options.packages.length; index++) {
+    await options.assertAuthority()
+    const source = await open(options.packages[index]!, constants.O_RDONLY | constants.O_NOFOLLOW)
+    let delivery: any
+    try {
+      const info = await source.stat()
+      if (!info.isFile() || info.size > 50 * 1024 * 1024) throw new Error('Delivery package is invalid or too large')
+      delivery = JSON.parse(await source.readFile('utf8'))
+    } finally { await source.close() }
+    if (delivery.version !== 1 || delivery.manifest?.projectId !== options.projectId || delivery.manifest?.requirementId !== options.requirementId || delivery.manifest?.planRevision !== options.planRevision || !uuid.test(delivery.manifest?.taskId ?? '') || !uuid.test(delivery.manifest?.attemptId ?? '') || !Array.isArray(delivery.manifest?.repositories) || !Array.isArray(delivery.repositories) || delivery.repositories.length > options.workspace.repositories.length || new Set(delivery.repositories.map((item: any) => item?.repositoryId)).size !== delivery.repositories.length) throw new Error('Invalid task delivery package')
+    for (const item of delivery.repositories) {
+      const repository = options.workspace.repositories.find(value => value.repositoryId === item.repositoryId)
+      if (!repository || item.baseCommit !== repository.headCommit || !delivery.manifest.repositories.some((entry: any) => entry.repositoryId === item.repositoryId && entry.baseCommit === item.baseCommit && entry.workingBranch === item.branch) || item.encoding !== 'base64' || typeof item.patch !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(item.patch)) throw new Error('Delivery does not match the integration baseline')
+      const bytes = Buffer.from(item.patch, 'base64')
+      if (!bytes.length || bytes.length > 30 * 1024 * 1024 || bytes.toString('base64') !== item.patch) throw new Error('Invalid patch payload')
+      const patchPath = join(patchRoot, `${index}-${repository.repositoryId}.patch`)
+      await writeFile(patchPath, bytes, { mode: 0o600, flag: 'wx' })
+      const check = await runCommand('git', ['apply', '--check', '--index', '--', patchPath], { cwd: repository.worktreePath, env })
+      if (!check.ok) throw new Error('Delivery conflicts with earlier integration work')
+      await options.assertAuthority()
+      await options.assertBaseline()
+      const apply = await runCommand('git', ['apply', '--index', '--', patchPath], { cwd: repository.worktreePath, env })
+      if (!apply.ok) throw new Error('Delivery application failed; inspect the preserved integration workspace')
+      applied.push({ repositoryId: repository.repositoryId, sourceAttemptId: delivery.manifest.attemptId })
+    }
+  }
+  return applied
 }
