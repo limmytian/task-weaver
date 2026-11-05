@@ -21,3 +21,9 @@ export const eventCursorStatusSchema = z.discriminatedUnion("status", [
 export type DurableEvent = z.infer<typeof durableEventSchema>;
 export type EventConsumer = z.infer<typeof eventConsumerSchema>;
 export type EventCursorStatus = z.infer<typeof eventCursorStatusSchema>;
+
+// Closed scope for the first supported durable event. New types need an explicit rule.
+export const planChangedEventScopeSchema = z.object({
+  requirementId: z.string().uuid(), taskId: z.string().uuid().optional(), sliceId: z.string().uuid().optional(),
+}).strict();
+export type PlanChangedEventScope = z.infer<typeof planChangedEventScopeSchema>;
