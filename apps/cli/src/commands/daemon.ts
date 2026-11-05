@@ -1,3 +1,4 @@
+import { activateContinuation } from '../daemon-continuation'
 import { dependencyContext } from "./dependency-context.js";
 import { createDeliveryWorkerRunner } from '../daemon-delivery-worker.js'
 import type { WorkerState, RequirementLane } from '../daemon-worker-types.js'
@@ -1188,14 +1189,11 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           try {
             const current = await daemonGet<any>(`/api/v1/requirements/${requirement.id}`)
             const currentTasks = Array.isArray(current.tasks) ? current.tasks : []
-            const completed = currentTasks.find((candidate: any) => candidate.id === task.id)?.status === 'done'
-            const next = currentTasks.find((candidate: any) => candidate.status === 'todo'
-              && candidate.executionSliceId === (executionSlice?.id ?? null)
-              && lane.tasks.some(original => original.id === candidate.id))
-            if (completed && next) {
-              assertActive()
-              return runAgent(w, { ...lane, task: next }, signal)
-            }
+            const next = await activateContinuation(task.id, currentTasks, new Set(lane.tasks.map(original => original.id)),
+              executionSlice?.id ?? null, id => fencedPatch(`/api/v1/tasks/${id}/status`, {
+                status: 'in_progress', reason: 'Picked up by daemon requirement lane continuation',
+              }))
+            if (next) return runAgent(w, { ...lane, task: next }, signal)
           } catch (error) {
             console.warn(`[Daemon] Task continuation stopped: ${error instanceof Error ? error.message : String(error)}`)
           }
