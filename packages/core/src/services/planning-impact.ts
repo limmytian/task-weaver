@@ -1,7 +1,8 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { executionControls, executionDelegations, executionSlices, requirementClaims, requirementDependencies, requirementRepositories, requirements, taskDependencies, taskClaims, tasks, tiAgentRuns, workflowInputs, workflowOutputs, type Database } from '@task-weaver/db';
 import { isExecutionPlanChange } from './planning-impact-policy';
-import { emitDurable } from './durable-events';
+import { appendDurableEvent, emitDurable } from './durable-events';
+import { randomUUID } from 'node:crypto';
 
 /** Runs under the resource-service identity lock, before the mutation changes its old relationships. */
 export async function planningImpact(db: Database, operation: string, call: any[]): Promise<string[]> {
@@ -78,10 +79,25 @@ export async function planningImpact(db: Database, operation: string, call: any[
 }
 
 /** Called after a successful mutation, in its transaction. Notification delivery is not the fence. */
-export async function invalidatePlanningExecutions(db: Database, ids: string[], reason: string, previousClaims: Array<typeof requirementClaims.$inferSelect> = []) {
+export async function invalidatePlanningExecutions(db: Database, ids: string[], reason: string, previousClaims: Array<typeof requirementClaims.$inferSelect> = [], changedTaskId?: string) {
   for (const id of [...new Set(ids)].sort()) {
     const [requirement] = await db.update(requirements).set({ planRevision: sql`${requirements.planRevision} + 1` }).where(eq(requirements.id, id)).returning();
     if (!requirement) continue;
+    // Each revision gets an immutable event in the same transaction. Do not collapse
+    // records: consumers can aggregate consecutive revisions without losing history.
+    const changedTask = changedTaskId ? await db.query.tasks.findFirst({ where: and(eq(tasks.id, changedTaskId), eq(tasks.requirementId, id)) }) : undefined;
+    const scope = changedTask ? { requirementId: id, taskId: changedTask.id } : { requirementId: id };
+    await appendDurableEvent(db as unknown as Parameters<typeof appendDurableEvent>[0], {
+      id: randomUUID(), projectId: requirement.projectId, type: 'plan.changed', version: 1, scope,
+      occurredAt: new Date(), payload: {
+        oldRevision: requirement.planRevision - 1, newRevision: requirement.planRevision,
+        cause: reason,
+        affectedTasks: { status: 'unavailable' },
+        subjectTask: changedTask ? { status: 'available', id: changedTask.id } : { status: 'unavailable' },
+        before: { status: 'unavailable' }, after: { status: 'unavailable' },
+        links: { requirement: `/api/v1/requirements/${id}`, inputs: `/api/v1/requirements/${id}/workflow-inputs`, evidence: `/api/v1/requirements/${id}/workflow-outputs` },
+      },
+    });
     const done = await db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.requirementId, id), eq(tasks.status, 'done'))).limit(1);
     const outputs = await db.select({ id: workflowOutputs.id }).from(workflowOutputs).where(eq(workflowOutputs.requirementId, id)).limit(1);
     if (done.length || outputs.length) await db.update(requirements).set({ evidenceNeedsReview: true }).where(eq(requirements.id, id));

@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { createDb, runMigrations, authActors, authUsers, authSessions, projects, projectMemberships, requirements, eventStreams, durableEvents } from "@task-weaver/db";
 import { requestIdentitySnapshotSchema, type VerifiedRequestContext } from "@task-weaver/contracts";
+import { invalidatePlanningExecutions } from "./planning-impact";
 import { lockIdentityLifecycle } from "./auth-security";
 import { appendDurableEvent, replayDurableEvents, acknowledgeDurableEvents, getDurableEventCheckpoint } from "./durable-events";
 
@@ -38,6 +39,21 @@ test("live event authorization and principal-owned checkpoints", { skip: !url, t
   await db.insert(projectMemberships).values({ projectId: foreign!.id, actorId: other.actor.id, actorType: "human", role: "owner" });
   const [requirement] = await db.insert(requirements).values({ projectId: project!.id, title: "Event requirement", createdBy: owner.actor.id }).returning();
   const [foreignRequirement] = await db.insert(requirements).values({ projectId: foreign!.id, title: "Foreign requirement", createdBy: other.actor.id }).returning();
+  // Publishing is atomic with revision changes and independent of a daemon claim.
+  await db.transaction(async tx => {
+    await invalidatePlanningExecutions(tx as unknown as typeof db, [requirement!.id], "updateRequirement");
+    await invalidatePlanningExecutions(tx as unknown as typeof db, [requirement!.id], "updateRequirement");
+  });
+  const published = await db.select().from(durableEvents).where(eq(durableEvents.projectId, project!.id)).orderBy(durableEvents.sequence);
+  assert.deepEqual(published.map(event => [event.type, event.payload.oldRevision, event.payload.newRevision]), [["plan.changed", 0, 1], ["plan.changed", 1, 2]]);
+  await assert.rejects(db.transaction(async tx => {
+    await invalidatePlanningExecutions(tx as unknown as typeof db, [requirement!.id], "updateRequirement");
+    throw new Error("rollback plan");
+  }), /rollback plan/);
+  assert.equal((await db.select().from(durableEvents).where(eq(durableEvents.projectId, project!.id))).length, 2);
+  // Reset this fixture's stream before the independent cursor tests below.
+  await db.delete(durableEvents).where(eq(durableEvents.projectId, project!.id));
+  await db.delete(eventStreams).where(eq(eventStreams.projectId, project!.id));
   const append = (type: string, scope: Record<string, unknown>) => db.transaction(tx => appendDurableEvent(tx, { id: randomUUID(), projectId: project!.id, type, version: 1, scope, payload: {}, occurredAt: new Date() }));
   // Distinct concurrent writers must allocate a contiguous sequence, including
   // when the stream row does not yet exist.

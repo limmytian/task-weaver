@@ -206,7 +206,9 @@ function bindServices(context?: VerifiedRequestContext) {
           if (group === "plan" && (name === "getPlanDraft" || name === "planDraftCapabilities")) {
             result = { ...result, canWrite: canAccessResource(authority, { projectId: call[1] }, "resource.write") };
           }
-          await invalidatePlanningExecutions(txDb, impact, name, previousClaims);
+          const changedTaskId = ["updateTask", "updateTaskStatus", "addTaskDependency", "addTaskRepository", "removeTaskRepository"].includes(name)
+            ? call[1] : name === "createTask" ? result?.id : undefined;
+          await invalidatePlanningExecutions(txDb, impact, name, previousClaims, changedTaskId);
           if (group === "requirement" && result?.id && impact.includes(result.id)) {
             const currentPlan = await tx.query.requirements.findFirst({ where: eq(requirements.id, result.id) });
             if (currentPlan) result = { ...result, planRevision: currentPlan.planRevision, evidenceNeedsReview: currentPlan.evidenceNeedsReview };
