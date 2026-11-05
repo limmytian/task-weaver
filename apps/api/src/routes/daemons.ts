@@ -6,6 +6,7 @@ import {
   createAuthorizedEventStream,
   createResourceServices,
   createExecutionControlService,
+  createManagedChildObservationService,
   createExecutionDelegationService,
   issueExecutionDelegationSchema,
   daemonSloService,
@@ -44,6 +45,10 @@ daemonsRouter.get("/observability/overview", async (c) => {
   }
   return c.json(await daemonObservabilityService.getDaemonObservabilityOverview(c.get("db"), parsed.data));
 });
+
+// These endpoints accept reports only from the authenticated supervisor, never a delegated worker.
+daemonsRouter.post("/:id/managed-children/spawn", async c => c.json(await createManagedChildObservationService(c.get("identity")).bind(c.get("db"), c.req.param("id"), await c.req.json()), 201));
+daemonsRouter.post("/:id/managed-children/exit", async c => c.json(await createManagedChildObservationService(c.get("identity")).exit(c.get("db"), c.req.param("id"), await c.req.json()), 201));
 
 daemonsRouter.post("/:id/execution-authority", async c => c.json(await createExecutionControlService(c.get("identity")).authority(c.get("db"), c.req.param("id"), await c.req.json())));
 

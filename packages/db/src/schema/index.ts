@@ -45,3 +45,5 @@ export * from "./plan-drafts";
 
 export * from "./durable-events";
 export * from "./reassessment-grants";
+
+export * from "./managed-child-observations";
