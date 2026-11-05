@@ -429,7 +429,7 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
       if (name.startsWith("add")) call[4] = visibility;
       return;
     }
-    if (name === "reconcileHumanRepositoryDelivery") {
+    if (["reconcileHumanRepositoryDelivery", "retryRequirementRepositoryDelivery"].includes(name)) {
       if (authority.actor.type !== "human" || authority.bounds) throw new AuthorizationError();
       const link = await db.query.requirementRepositories.findFirst({ where: eq(requirementRepositories.id, id) });
       if (!link) throw new NotFoundError("Resource not found");
