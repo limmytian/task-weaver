@@ -132,10 +132,9 @@ export async function createTask(
       actorType: actor.type,
       metadata: { title: input.title, status: input.status ?? "todo" },
     });
+    await emitDurable(txDb, { type: "task_created", projectId: input.projectId ?? null, taskId: created!.id, title: input.title });
     return created!;
   });
-
-  await emitDurable(db, { type: "task_created", projectId: input.projectId ?? null, taskId: task!.id, title: input.title });
 
   return task;
 }
