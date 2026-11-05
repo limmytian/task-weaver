@@ -1,3 +1,4 @@
+import { createDaemonEventConsumer } from "../daemon-event-consumer.js";
 import { activateContinuation } from '../daemon-continuation'
 import { dependencyContext } from "./dependency-context.js";
 import { createDeliveryWorkerRunner } from '../daemon-delivery-worker.js'
@@ -729,6 +730,23 @@ export function registerDaemon(program: Command): void {
         lastEligibilitySummary: null,
       }))
       const controlMonitors = new Set<ReturnType<typeof monitorExecutionControl>>()
+      const projectConsumers = new Map<string, { refs: number; consumer: ReturnType<typeof createDaemonEventConsumer> }>()
+      const retainProjectConsumer = (projectId: string) => {
+        let entry = projectConsumers.get(projectId)
+        if (!entry) {
+          const consumer = createDaemonEventConsumer({ projectId, consumer: `daemon:${daemonId}`,
+            get: <T>(path: string) => request<T>('GET', path, undefined, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal: AbortSignal.timeout(5000) }),
+            post: <T>(path: string, body: unknown) => request<T>('POST', path, body, { credential: { apiUrl: cliConfig.apiUrl, apiKey: cliConfig.apiKey! }, signal: AbortSignal.timeout(5000) }),
+            handle: async events => { if (events.length) await Promise.all([...controlMonitors].map(monitor => monitor.tick())) },
+            report: message => console.warn(`[Daemon] ${message}`),
+          })
+          entry = { refs: 0, consumer }
+          projectConsumers.set(projectId, entry)
+        }
+        entry.refs++
+        return () => { if (--entry!.refs === 0) { entry!.consumer.close(); projectConsumers.delete(projectId) } }
+      }
+      const closeProjectConsumers = () => { for (const entry of projectConsumers.values()) entry.consumer.close(); projectConsumers.clear() }
       let sseCleanup: (() => void) | null = null
       let stopping = false
       const lifecycle = new DaemonLifecycle()
@@ -793,6 +811,7 @@ export function registerDaemon(program: Command): void {
         stopping = true
         leaseSupervisor.stop()
         evidenceCoordinator?.close()
+        closeProjectConsumers()
         for (const w of workers) {
           if (w.pollTimer) clearTimeout(w.pollTimer)
         }
@@ -1075,7 +1094,8 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           stop: () => executionController.abort(new Error('Execution invalidated by a planning change')),
         })
         controlMonitors.add(controlMonitor)
-        const closeControlMonitor = () => { controlMonitors.delete(controlMonitor); controlMonitor.close() }
+        const releaseProjectConsumer = retainProjectConsumer(requirement.projectId)
+        const closeControlMonitor = () => { releaseProjectConsumer(); controlMonitors.delete(controlMonitor); controlMonitor.close() }
         const controlledGit = createControlledGit({ config: cliConfig, workspace, entries: lane.repositories, signal: executionSignal,
           assertAuthority: async () => { assertActive(); await daemonPost(`/api/v1/daemons/${daemonId}/execution-authority`, { requirementId: requirement.id, ...leaseFence }) },
           record: input => daemonPost(`/api/v1/daemons/${daemonId}/git-synchronization`, { ...input, requirementId: requirement.id, ...leaseFence }),
@@ -1638,6 +1658,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
               buffer = lines.pop() || ''
 
               for (const line of lines) {
+                if (line.startsWith('event: ')) for (const entry of projectConsumers.values()) void entry.consumer.tick()
                 if (line.trim() === 'event: requirement_execution_invalidated') {
                   for (const monitor of controlMonitors) void monitor.tick()
                 }
@@ -1688,6 +1709,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
         stopping = true
         console.log(`\n[Daemon] ${reason} received; entering drain mode...`)
         evidenceCoordinator?.close()
+        closeProjectConsumers()
         for (const w of workers) {
           if (w.pollTimer) clearTimeout(w.pollTimer)
         }
