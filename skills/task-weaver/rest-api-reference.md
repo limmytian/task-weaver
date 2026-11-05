@@ -2520,3 +2520,9 @@ Discovery/retention coverage, usefulness and per-capability model/context cost
 remain unknown where not measured. API duration, when present, is one observation.
 Review actual artifacts and use the existing process-level Usage commands for
 measured counters. Zero visible references does not establish zero actual use.
+
+### Reassessment grants and decisions
+
+`POST /api/v1/reassessment/grants` creates a human-managed grant with `projectId`, nullable `requirementId`, `agentId`, `operations` (currently `["revalidate_evidence"]`), and an ISO `expiresAt`. `GET /api/v1/reassessment/grants?projectId=...` lists grants, and `POST /api/v1/reassessment/grants/{id}/revoke` takes `{ "projectId": "..." }`. These operations require a human with live project management access.
+
+`POST /api/v1/reassessment/decisions` accepts `grantId`, `projectId`, `requirementId`, `expectedRevision`, `decision` (`accept` or `escalate`), `evidence` (objects containing `outputId` and `rationale`), `rationale`, `inputsAvailable`, and `uncertainExternalEffects`. The authenticated agent must have live requirement access and a matching, unexpired, unrevoked grant. A stale revision is rejected. Missing or unavailable evidence and uncertain external effects produce escalation. `GET /api/v1/reassessment/decisions?requirementId=...` returns structured audit fields without evidence references or free text. Recording a decision does not resume execution or establish that an external process stopped.

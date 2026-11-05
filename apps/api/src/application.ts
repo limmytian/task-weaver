@@ -45,6 +45,7 @@ import searchRoutes from "./routes/search.js";
 import taskRoutes from "./routes/tasks.js";
 import versionRoutes from "./routes/version.js";
 import inboundRoutes from "./routes/inbound-events.js";
+import reassessmentRoutes from "./routes/reassessment.js";
 import durableEventRoutes from "./routes/durable-events.js";
 import webhookRoutes from "./routes/webhooks.js";
 import { mcpPool } from "./mcp-pool.js";
@@ -209,6 +210,7 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
         mountPath: "/api/v1",
         route: scheduleRoutes,
       },
+      { id: "reassessment", method: "GET", path: "/api/v1/reassessment", route: reassessmentRoutes },
       { id: "durable-events", method: "GET", path: "/api/v1/events", route: durableEventRoutes },
       { id: "verified-inbound-events", method: "GET", path: "/api/v1/inbound", route: inboundRoutes },
       { id: "ti-agent", method: "GET", path: "/api/v1/ti", route: tiRoutes },

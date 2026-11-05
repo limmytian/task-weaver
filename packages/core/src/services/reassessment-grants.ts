@@ -5,7 +5,7 @@ import { AuthorizationError, NotFoundError, ValidationError, type VerifiedReques
 import { lockIdentityLifecycle, auditIdentity } from "./auth-security";
 import { resourceAuthority, requireResource } from "./resource-authorization";
 
-const inputSchema = z.object({ projectId: z.string().uuid(), requirementId: z.string().uuid().nullable(), agentId: z.string().uuid(), operations: z.array(z.literal("revalidate_evidence")).min(1).max(1), expiresAt: z.date() }).strict();
+export const reassessmentGrantInputSchema = z.object({ projectId: z.string().uuid(), requirementId: z.string().uuid().nullable(), agentId: z.string().uuid(), operations: z.array(z.literal("revalidate_evidence")).min(1).max(1), expiresAt: z.date() }).strict();
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 async function manager(tx: Transaction, context: VerifiedRequestContext, projectId: string) {
@@ -18,8 +18,8 @@ async function manager(tx: Transaction, context: VerifiedRequestContext, project
 /** Human-managed preauthorization only; it neither creates a credential nor an execution lease. */
 export function createReassessmentGrantService(context: VerifiedRequestContext) {
   return {
-    async create(db: Database, value: z.input<typeof inputSchema>) {
-      const input = inputSchema.parse(value);
+    async create(db: Database, value: z.input<typeof reassessmentGrantInputSchema>) {
+      const input = reassessmentGrantInputSchema.parse(value);
       return db.transaction(async tx => {
         await lockIdentityLifecycle(tx);
         const actor = await manager(tx, context, input.projectId);

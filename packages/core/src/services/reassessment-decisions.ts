@@ -3,9 +3,11 @@ import { z } from "zod";
 import { activityLog, requirements, workflowOutputs, type Database } from "@task-weaver/db";
 import { AuthorizationError, ConflictError, type VerifiedRequestContext } from "@task-weaver/contracts";
 import { lockReassessmentGrant } from "./reassessment-grants";
+import { lockIdentityLifecycle } from "./auth-security";
+import { resourceAuthority, requireResource } from "./resource-authorization";
 import { reassessmentDisposition } from "./agent-reassessment-policy";
 
-const inputSchema = z.object({
+export const reassessmentDecisionInputSchema = z.object({
   grantId: z.string().uuid(), projectId: z.string().uuid(), requirementId: z.string().uuid(),
   expectedRevision: z.number().int().nonnegative(), decision: z.enum(["accept", "escalate"]),
   evidence: z.array(z.object({ outputId: z.string().uuid(), rationale: z.string().trim().min(1).max(2000) }).strict()).max(100),
@@ -15,8 +17,25 @@ const inputSchema = z.object({
 /** Records historical evidence review only. This does not resume or recover an execution. */
 export function createReassessmentDecisionService(context: VerifiedRequestContext) {
   return {
-    async record(db: Database, value: z.input<typeof inputSchema>) {
-      const input = inputSchema.parse(value);
+    async inspect(db: Database, requirementId: string) {
+      z.string().uuid().parse(requirementId);
+      return db.transaction(async tx => {
+        await lockIdentityLifecycle(tx);
+        const authority = await resourceAuthority(tx, context);
+        await requireResource(tx as unknown as Database, authority, "requirement", requirementId);
+        const rows = await tx.select().from(activityLog).where(and(eq(activityLog.entityType, "requirement"), eq(activityLog.entityId, requirementId), eq(activityLog.action, "agent_reassessment_recorded")));
+        // Evidence references and free text can reveal outputs beyond the caller's authority.
+        return rows.map(row => {
+          const metadata = row.metadata as Record<string, unknown> | null;
+          return { id: row.id, actorId: row.actorId, createdAt: row.createdAt,
+            grantId: metadata?.grantId, planRevision: metadata?.planRevision,
+            requestedDecision: metadata?.requestedDecision, disposition: metadata?.disposition,
+            inputsAvailable: metadata?.inputsAvailable, uncertainExternalEffects: metadata?.uncertainExternalEffects };
+        });
+      });
+    },
+    async record(db: Database, value: z.input<typeof reassessmentDecisionInputSchema>) {
+      const input = reassessmentDecisionInputSchema.parse(value);
       return db.transaction(async tx => {
         const grant = await lockReassessmentGrant(tx, context, { ...input, operation: "revalidate_evidence" });
         // The grant helper locks the requirement before the grant, serializing plan changes and revocation.

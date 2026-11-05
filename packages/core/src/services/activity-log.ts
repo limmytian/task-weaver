@@ -59,6 +59,12 @@ function buildConditions(input: ListActivityLogInput) {
   return conditions;
 }
 
+function redactReassessmentEvidence<T extends { action: string; metadata: unknown }>(row: T): T {
+  if (row.action !== "agent_reassessment_recorded" || !row.metadata || typeof row.metadata !== "object") return row;
+  const { evidence, rationale, ...metadata } = row.metadata as Record<string, unknown>;
+  return { ...row, metadata };
+}
+
 export async function listActivityLog(
   db: Database,
   input: ListActivityLogInput,
@@ -68,13 +74,14 @@ export async function listActivityLog(
   const limit = input.limit ?? 50;
   const offset = input.offset ?? 0;
 
-  return db
+  const rows = await db
     .select()
     .from(activityLog)
     .where(and(...conditions))
     .orderBy(desc(activityLog.createdAt))
     .limit(limit)
     .offset(offset);
+  return rows.map(redactReassessmentEvidence);
 }
 
 export async function exportActivityLog(
@@ -84,11 +91,12 @@ export async function exportActivityLog(
 ) {
   const conditions = [...buildConditions(input), visibility];
 
-  return db
+  const rows = await db
     .select()
     .from(activityLog)
     .where(and(...conditions))
     .orderBy(desc(activityLog.createdAt));
+  return rows.map(redactReassessmentEvidence);
 }
 
 function escapeCsvField(value: string): string {
