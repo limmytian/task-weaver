@@ -33,11 +33,12 @@ export type ExecutorObservation = z.infer<typeof executorObservationSchema>;
 export type ExecutorTool = z.infer<typeof executorToolSchema>;
 export type ExecutorFailure = z.infer<typeof executorFailureSchema>;
 
-/** An expired status snapshot is unknown; a confirmed interruption stays blocked until rechecked. */
-export function executorObservationBlocks(observation: ExecutorObservation) {
-  if (observation.state === "action_required") return true;
-  if (observation.state !== "cooling_down") return false;
-  return true;
+/** Codex quota must be current and verified before acquiring new work. */
+export function executorObservationBlocks(observation: ExecutorObservation, now = Date.now()) {
+  if (observation.state === "action_required" || observation.state === "cooling_down") return true;
+  if (observation.tool !== "codex" || observation.authenticationMode === "api_key") return false;
+  return observation.state !== "available" || Date.parse(observation.staleAt) <= now
+    || (observation.source === "status_query" && observation.windows.length === 0);
 }
 
 export const resumeExecutorSchema = z.object({
