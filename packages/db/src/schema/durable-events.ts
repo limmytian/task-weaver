@@ -30,6 +30,9 @@ export const eventConsumers = pgTable("event_consumers", {
   principalId: text("principal_id").notNull(),
   name: text("name").notNull(),
   acknowledgedSequence: bigint("acknowledged_sequence", { mode: "bigint" }).notNull().default(0n),
+  leaseOwner: uuid("lease_owner"),
+  leaseGeneration: bigint("lease_generation", { mode: "bigint" }).notNull().default(0n),
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, t => [uniqueIndex("event_consumers_project_principal_name").on(t.projectId, t.principalType, t.principalId, t.name), index("event_consumers_project").on(t.projectId), check("event_consumer_valid", sql`${t.acknowledgedSequence} >= 0 AND length(${t.name}) > 0 AND length(${t.principalId}) > 0 AND ${t.principalType} IN ('human', 'agent')`)]);
+}, t => [uniqueIndex("event_consumers_project_principal_name").on(t.projectId, t.principalType, t.principalId, t.name), index("event_consumers_project").on(t.projectId), check("event_consumer_lease_valid", sql`${t.leaseGeneration} >= 0 AND ((${t.leaseOwner} IS NULL AND ${t.leaseExpiresAt} IS NULL) OR (${t.leaseOwner} IS NOT NULL AND ${t.leaseExpiresAt} IS NOT NULL AND ${t.leaseGeneration} > 0))`), check("event_consumer_valid", sql`${t.acknowledgedSequence} >= 0 AND length(${t.name}) > 0 AND length(${t.principalId}) > 0 AND ${t.principalType} IN ('human', 'agent')`)]);

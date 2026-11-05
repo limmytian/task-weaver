@@ -137,3 +137,53 @@ export async function getDurableEventCheckpoint(db: Database, input: { projectId
     return { cursor: (row?.acknowledgedSequence ?? 0n).toString() };
   });
 }
+
+const MAX_LEASE_MS = 5 * 60 * 1000;
+function validateLeaseInput(input: { consumer: string; owner: string; durationMs: number }) {
+  if (!input.consumer.trim()) throw new Error("Consumer name is required");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.owner)) throw new Error("Lease owner must be a UUID");
+  if (!Number.isInteger(input.durationMs) || input.durationMs < 1000 || input.durationMs > MAX_LEASE_MS) throw new Error("Lease duration must be between 1000 and 300000 milliseconds");
+}
+
+/** A new acquisition increments the fence, including after expiry by the same owner. */
+export async function acquireDurableConsumerLease(db: Database, input: { projectId: string; consumer: string; owner: string; durationMs: number }, context: VerifiedRequestContext) {
+  validateLeaseInput(input);
+  return withEventAuthority(db, context, input.projectId, async (tx, authority) => {
+    await tx.insert(eventStreams).values({ projectId: input.projectId }).onConflictDoNothing();
+    await tx.insert(eventConsumers).values({ projectId: input.projectId, principalType: authority.actor.type, principalId: authority.actor.id, name: input.consumer }).onConflictDoNothing();
+    const [lease] = await tx.update(eventConsumers).set({ leaseOwner: input.owner, leaseGeneration: sql`${eventConsumers.leaseGeneration} + 1`, leaseExpiresAt: sql`clock_timestamp() + ${input.durationMs} * interval '1 millisecond'`, updatedAt: sql`clock_timestamp()` }).where(and(eq(eventConsumers.projectId, input.projectId), eq(eventConsumers.principalType, authority.actor.type), eq(eventConsumers.principalId, authority.actor.id), eq(eventConsumers.name, input.consumer), sql`(${eventConsumers.leaseExpiresAt} IS NULL OR ${eventConsumers.leaseExpiresAt} <= clock_timestamp())`)).returning();
+    return lease ? { status: "acquired" as const, generation: lease.leaseGeneration.toString(), expiresAt: lease.leaseExpiresAt!.toISOString() } : { status: "busy" as const };
+  });
+}
+
+export async function renewDurableConsumerLease(db: Database, input: { projectId: string; consumer: string; owner: string; generation: string; durationMs: number }, context: VerifiedRequestContext) {
+  validateLeaseInput(input);
+  const generation = cursor(input.generation);
+  return withEventAuthority(db, context, input.projectId, async (tx, authority) => {
+    const [lease] = await tx.update(eventConsumers).set({ leaseExpiresAt: sql`clock_timestamp() + ${input.durationMs} * interval '1 millisecond'`, updatedAt: sql`clock_timestamp()` }).where(and(eq(eventConsumers.projectId, input.projectId), eq(eventConsumers.principalType, authority.actor.type), eq(eventConsumers.principalId, authority.actor.id), eq(eventConsumers.name, input.consumer), eq(eventConsumers.leaseOwner, input.owner), eq(eventConsumers.leaseGeneration, generation), sql`${eventConsumers.leaseExpiresAt} > clock_timestamp()`)).returning();
+    if (!lease) throw new Error("Consumer lease is stale or expired");
+    return { generation: lease.leaseGeneration.toString(), expiresAt: lease.leaseExpiresAt!.toISOString() };
+  });
+}
+
+/** Atomically validate the live fence and advance the principal's checkpoint. */
+export async function acknowledgeDurableEventsFenced(db: Database, input: { projectId: string; consumer: string; cursor: string; owner: string; generation: string }, context: VerifiedRequestContext) {
+  validateLeaseInput({ ...input, durationMs: 1000 });
+  const position = cursor(input.cursor), generation = cursor(input.generation);
+  return withEventAuthority(db, context, input.projectId, async (tx, authority) => {
+    const [stream] = await tx.select().from(eventStreams).where(eq(eventStreams.projectId, input.projectId)).for("update");
+    if (!stream) throw new Error("Consumer lease is stale or expired");
+    const [lease] = await tx.select().from(eventConsumers).where(and(eq(eventConsumers.projectId, input.projectId), eq(eventConsumers.principalType, authority.actor.type), eq(eventConsumers.principalId, authority.actor.id), eq(eventConsumers.name, input.consumer))).for("update");
+    // Check expiry using the database clock after waiting for the row lock.
+    const [updated] = lease && await tx.update(eventConsumers).set({ acknowledgedSequence: sql`greatest(${eventConsumers.acknowledgedSequence}, ${position})`, updatedAt: sql`clock_timestamp()` }).where(and(eq(eventConsumers.id, lease.id), eq(eventConsumers.leaseOwner, input.owner), eq(eventConsumers.leaseGeneration, generation), sql`${eventConsumers.leaseExpiresAt} > clock_timestamp()`, sql`${position} >= ${stream.retentionFloor} AND ${position} < ${stream.nextSequence}`)).returning() || [];
+    if (!lease || lease.leaseOwner !== input.owner || lease.leaseGeneration !== generation) throw new Error("Consumer lease is stale or expired");
+    if (!updated) {
+      // Validate the fence even when the cursor is invalid.
+      const [live] = await tx.select({ id: eventConsumers.id }).from(eventConsumers).where(and(eq(eventConsumers.id, lease.id), sql`${eventConsumers.leaseExpiresAt} > clock_timestamp()`));
+      if (!live) throw new Error("Consumer lease is stale or expired");
+      if (position < stream.retentionFloor) return { status: "expired" as const, cursor: input.cursor, retentionFloor: stream.retentionFloor.toString() };
+      throw new Error("Event cursor is ahead of the stream");
+    }
+    return { status: "valid" as const, cursor: updated.acknowledgedSequence.toString(), retentionFloor: stream.retentionFloor.toString() };
+  });
+}

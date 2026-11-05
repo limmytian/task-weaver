@@ -6,7 +6,7 @@ import { createDb, runMigrations, authActors, authUsers, authSessions, projects,
 import { requestIdentitySnapshotSchema, type VerifiedRequestContext } from "@task-weaver/contracts";
 import { invalidatePlanningExecutions, planningChangeSnapshot } from "./planning-impact";
 import { lockIdentityLifecycle } from "./auth-security";
-import { appendDurableEvent, replayDurableEvents, acknowledgeDurableEvents, getDurableEventCheckpoint } from "./durable-events";
+import { appendDurableEvent, replayDurableEvents, acknowledgeDurableEvents, getDurableEventCheckpoint, acquireDurableConsumerLease, renewDurableConsumerLease, acknowledgeDurableEventsFenced } from "./durable-events";
 
 const url = process.env.TW_EVENT_E2E_DATABASE_URL;
 test("live event authorization and principal-owned checkpoints", { skip: !url, timeout: 60000 }, async t => {
@@ -105,6 +105,27 @@ test("live event authorization and principal-owned checkpoints", { skip: !url, t
   await assert.rejects(acknowledgeDurableEvents(db, { projectId: project!.id, consumer: "worker", cursor: "17" }, owner.context), /ahead/);
   await assert.rejects(replayDurableEvents(db, { projectId: project!.id, cursor: "-1" }, owner.context));
 
+  // Concurrent contenders serialize on the named principal-owned lease.
+  const leaseOwner = randomUUID(), rival = randomUUID();
+  const leaseInput = { projectId: project!.id, consumer: "leased", owner: leaseOwner, durationMs: 30000 };
+  const contenders = await Promise.all([acquireDurableConsumerLease(db, leaseInput, owner.context), acquireDurableConsumerLease(db, { ...leaseInput, owner: rival }, owner.context)]);
+  assert.equal(contenders.filter(result => result.status === "acquired").length, 1);
+  const winner = contenders[0]!.status === "acquired" ? leaseOwner : rival;
+  const acquired = contenders.find(result => result.status === "acquired")!;
+  if (acquired.status !== "acquired") throw new Error("Missing lease");
+  const fence = { projectId: project!.id, consumer: "leased", owner: winner, generation: acquired.generation };
+  assert.equal((await renewDurableConsumerLease(db, { ...fence, durationMs: 30000 }, owner.context)).generation, acquired.generation);
+  assert.equal((await acknowledgeDurableEventsFenced(db, { ...fence, cursor: "5" }, owner.context)).cursor, "5");
+  await assert.rejects(acknowledgeDurableEventsFenced(db, { ...fence, owner: randomUUID(), cursor: "6" }, owner.context), /stale/);
+  await db.execute(sql`UPDATE task_weaver.event_consumers SET lease_expires_at = clock_timestamp() - interval '1 second' WHERE project_id = ${project!.id} AND name = 'leased'`);
+  await assert.rejects(renewDurableConsumerLease(db, { ...fence, durationMs: 30000 }, owner.context), /stale/);
+  const takeover = await acquireDurableConsumerLease(db, { ...leaseInput, owner: rival }, owner.context);
+  assert.equal(takeover.status, "acquired");
+  if (takeover.status !== "acquired") throw new Error("Missing takeover");
+  assert.equal(BigInt(takeover.generation), BigInt(acquired.generation) + 1n);
+  await assert.rejects(acknowledgeDurableEventsFenced(db, { ...fence, cursor: "6" }, owner.context), /stale/);
+  assert.equal((await acknowledgeDurableEventsFenced(db, { ...fence, owner: rival, generation: takeover.generation, cursor: "6" }, owner.context)).cursor, "6");
+  assert.equal((await acquireDurableConsumerLease(db, leaseInput, other.context)).status, "acquired");
   // A retention transaction holding the stream lock must be observed before
   // replay decides whether its cursor is still valid.
   let releaseRetention!: () => void, retentionLocked!: () => void;
@@ -146,4 +167,7 @@ test("live event authorization and principal-owned checkpoints", { skip: !url, t
   await assert.rejects(replayDurableEvents(db, { projectId: project!.id, cursor: "0" }, owner.context));
   await assert.rejects(acknowledgeDurableEvents(db, { projectId: project!.id, consumer: "worker", cursor: "16" }, owner.context));
   await assert.rejects(getDurableEventCheckpoint(db, { projectId: project!.id, consumer: "worker" }, owner.context));
+  await assert.rejects(acquireDurableConsumerLease(db, leaseInput, owner.context));
+  await assert.rejects(renewDurableConsumerLease(db, { ...fence, durationMs: 30000 }, owner.context));
+  await assert.rejects(acknowledgeDurableEventsFenced(db, { ...fence, cursor: "6" }, owner.context));
 });

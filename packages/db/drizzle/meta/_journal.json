@@ -610,6 +610,13 @@
       "when": 1793761564101,
       "tag": "0086_event_consumer_principals",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1793761564102,
+      "tag": "0087_event_consumer_leases",
+      "breakpoints": true
     }
   ]
 }

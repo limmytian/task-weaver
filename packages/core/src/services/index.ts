@@ -85,4 +85,4 @@ export { createInboundSourceService, acceptInboundEvent, processInboundEventOnce
 
 export { createExecutionControlService } from "./execution-controls";
 
-export { appendDurableEvent, replayDurableEvents, acknowledgeDurableEvents, getDurableEventCheckpoint } from "./durable-events";
+export { appendDurableEvent, replayDurableEvents, acknowledgeDurableEvents, getDurableEventCheckpoint, acquireDurableConsumerLease, renewDurableConsumerLease, acknowledgeDurableEventsFenced } from "./durable-events";
