@@ -25,6 +25,18 @@ test('live planning fences old runs, preserves healthy leases and releases depen
   for (const [id, nodeId] of [[daemonA, 'node-a'], [daemonB, 'node-b']]) await json(await api('/daemons/register', 'POST', { id, nodeId, name: 'Recovery fixture', role: 'executor', capabilities: ['codex', 'executor:codex', 'live-plan-v1'] }, agentHeaders), 201);
   const create = async (title: string, policy?: unknown) => json(await api(`/projects/${fixture.project.id}/requirements`, 'POST', { title, status: 'approved', recoveryPolicy: policy }), 201);
   const task = async (requirementId: string, title: string) => json(await api(`/projects/${fixture.project.id}/tasks`, 'POST', { requirementId, title }), 201);
+  const leaseRequirement = await json(await api(`/projects/${fixture.project.id}/requirements`, 'POST', { title: 'Task lease fixture', status: 'draft' }), 201);
+  const leaseTask = await task(leaseRequirement.id, 'Lease heartbeat');
+  const lease = await json(await api(`/tasks/${leaseTask.id}/claim`, 'POST', { durationMinutes: 2 }, agentHeaders), 201);
+  assert.equal((await api(`/tasks/${leaseTask.id}/heartbeat`, 'POST', { extendMinutes: 2 }, agentHeaders)).status, 200);
+  assert.notEqual((await api(`/tasks/${leaseTask.id}/heartbeat`, 'POST', { extendMinutes: 2 })).status, 200);
+  await db.update(taskClaims).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(taskClaims.id, lease.id));
+  assert.notEqual((await api(`/tasks/${leaseTask.id}/heartbeat`, 'POST', { extendMinutes: 2 }, agentHeaders)).status, 200);
+  assert.ok((await db.query.taskClaims.findFirst({ where: eq(taskClaims.id, lease.id) }))!.expiresAt < new Date());
+  const replacement = await json(await api(`/tasks/${leaseTask.id}/claim`, 'POST', { durationMinutes: 2 }), 201);
+  assert.notEqual(replacement.id, lease.id);
+  assert.notEqual((await api(`/tasks/${leaseTask.id}/heartbeat`, 'POST', { extendMinutes: 2 }, agentHeaders)).status, 200);
+  await json(await api(`/tasks/${leaseTask.id}/release`, 'POST', {}));
   const acquire = (daemon = daemonA) => api(`/daemons/${daemon}/apply-requirement`, 'POST', { projectId: fixture.project.id, workerIndex: 0 }, agentHeaders);
   const requirement = await create('Plan reconciliation');
   const activeTask = await task(requirement.id, 'Work under current plan');
