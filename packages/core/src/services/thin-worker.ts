@@ -67,6 +67,7 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
         const rows = await tx.execute(sql`
           SELECT t.id AS task_id, r.id AS requirement_id FROM ${tasks} t JOIN ${requirements} r ON r.id = t.requirement_id
           WHERE t.project_id = ${input.projectId} AND t.scope = 'project' AND t.status = 'todo'
+            AND (t.assignee IS NULL OR (t.assignee_type = 'agent' AND t.assignee = ${authority.actor.id}))
             AND r.project_id = ${input.projectId} AND r.status IN ('approved', 'in_progress')
             AND t.execution_slice_id IS NULL
             AND NOT EXISTS (SELECT 1 FROM execution_slices es WHERE es.requirement_id = r.id AND es.status NOT IN ('done', 'cancelled'))
