@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import test from 'node:test'
-import { captureThinPatches, packageThinArtifacts } from './thin-workspace-artifacts.js'
+import { applyThinDeliveries, captureThinPatches, packageThinArtifacts } from './thin-workspace-artifacts.js'
 import type { Config } from './config.js'
 import {
   inspectCompositeWorkspace,
@@ -62,6 +62,8 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
     assert.notEqual(first.repositories[0]!.workingBranch, second.repositories[0]!.workingBranch)
     assert.equal(first.repositories[0]!.headCommit, second.repositories[0]!.headCommit)
     await writeFile(join(first.repositories[0]!.worktreePath, 'README.md'), 'dirty first\n')
+    const binary = Buffer.from([0, 1, 2, 255, 128, 10])
+    await writeFile(join(first.repositories[0]!.worktreePath, 'binary.dat'), binary)
     assert.notEqual(await readFile(join(second.repositories[0]!.worktreePath, 'README.md'), 'utf8'), 'dirty first\n')
     await assert.rejects(provisionThinWorkspace(options(0)))
     assert.equal(await readFile(join(first.repositories[0]!.worktreePath, 'README.md'), 'utf8'), 'dirty first\n')
@@ -86,8 +88,23 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
     assert.equal(delivery.manifest.attemptId, attemptIds[0])
     assert.match(Buffer.from(delivery.repositories[0].patch, 'base64').toString('utf8'), /dirty first/)
     await assert.rejects(packageThinArtifacts(first, [{ ...patches[0]!, baseCommit: 'a'.repeat(40) }], async () => {}), /outside/)
+    await writeFile(join(second.repositories[0]!.worktreePath, 'other.txt'), 'independent\n')
+    const secondPatches = await captureThinPatches(second, async () => {})
+    const secondPackage = await packageThinArtifacts(second, secondPatches, async () => {})
     const baselineOptions = { config: options(0).config, workspace: first, entries: [repository], assertAuthority: async () => {} }
     await verifyThinWorkspaceBaselines(baselineOptions)
+    const integrationBaseline = { ...baselineOptions, workspace: retry }
+    const integrated = await applyThinDeliveries({ workspace: retry, projectId, requirementId, taskId: taskIds[0]!, attemptId: '00000000-0000-4000-8000-000000000008', planRevision: 2, packages: [packagePath, secondPackage], assertAuthority: async () => {}, assertBaseline: () => verifyThinWorkspaceBaselines(integrationBaseline) })
+    assert.equal(integrated[0]!.sourceAttemptId, attemptIds[0])
+    assert.equal(integrated[1]!.sourceAttemptId, attemptIds[1])
+    assert.equal(await readFile(join(retry.repositories[0]!.worktreePath, 'README.md'), 'utf8'), 'dirty first\n')
+    assert.deepEqual(await readFile(join(retry.repositories[0]!.worktreePath, 'binary.dat')), binary)
+    assert.equal(await readFile(join(retry.repositories[0]!.worktreePath, 'other.txt'), 'utf8'), 'independent\n')
+    assert.equal(await readFile(join(first.repositories[0]!.worktreePath, 'README.md'), 'utf8'), 'dirty first\n')
+    const conflictAttempt = '00000000-0000-4000-8000-000000000009'
+    const conflictWorkspace = await provisionThinWorkspace({ ...options(1), attemptId: conflictAttempt })
+    await assert.rejects(applyThinDeliveries({ workspace: conflictWorkspace, projectId, requirementId, taskId: taskIds[1]!, attemptId: conflictAttempt, planRevision: 2, packages: [packagePath, packagePath], assertAuthority: async () => {}, assertBaseline: () => verifyThinWorkspaceBaselines({ ...baselineOptions, workspace: conflictWorkspace }) }), /conflicts/)
+    assert.equal(await readFile(join(conflictWorkspace.repositories[0]!.worktreePath, 'README.md'), 'utf8'), 'dirty first\n')
     await writeFile(join(root, 'thin-seed', 'new-base.txt'), 'advanced\n')
     git(['add', 'new-base.txt'], join(root, 'thin-seed'))
     git(['commit', '-m', 'advance baseline'], join(root, 'thin-seed'))
@@ -99,6 +116,7 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
     await writeFile(join(second.repositories[0]!.worktreePath, 'later.txt'), 'new base\n')
     git(['add', 'later.txt'], second.repositories[0]!.worktreePath)
     git(['commit', '-m', 'unexpected commit'], second.repositories[0]!.worktreePath)
+    await rm(join(second.rootPath, 'artifacts'), { recursive: true })
     await assert.rejects(captureThinPatches(second, async () => {}), /HEAD changed/)
   } finally {
     if (previousHome === undefined) delete process.env.HOME
