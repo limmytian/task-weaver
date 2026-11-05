@@ -29,6 +29,11 @@ export function createDaemonEventConsumer(options: {
     }
   }
   const query = (extra: Record<string, string>) => new URLSearchParams({ projectId: options.projectId, ...extra }).toString()
+  const recordExpiry = async () => {
+    await options.post('/api/v1/events/incidents', { projectId: options.projectId, consumer: options.consumer, owner, generation })
+    expired = true
+    options.report(`Event cursor expired for project ${options.projectId}, consumer ${options.consumer}. Durable attention recorded. Review missing history and any uncertain external effects, then deliberately resynchronize before continuing.`)
+  }
   const tick = async () => {
     if (closed || expired) return
     if (running) { pending = true; return }
@@ -49,8 +54,7 @@ export function createDaemonEventConsumer(options: {
         const checkpoint = await options.get<{ status: string; cursor: string; retentionFloor: string }>(`/api/v1/events/checkpoint?${query({ consumer: options.consumer })}`)
         cursor = checkpoint.cursor
         if (checkpoint.status === 'expired') {
-          expired = true
-          options.report(`Event cursor expired for project ${options.projectId}, consumer ${options.consumer} at ${cursor}; retention floor ${checkpoint.retentionFloor}. Review lost history and resynchronize before continuing.`)
+          await recordExpiry()
           return
         }
       }
@@ -59,8 +63,7 @@ export function createDaemonEventConsumer(options: {
         const batch: { status: string; cursor: string; retentionFloor: string; events?: unknown[] } = await options.get(`/api/v1/events?${query({ cursor: cursor!, limit: '100' })}`)
         if (closed) return
         if (batch.status === 'expired') {
-          expired = true
-          options.report(`Event cursor expired for project ${options.projectId} at ${cursor}; retention floor ${batch.retentionFloor}. Resynchronization requires review.`)
+          await recordExpiry()
           return
         }
         if (batch.status !== 'valid' || !batch.events) throw new Error('Invalid event replay response')
@@ -74,8 +77,7 @@ export function createDaemonEventConsumer(options: {
           const ack: { status: string; cursor: string; retentionFloor: string } = await options.post('/api/v1/events/ack/fenced', { projectId: options.projectId, consumer: options.consumer, owner, generation, cursor: batch.cursor })
           if (closed) return
           if (ack.status === 'expired') {
-            expired = true
-            options.report(`Event checkpoint expired for project ${options.projectId}; retention floor ${ack.retentionFloor}. Resynchronization requires review.`)
+            await recordExpiry()
             return
           }
           if (ack.status !== 'valid') throw new Error('Invalid event acknowledgment')

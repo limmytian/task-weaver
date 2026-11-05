@@ -30,6 +30,7 @@ function server() {
       }
       if (!live || owner !== input.owner || String(generation) !== input.generation) throw new Error('stale lease')
       if (path.endsWith('/renew')) return { generation: String(generation) } as T
+      if (path.endsWith('/incidents')) return {} as T
       assert.ok(path.endsWith('/ack/fenced'))
       checkpoint = input.cursor; acknowledgments.push(input.owner)
       return { status: 'valid', cursor: checkpoint, retentionFloor: '0' } as T
