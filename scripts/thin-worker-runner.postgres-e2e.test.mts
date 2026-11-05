@@ -1,0 +1,58 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { once } from 'node:events';
+import { createRequire } from 'node:module';
+import { createDb, runMigrations, requirements, tasks, taskDependencies, workerAttempts } from '../packages/db/src/index';
+import { resourcePostgresFixture } from '../apps/api/src/resource-postgres-fixture';
+import { runThinOnce, type ThinExecutor } from '../apps/cli/src/thin-worker';
+const apiRequire = createRequire(new URL('../apps/api/package.json', import.meta.url));
+const { serve } = await import(apiRequire.resolve('@hono/node-server'));
+const { eq } = await import(apiRequire.resolve('drizzle-orm'));
+const url = process.env.TW_EXECUTION_RECOVERY_E2E_DATABASE_URL;
+
+test('once worker runs a bounded deterministic executor and parks empty results', { skip: !url, timeout: 120000 }, async t => {
+  const parsed = new URL(url!); assert.equal(parsed.hostname, '127.0.0.1'); assert.equal(parsed.pathname, '/tw_execution_recovery_e2e');
+  await runMigrations(url!); const db = createDb(url!); t.after(() => db.$client.end());
+  const root = await mkdtemp(join(tmpdir(), 'tw-thin-runner-')), oldHome = process.env.HOME, oldStorage = process.env.TW_ATTACHMENT_STORAGE_DIR, oldConfig = process.env.TW_CONFIG_DIR;
+  process.env.HOME = root; process.env.TW_CONFIG_DIR = join(root, 'cli'); process.env.TW_ATTACHMENT_STORAGE_DIR = join(root, 'storage');
+  t.after(async () => { for (const [key, value] of [['HOME', oldHome], ['TW_ATTACHMENT_STORAGE_DIR', oldStorage], ['TW_CONFIG_DIR', oldConfig]] as const) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } await rm(root, { recursive: true, force: true }); });
+  const f = await resourcePostgresFixture(db, url!);
+  const agent = await f.identity.createAgent(f.owner.headers, { displayName: 'Deterministic executor' });
+  await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: 'maintainer', explicitPermissions: [] });
+  const issue = (id: string, manage: boolean) => f.identity.issueKey(f.owner.headers, id, { name: 'Runner fixture', expiresAt: null, grants: [{ scope: 'project', projectId: f.project.id, permissions: ['resource.read', 'resource.write', 'execution.run', ...(manage ? ['project.manage' as const] : [])] }] });
+  const owner = await issue(f.owner.context.actor.id, true), key = await issue(agent.id, false);
+  const server = serve({ fetch: f.app.fetch, hostname: '127.0.0.1', port: 0 }); t.after(() => server.close()); if (!server.listening) await once(server, 'listening');
+  const address = server.address(); assert.ok(address && typeof address !== 'string'); const apiUrl = `http://127.0.0.1:${address.port}`;
+  const mode = await fetch(`${apiUrl}/api/v1/thin-workers/mode`, { method: 'POST', headers: { authorization: `Bearer ${owner.rawKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ projectId: f.project.id, mode: 'thin', inspection: 'Disposable fixture is empty' }) }); assert.equal(mode.status, 200);
+  const [req] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Runner fixture', status: 'approved', createdBy: f.owner.context.actor.id }).returning();
+  const children = await db.insert(tasks).values(['A', 'B'].map(title => ({ projectId: f.project.id, requirementId: req!.id, title, createdBy: f.owner.context.actor.id }))).returning();
+  const [accept] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Acceptance', createdBy: f.owner.context.actor.id }).returning();
+  await db.insert(taskDependencies).values(children.map(child => ({ taskId: accept!.id, dependsOnTaskId: child.id, type: 'blocks' as const })));
+  const config = { apiUrl, apiKey: key.rawKey, nodeId: 'fixture-node' };
+  const executor: ThinExecutor = { async preflight() { return { blocked: false, reason: 'Fixture', retryAt: null } }, async execute(input) { assert.equal(input.environment.TW_API_KEY, undefined); assert.ok(!Object.values(input.environment).includes(key.rawKey)); await new Promise(resolve => setTimeout(resolve, 300)); await writeFile(join(input.cwd, 'result.md'), 'Deterministic evidence\n'); return { ok: true, reason: 'Fixture', quotaBlocked: false } } };
+  const opts = { config, projectId: f.project.id, model: 'fixture', effort: 'low', timeoutMs: 10000, heartbeatIntervalMs: 100, executor };
+  const runs = await Promise.all([runThinOnce(opts), runThinOnce(opts)]);
+  assert.deepEqual(new Set(runs.map(run => run.taskId)), new Set(children.map(child => child.id)));
+  assert.ok(runs.every(run => run.state === 'completed'));
+  for (const run of runs) {
+    const attempt = await db.query.workerAttempts.findFirst({ where: eq(workerAttempts.id, run.attemptId!) });
+    assert.ok(attempt!.heartbeatAt.getTime() > attempt!.createdAt.getTime());
+  }
+  const emptyExecutor: ThinExecutor = { ...executor, async execute() { return { ok: true, reason: 'Fixture', quotaBlocked: false } } };
+  const parked = await runThinOnce({ ...opts, executor: emptyExecutor });
+  assert.equal(parked.taskId, accept!.id); assert.equal(parked.state, 'attention');
+  assert.equal((await db.query.tasks.findFirst({ where: eq(tasks.id, accept!.id) }))!.status, 'in_review');
+  const before = (await db.select().from(workerAttempts)).length;
+  const quota = await runThinOnce({ ...opts, executor: { ...executor, async preflight() { return { blocked: true, reason: 'Quota exhausted', retryAt: null } } } });
+  assert.equal(quota.state, 'cooldown'); assert.equal((await db.select().from(workerAttempts)).length, before);
+  const repeated = await runThinOnce({ ...opts, executor: { ...executor, async preflight() { throw new Error('Cooldown must avoid a new probe') } } });
+  assert.equal(repeated.state, 'cooldown');
+  const [networkTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Network interruption', createdBy: f.owner.context.actor.id }).returning();
+  const interrupted = await runThinOnce({ ...opts, config: { ...config, nodeId: 'other-node' }, executor: { ...executor, async execute(input) { await writeFile(join(input.cwd, 'result.md'), 'Local work\n'); server.close(); server.closeAllConnections(); return { ok: true, reason: 'Fixture', quotaBlocked: false } } } });
+  assert.equal(interrupted.taskId, networkTask!.id);
+  assert.equal(interrupted.state, 'attention');
+  assert.equal((await db.query.tasks.findFirst({ where: eq(tasks.id, networkTask!.id) }))!.status, 'in_progress');
+});
