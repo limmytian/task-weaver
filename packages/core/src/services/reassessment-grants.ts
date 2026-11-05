@@ -5,7 +5,7 @@ import { AuthorizationError, NotFoundError, ValidationError, type VerifiedReques
 import { lockIdentityLifecycle, auditIdentity } from "./auth-security";
 import { resourceAuthority, requireResource } from "./resource-authorization";
 
-export const reassessmentGrantInputSchema = z.object({ projectId: z.string().uuid(), requirementId: z.string().uuid().nullable(), agentId: z.string().uuid(), operations: z.array(z.literal("revalidate_evidence")).min(1).max(1), expiresAt: z.date() }).strict();
+export const reassessmentGrantInputSchema = z.object({ projectId: z.string().uuid(), requirementId: z.string().uuid().nullable(), agentId: z.string().uuid(), operations: z.array(z.enum(["revalidate_evidence", "assess_interrupted_execution"])).min(1).max(2).refine(operations => new Set(operations).size === operations.length, "Operations must be unique"), expiresAt: z.date() }).strict();
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 async function manager(tx: Transaction, context: VerifiedRequestContext, projectId: string) {
@@ -60,7 +60,7 @@ export function createReassessmentGrantService(context: VerifiedRequestContext) 
 }
 
 /** Hold the grant lock through the caller's transaction; never use this as an execution lease. */
-export async function lockReassessmentGrant(tx: Transaction, context: VerifiedRequestContext, input: { grantId: string; projectId: string; requirementId: string; operation: "revalidate_evidence" }) {
+export async function lockReassessmentGrant(tx: Transaction, context: VerifiedRequestContext, input: { grantId: string; projectId: string; requirementId: string; operation: "revalidate_evidence" | "assess_interrupted_execution" }) {
   await lockIdentityLifecycle(tx);
   const authority = await resourceAuthority(tx, context);
   if (authority.actor.type !== "agent") throw new AuthorizationError();

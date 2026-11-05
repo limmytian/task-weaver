@@ -3,7 +3,7 @@ export type ReassessmentGrant = {
   projectId: string;
   requirementId: string | null;
   agentId: string;
-  operations: readonly ('revalidate_evidence')[];
+  operations: readonly ('revalidate_evidence' | 'assess_interrupted_execution')[];
   expiresAt: Date;
   revokedAt: Date | null;
 };

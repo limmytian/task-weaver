@@ -207,3 +207,9 @@ unavailable context are explicitly marked unavailable; consult the linked resour
 with current authorization. Downstream events do not expose source change details.
 Delivery may be repeated, and receiving an event does not establish that a process
 has stopped.
+
+### Bounded interrupted-execution assessment
+
+The core supports a separate `assess_interrupted_execution` grant operation. A human project manager scopes it to an agent and project, optionally a requirement, with an expiry and revocation. It authorizes an advisory assessment only. It does not authorize resumption, external effects, credential issuance, or evidence revalidation. The assessment transaction checks live agent access, grant scope, expiry and revocation, the current plan revision, and the specific control and its observed update time. It records the observed control phase, run, inputs, rationale, and disposition in the audit log.
+
+A decision can be accepted only when the recorded control phase is stopped, inputs are available and described, and external effects are known. Otherwise it escalates. A stopped control is a recorded observation, not proof that an external process has stopped. The agent is responsible for identifying uncertainty; an unknown external outcome requires human review. This core operation does not expose an execution recovery or daemon integration interface.

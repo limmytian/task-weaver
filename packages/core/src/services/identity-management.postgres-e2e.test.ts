@@ -16,6 +16,7 @@ import {
   reassessmentGrants,
   workflowOutputs,
   activityLog,
+  executionControls,
 } from "@task-weaver/db";
 import {
   AuthenticationError,
@@ -23,6 +24,7 @@ import {
   NotFoundError,
   ValidationError,
 } from "@task-weaver/contracts";
+import { createInterruptedReassessmentService } from "./interrupted-reassessment";
 import { createReassessmentDecisionService } from "./reassessment-decisions";
 import { createReassessmentGrantService, lockReassessmentGrant } from "./reassessment-grants";
 import { createAuthenticationService } from "./authentication";
@@ -148,6 +150,31 @@ test(
       await assert.rejects(decisions.record(db, assessment));
       const [unchanged] = await db.select().from(requirements).where(eq(requirements.id, requirement!.id));
       assert.equal(unchanged?.evidenceNeedsReview, true);
+
+      const interrupted = createInterruptedReassessmentService(agentContext);
+      const executionGrant = await service.create(db, { ...input, operations: ["assess_interrupted_execution"] });
+      const [control] = await db.insert(executionControls).values({ requirementId: requirement!.id, projectId: grantProject.id, daemonId: randomUUID(), runId: randomUUID(), revision: 0, reason: "Plan changed", phase: "stopped", deadline: new Date() }).returning();
+      const executionAssessment = { grantId: executionGrant.id, projectId: grantProject.id, requirementId: requirement!.id, expectedRevision: 1, controlId: control!.id, expectedControlUpdatedAt: control!.updatedAt.toISOString(), decision: "accept" as const, inputs: [{ reference: "workspace", observation: "Reviewed local state" }], inputsAvailable: true, uncertainExternalEffects: false, rationale: "Ready for human review" };
+      await assert.rejects(interrupted.record(db, { ...executionAssessment, grantId: grant.id }), AuthorizationError);
+      await assert.rejects(interrupted.record(db, { ...executionAssessment, expectedRevision: 0 }));
+      await assert.rejects(interrupted.record(db, { ...executionAssessment, projectId: otherProject.id }), AuthorizationError);
+      assert.equal((await interrupted.record(db, executionAssessment)).disposition, "accept");
+      const uncertain = await interrupted.record(db, { ...executionAssessment, uncertainExternalEffects: true });
+      assert.equal(uncertain.disposition, "escalate");
+      assert.equal((await interrupted.record(db, { ...executionAssessment, inputsAvailable: false })).disposition, "escalate");
+      const [executionAudit] = await db.select().from(activityLog).where(eq(activityLog.id, uncertain.id));
+      assert.equal((executionAudit!.metadata as { observedPhase: string }).observedPhase, "stopped");
+      await db.update(executionControls).set({ phase: "manual", updatedAt: new Date(Date.now() + 1000) }).where(eq(executionControls.id, control!.id));
+      await assert.rejects(interrupted.record(db, executionAssessment));
+      const [manualControl] = await db.select().from(executionControls).where(eq(executionControls.id, control!.id));
+      assert.equal((await interrupted.record(db, { ...executionAssessment, expectedControlUpdatedAt: manualControl!.updatedAt.toISOString() })).disposition, "escalate");
+      await db.update(reassessmentGrants).set({ expiresAt: new Date(0) }).where(eq(reassessmentGrants.id, executionGrant.id));
+      await assert.rejects(interrupted.record(db, executionAssessment), AuthorizationError);
+      await db.update(reassessmentGrants).set({ expiresAt: input.expiresAt }).where(eq(reassessmentGrants.id, executionGrant.id));
+      await service.revoke(db, grantProject.id, executionGrant.id);
+      await assert.rejects(interrupted.record(db, executionAssessment), AuthorizationError);
+      const [unchangedControl] = await db.select().from(executionControls).where(eq(executionControls.id, control!.id));
+      assert.equal(unchangedControl!.phase, "manual");
 
       await assert.rejects(db.transaction(tx => lockReassessmentGrant(tx, agentContext, { grantId: grant.id, projectId: otherProject.id, requirementId: requirement!.id, operation: "revalidate_evidence" })), AuthorizationError);
       await db.update(reassessmentGrants).set({ expiresAt: new Date(0) }).where(eq(reassessmentGrants.id, grant.id));
