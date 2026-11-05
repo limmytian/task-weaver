@@ -37,9 +37,25 @@ export async function appendDurableEvent(tx: Transaction, input: Omit<typeof dur
   await tx.insert(eventStreams).values({ projectId: input.projectId }).onConflictDoNothing();
   const [stream] = await tx.select().from(eventStreams).where(eq(eventStreams.projectId, input.projectId)).for("update");
   if (!stream) throw new Error("Event stream unavailable");
-  const [event] = await tx.insert(durableEvents).values({ ...input, sequence: stream.nextSequence }).returning();
+  const [event] = await tx.insert(durableEvents).values({ ...input, sequence: stream.nextSequence }).onConflictDoNothing({ target: durableEvents.id }).returning();
+  if (!event) {
+    const [existing] = await tx.select().from(durableEvents).where(eq(durableEvents.id, input.id!));
+    // An ID identifies one immutable event. Never treat a conflicting retry as success.
+    if (!existing || existing.projectId !== input.projectId || existing.type !== input.type || existing.version !== input.version ||
+        existing.occurredAt.getTime() !== input.occurredAt.getTime() ||
+        !sameJson(existing.scope, input.scope) || !sameJson(existing.payload, input.payload)) throw new Error("Event ID conflicts with an existing event");
+    return existing;
+  }
   await tx.update(eventStreams).set({ nextSequence: sql`${eventStreams.nextSequence} + 1`, updatedAt: new Date() }).where(eq(eventStreams.projectId, input.projectId));
   return event!;
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) || Array.isArray(b)) return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => sameJson(v, b[i]));
+  const left = Object.keys(a as object).sort(), right = Object.keys(b as object).sort();
+  return left.length === right.length && left.every((key, i) => key === right[i] && sameJson((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
 }
 
 function cursor(value: string) { return BigInt(eventCursorSchema.parse(value)); }
@@ -64,7 +80,19 @@ export async function replayDurableEvents(db: Database, input: { projectId: stri
     if (await auth.event(row)) events.push(serialize(row));
   }
   await auth.project(input.projectId);
-  return { status: "valid" as const, cursor: (rows.at(-1)?.sequence ?? position).toString(), retentionFloor: floor.toString(), events };
+  // Retention may have advanced while authorization checks were running.
+  const [current] = await db.select().from(eventStreams).where(eq(eventStreams.projectId, input.projectId));
+  const currentFloor = current?.retentionFloor ?? 0n;
+  if (position < currentFloor) return { status: "expired" as const, cursor: input.cursor, retentionFloor: currentFloor.toString() };
+  // Recheck each selected resource before returning, including previously allowed rows.
+  const visible = [] as typeof events;
+  for (const event of events) {
+    await auth.project(input.projectId);
+    const row = rows.find(candidate => candidate.id === event.id)!;
+    if (await auth.event(row)) visible.push(event);
+  }
+  await auth.project(input.projectId);
+  return { status: "valid" as const, cursor: (rows.at(-1)?.sequence ?? position).toString(), retentionFloor: currentFloor.toString(), events: visible };
 }
 
 /** Acknowledgments are monotonic and idempotent per project and consumer. */
@@ -87,4 +115,15 @@ export async function acknowledgeDurableEvents(db: Database, input: { projectId:
     }).returning();
     return { status: "valid" as const, cursor: consumer!.acknowledgedSequence.toString(), retentionFloor: stream.retentionFloor.toString() };
   });
+}
+
+/** Read the durable checkpoint only after authorizing its consumer identity. */
+export async function getDurableEventCheckpoint(db: Database, input: { projectId: string; consumer: string }, auth: EventAuthorization) {
+  if (!input.consumer.trim()) throw new Error("Consumer name is required");
+  await auth.project(input.projectId);
+  await auth.consumer(input.projectId, input.consumer);
+  const [row] = await db.select().from(eventConsumers).where(and(eq(eventConsumers.projectId, input.projectId), eq(eventConsumers.name, input.consumer)));
+  await auth.project(input.projectId);
+  await auth.consumer(input.projectId, input.consumer);
+  return { cursor: (row?.acknowledgedSequence ?? 0n).toString() };
 }
