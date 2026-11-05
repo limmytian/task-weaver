@@ -12,6 +12,8 @@ import {
   authAuditEvents,
   authActors,
   apiKeys,
+  requirements,
+  reassessmentGrants,
 } from "@task-weaver/db";
 import {
   AuthenticationError,
@@ -19,6 +21,7 @@ import {
   NotFoundError,
   ValidationError,
 } from "@task-weaver/contracts";
+import { createReassessmentGrantService, lockReassessmentGrant } from "./reassessment-grants";
 import { createAuthenticationService } from "./authentication";
 import { createIdentityManagementService } from "./identity-management";
 import { getLiveRequestAuthority } from "./api-keys";
@@ -107,6 +110,37 @@ test(
     const outsider = await human();
     const project = await identity.createProject(owner.headers, {
       name: "Human-owned project",
+    });
+    await t.test("reassessment grants enforce scope, live management authority and audited concurrent revocation", async () => {
+      const agent = await identity.createAgent(owner.headers, { displayName: "Reassessment agent" });
+      const grantProject = await identity.createProject(owner.headers, { name: "Grant project" });
+      const otherProject = await identity.createProject(outsider.headers, { name: "Other grant project" });
+      const [requirement] = await db.insert(requirements).values({ projectId: grantProject.id, title: "Grant scope", createdBy: owner.account.actorId }).returning();
+      const [otherRequirement] = await db.insert(requirements).values({ projectId: otherProject.id, title: "Other scope", createdBy: outsider.account.actorId }).returning();
+      const service = createReassessmentGrantService(await auth.resolve(owner.headers));
+      const outsiderService = createReassessmentGrantService(await auth.resolve(outsider.headers));
+      const input = { projectId: grantProject.id, requirementId: requirement!.id, agentId: agent.id, operations: ["revalidate_evidence"] as ["revalidate_evidence"], expiresAt: new Date(Date.now() + 60_000) };
+      await assert.rejects(service.create(db, { ...input, requirementId: otherRequirement!.id }), ValidationError);
+      await assert.rejects(service.create(db, { ...input, expiresAt: new Date(0) }), ValidationError);
+      await assert.rejects(outsiderService.create(db, input), NotFoundError);
+      await identity.grantAgentProjectAccess(owner.headers, { actorId: agent.id, projectIds: [grantProject.id] });
+      const key = await identity.issueKey(owner.headers, agent.id, { name: "Reassessment key", expiresAt: null, grants: [{ scope: "project", projectId: grantProject.id, permissions: ["resource.read"] }] });
+      const agentContext = await auth.resolve(new Headers({ authorization: `Bearer ${key.rawKey}` }));
+      const grant = await service.create(db, input);
+      const use = () => db.transaction(tx => lockReassessmentGrant(tx, agentContext, { grantId: grant.id, projectId: grantProject.id, requirementId: requirement!.id, operation: "revalidate_evidence" }));
+      assert.equal((await use()).id, grant.id);
+      await assert.rejects(db.transaction(tx => lockReassessmentGrant(tx, agentContext, { grantId: grant.id, projectId: otherProject.id, requirementId: requirement!.id, operation: "revalidate_evidence" })), AuthorizationError);
+      await db.update(reassessmentGrants).set({ expiresAt: new Date(0) }).where(eq(reassessmentGrants.id, grant.id));
+      await assert.rejects(use(), AuthorizationError);
+      await db.update(reassessmentGrants).set({ expiresAt: input.expiresAt }).where(eq(reassessmentGrants.id, grant.id));
+      assert.equal((await service.list(db, grantProject.id)).find(row => row.id === grant.id)?.requirementId, requirement!.id);
+      await assert.rejects(outsiderService.revoke(db, otherProject.id, grant.id));
+      const revoked = await Promise.all([service.revoke(db, grantProject.id, grant.id), service.revoke(db, grantProject.id, grant.id)]);
+      assert.ok(revoked.every(row => row.revokedAt && row.revokedBy === owner.account.actorId));
+      await assert.rejects(use(), AuthorizationError);
+      const audit = await db.select().from(authAuditEvents).where(eq(authAuditEvents.entityId, grant.id));
+      assert.equal(audit.filter(row => row.action === "reassessment_grant.created").length, 1);
+      assert.equal(audit.filter(row => row.action === "reassessment_grant.revoked").length, 1);
     });
     await t.test("named Key options are authorized, bounded and retain explicit scope IDs across pages", async () => {
       const manager = await human();
