@@ -8,8 +8,11 @@ To reproduce with a disposable local PostgreSQL cluster and installed workspace 
 initdb -D /tmp/tw-event-pg --auth=trust --no-locale
 pg_ctl -D /tmp/tw-event-pg -o '-h 127.0.0.1 -p 55439' -l /tmp/tw-event-pg.log start
 createdb -h 127.0.0.1 -p 55439 tw_event_e2e
-TW_EVENT_E2E_DATABASE_URL=postgres://127.0.0.1:55439/tw_event_e2e pnpm exec tsx --test packages/core/src/services/durable-events.postgres-e2e.test.ts packages/db/src/durable-events.postgres-e2e.test.ts
+TW_EVENT_E2E_DATABASE_URL=postgres://127.0.0.1:55439/tw_event_e2e pnpm exec tsx --test packages/db/src/durable-events.postgres-e2e.test.ts
+TW_EVENT_E2E_DATABASE_URL=postgres://127.0.0.1:55439/tw_event_e2e pnpm exec tsx --test --test-concurrency=1 packages/core/src/services/durable-events.postgres-e2e.test.ts apps/api/src/durable-events.postgres-e2e.test.ts apps/api/src/daemon-event-consumer.postgres-e2e.test.ts
 pg_ctl -D /tmp/tw-event-pg stop
 ```
 
 Use a fresh cluster and an unused port; the tests write fixture data and run migrations. The database URL is deliberately restricted to `127.0.0.1` and `tw_event_e2e` by the service test.
+
+On 2026-11-05, the migration test and the three service, API, and daemon tests passed against fresh local PostgreSQL databases. The service test covers concurrent lease acquisition, renewal, stale and expired fences, takeover, principal isolation, revocation, and reconnection; the daemon test exercises fenced REST consumption. The migration test must run against an empty schema: running it after the service tests in the same database fails because they have already created that schema. Reconnection tests a new database client, not a server restart.
