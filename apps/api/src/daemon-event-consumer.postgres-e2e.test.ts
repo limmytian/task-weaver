@@ -1,0 +1,62 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { randomUUID } from "node:crypto";
+import { serve } from "@hono/node-server";
+import { and, eq, sql } from "drizzle-orm";
+import { createDb, runMigrations, requirements, eventConsumers, eventStreams, apiKeys } from "@task-weaver/db";
+import { appendDurableEvent } from "@task-weaver/core";
+import { resourcePostgresFixture } from "./resource-postgres-fixture";
+
+const url = process.env.TW_EVENT_E2E_DATABASE_URL;
+const until = async (condition: () => boolean) => {
+  for (let i = 0; i < 200 && !condition(); i++) await new Promise(r => setTimeout(r, 10));
+  assert.ok(condition(), "timed out waiting for consumer");
+};
+
+test("daemon consumers use real fenced REST leases and checkpoints", { skip: !url, timeout: 60000 }, async t => {
+  const consumerModule = "../../cli/src/daemon-event-consumer.ts";
+  const { createDaemonEventConsumer } = await import(consumerModule) as { createDaemonEventConsumer: (options: { projectId: string; consumer: string; get: <T>(path: string) => Promise<T>; post: <T>(path: string, body: unknown) => Promise<T>; intervalMs: number; report: (message: string) => void; handle: (events: unknown[]) => Promise<void> }) => { tick(): Promise<void>; close(): void } };
+  const parsed = new URL(url!); assert.equal(parsed.hostname, "127.0.0.1"); assert.equal(parsed.pathname, "/tw_event_e2e");
+  await runMigrations(url!);
+  const db = createDb(url!); t.after(() => db.$client.end());
+  const f = await resourcePostgresFixture(db, url!);
+  const key = await f.identity.issueKey(f.owner.headers, f.owner.context.actor.id, { name: "daemon test", expiresAt: null, grants: [{ scope: "project", projectId: f.project.id, permissions: ["resource.read", "resource.write"] }] });
+  const [requirement] = await db.insert(requirements).values({ projectId: f.project.id, title: "Daemon event fixture", createdBy: f.owner.context.actor.id }).returning();
+  await db.transaction(tx => appendDurableEvent(tx, { id: randomUUID(), projectId: f.project.id, type: "plan.changed", version: 1, scope: { requirementId: requirement!.id }, payload: {}, occurredAt: new Date() }));
+  const server = serve({ fetch: f.app.fetch, port: 0, hostname: "127.0.0.1" });
+  t.after(() => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())));
+  await new Promise<void>(resolve => server.once("listening", resolve));
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const request = async <T>(path: string, body?: unknown): Promise<T> => {
+    const response = await fetch(`http://127.0.0.1:${address.port}${path}`, { method: body ? "POST" : "GET", headers: { authorization: `Bearer ${key.rawKey}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json() as T;
+  };
+  const consumer = "daemon-node:stable";
+  const row = async () => (await db.select().from(eventConsumers).where(and(eq(eventConsumers.projectId, f.project.id), eq(eventConsumers.name, consumer))))[0]!;
+  const expire = () => db.update(eventConsumers).set({ leaseExpiresAt: sql`clock_timestamp() - interval '1 second'` }).where(and(eq(eventConsumers.projectId, f.project.id), eq(eventConsumers.name, consumer)));
+  let release!: () => void, entered = false, handled = 0;
+  const reports: string[] = [];
+  const options = { projectId: f.project.id, consumer, get: <T>(path: string) => request<T>(path), post: <T>(path: string, body: unknown) => request<T>(path, body), intervalMs: 100000, report: (message: string) => reports.push(message) };
+  const first = createDaemonEventConsumer({ ...options, handle: async events => { if (events.length) { entered = true; await new Promise<void>(r => { release = r; }); } } });
+  t.after(() => first.close());
+  await until(() => entered);
+  const stale = await row(); assert.equal(stale.acknowledgedSequence, 0n);
+  const second = createDaemonEventConsumer({ ...options, handle: async events => { handled += events.length; } });
+  t.after(() => second.close());
+  await new Promise(r => setTimeout(r, 100)); assert.equal(handled, 0);
+  await expire(); await second.tick(); assert.equal(handled, 1); assert.equal((await row()).acknowledgedSequence, 1n);
+  await assert.rejects(request("/api/v1/events/ack/fenced", { projectId: f.project.id, consumer, owner: stale.leaseOwner, generation: String(stale.leaseGeneration), cursor: "1" }));
+  release(); await until(() => reports.some(message => message.includes("failed")));
+  first.close(); second.close(); await expire();
+  let restarted = false;
+  const third = createDaemonEventConsumer({ ...options, handle: async events => { assert.equal(events.length, 0); restarted = true; } });
+  t.after(() => third.close()); await until(() => restarted); assert.equal((await row()).acknowledgedSequence, 1n);
+  await db.update(apiKeys).set({ revokedAt: new Date() }).where(eq(apiKeys.id, key.id));
+  await third.tick(); assert.ok(reports.some(message => message.includes("HTTP"))); assert.equal((await row()).acknowledgedSequence, 1n); third.close();
+  await db.update(apiKeys).set({ revokedAt: null }).where(eq(apiKeys.id, key.id));
+  await db.update(eventStreams).set({ retentionFloor: 1n }).where(eq(eventStreams.projectId, f.project.id));
+  const expiredReports: string[] = [];
+  const expired = createDaemonEventConsumer({ ...options, consumer: "expired", report: message => expiredReports.push(message), handle: async () => assert.fail("expired cursor handled") });
+  t.after(() => expired.close()); await until(() => expiredReports.length > 0); assert.match(expiredReports[0]!, /expired/);
+});
