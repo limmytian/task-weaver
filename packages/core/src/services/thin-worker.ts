@@ -146,7 +146,9 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
         const summary = safeText(input.summary, 1000);
         const [prior] = await tx.select().from(workflowOutputs).where(and(eq(workflowOutputs.workerAttemptId, attempt.id), eq(workflowOutputs.referenceId, document.id), eq(workflowOutputs.attachmentFileVersionId, file.id), eq(workflowOutputs.summary, summary)));
         if (prior) return prior;
+        await tx.update(requirements).set({ workflowStateRevision: sql`${requirements.workflowStateRevision} + 1`, updatedAt: sql`clock_timestamp()` }).where(eq(requirements.id, requirement.id));
         const [output] = await tx.insert(workflowOutputs).values({ requirementId: requirement.id, taskId: task.id, workerAttemptId: attempt.id, workflowRevision: requirement.workflowRevision, planRevision: attempt.planRevision, type: 'attachment', referenceId: document.id, attachmentFileVersionId: file.id, summary, createdBy: authority.actor.id, createdByType: authority.actor.type }).returning();
+        await tx.insert(activityLog).values({ entityType: 'requirement', entityId: requirement.id, action: 'workflow_output_registered', actorId: authority.actor.id, actorType: authority.actor.type, metadata: { outputId: output!.id, type: 'attachment', attemptId: attempt.id } });
         return output!;
       });
     },
