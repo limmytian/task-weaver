@@ -73,13 +73,16 @@ export function createInterruptedReassessmentService(context: VerifiedRequestCon
         const ids = new Set(input.inputs.map(item => item.inputId));
         const inputsAvailable = ids.size > 0 && ids.size === input.inputs.length && ids.size === resolved.length && resolved.every(item => ids.has(item.inputId) && item.status === "available");
         const evidence = [...resolved, ...input.inputs.filter(item => !resolved.some(row => row.inputId === item.inputId)).map(item => ({ inputId: item.inputId, status: "unavailable" as const, reason: "missing" as const }))];
-        // A recorded stop is an observation, not proof that an external process has stopped.
-        const disposition = input.decision === "accept" && control.phase === "stopped" && runMatchesGeneration && inputsAvailable && !input.uncertainExternalEffects ? "accept" : "escalate";
+        // A control phase and a live claim do not establish that the managed child exited.
+        // Until fenced server-side exit evidence is available, even an otherwise
+        // acceptable assessment must request human review.
+        const managedChildExitEvidence = "unavailable" as const;
+        const disposition = "escalate" as const;
         const [record] = await tx.insert(activityLog).values({ entityType: "requirement", entityId: input.requirementId,
           action: "interrupted_execution_assessed", actorId: grant.agentId, actorType: "agent", metadata: {
             grantId: grant.id, planRevision: requirement.planRevision, controlId: control.id, runId: control.runId,
             leaseGeneration: requirement.leaseGeneration, runMatchesGeneration, observedPhase: control.phase, observedControlUpdatedAt: control.updatedAt.toISOString(),
-            requestedDecision: input.decision, disposition, inputs: evidence, inputsAvailable, notes: input.notes,
+            requestedDecision: input.decision, disposition, managedChildExitEvidence, inputs: evidence, inputsAvailable, notes: input.notes,
             uncertainExternalEffects: input.uncertainExternalEffects, rationale: input.rationale,
           } }).returning();
         return { id: record!.id, disposition };
