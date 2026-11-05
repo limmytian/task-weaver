@@ -728,6 +728,7 @@ export function registerDaemon(program: Command): void {
         polling: false,
         lastEligibilitySummary: null,
       }))
+      const controlMonitors = new Set<ReturnType<typeof monitorExecutionControl>>()
       let sseCleanup: (() => void) | null = null
       let stopping = false
       const lifecycle = new DaemonLifecycle()
@@ -1073,11 +1074,13 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           acknowledge: (control, phase) => daemonPost(`${controlEndpoint}/${control.id}/ack`, { phase, revision: control.revision }),
           stop: () => executionController.abort(new Error('Execution invalidated by a planning change')),
         })
+        controlMonitors.add(controlMonitor)
+        const closeControlMonitor = () => { controlMonitors.delete(controlMonitor); controlMonitor.close() }
         const controlledGit = createControlledGit({ config: cliConfig, workspace, entries: lane.repositories, signal: executionSignal,
           assertAuthority: async () => { assertActive(); await daemonPost(`/api/v1/daemons/${daemonId}/execution-authority`, { requirementId: requirement.id, ...leaseFence }) },
           record: input => daemonPost(`/api/v1/daemons/${daemonId}/git-synchronization`, { ...input, requirementId: requirement.id, ...leaseFence }),
         })
-        const access = await createTaskWorkerAccess({ config: cliConfig, daemonId, requirementId: requirement.id, taskId: task.id, sharedCapabilityReads: opts.sharedCapabilityReads, capabilityExecution: opts.capabilityExecution, runId: lane.runId, workerIndex: w.index, leaseGeneration: lane.leaseGeneration, signal: executionSignal, controlledGit }).catch(error => { controlMonitor.close(); throw error })
+        const access = await createTaskWorkerAccess({ config: cliConfig, daemonId, requirementId: requirement.id, taskId: task.id, sharedCapabilityReads: opts.sharedCapabilityReads, capabilityExecution: opts.capabilityExecution, runId: lane.runId, workerIndex: w.index, leaseGeneration: lane.leaseGeneration, signal: executionSignal, controlledGit }).catch(error => { closeControlMonitor(); throw error })
         const consoleBuffer = new WorkerConsoleBuffer(toolCmd, access.consoleSecrets)
         consoleObserver = consoleCoordinator.observe({
           target: { requirementId: requirement.id, taskId: task.id, runId: lane.runId!, workerIndex: w.index, leaseGeneration: lane.leaseGeneration! }, buffer: consoleBuffer, signal: access.signal,
@@ -1132,7 +1135,7 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
           if (!(error instanceof ExecutorResourceBlocked)) throw error
           childResult = { ok: false, status: null, stdout: '', stderr: '', command: 'executor-preflight', signal: null,
             timedOut: false, cancelled: false, outputTruncated: false, durationMs: 0, resourceInterruption: error.observation }
-        } finally { consoleObserver?.close(); controlMonitor.close(); await access.close(); await clearLocalExecution(requirement.id, lane.runId) }
+        } finally { consoleObserver?.close(); closeControlMonitor(); await access.close(); await clearLocalExecution(requirement.id, lane.runId) }
         // runMeteredAgent has observed managed process exit. Keep the lane heartbeat while inspecting.
         let control = (await readControls()).find(row => row.runId === lane.runId)
         if (control) {
@@ -1635,6 +1638,9 @@ IMPORTANT REQUIREMENTS & PROTOCOL:
               buffer = lines.pop() || ''
 
               for (const line of lines) {
+                if (line.trim() === 'event: requirement_execution_invalidated') {
+                  for (const monitor of controlMonitors) void monitor.tick()
+                }
                 if (
                   line.startsWith('event: task_created') ||
                   line.startsWith('event: task_released') ||
