@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { createReassessmentDecisionService, createReassessmentGrantService } from "@task-weaver/core";
+import type { Database } from "@task-weaver/db";
 import { createDb, runMigrations, requirements, apiKeys, workflowOutputs, activityLog } from "@task-weaver/db";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 
@@ -23,7 +25,7 @@ test("reassessment REST enforces live authority, revisions and revocation", { sk
   assert.notEqual((await request("/grants", agentHeaders, grantInput)).status, 201);
   const grantResponse = await request("/grants", managerHeaders, grantInput); assert.equal(grantResponse.status, 201, await grantResponse.clone().text());
   const grant = await grantResponse.json() as any;
-  const decision = { grantId: grant.id, projectId: f.project.id, requirementId: requirement!.id, expectedRevision: requirement!.planRevision, decision: "accept", evidence: [], rationale: "private rationale", inputsAvailable: false, uncertainExternalEffects: true };
+  const decision = { grantId: grant.id, projectId: f.project.id, requirementId: requirement!.id, expectedRevision: requirement!.planRevision, decision: "accept" as const, evidence: [], rationale: "private rationale", inputsAvailable: false, uncertainExternalEffects: true };
   assert.notEqual((await request("/decisions", f.owner.headers, decision)).status, 201);
   assert.notEqual((await request("/decisions", agentHeaders, { ...decision, expectedRevision: decision.expectedRevision + 1 })).status, 201);
   const [otherRequirement] = await db.insert(requirements).values({ projectId: f.project.id, title: "Other", createdBy: f.owner.context.actor.id }).returning();
@@ -49,6 +51,14 @@ test("reassessment REST enforces live authority, revisions and revocation", { sk
   assert.equal(applicationAudit!.actorId, agent.id); assert.equal(applicationAudit!.actorType, "agent");
   assert.equal((applicationAudit!.metadata as any).decisionId, acceptedBody.id);
   await db.update(requirements).set({ evidenceNeedsReview: true }).where(eq(requirements.id, requirement!.id));
+  const waitForBlocked = async () => {
+    for (let i = 0; i < 200; i++) {
+      const rows = await db.execute(sql`select 1 from pg_stat_activity where datname = current_database() and cardinality(pg_blocking_pids(pid)) > 0 limit 1`);
+      if (rows.length) return;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    throw new Error("Competing transaction did not block");
+  };
   let revisionLocked!: () => void, releaseRevision!: () => void;
   const locked = new Promise<void>(resolve => { revisionLocked = resolve; });
   const release = new Promise<void>(resolve => { releaseRevision = resolve; });
@@ -58,7 +68,8 @@ test("reassessment REST enforces live authority, revisions and revocation", { sk
   });
   await locked;
   const concurrentApply = request("/apply", agentHeaders, apply);
-  releaseRevision(); await changeRevision;
+  try { await waitForBlocked(); } finally { releaseRevision(); }
+  await changeRevision;
   assert.equal((await concurrentApply).status, 409);
   await db.update(requirements).set({ planRevision: requirement!.planRevision }).where(eq(requirements.id, requirement!.id));
   await db.update(workflowOutputs).set({ availability: "missing" }).where(eq(workflowOutputs.id, output!.id));
@@ -77,12 +88,83 @@ test("reassessment REST enforces live authority, revisions and revocation", { sk
   assert.notEqual((await request(`/decisions?requirementId=${requirement!.id}`, f.outsider.headers)).status, 200);
   const activity = await f.app.request(`http://127.0.0.1:3001/api/v1/activity?projectId=${f.project.id}&action=agent_reassessment_recorded`, { headers: managerHeaders });
   assert.equal(activity.status, 200); assert.doesNotMatch(await activity.text(), /private rationale/);
-  const [revoked, raced] = await Promise.all([request(`/grants/${grant.id}/revoke`, managerHeaders, { projectId: f.project.id }), request("/apply", agentHeaders, apply)]);
-  assert.equal(revoked.status, 200); assert.ok([403, 409].includes(raced.status));
+  // Keep the actual service transaction open after apply/revoke, then prove the
+  // competing service is waiting on a PostgreSQL lock before committing it.
+  const agentContext = await f.auth.resolve(agentHeaders);
+  const managerContext = await f.auth.resolve(managerHeaders);
+  const decisions = createReassessmentDecisionService(agentContext);
+  const grants = createReassessmentGrantService(managerContext);
+  const gate = () => {
+    let open!: () => void;
+    const promise = new Promise<void>(resolve => { open = resolve; });
+    return { promise, open };
+  };
+  await db.update(workflowOutputs).set({ availability: "available" }).where(eq(workflowOutputs.id, output!.id));
+  const fresh = await request("/decisions", agentHeaders, supported);
+  assert.equal(fresh.status, 201);
+  const freshDecision = await fresh.json() as any;
+  const freshApply = { ...apply, decisionId: freshDecision.id };
+  // Commit evidence changes while apply is waiting, then check that its
+  // snapshot cannot clear review. A rolled-back change must leave it usable.
+  const raceEvidence = async (change: (tx: Database) => Promise<void>, rollback = false) => {
+    const changed = gate(), finish = gate();
+    const mutation = db.transaction(async tx => {
+      await change(tx as unknown as Database);
+      changed.open(); await finish.promise;
+      if (rollback) throw new Error("intentional rollback");
+    });
+    const settledMutation = rollback ? assert.rejects(mutation, /intentional rollback/) : mutation;
+    await changed.promise;
+    const pending = decisions.apply(db, freshApply);
+    const outcome = pending.then(() => true, () => false);
+    try { await waitForBlocked(); } finally { finish.open(); }
+    await settledMutation;
+    assert.equal(await outcome, rollback);
+    const [state] = await db.select().from(requirements).where(eq(requirements.id, requirement!.id));
+    assert.equal(state!.evidenceNeedsReview, !rollback);
+    if (rollback) await db.update(requirements).set({ evidenceNeedsReview: true }).where(eq(requirements.id, requirement!.id));
+  };
+  await raceEvidence(async tx => { await tx.update(workflowOutputs).set({ availability: "missing" }).where(eq(workflowOutputs.id, output!.id)); });
+  await db.update(workflowOutputs).set({ availability: "available" }).where(eq(workflowOutputs.id, output!.id));
+  await raceEvidence(async tx => { await tx.delete(workflowOutputs).where(eq(workflowOutputs.id, output!.id)); });
+  await db.insert(workflowOutputs).values(output!);
+  await raceEvidence(async tx => { await tx.update(workflowOutputs).set({ availability: "missing" }).where(eq(workflowOutputs.id, output!.id)); }, true);
+  // An uncommitted insertion holds a foreign-key lock on the requirement;
+  // apply must wait for it and then observe the additional output.
+  let insertedId = "";
+  await raceEvidence(async tx => {
+    const [inserted] = await tx.insert(workflowOutputs).values({ requirementId: requirement!.id, type: "comment", createdBy: f.owner.context.actor.id, createdByType: "human" }).returning();
+    insertedId = inserted!.id;
+  });
+  await db.delete(workflowOutputs).where(eq(workflowOutputs.id, insertedId));
+  const appliedGate = gate(), commitApply = gate();
+  const first = db.transaction(async tx => {
+    await decisions.apply(tx as unknown as Database, freshApply);
+    appliedGate.open(); await commitApply.promise;
+  });
+  await appliedGate.promise;
+  const revokeAfter = grants.revoke(db, f.project.id, grant.id);
+  try { await waitForBlocked(); } finally { commitApply.open(); }
+  await first; await revokeAfter;
+  assert.equal((await db.select().from(requirements).where(eq(requirements.id, requirement!.id)))[0]!.evidenceNeedsReview, false);
+
+  const secondGrant = await grants.create(db, { ...grantInput, operations: ["revalidate_evidence"], expiresAt: new Date(grantInput.expiresAt) });
+  await db.update(requirements).set({ evidenceNeedsReview: true }).where(eq(requirements.id, requirement!.id));
+  const secondDecision = await decisions.record(db, { ...supported, grantId: secondGrant.id });
+  const revokedGate = gate(), commitRevoke = gate();
+  const second = db.transaction(async tx => {
+    await grants.revoke(tx as unknown as Database, f.project.id, secondGrant.id);
+    revokedGate.open(); await commitRevoke.promise;
+  });
+  await revokedGate.promise;
+  const applyAfter = decisions.apply(db, { ...apply, grantId: secondGrant.id, decisionId: secondDecision.id });
+  // Attach rejection handling immediately while the transaction is blocked.
+  const rejectedApply = assert.rejects(applyAfter);
+  try { await waitForBlocked(); } finally { commitRevoke.open(); }
+  await second; await rejectedApply;
+  assert.equal((await db.select().from(requirements).where(eq(requirements.id, requirement!.id)))[0]!.evidenceNeedsReview, true);
   assert.notEqual((await request("/decisions", agentHeaders, decision)).status, 201);
   assert.notEqual((await request("/apply", agentHeaders, apply)).status, 200);
-  const [stillReview] = await db.select().from(requirements).where(eq(requirements.id, requirement!.id));
-  assert.equal(stillReview!.evidenceNeedsReview, true);
   await db.update(apiKeys).set({ revokedAt: new Date() }).where(eq(apiKeys.id, key.id));
   assert.notEqual((await request(`/decisions?requirementId=${requirement!.id}`, agentHeaders)).status, 200);
 });
