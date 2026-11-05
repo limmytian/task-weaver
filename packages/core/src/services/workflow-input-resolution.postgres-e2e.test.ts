@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { addWorkflowInput } from "./requirements";
 import { eq } from "drizzle-orm";
 import { createDb, runMigrations, authActors, authUsers, authSessions, projects, projectMemberships, requirements, workflowInputs, workflowOutputs, documents, documentFileVersions } from "@task-weaver/db";
 import { requestIdentitySnapshotSchema, type VerifiedRequestContext } from "@task-weaver/contracts";
@@ -8,6 +12,9 @@ import { resolveWorkflowInputs } from "./workflow-input-resolution";
 
 const url = process.env.TW_INPUT_E2E_DATABASE_URL;
 test("workflow inputs resolve current authorized immutable files", { skip: !url, timeout: 60000 }, async t => {
+  const directory = await mkdtemp(join(tmpdir(), "tw-input-test-"));
+  const previousDir = process.env.TW_ATTACHMENT_STORAGE_DIR; process.env.TW_ATTACHMENT_STORAGE_DIR = directory;
+  t.after(async () => { if (previousDir === undefined) delete process.env.TW_ATTACHMENT_STORAGE_DIR; else process.env.TW_ATTACHMENT_STORAGE_DIR = previousDir; await rm(directory, { recursive: true, force: true }); });
   const parsed = new URL(url!); assert.equal(parsed.hostname, "127.0.0.1"); assert.equal(parsed.pathname, "/tw_input_e2e");
   await runMigrations(url!); const db = createDb(url!); t.after(() => db.$client.end());
   const [actor] = await db.insert(authActors).values({ type: "human", displayName: "Fixture", status: "active" }).returning();
@@ -17,14 +24,28 @@ test("workflow inputs resolve current authorized immutable files", { skip: !url,
   const context = requestIdentitySnapshotSchema.parse({ actor: { id: actor!.id, type: "human", userId: user!.id, status: "active", instanceRole: "user" }, credential: { id: session!.id, kind: "session", actorId: actor!.id, expiresAt: expires.toISOString() }, verifiedAt: now.toISOString() }) as VerifiedRequestContext;
   const [project] = await db.insert(projects).values({ name: "Fixture", createdBy: actor!.id }).returning();
   const [membership] = await db.insert(projectMemberships).values({ projectId: project!.id, actorId: actor!.id, actorType: "human", role: "owner" }).returning();
-  const [target, source] = await db.insert(requirements).values(["Target", "Source"].map(title => ({ title, projectId: project!.id, createdBy: actor!.id }))).returning();
+  const [target, source] = await db.insert(requirements).values(["Target", "Source"].map(title => ({ title, projectId: project!.id, createdBy: actor!.id, workflow: { version: 1, delivery: { mode: "manual", method: "git_branch", instructions: "" }, acceptance: { mode: "skip", instructions: "", requiredChecks: [], minimumHumanApprovals: 0 }, integration: { mode: "skip", method: "none", instructions: "" }, worktreeMode: "auto", worktreeRetentionDays: 7, localArtifactRetentionDays: 30 } }))).returning();
   const [doc] = await db.insert(documents).values({ projectId: project!.id, form: "attachment", title: "File", content: "", createdBy: actor!.id }).returning();
-  const [file] = await db.insert(documentFileVersions).values({ documentId: doc!.id, version: 1, originalFilename: "a", mimeType: "text/plain", sizeBytes: 1, sha256: "a".repeat(64), storageBackend: "fixture", objectKey: randomUUID(), createdBy: actor!.id, createdByType: "human" }).returning();
+  const [file] = await db.insert(documentFileVersions).values({ documentId: doc!.id, version: 1, originalFilename: "a", mimeType: "text/plain", sizeBytes: 1, sha256: createHash("sha256").update("a").digest("hex"), storageBackend: "local", objectKey: "fixture", createdBy: actor!.id, createdByType: "human" }).returning();
   await db.update(documents).set({ currentFileVersionId: file!.id }).where(eq(documents.id, doc!.id));
   const [output, local] = await db.insert(workflowOutputs).values([{ requirementId: source!.id, type: "attachment" as const, referenceId: doc!.id, attachmentFileVersionId: file!.id, createdBy: actor!.id, createdByType: "human" as const }, { requirementId: target!.id, type: "local" as const, createdBy: actor!.id, createdByType: "human" as const }]).returning();
   await db.insert(workflowInputs).values([{ requirementId: target!.id, outputId: output!.id, createdBy: actor!.id }, { requirementId: target!.id, outputId: local!.id, createdBy: actor!.id }]);
   const resolve = () => db.transaction(tx => resolveWorkflowInputs(tx, context, target!.id));
-  let rows = await resolve(); assert.equal(rows.find(r => r.status === "available")?.status, "available"); assert.ok(rows.some(r => r.status === "unavailable" && r.reason === "local_only"));
+  let rows = await resolve(); assert.ok(rows.some(r => r.status === "unavailable" && r.reason === "unverified"));
+  await writeFile(join(directory, "fixture"), "b");
+  rows = await resolve(); assert.ok(rows.some(r => r.status === "unavailable" && r.reason === "unverified"));
+  await writeFile(join(directory, "fixture"), "a");
+  rows = await resolve(); assert.equal(rows.find(r => r.status === "available")?.status, "available"); assert.ok(rows.some(r => r.status === "unavailable" && r.reason === "local_only"));
+  // A direct registration must wait until the resolver transaction releases its target lock.
+  let release!: () => void; let locked!: () => void;
+  const lockReady = new Promise<void>(r => { locked = r; });
+  const hold = new Promise<void>(r => { release = r; });
+  const reader = db.transaction(async tx => { await resolveWorkflowInputs(tx, context, target!.id); locked(); await hold; });
+  await lockReady;
+  let completed = false;
+  const registration = addWorkflowInput(db, target!.id, { outputId: output!.id }, { id: actor!.id, type: "human" }).then(() => { completed = true; });
+  await new Promise(r => setTimeout(r, 200)); assert.equal(completed, false);
+  release(); await reader; await registration; assert.equal(completed, true);
   await db.update(documents).set({ currentFileVersionId: randomUUID() }).where(eq(documents.id, doc!.id));
   rows = await resolve(); assert.ok(rows.some(r => r.status === "unavailable" && r.reason === "changed"));
   await db.update(workflowOutputs).set({ availability: "missing" }).where(eq(workflowOutputs.id, output!.id));

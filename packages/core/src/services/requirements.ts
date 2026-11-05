@@ -195,6 +195,10 @@ export async function retireWorkflowOutput(db: Database, requirementId: string, 
 }
 
 export async function addWorkflowInput(db: Database, requirementId: string, input: AddWorkflowInputInput, actor: Actor) {
+  return db.transaction(tx => addWorkflowInputInTransaction(tx as unknown as Database, requirementId, input, actor));
+}
+
+async function addWorkflowInputInTransaction(db: Database, requirementId: string, input: AddWorkflowInputInput, actor: Actor) {
   // Serialize input registration with transactional input resolution.
   await db.select({ id: requirements.id }).from(requirements).where(eq(requirements.id, requirementId)).for("update");
   const requirement = await getRequirementOrThrow(db, requirementId);

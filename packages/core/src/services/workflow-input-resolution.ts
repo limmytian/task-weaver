@@ -1,6 +1,7 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import { documents, documentFileVersions, requirements, workflowInputs, workflowOutputs, type Database } from "@task-weaver/db";
 import { NotFoundError, type VerifiedRequestContext } from "@task-weaver/contracts";
+import { attachmentStorage } from "./attachment-storage";
 import { lockIdentityLifecycle } from "./auth-security";
 import { requireResource, resourceAuthority } from "./resource-authorization";
 
@@ -48,6 +49,11 @@ export async function resolveWorkflowInputs(tx: Transaction, context: VerifiedRe
     if (!doc || !file) { unavailable("missing"); continue; }
     if (doc.currentFileVersionId !== file.id) { unavailable("changed"); continue; }
     if (!/^[a-f0-9]{64}$/.test(file.sha256) || (output.type === "local" && (output.sha256 !== file.sha256 || output.sizeBytes !== file.sizeBytes))) { unavailable("unverified"); continue; }
+    if (file.storageBackend !== "local") { unavailable("unverified"); continue; }
+    try {
+      const verified = await attachmentStorage().getVerifiedObject(file.objectKey, { sha256: file.sha256, sizeBytes: file.sizeBytes });
+      verified.body.destroy();
+    } catch { unavailable("unverified"); continue; }
     result.push({ inputId: input.id, status: "available", outputId: output.id, sourceRequirementId: output.requirementId, documentId, fileVersionId: file.id, version: file.version, sha256: file.sha256 });
   }
   return result;
