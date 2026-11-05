@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { createReassessmentDecisionService, createReassessmentGrantService } from "@task-weaver/core";
 import type { Database } from "@task-weaver/db";
-import { createDb, runMigrations, requirements, apiKeys, workflowOutputs, activityLog } from "@task-weaver/db";
+import { createDb, runMigrations, requirements, apiKeys, workflowOutputs, activityLog, executionControls } from "@task-weaver/db";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 
 const url = process.env.TW_REASSESSMENT_E2E_DATABASE_URL;
@@ -25,6 +26,20 @@ test("reassessment REST enforces live authority, revisions and revocation", { sk
   assert.notEqual((await request("/grants", agentHeaders, grantInput)).status, 201);
   const grantResponse = await request("/grants", managerHeaders, grantInput); assert.equal(grantResponse.status, 201, await grantResponse.clone().text());
   const grant = await grantResponse.json() as any;
+  const executionGrantResponse = await request("/grants", managerHeaders, { ...grantInput, operations: ["assess_interrupted_execution"] });
+  assert.equal(executionGrantResponse.status, 201);
+  const executionGrant = await executionGrantResponse.json() as any;
+  const [control] = await db.insert(executionControls).values({ requirementId: requirement!.id, projectId: f.project.id, daemonId: randomUUID(), runId: randomUUID(), revision: requirement!.planRevision, reason: "Plan changed", phase: "stopped", deadline: new Date() }).returning();
+  const interrupted = { grantId: executionGrant.id, projectId: f.project.id, requirementId: requirement!.id, expectedRevision: requirement!.planRevision, controlId: control!.id, expectedControlUpdatedAt: control!.updatedAt.toISOString(), decision: "accept", inputs: [{ reference: "workspace", observation: "Reviewed state" }], inputsAvailable: true, uncertainExternalEffects: false, rationale: "Reviewed local state" };
+  assert.notEqual((await request("/interrupted", f.owner.headers, interrupted)).status, 201);
+  assert.notEqual((await request("/interrupted", agentHeaders, { ...interrupted, grantId: grant.id })).status, 201);
+  const assessed = await request("/interrupted", agentHeaders, interrupted);
+  assert.equal(assessed.status, 201, await assessed.clone().text());
+  assert.equal((await assessed.json() as any).disposition, "accept");
+  assert.equal((await (await request("/interrupted", agentHeaders, { ...interrupted, uncertainExternalEffects: true })).json() as any).disposition, "escalate");
+  assert.equal((await db.select().from(executionControls).where(eq(executionControls.id, control!.id)))[0]!.phase, "stopped");
+  await request(`/grants/${executionGrant.id}/revoke`, managerHeaders, { projectId: f.project.id });
+  assert.notEqual((await request("/interrupted", agentHeaders, interrupted)).status, 201);
   const decision = { grantId: grant.id, projectId: f.project.id, requirementId: requirement!.id, expectedRevision: requirement!.planRevision, decision: "accept" as const, evidence: [], rationale: "private rationale", inputsAvailable: false, uncertainExternalEffects: true };
   assert.notEqual((await request("/decisions", f.owner.headers, decision)).status, 201);
   assert.notEqual((await request("/decisions", agentHeaders, { ...decision, expectedRevision: decision.expectedRevision + 1 })).status, 201);
