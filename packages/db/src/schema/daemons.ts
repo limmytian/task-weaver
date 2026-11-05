@@ -18,6 +18,7 @@ export const daemons = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     name: text("name").notNull(),
     role: daemonRoleEnum("role").default("executor").notNull(),
+    registrationCredentialId: uuid("registration_credential_id"),
     actorId: text("actor_id"),
     actorType: actorTypeEnum("actor_type"),
     host: text("host"),

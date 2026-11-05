@@ -1,3 +1,5 @@
+ALTER TABLE "task_weaver"."daemons" ADD COLUMN "registration_credential_id" uuid;
+--> statement-breakpoint
 CREATE TABLE "task_weaver"."managed_child_observations" (
   "run_id" uuid PRIMARY KEY NOT NULL,
   "requirement_id" uuid NOT NULL REFERENCES "task_weaver"."requirements"("id") ON DELETE CASCADE,

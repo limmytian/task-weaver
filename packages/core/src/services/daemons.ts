@@ -220,6 +220,7 @@ export async function registerDaemon(
   db: Database,
   input: RegisterDaemonInput,
   actor: Actor,
+  registrationCredentialId?: string,
 ) {
   const now = new Date();
   const config = getDaemonConfig();
@@ -233,6 +234,9 @@ export async function registerDaemon(
     });
 
     if (existing) {
+      if (registrationCredentialId && existing.registrationCredentialId && existing.registrationCredentialId !== registrationCredentialId) {
+        throw new ValidationError("Daemon registration credential does not match");
+      }
       if (!existing.actorId || existing.actorId !== actor.id || existing.actorType !== actor.type) {
         throw new ValidationError(
           `Daemon instance '${existing.id}' belongs to actor '${existing.actorId}'`,
@@ -306,6 +310,7 @@ export async function registerDaemon(
       role: input.role,
       actorId: actor.id,
       actorType: actor.type,
+      registrationCredentialId: registrationCredentialId ?? null,
       capabilities: input.capabilities,
       host: input.host,
       nodeId: input.nodeId,

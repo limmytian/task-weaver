@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
-import { createDb, runMigrations, requirements } from '@task-weaver/db';
+import { createDb, runMigrations, requirements, apiKeys } from '@task-weaver/db';
 import { resourcePostgresFixture } from './resource-postgres-fixture';
 
 const databaseUrl = process.env.TW_EXECUTION_RECOVERY_E2E_DATABASE_URL;
@@ -21,6 +21,8 @@ test('managed child observations are fenced and reject replay', { skip: !databas
   await fixture.identity.setMembership(fixture.owner.headers, fixture.project.id, agent.id, { role: 'maintainer', explicitPermissions: [] });
   const key = await fixture.identity.issueKey(fixture.owner.headers, agent.id, { name: 'Recovery test', expiresAt: null, grants: [{ scope: 'project', projectId: fixture.project.id, permissions: ['resource.read', 'resource.write', 'execution.run', 'audit.read'] }, { scope: 'personal', actorId: fixture.owner.context.actor.id, permissions: ['resource.read'] }] });
   const agentHeaders = new Headers({ authorization: `Bearer ${key.rawKey}`, 'content-type': 'application/json' });
+  const otherKey = await fixture.identity.issueKey(fixture.owner.headers, agent.id, { name: 'Other credential', expiresAt: null, grants: [{ scope: 'project', projectId: fixture.project.id, permissions: ['resource.read', 'resource.write', 'execution.run'] }] });
+  const otherHeaders = new Headers({ authorization: `Bearer ${otherKey.rawKey}`, 'content-type': 'application/json' });
   const daemonA = randomUUID(), daemonB = randomUUID();
   for (const [id, nodeId] of [[daemonA, 'node-a'], [daemonB, 'node-b']]) await json(await api('/daemons/register', 'POST', { id, nodeId, name: 'Recovery fixture', role: 'executor', capabilities: ['codex', 'executor:codex', 'live-plan-v1'] }, agentHeaders), 201);
   const create = async (title: string, policy?: unknown) => json(await api(`/projects/${fixture.project.id}/requirements`, 'POST', { title, status: 'approved', recoveryPolicy: policy }), 201);
@@ -42,7 +44,14 @@ test('managed child observations are fenced and reject replay', { skip: !databas
   assert.notEqual((await api(spawn, 'POST', childIdentity, fixture.owner.headers)).status, 201);
   assert.notEqual((await api(spawn, 'POST', { ...childIdentity, leaseGeneration: lane.leaseGeneration + 1 }, agentHeaders)).status, 201);
   assert.notEqual((await api(`/daemons/${daemonB}/managed-children/spawn`, 'POST', childIdentity, agentHeaders)).status, 201);
+  assert.notEqual((await api('/daemons/register', 'POST', { id: daemonA, nodeId: 'node-a', name: 'Impersonator', role: 'executor', capabilities: ['codex'] }, otherHeaders)).status, 201);
+  assert.notEqual((await api(spawn, 'POST', childIdentity, otherHeaders)).status, 201);
   await json(await api(spawn, 'POST', childIdentity, agentHeaders), 201);
+  assert.notEqual((await api(exit, 'POST', report, otherHeaders)).status, 201);
+  await fixture.identity.revokeKey(fixture.owner.headers, agent.id, key.id);
+  assert.notEqual((await api(exit, 'POST', report, agentHeaders)).status, 201);
+  assert.notEqual((await api(exit, 'POST', report, otherHeaders)).status, 201);
+  await db.update(apiKeys).set({ revokedAt: null }).where(eq(apiKeys.id, key.id));
   assert.notEqual((await api(spawn, 'POST', childIdentity, agentHeaders)).status, 201);
   assert.notEqual((await api(exit, 'POST', { ...report, processIdentity: 'different-start' }, agentHeaders)).status, 201);
   assert.notEqual((await api(exit, 'POST', { ...report, pid: 12346 }, agentHeaders)).status, 201);
