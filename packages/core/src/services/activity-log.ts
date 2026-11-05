@@ -61,7 +61,7 @@ function buildConditions(input: ListActivityLogInput) {
 
 function redactReassessmentEvidence<T extends { action: string; metadata: unknown }>(row: T): T {
   if (row.action !== "agent_reassessment_recorded" || !row.metadata || typeof row.metadata !== "object") return row;
-  const { evidence, rationale, ...metadata } = row.metadata as Record<string, unknown>;
+  const { evidence, rationale, evidenceFingerprint, ...metadata } = row.metadata as Record<string, unknown>;
   return { ...row, metadata };
 }
 

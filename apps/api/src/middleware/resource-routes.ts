@@ -1,7 +1,7 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
   ["GET", /^\/api\/v1\/reassessment\/(?:grants|decisions)\/?$/],
-  ["POST", /^\/api\/v1\/reassessment\/(?:grants|decisions|grants\/[0-9a-fA-F-]{36}\/revoke)\/?$/],
+  ["POST", /^\/api\/v1\/reassessment\/(?:grants|decisions|apply|grants\/[0-9a-fA-F-]{36}\/revoke)\/?$/],
   ["GET", /^\/api\/v1\/events(?:\/(?:checkpoint|incidents))?\/?$/],
   ["POST", /^\/api\/v1\/events\/(?:ack(?:\/fenced)?|lease\/(?:acquire|renew)|incidents(?:\/resolve)?)\/?$/],
   ["POST", /^\/api\/v1\/evidence\/(?:open|[0-9a-fA-F-]{36}\/(?:claim|chunk|finish|cancel|fail|promote))\/?$/],

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { createReassessmentGrantService, createReassessmentDecisionService, reassessmentGrantInputSchema, reassessmentDecisionInputSchema } from "@task-weaver/core";
+import { createReassessmentGrantService, createReassessmentDecisionService, reassessmentGrantInputSchema, reassessmentDecisionInputSchema, reassessmentApplyInputSchema } from "@task-weaver/core";
 import type { Env } from "../middleware/actor.js";
 
 const routes = new Hono<Env>();
@@ -26,6 +26,11 @@ routes.post("/decisions", async c => {
   const input = reassessmentDecisionInputSchema.safeParse(await c.req.json().catch(() => null));
   if (!input.success) return c.json({ error: "Invalid decision" }, 400);
   return c.json(await createReassessmentDecisionService(c.get("identity")).record(c.get("db"), input.data), 201);
+});
+routes.post("/apply", async c => {
+  const input = reassessmentApplyInputSchema.safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: "Invalid application" }, 400);
+  return c.json(await createReassessmentDecisionService(c.get("identity")).apply(c.get("db"), input.data));
 });
 routes.get("/decisions", async c => {
   const requirementId = id.safeParse(c.req.query("requirementId"));
