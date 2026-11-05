@@ -136,7 +136,9 @@ export async function getDurableEventCheckpoint(db: Database, input: { projectId
   if (!input.consumer.trim()) throw new Error("Consumer name is required");
   return withEventAuthority(db, context, input.projectId, async (tx, authority) => {
     const [row] = await tx.select().from(eventConsumers).where(and(eq(eventConsumers.projectId, input.projectId), eq(eventConsumers.principalType, authority.actor.type), eq(eventConsumers.principalId, authority.actor.id), eq(eventConsumers.name, input.consumer)));
-    return { cursor: (row?.acknowledgedSequence ?? 0n).toString() };
+    const [stream] = await tx.select({ retentionFloor: eventStreams.retentionFloor }).from(eventStreams).where(eq(eventStreams.projectId, input.projectId));
+    const position = row?.acknowledgedSequence ?? 0n, floor = stream?.retentionFloor ?? 0n;
+    return { status: position < floor ? "expired" as const : "valid" as const, cursor: position.toString(), retentionFloor: floor.toString() };
   });
 }
 

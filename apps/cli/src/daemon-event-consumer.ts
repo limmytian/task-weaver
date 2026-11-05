@@ -45,7 +45,15 @@ export function createDaemonEventConsumer(options: {
         await renew()
         if (closed) return
       }
-      if (cursor === undefined) cursor = (await options.get<{ cursor: string }>(`/api/v1/events/checkpoint?${query({ consumer: options.consumer })}`)).cursor
+      if (cursor === undefined) {
+        const checkpoint = await options.get<{ status: string; cursor: string; retentionFloor: string }>(`/api/v1/events/checkpoint?${query({ consumer: options.consumer })}`)
+        cursor = checkpoint.cursor
+        if (checkpoint.status === 'expired') {
+          expired = true
+          options.report(`Event cursor expired for project ${options.projectId}, consumer ${options.consumer} at ${cursor}; retention floor ${checkpoint.retentionFloor}. Review lost history and resynchronize before continuing.`)
+          return
+        }
+      }
       do {
         pending = false
         const batch: { status: string; cursor: string; retentionFloor: string; events?: unknown[] } = await options.get(`/api/v1/events?${query({ cursor: cursor!, limit: '100' })}`)

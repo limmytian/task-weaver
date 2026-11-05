@@ -59,4 +59,14 @@ test("daemon consumers use real fenced REST leases and checkpoints", { skip: !ur
   const expiredReports: string[] = [];
   const expired = createDaemonEventConsumer({ ...options, consumer: "expired", report: message => expiredReports.push(message), handle: async () => assert.fail("expired cursor handled") });
   t.after(() => expired.close()); await until(() => expiredReports.length > 0); assert.match(expiredReports[0]!, /expired/);
+  const checkpointPath = `/api/v1/events/checkpoint?${new URLSearchParams({ projectId: f.project.id, consumer: "expired" })}`;
+  assert.deepEqual(await request(checkpointPath), { status: "expired", cursor: "0", retentionFloor: "1" });
+  expired.close();
+  await db.update(eventConsumers).set({ leaseExpiresAt: sql`clock_timestamp() - interval '1 second'` }).where(and(eq(eventConsumers.projectId, f.project.id), eq(eventConsumers.name, "expired")));
+  const restartedReports: string[] = [];
+  const expiredRestart = createDaemonEventConsumer({ ...options, consumer: "expired", report: message => restartedReports.push(message), handle: async () => assert.fail("expired cursor handled after restart") });
+  t.after(() => expiredRestart.close());
+  await until(() => restartedReports.length > 0);
+  assert.match(restartedReports[0]!, /retention floor 1/);
+  assert.deepEqual(await request(checkpointPath), { status: "expired", cursor: "0", retentionFloor: "1" });
 });
