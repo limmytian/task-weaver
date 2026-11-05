@@ -6,7 +6,7 @@ import { createDb, runMigrations, authActors, authUsers, authSessions, projects,
 import { requestIdentitySnapshotSchema, type VerifiedRequestContext } from "@task-weaver/contracts";
 import { invalidatePlanningExecutions, planningChangeSnapshot } from "./planning-impact";
 import { lockIdentityLifecycle } from "./auth-security";
-import { appendDurableEvent, replayDurableEvents, acknowledgeDurableEvents, getDurableEventCheckpoint, acquireDurableConsumerLease, renewDurableConsumerLease, acknowledgeDurableEventsFenced } from "./durable-events";
+import { appendDurableEvent, replayDurableEvents, acknowledgeDurableEvents, getDurableEventCheckpoint, acquireDurableConsumerLease, renewDurableConsumerLease, acknowledgeDurableEventsFenced, recordEventCursorIncident, inspectEventCursorIncidents, resolveEventCursorIncident } from "./durable-events";
 
 const url = process.env.TW_EVENT_E2E_DATABASE_URL;
 test("live event authorization and principal-owned checkpoints", { skip: !url, timeout: 60000 }, async t => {
@@ -157,6 +157,21 @@ test("live event authorization and principal-owned checkpoints", { skip: !url, t
   assert.equal((await replayDurableEvents(db, { projectId: project!.id, cursor: "2" }, owner.context)).status, "valid");
   assert.deepEqual(await acknowledgeDurableEvents(db, { projectId: project!.id, consumer: "expired", cursor: "1" }, owner.context), { status: "expired", cursor: "1", retentionFloor: "2" });
   assert.equal((await getDurableEventCheckpoint(db, { projectId: project!.id, consumer: "expired" }, owner.context)).cursor, "0");
+  const incidentInput = { projectId: project!.id, consumer: "incident-worker", cursor: "1", retentionFloor: "2" };
+  const incidents = await Promise.all(Array.from({ length: 8 }, () => recordEventCursorIncident(db, incidentInput, owner.context)));
+  assert.equal(new Set(incidents.map(row => row.id)).size, 1);
+  const reopenedDb = createDb(url!);
+  try {
+    assert.equal((await inspectEventCursorIncidents(reopenedDb, { projectId: project!.id }, owner.context))[0]!.id, incidents[0]!.id);
+    assert.deepEqual(await inspectEventCursorIncidents(reopenedDb, { projectId: project!.id }, other.context), []);
+    await assert.rejects(inspectEventCursorIncidents(reopenedDb, { projectId: foreign!.id }, owner.context));
+    await assert.rejects(resolveEventCursorIncident(reopenedDb, { projectId: project!.id, incidentId: incidents[0]!.id }, other.context));
+    assert.equal((await getDurableEventCheckpoint(reopenedDb, { projectId: project!.id, consumer: incidentInput.consumer }, owner.context)).cursor, "0");
+    await resolveEventCursorIncident(reopenedDb, { projectId: project!.id, incidentId: incidents[0]!.id }, owner.context);
+    await assert.rejects(resolveEventCursorIncident(reopenedDb, { projectId: project!.id, incidentId: incidents[0]!.id }, owner.context));
+    assert.notEqual((await recordEventCursorIncident(reopenedDb, incidentInput, owner.context)).id, incidents[0]!.id);
+    assert.equal((await getDurableEventCheckpoint(reopenedDb, { projectId: project!.id, consumer: incidentInput.consumer }, owner.context)).cursor, "0");
+  } finally { await reopenedDb.$client.end(); }
   let releaseRevocation!: () => void, revocationLocked!: () => void;
   const revocationReady = new Promise<void>(resolve => { revocationLocked = resolve; });
   const revocationRelease = new Promise<void>(resolve => { releaseRevocation = resolve; });
@@ -176,6 +191,9 @@ test("live event authorization and principal-owned checkpoints", { skip: !url, t
   const deleted = await replayDurableEvents(db, { projectId: project!.id, cursor: "2" }, owner.context);
   if (deleted.status === "valid") assert.deepEqual(deleted.events, []); else assert.fail("unexpected expiration");
   await db.update(projectMemberships).set({ removedAt: new Date() }).where(eq(projectMemberships.id, membership!.id));
+  await assert.rejects(inspectEventCursorIncidents(db, { projectId: project!.id }, owner.context));
+  await assert.rejects(recordEventCursorIncident(db, incidentInput, owner.context));
+  await assert.rejects(resolveEventCursorIncident(db, { projectId: project!.id, incidentId: incidents[0]!.id }, owner.context));
   await assert.rejects(replayDurableEvents(db, { projectId: project!.id, cursor: "0" }, owner.context));
   await assert.rejects(acknowledgeDurableEvents(db, { projectId: project!.id, consumer: "worker", cursor: "16" }, owner.context));
   await assert.rejects(getDurableEventCheckpoint(db, { projectId: project!.id, consumer: "worker" }, owner.context));

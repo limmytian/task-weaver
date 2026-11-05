@@ -36,3 +36,16 @@ export const eventConsumers = pgTable("event_consumers", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, t => [uniqueIndex("event_consumers_project_principal_name").on(t.projectId, t.principalType, t.principalId, t.name), index("event_consumers_project").on(t.projectId), check("event_consumer_lease_valid", sql`${t.leaseGeneration} >= 0 AND ((${t.leaseOwner} IS NULL AND ${t.leaseExpiresAt} IS NULL) OR (${t.leaseOwner} IS NOT NULL AND ${t.leaseExpiresAt} IS NOT NULL AND ${t.leaseGeneration} > 0))`), check("event_consumer_valid", sql`${t.acknowledgedSequence} >= 0 AND length(${t.name}) > 0 AND length(${t.principalId}) > 0 AND ${t.principalType} IN ('human', 'agent')`)]);
+
+export const eventCursorIncidents = pgTable("event_cursor_incidents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  principalType: text("principal_type").notNull(),
+  principalId: text("principal_id").notNull(),
+  consumer: text("consumer").notNull(),
+  cursor: bigint("cursor", { mode: "bigint" }).notNull(),
+  retentionFloor: bigint("retention_floor", { mode: "bigint" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+}, t => [uniqueIndex("event_cursor_incidents_open_unique").on(t.projectId, t.principalType, t.principalId, t.consumer).where(sql`${t.resolvedAt} IS NULL`), check("event_cursor_incident_valid", sql`${t.cursor} >= 0 AND ${t.retentionFloor} > ${t.cursor} AND length(${t.consumer}) > 0 AND length(${t.principalId}) > 0 AND ${t.principalType} IN ('human', 'agent')`)]);

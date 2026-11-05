@@ -23,7 +23,7 @@ export async function emitDurable(db: Database, event: RealtimeEvent) {
   emit(enriched);
 }
 import { and, asc, eq, gt, sql } from "drizzle-orm";
-import { durableEvents, eventConsumers, eventStreams } from "@task-weaver/db";
+import { durableEvents, eventConsumers, eventStreams, eventCursorIncidents } from "@task-weaver/db";
 import { eventCursorSchema, planChangedEventScopeSchema } from "@task-weaver/contracts";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -189,5 +189,39 @@ export async function acknowledgeDurableEventsFenced(db: Database, input: { proj
       throw new Error("Event cursor is ahead of the stream");
     }
     return { status: "valid" as const, cursor: updated.acknowledgedSequence.toString(), retentionFloor: stream.retentionFloor.toString() };
+  });
+}
+
+/** Record an expired cursor without modifying the consumer checkpoint. */
+export async function recordEventCursorIncident(db: Database, input: { projectId: string; consumer: string; cursor: string; retentionFloor: string }, context: VerifiedRequestContext) {
+  const position = cursor(input.cursor), floor = cursor(input.retentionFloor);
+  if (!input.consumer.trim() || position >= floor) throw new Error("An expired cursor and consumer name are required");
+  return withEventAuthority(db, context, input.projectId, async (tx, authority) => {
+    const [incident] = await tx.insert(eventCursorIncidents).values({ projectId: input.projectId, principalType: authority.actor.type, principalId: authority.actor.id, consumer: input.consumer, cursor: position, retentionFloor: floor }).onConflictDoUpdate({
+      target: [eventCursorIncidents.projectId, eventCursorIncidents.principalType, eventCursorIncidents.principalId, eventCursorIncidents.consumer],
+      targetWhere: sql`${eventCursorIncidents.resolvedAt} IS NULL`,
+      set: { cursor: position, retentionFloor: floor, updatedAt: sql`clock_timestamp()` },
+    }).returning();
+    return serializeIncident(incident!);
+  });
+}
+
+function serializeIncident(row: typeof eventCursorIncidents.$inferSelect) {
+  return { ...row, cursor: row.cursor.toString(), retentionFloor: row.retentionFloor.toString() };
+}
+
+export async function inspectEventCursorIncidents(db: Database, input: { projectId: string }, context: VerifiedRequestContext) {
+  return withEventAuthority(db, context, input.projectId, async (tx, authority) => {
+    const rows = await tx.select().from(eventCursorIncidents).where(and(eq(eventCursorIncidents.projectId, input.projectId), eq(eventCursorIncidents.principalType, authority.actor.type), eq(eventCursorIncidents.principalId, authority.actor.id))).orderBy(asc(eventCursorIncidents.createdAt));
+    return rows.map(serializeIncident);
+  });
+}
+
+/** Resolve only the caller's open incident; resolution does not advance a cursor. */
+export async function resolveEventCursorIncident(db: Database, input: { projectId: string; incidentId: string }, context: VerifiedRequestContext) {
+  return withEventAuthority(db, context, input.projectId, async (tx, authority) => {
+    const [row] = await tx.update(eventCursorIncidents).set({ resolvedAt: sql`clock_timestamp()`, updatedAt: sql`clock_timestamp()` }).where(and(eq(eventCursorIncidents.id, input.incidentId), eq(eventCursorIncidents.projectId, input.projectId), eq(eventCursorIncidents.principalType, authority.actor.type), eq(eventCursorIncidents.principalId, authority.actor.id), sql`${eventCursorIncidents.resolvedAt} IS NULL`)).returning();
+    if (!row) throw new Error("Open event cursor incident not found");
+    return serializeIncident(row);
   });
 }
