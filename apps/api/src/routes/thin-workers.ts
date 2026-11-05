@@ -1,9 +1,15 @@
 import { Hono } from 'hono';
-import { createAuthorizedEventStream, createThinWorkerService, workerAcquireSchema, workerHeartbeatSchema, workerModeSchema, workerOutputSchema, workerReleaseSchema, workerResolveSchema, workerResultSchema } from '@task-weaver/core';
+import { ConflictError, ValidationError, authenticationFailure, createAuthorizedEventStream, createThinWorkerService, workerAcquireSchema, workerHeartbeatSchema, workerModeSchema, workerOutputSchema, workerReleaseSchema, workerResolveSchema, workerResultSchema } from '@task-weaver/core';
 import { z } from 'zod';
 import type { Env } from '../middleware/actor.js';
 
 const routes = new Hono<Env>();
+routes.onError((error, c) => {
+  if (error instanceof ConflictError) return c.json({ error: error.message, code: 'conflict', currentVersion: error.currentVersion }, 409);
+  if (error instanceof ValidationError) return c.json({ error: error.message, code: 'validation_failed' }, 400);
+  const failure = authenticationFailure(error);
+  return c.json({ error: failure.error, code: failure.code }, failure.status);
+});
 routes.get('/events', async c => {
   const project = z.string().uuid().safeParse(c.req.query('projectId'));
   if (!project.success) return c.json({ error: 'Invalid project' }, 400);

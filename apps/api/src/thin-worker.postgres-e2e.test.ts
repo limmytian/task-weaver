@@ -47,6 +47,7 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   await db.update(tasks).set({ status: 'cancelled' }).where(eq(tasks.id, legacyTask!.id));
   await owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Fixture queue inspected' });
   const [req] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Thin fixture', status: 'approved', createdBy: f.owner.context.actor.id }).returning();
+  await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Human owned', priority: 'urgent', assignee: f.owner.context.actor.id, assigneeType: 'human', createdBy: f.owner.context.actor.id });
   const [first] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'One winner', createdBy: f.owner.context.actor.id }).returning();
   const workerIds = [randomUUID(), randomUUID()];
   const input = (workerId: string) => ({ projectId: f.project.id, workerId, nodeId: 'fixture-node', executor: 'codex' as const, model: 'gpt-6.1-terra', durationSeconds: 120 });
@@ -121,6 +122,9 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   assert.notEqual((await f.app.request('/api/v1/thin-workers/heartbeat', { method: 'POST', headers: httpHeaders, body: JSON.stringify({ ...heartbeatRequest, token: `twa_${'b'.repeat(64)}` }) })).status, 200);
   await db.update(requirements).set({ planRevision: stale.attempt!.planRevision + 1 }).where(eq(requirements.id, req!.id));
   await assert.rejects(worker.result(db, { attemptId: stale.attempt!.id, token: stale.token!, workerId: stale.attempt!.workerId, resultKey: randomUUID(), outcome: 'attention', summary: 'Stale plan' }));
+  const conflict = await f.app.request('/api/v1/thin-workers/result', { method: 'POST', headers: httpHeaders, body: JSON.stringify({ attemptId: stale.attempt!.id, token: stale.token!, workerId: stale.attempt!.workerId, resultKey: randomUUID(), outcome: 'attention', summary: 'Stale plan' }) });
+  assert.equal(conflict.status, 409);
+  assert.equal((await conflict.json() as any).currentVersion, stale.attempt!.planRevision + 1);
   await assert.rejects(owner.resolve(db, { attemptId: winner.attempt!.id, disposition: 'retry', reason: 'External effects checked' }));
   await owner.resolve(db, { attemptId: winner.attempt!.id, disposition: 'retry', retrySafe: true, reason: 'External effects checked' });
   const replacement = await worker.acquire(db, input(randomUUID()));

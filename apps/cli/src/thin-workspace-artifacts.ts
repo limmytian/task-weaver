@@ -29,7 +29,7 @@ export async function captureThinPatches(workspace: CompositeWorkspace, assertAu
 }
 
 /** Package local patches with their frozen manifest for authenticated artifact upload. */
-export async function packageThinArtifacts(workspace: CompositeWorkspace, patches: Array<{ repositoryId: string; baseCommit: string; branch: string; path: string }>, assertAuthority: () => Promise<void>) {
+export async function packageThinArtifacts(workspace: CompositeWorkspace, patches: Array<{ repositoryId: string; baseCommit: string; branch: string; path: string }>, assertAuthority: () => Promise<void>, reportPath?: string) {
   const { open } = await import('node:fs/promises')
   const { constants } = await import('node:fs')
   const { dirname, resolve } = await import('node:path')
@@ -59,10 +59,23 @@ export async function packageThinArtifacts(workspace: CompositeWorkspace, patche
       parts.push({ repositoryId: patch.repositoryId, baseCommit: patch.baseCommit, branch: patch.branch, encoding: 'base64', patch: bytes.toString('base64') })
     } finally { await file.close() }
   }
-  if (!parts.length) throw new Error('No task artifacts were produced')
+  let report: string | null = null
+  if (reportPath) {
+    const path = resolve(reportPath)
+    if (dirname(path) !== resolve(workspace.rootPath) || path !== resolve(join(workspace.rootPath, 'result.md'))) throw new Error('Task report must be result.md at the workspace root')
+    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    try {
+      const info = await file.stat()
+      if (!info.isFile() || info.size > 1024 * 1024) throw new Error('Task report is unavailable or too large')
+      const bytes = await file.readFile()
+      if (bytes.length !== info.size) throw new Error('Task report changed while reading')
+      report = bytes.toString('utf8').trim()
+    } finally { await file.close() }
+  }
+  if (!parts.length && !report) throw new Error('No task artifacts were produced')
   await assertAuthority()
   const path = join(directory, 'task-delivery.json')
-  await writeFile(path, JSON.stringify({ version: 1, manifest, repositories: parts }) + '\n', { mode: 0o600, flag: 'wx' })
+  await writeFile(path, JSON.stringify({ version: 1, manifest, report, repositories: parts }) + '\n', { mode: 0o600, flag: 'wx' })
   return path
 }
 
