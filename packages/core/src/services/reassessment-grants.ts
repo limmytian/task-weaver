@@ -65,7 +65,7 @@ export async function lockReassessmentGrant(tx: Transaction, context: VerifiedRe
   const authority = await resourceAuthority(tx, context);
   if (authority.actor.type !== "agent") throw new AuthorizationError();
   await requireResource(tx as unknown as Database, authority, "requirement", input.requirementId);
-  const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, input.requirementId)).for("share");
+  const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, input.requirementId)).for("update");
   const [grant] = await tx.select().from(reassessmentGrants).where(eq(reassessmentGrants.id, input.grantId)).for("update");
   if (!requirement || requirement.projectId !== input.projectId || !grant || grant.projectId !== input.projectId ||
       (grant.requirementId !== null && grant.requirementId !== input.requirementId) || grant.agentId !== authority.actor.id ||

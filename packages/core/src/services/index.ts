@@ -87,3 +87,5 @@ export { createExecutionControlService } from "./execution-controls";
 
 export { appendDurableEvent, replayDurableEvents, acknowledgeDurableEvents, getDurableEventCheckpoint, acquireDurableConsumerLease, renewDurableConsumerLease, acknowledgeDurableEventsFenced, recordEventCursorIncident, inspectEventCursorIncidents, resolveEventCursorIncident } from "./durable-events";
 export * from "./reassessment-grants";
+
+export * from "./reassessment-decisions";

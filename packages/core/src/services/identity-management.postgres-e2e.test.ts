@@ -14,6 +14,8 @@ import {
   apiKeys,
   requirements,
   reassessmentGrants,
+  workflowOutputs,
+  activityLog,
 } from "@task-weaver/db";
 import {
   AuthenticationError,
@@ -21,6 +23,7 @@ import {
   NotFoundError,
   ValidationError,
 } from "@task-weaver/contracts";
+import { createReassessmentDecisionService } from "./reassessment-decisions";
 import { createReassessmentGrantService, lockReassessmentGrant } from "./reassessment-grants";
 import { createAuthenticationService } from "./authentication";
 import { createIdentityManagementService } from "./identity-management";
@@ -129,6 +132,23 @@ test(
       const grant = await service.create(db, input);
       const use = () => db.transaction(tx => lockReassessmentGrant(tx, agentContext, { grantId: grant.id, projectId: grantProject.id, requirementId: requirement!.id, operation: "revalidate_evidence" }));
       assert.equal((await use()).id, grant.id);
+      const decisions = createReassessmentDecisionService(agentContext);
+      const [output] = await db.insert(workflowOutputs).values({ requirementId: requirement!.id, type: "comment", createdBy: agent.id, createdByType: "agent" }).returning();
+      const assessment = { grantId: grant.id, projectId: grantProject.id, requirementId: requirement!.id, expectedRevision: 0,
+        decision: "accept" as const, evidence: [{ outputId: output!.id, rationale: "Reviewed output" }], rationale: "Evidence remains relevant", inputsAvailable: true, uncertainExternalEffects: false };
+      const recorded = await decisions.record(db, assessment);
+      assert.equal(recorded.disposition, "accept");
+      const [auditRecord] = await db.select().from(activityLog).where(eq(activityLog.id, recorded.id));
+      assert.equal(auditRecord?.actorId, agent.id);
+      assert.equal(auditRecord?.actorType, "agent");
+      assert.equal((auditRecord?.metadata as { planRevision: number }).planRevision, 0);
+      assert.equal((await decisions.record(db, { ...assessment, evidence: [{ outputId: randomUUID(), rationale: "Missing" }] })).disposition, "escalate");
+      assert.equal((await decisions.record(db, { ...assessment, uncertainExternalEffects: true })).disposition, "escalate");
+      await db.update(requirements).set({ planRevision: 1, evidenceNeedsReview: true }).where(eq(requirements.id, requirement!.id));
+      await assert.rejects(decisions.record(db, assessment));
+      const [unchanged] = await db.select().from(requirements).where(eq(requirements.id, requirement!.id));
+      assert.equal(unchanged?.evidenceNeedsReview, true);
+
       await assert.rejects(db.transaction(tx => lockReassessmentGrant(tx, agentContext, { grantId: grant.id, projectId: otherProject.id, requirementId: requirement!.id, operation: "revalidate_evidence" })), AuthorizationError);
       await db.update(reassessmentGrants).set({ expiresAt: new Date(0) }).where(eq(reassessmentGrants.id, grant.id));
       await assert.rejects(use(), AuthorizationError);
@@ -138,6 +158,7 @@ test(
       const revoked = await Promise.all([service.revoke(db, grantProject.id, grant.id), service.revoke(db, grantProject.id, grant.id)]);
       assert.ok(revoked.every(row => row.revokedAt && row.revokedBy === owner.account.actorId));
       await assert.rejects(use(), AuthorizationError);
+      await assert.rejects(decisions.record(db, { ...assessment, expectedRevision: 1 }), AuthorizationError);
       const audit = await db.select().from(authAuditEvents).where(eq(authAuditEvents.entityId, grant.id));
       assert.equal(audit.filter(row => row.action === "reassessment_grant.created").length, 1);
       assert.equal(audit.filter(row => row.action === "reassessment_grant.revoked").length, 1);
