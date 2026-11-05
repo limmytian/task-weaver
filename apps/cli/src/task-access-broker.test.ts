@@ -84,6 +84,27 @@ test('upstream revocation closes task access and invokes cancellation without re
   } finally { await broker.close() }
 })
 
+test('background authorization probes tolerate transient failures but close on repeated failure or rejection', async () => {
+  for (const mode of ['transient', 'persistent', 'unauthorized', 'forbidden'] as const) {
+    const cap = capability()
+    let calls = 0, invalidations = 0
+    const broker = await createTaskAccessBroker({ apiUrl: 'https://tw.example', capability: cap,
+      renew: async () => cap, revoke: async () => {}, onInvalidation: () => { invalidations++ },
+      fetch: async () => {
+        calls++
+        if (mode === 'unauthorized' || mode === 'forbidden') return Response.json({}, { status: mode === 'unauthorized' ? 401 : 403 })
+        if (mode === 'persistent' || calls === 1) throw new Error('network unavailable')
+        return Response.json({ ok: true })
+      },
+    })
+    try {
+      await new Promise(resolve => setTimeout(resolve, mode === 'unauthorized' || mode === 'forbidden' ? 1300 : 3400))
+      assert.equal(invalidations, mode === 'transient' ? 0 : 1, mode)
+      assert.ok(calls >= (mode === 'persistent' ? 3 : mode === 'transient' ? 2 : 1), mode)
+    } finally { await broker.close() }
+  }
+})
+
 test('renewal rotates private tokens and rejects expansion of the task bound', async () => {
   for (const expand of ["none", "tasks", "shared", "execution"]) {
     const cap = capability(Date.now() + 1500)

@@ -38,6 +38,7 @@ export async function createTaskAccessBroker(options: {
   const verifier = secretDigest(`Bearer ${handle}`)
   let capability = options.capability
   let validating = false
+  let consecutiveProbeFailures = 0
   let closed = false
   let validationTimer: ReturnType<typeof setInterval> | undefined
   let expiryTimer: ReturnType<typeof setTimeout> | undefined
@@ -183,8 +184,10 @@ export async function createTaskAccessBroker(options: {
       headers: { authorization: `Bearer ${capability.token}` }, redirect: 'error', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(2500)]),
     }).then(async response => {
       await response.body?.cancel()
-      if (!response.ok) invalidate()
-    }).catch(() => { invalidate() }).finally(() => { validating = false; requests.delete(controller) })
+      if (response.ok) consecutiveProbeFailures = 0
+      else if (response.status < 500) invalidate()
+      else if (++consecutiveProbeFailures >= 3) invalidate()
+    }).catch(() => { if (++consecutiveProbeFailures >= 3) invalidate() }).finally(() => { validating = false; requests.delete(controller) })
   }, 1000)
   validationTimer.unref()
   return {
