@@ -320,7 +320,7 @@ async function checkMemoryEntity(db: Database, authority: ResourceAuthority, inp
 }
 
 function redactDelegatedInput(value: any): any {
-  if (typeof value === "string") return value.replace(/\b(?:tw|twd|twb)_[0-9a-f]{64}\b/gi, "[redacted]");
+  if (typeof value === "string") return value.replace(/\b(?:tw|twd|twb|twa)_[0-9a-f]{64}\b/gi, "[redacted]");
   if (Array.isArray(value)) return value.map(redactDelegatedInput);
   if (value && Object.getPrototypeOf(value) === Object.prototype) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactDelegatedInput(item)]));
   return value;

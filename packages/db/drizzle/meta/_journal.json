@@ -645,6 +645,20 @@
       "when": 1793761564106,
       "tag": "0091_managed_child_observations",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1793761564107,
+      "tag": "0092_worker_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1793761564108,
+      "tag": "0093_worker_attempts",
+      "breakpoints": true
     }
   ]
 }

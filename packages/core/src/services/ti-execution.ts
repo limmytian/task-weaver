@@ -15,7 +15,7 @@ import { insertCapability, liveExecutionAuthority } from './execution-delegation
 
 const operations = new Set(['createRun', 'acquireRun', 'heartbeatRunLease', 'updateRunProgress', 'scheduleRunRetry', 'completeRun']);
 export const isTiExecutionOperation = (name: string) => operations.has(name);
-const safeText = (value: string) => value.replace(/(?:tw|twd|twb)_[0-9a-f]{64}/g, '[REDACTED]');
+const safeText = (value: string) => value.replace(/(?:tw|twd|twb|twa)_[0-9a-f]{64}/g, '[REDACTED]');
 function redact(value: any): any {
   if (typeof value === 'string') return safeText(value);
   if (Array.isArray(value)) return value.map(redact);

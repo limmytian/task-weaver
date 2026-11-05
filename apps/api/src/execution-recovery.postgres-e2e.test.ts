@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
-import { createDb, runMigrations, requirementClaims, executionControls, requirements, daemons, taskClaims } from '@task-weaver/db';
+import { createDb, runMigrations, requirementClaims, executionControls, requirements, daemons, taskClaims, projects } from '@task-weaver/db';
 import { resourcePostgresFixture } from './resource-postgres-fixture';
 
 const databaseUrl = process.env.TW_EXECUTION_RECOVERY_E2E_DATABASE_URL;
@@ -37,6 +37,12 @@ test('live planning fences old runs, preserves healthy leases and releases depen
   assert.notEqual(replacement.id, lease.id);
   assert.notEqual((await api(`/tasks/${leaseTask.id}/heartbeat`, 'POST', { extendMinutes: 2 }, agentHeaders)).status, 200);
   await json(await api(`/tasks/${leaseTask.id}/release`, 'POST', {}));
+  await db.update(projects).set({ workerMode: 'thin' }).where(eq(projects.id, fixture.project.id));
+  assert.notEqual((await api(`/tasks/${leaseTask.id}/claim`, 'POST', { durationMinutes: 2 }, agentHeaders)).status, 201);
+  const blockedRequirement = await json(await api(`/projects/${fixture.project.id}/requirements`, 'POST', { title: 'Legacy mode guard', status: 'approved' }), 201);
+  assert.notEqual((await api(`/requirements/${blockedRequirement.id}/claim`, 'POST', { durationMinutes: 2 }, agentHeaders)).status, 201);
+  await db.update(requirements).set({ status: 'draft' }).where(eq(requirements.id, blockedRequirement.id));
+  await db.update(projects).set({ workerMode: 'legacy' }).where(eq(projects.id, fixture.project.id));
   const acquire = (daemon = daemonA) => api(`/daemons/${daemon}/apply-requirement`, 'POST', { projectId: fixture.project.id, workerIndex: 0 }, agentHeaders);
   const requirement = await create('Plan reconciliation');
   const activeTask = await task(requirement.id, 'Work under current plan');
