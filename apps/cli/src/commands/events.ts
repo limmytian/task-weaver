@@ -22,6 +22,12 @@ export function registerEvents(program: Command) {
   events.command("cursor").requiredOption("--project <id>").requiredOption("--consumer <name>").option("--json").action(async o => {
     printJson(await get(`/api/v1/events/checkpoint?${new URLSearchParams({ projectId: o.project, consumer: o.consumer })}`));
   });
+  events.command("incidents").description("inspect cursor expiration attention").requiredOption("--project <id>").option("--json").action(async o => {
+    printJson(await get(`/api/v1/events/incidents?${new URLSearchParams({ projectId: o.project })}`));
+  });
+  events.command("resolve-incident").description("record review without advancing the checkpoint").requiredOption("--project <id>").requiredOption("--incident <id>").option("--json").action(async o => {
+    printJson(await post("/api/v1/events/incidents/resolve", { projectId: o.project, incidentId: o.incident }));
+  });
   events.command("ack").requiredOption("--project <id>").requiredOption("--consumer <name>").requiredOption("--cursor <sequence>").option("--json").action(async o => {
     printJson(await post("/api/v1/events/ack", { projectId: o.project, consumer: o.consumer, cursor: o.cursor }));
   });

@@ -44,7 +44,22 @@ test("REST and MCP event interfaces preserve replay, checkpoints and live author
   await db.update(eventStreams).set({ retentionFloor: 1n }).where(eq(eventStreams.projectId, f.project.id));
   assert.equal((await (await rest(`?${query}&cursor=0`)).json() as any).status, "expired");
   assert.equal((await mcp("tw_events_list", { projectId: f.project.id, cursor: "0" })).data.status, "expired");
+  // Acquire with a known fence to verify stale and valid recording requests.
+  const incidentOwner = randomUUID();
+  const incidentLease = await (await rest("/lease/acquire", worker.rawKey, { ...leaseInput, consumer: "incident-worker", owner: incidentOwner })).json() as any;
+  const incidentInput = { projectId: f.project.id, consumer: "incident-worker", owner: incidentOwner, generation: incidentLease.generation };
+  assert.notEqual((await rest("/incidents", worker.rawKey, { ...incidentInput, owner: randomUUID() })).status, 200);
+  const created = await rest("/incidents", worker.rawKey, incidentInput); assert.equal(created.status, 200);
+  const incident = await created.json() as any; assert.match(incident.guidance, /uncertain external effects/);
+  assert.equal((await (await rest(`/incidents?${query}`, owner.rawKey)).json() as any[]).length, 0);
+  const operator = await f.identity.issueKey(f.owner.headers, f.owner.context.actor.id, { name: "Operator", expiresAt: null, grants: [{ scope: "project", projectId: f.project.id, permissions: ["resource.read", "resource.write", "project.manage"] }] });
+  const visible = await (await rest(`/incidents?${query}`, operator.rawKey)).json() as any[];
+  assert.equal(visible[0].id, incident.id); assert.equal(visible[0].consumer, "incident-worker");
+  assert.equal((await rest("/incidents/resolve", operator.rawKey, { projectId: f.project.id, incidentId: incident.id })).status, 200);
+  assert.equal((await (await rest(`/checkpoint?${query}&consumer=incident-worker`, worker.rawKey)).json() as any).status, "expired");
   await db.update(apiKeys).set({ revokedAt: new Date() }).where(eq(apiKeys.id, worker.id));
+  assert.notEqual((await rest(`/incidents?${query}`, worker.rawKey)).status, 200);
+  assert.notEqual((await rest("/incidents", worker.rawKey, incidentInput)).status, 200);
   assert.notEqual((await rest(`/checkpoint?${query}&consumer=worker`, worker.rawKey)).status, 200);
   assert.notEqual((await f.app.request("http://127.0.0.1:3001/api/v1/mcp-server/tools/tw_events_cursor", { method: "POST", headers: headers(worker.rawKey), body: JSON.stringify({ projectId: f.project.id, consumer: "worker" }) })).status, 200);
 });

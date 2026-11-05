@@ -213,20 +213,22 @@ export async function recordEventCursorIncident(db: Database, input: { projectId
 }
 
 function serializeIncident(row: typeof eventCursorIncidents.$inferSelect) {
-  return { ...row, cursor: row.cursor.toString(), retentionFloor: row.retentionFloor.toString() };
+  return { ...row, cursor: row.cursor.toString(), retentionFloor: row.retentionFloor.toString(), guidance: "Review available history and independently investigate uncertain external effects. Deliberately resynchronize before continuing; resolving this incident does not advance the checkpoint." };
 }
 
 export async function inspectEventCursorIncidents(db: Database, input: { projectId: string }, context: VerifiedRequestContext) {
   return withEventAuthority(db, context, input.projectId, async (tx, authority) => {
-    const rows = await tx.select().from(eventCursorIncidents).where(and(eq(eventCursorIncidents.projectId, input.projectId), eq(eventCursorIncidents.principalType, authority.actor.type), eq(eventCursorIncidents.principalId, authority.actor.id))).orderBy(asc(eventCursorIncidents.createdAt));
+    const operator = authority.actor.type === "human" && !authority.bounds && authority.grants.some(g => g.scope === "project" && g.projectId === input.projectId && g.permissions.includes("project.manage"));
+    const rows = await tx.select().from(eventCursorIncidents).where(and(eq(eventCursorIncidents.projectId, input.projectId), operator ? undefined : eq(eventCursorIncidents.principalType, authority.actor.type), operator ? undefined : eq(eventCursorIncidents.principalId, authority.actor.id))).orderBy(asc(eventCursorIncidents.createdAt));
     return rows.map(serializeIncident);
   });
 }
 
-/** Resolve only the caller's open incident; resolution does not advance a cursor. */
+/** Resolution records review without advancing a cursor. */
 export async function resolveEventCursorIncident(db: Database, input: { projectId: string; incidentId: string }, context: VerifiedRequestContext) {
   return withEventAuthority(db, context, input.projectId, async (tx, authority) => {
-    const [row] = await tx.update(eventCursorIncidents).set({ resolvedAt: sql`clock_timestamp()`, updatedAt: sql`clock_timestamp()` }).where(and(eq(eventCursorIncidents.id, input.incidentId), eq(eventCursorIncidents.projectId, input.projectId), eq(eventCursorIncidents.principalType, authority.actor.type), eq(eventCursorIncidents.principalId, authority.actor.id), sql`${eventCursorIncidents.resolvedAt} IS NULL`)).returning();
+    const operator = authority.actor.type === "human" && !authority.bounds && authority.grants.some(g => g.scope === "project" && g.projectId === input.projectId && g.permissions.includes("project.manage"));
+    const [row] = await tx.update(eventCursorIncidents).set({ resolvedAt: sql`clock_timestamp()`, updatedAt: sql`clock_timestamp()` }).where(and(eq(eventCursorIncidents.id, input.incidentId), eq(eventCursorIncidents.projectId, input.projectId), operator ? undefined : eq(eventCursorIncidents.principalType, authority.actor.type), operator ? undefined : eq(eventCursorIncidents.principalId, authority.actor.id), sql`${eventCursorIncidents.resolvedAt} IS NULL`)).returning();
     if (!row) throw new Error("Open event cursor incident not found");
     return serializeIncident(row);
   });
