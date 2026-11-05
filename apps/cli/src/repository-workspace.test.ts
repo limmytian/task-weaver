@@ -6,12 +6,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import test from 'node:test'
+import { captureThinPatches, packageThinArtifacts } from './thin-workspace-artifacts.js'
 import type { Config } from './config.js'
 import {
   inspectCompositeWorkspace,
   isRepositoryRelevantToPhase,
   normalizeRequirementRepositoryEntries,
   provisionCompositeWorkspace,
+  provisionThinWorkspace,
+  verifyThinWorkspaceBaselines,
   withRepositoryWorkspaceLock,
   type RequirementRepositoryEntry,
 } from './repository-workspace.js'
@@ -39,6 +42,65 @@ function git(args: string[], cwd?: string) {
   assert.equal(result.status, 0, `git ${args.join(' ')} failed\n${result.stderr || result.stdout}`)
   return result.stdout.trim()
 }
+
+test('thin workspaces isolate parallel attempts and preserve dirty work', { timeout: 60_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tw-thin-workspace-'))
+  const previousHome = process.env.HOME
+  const home = join(root, 'home')
+  await mkdir(home, { recursive: true })
+  process.env.HOME = home
+  try {
+    const remote = await createRemote(root, 'thin')
+    const projectId = '00000000-0000-4000-8000-000000000001'
+    const requirementId = '00000000-0000-4000-8000-000000000002'
+    const taskIds = ['00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000004']
+    const attemptIds = ['00000000-0000-4000-8000-000000000005', '00000000-0000-4000-8000-000000000006']
+    const repository = entry({ linkId: 'link', requirementId, repositoryId: '00000000-0000-4000-8000-000000000007', name: 'thin', canonicalKey: 'local.test/task-weaver/thin', remote, workingBranch: 'main' })
+    const options = (index: number) => ({ config: { apiUrl: 'http://task-weaver.test', nodeId: 'node-thin' }, projectId, requirementId, taskId: taskIds[index]!, attemptId: attemptIds[index]!, planRevision: 2, entries: [repository], assertAuthority: async () => {} })
+    const [first, second] = await Promise.all([provisionThinWorkspace(options(0)), provisionThinWorkspace(options(1))])
+    assert.notEqual(first.rootPath, second.rootPath)
+    assert.notEqual(first.repositories[0]!.workingBranch, second.repositories[0]!.workingBranch)
+    assert.equal(first.repositories[0]!.headCommit, second.repositories[0]!.headCommit)
+    await writeFile(join(first.repositories[0]!.worktreePath, 'README.md'), 'dirty first\n')
+    assert.notEqual(await readFile(join(second.repositories[0]!.worktreePath, 'README.md'), 'utf8'), 'dirty first\n')
+    await assert.rejects(provisionThinWorkspace(options(0)))
+    assert.equal(await readFile(join(first.repositories[0]!.worktreePath, 'README.md'), 'utf8'), 'dirty first\n')
+    const retry = await provisionThinWorkspace({ ...options(0), attemptId: '00000000-0000-4000-8000-000000000008' })
+    assert.notEqual(retry.rootPath, first.rootPath)
+    assert.notEqual(retry.repositories[0]!.workingBranch, first.repositories[0]!.workingBranch)
+    assert.equal(await readFile(join(first.repositories[0]!.worktreePath, 'README.md'), 'utf8'), 'dirty first\n')
+    const manifest = JSON.parse(await readFile(first.manifestPath, 'utf8'))
+    assert.equal(manifest.attemptId, attemptIds[0])
+    assert.equal(manifest.repositories[0].baseCommit, first.repositories[0]!.headCommit)
+    const patches = await captureThinPatches(first, async () => {})
+    assert.equal(patches.length, 1)
+    assert.match(await readFile(patches[0]!.path, 'utf8'), /dirty first/)
+    assert.equal(patches[0]!.baseCommit, first.repositories[0]!.headCommit)
+    const packagePath = await packageThinArtifacts(first, patches, async () => {})
+    const delivery = JSON.parse(await readFile(packagePath, 'utf8'))
+    assert.equal(delivery.manifest.attemptId, attemptIds[0])
+    assert.match(Buffer.from(delivery.repositories[0].patch, 'base64').toString('utf8'), /dirty first/)
+    await assert.rejects(packageThinArtifacts(first, [{ ...patches[0]!, baseCommit: 'a'.repeat(40) }], async () => {}), /outside/)
+    const baselineOptions = { config: options(0).config, workspace: first, entries: [repository], assertAuthority: async () => {} }
+    await verifyThinWorkspaceBaselines(baselineOptions)
+    await writeFile(join(root, 'thin-seed', 'new-base.txt'), 'advanced\n')
+    git(['add', 'new-base.txt'], join(root, 'thin-seed'))
+    git(['commit', '-m', 'advance baseline'], join(root, 'thin-seed'))
+    git(['push', 'origin', 'main'], join(root, 'thin-seed'))
+    await assert.rejects(verifyThinWorkspaceBaselines(baselineOptions), /baseline changed/)
+    assert.equal(await readFile(join(first.repositories[0]!.worktreePath, 'README.md'), 'utf8'), 'dirty first\n')
+    git(['config', 'user.name', 'Task Weaver Test'], second.repositories[0]!.worktreePath)
+    git(['config', 'user.email', 'test@example.test'], second.repositories[0]!.worktreePath)
+    await writeFile(join(second.repositories[0]!.worktreePath, 'later.txt'), 'new base\n')
+    git(['add', 'later.txt'], second.repositories[0]!.worktreePath)
+    git(['commit', '-m', 'unexpected commit'], second.repositories[0]!.worktreePath)
+    await assert.rejects(captureThinPatches(second, async () => {}), /HEAD changed/)
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME
+    else process.env.HOME = previousHome
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 async function createRemote(root: string, name: string) {
   const seed = join(root, `${name}-seed`)
