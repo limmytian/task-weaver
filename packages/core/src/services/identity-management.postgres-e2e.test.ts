@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, createHash } from "node:crypto";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { and, eq, isNull } from "drizzle-orm";
 import {
   createDb,
@@ -16,7 +19,7 @@ import {
   reassessmentGrants,
   workflowOutputs,
   activityLog,
-  executionControls,
+  executionControls, requirementClaims, workflowInputs, documents, documentFileVersions,
 } from "@task-weaver/db";
 import {
   AuthenticationError,
@@ -154,14 +157,57 @@ test(
       const interrupted = createInterruptedReassessmentService(agentContext);
       const executionGrant = await service.create(db, { ...input, operations: ["assess_interrupted_execution"] });
       const [control] = await db.insert(executionControls).values({ requirementId: requirement!.id, projectId: grantProject.id, daemonId: randomUUID(), runId: randomUUID(), revision: 0, reason: "Plan changed", phase: "stopped", deadline: new Date() }).returning();
-      const executionAssessment = { grantId: executionGrant.id, projectId: grantProject.id, requirementId: requirement!.id, expectedRevision: 1, controlId: control!.id, expectedControlUpdatedAt: control!.updatedAt.toISOString(), decision: "accept" as const, inputs: [{ reference: "workspace", observation: "Reviewed local state" }], inputsAvailable: true, uncertainExternalEffects: false, rationale: "Ready for human review" };
+      const inputDirectory = await mkdtemp(join(tmpdir(), "tw-assessment-"));
+      const oldStorage = process.env.TW_ATTACHMENT_STORAGE_DIR;
+      process.env.TW_ATTACHMENT_STORAGE_DIR = inputDirectory;
+      t.after(async () => { if (oldStorage === undefined) delete process.env.TW_ATTACHMENT_STORAGE_DIR; else process.env.TW_ATTACHMENT_STORAGE_DIR = oldStorage; await rm(inputDirectory, { recursive: true, force: true }); });
+      await writeFile(join(inputDirectory, "assessment"), "a");
+      const [doc] = await db.insert(documents).values({ projectId: grantProject.id, form: "attachment", title: "Input", content: "", createdBy: owner.account.actorId }).returning();
+      const [file] = await db.insert(documentFileVersions).values({ documentId: doc!.id, version: 1, originalFilename: "a", mimeType: "text/plain", sizeBytes: 1, sha256: createHash("sha256").update("a").digest("hex"), storageBackend: "local", objectKey: "assessment", createdBy: owner.account.actorId, createdByType: "human" }).returning();
+      await db.update(documents).set({ currentFileVersionId: file!.id }).where(eq(documents.id, doc!.id));
+      const [fileOutput] = await db.insert(workflowOutputs).values({ requirementId: requirement!.id, type: "attachment", referenceId: doc!.id, attachmentFileVersionId: file!.id, createdBy: agent.id, createdByType: "agent" }).returning();
+      const [workflowInput] = await db.insert(workflowInputs).values({ requirementId: requirement!.id, outputId: fileOutput!.id, createdBy: owner.account.actorId }).returning();
+      await db.update(requirements).set({ leaseGeneration: 1 }).where(eq(requirements.id, requirement!.id));
+      await db.insert(requirementClaims).values({ id: control!.runId, requirementId: requirement!.id, daemonId: control!.daemonId, claimedBy: agent.id, claimedByType: "agent", generation: 1, expiresAt: new Date(Date.now() + 60000) });
+      const executionAssessment = { grantId: executionGrant.id, projectId: grantProject.id, requirementId: requirement!.id, expectedRevision: 1, controlId: control!.id, expectedControlUpdatedAt: control!.updatedAt.toISOString(), expectedRunId: control!.runId, expectedLeaseGeneration: 1, decision: "accept" as const, inputs: [{ type: "workflow_input" as const, inputId: workflowInput!.id }], notes: "Reviewed local state", uncertainExternalEffects: false, rationale: "Ready for human review" };
       await assert.rejects(interrupted.record(db, { ...executionAssessment, grantId: grant.id }), AuthorizationError);
       await assert.rejects(interrupted.record(db, { ...executionAssessment, expectedRevision: 0 }));
+      await assert.rejects(interrupted.record(db, { ...executionAssessment, expectedLeaseGeneration: 2 }));
+      await assert.rejects(interrupted.record(db, { ...executionAssessment, expectedRunId: randomUUID() }));
       await assert.rejects(interrupted.record(db, { ...executionAssessment, projectId: otherProject.id }), AuthorizationError);
       assert.equal((await interrupted.record(db, executionAssessment)).disposition, "accept");
+      const verifiedAssessment = await interrupted.record(db, executionAssessment);
+      const [verifiedAudit] = await db.select().from(activityLog).where(eq(activityLog.id, verifiedAssessment.id));
+      const verifiedInputs = (verifiedAudit!.metadata as { inputs: Array<{ sha256?: string; fileVersionId?: string }> }).inputs;
+      assert.equal(verifiedInputs[0]!.sha256, file!.sha256);
+      assert.equal(verifiedInputs[0]!.fileVersionId, file!.id);
+      await db.update(documents).set({ projectId: otherProject.id }).where(eq(documents.id, doc!.id));
+      assert.equal((await interrupted.record(db, executionAssessment)).disposition, "escalate");
+      await db.update(documents).set({ projectId: grantProject.id }).where(eq(documents.id, doc!.id));
+      await writeFile(join(inputDirectory, "assessment"), "b");
+      assert.equal((await interrupted.record(db, executionAssessment)).disposition, "escalate");
+      await rm(join(inputDirectory, "assessment"));
+      assert.equal((await interrupted.record(db, executionAssessment)).disposition, "escalate");
+      await writeFile(join(inputDirectory, "assessment"), "a");
+      await db.update(documents).set({ currentFileVersionId: randomUUID() }).where(eq(documents.id, doc!.id));
+      assert.equal((await interrupted.record(db, executionAssessment)).disposition, "escalate");
+      await db.update(documents).set({ currentFileVersionId: file!.id }).where(eq(documents.id, doc!.id));
+      let unlockDocument!: () => void, documentLocked!: () => void;
+      const lockedDocument = new Promise<void>(resolve => { documentLocked = resolve; });
+      const holdDocument = new Promise<void>(resolve => { unlockDocument = resolve; });
+      const writer = db.transaction(async tx => {
+        await tx.select().from(documents).where(eq(documents.id, doc!.id)).for("update");
+        documentLocked(); await holdDocument;
+        await tx.update(documents).set({ currentFileVersionId: randomUUID() }).where(eq(documents.id, doc!.id));
+      });
+      await lockedDocument;
+      const concurrentAssessment = interrupted.record(db, executionAssessment);
+      unlockDocument(); await writer;
+      assert.equal((await concurrentAssessment).disposition, "escalate");
+      await db.update(documents).set({ currentFileVersionId: file!.id }).where(eq(documents.id, doc!.id));
       const uncertain = await interrupted.record(db, { ...executionAssessment, uncertainExternalEffects: true });
       assert.equal(uncertain.disposition, "escalate");
-      assert.equal((await interrupted.record(db, { ...executionAssessment, inputsAvailable: false })).disposition, "escalate");
+      assert.equal((await interrupted.record(db, { ...executionAssessment, inputs: [{ type: "workflow_input" as const, inputId: randomUUID() }] })).disposition, "escalate");
       const [executionAudit] = await db.select().from(activityLog).where(eq(activityLog.id, uncertain.id));
       assert.equal((executionAudit!.metadata as { observedPhase: string }).observedPhase, "stopped");
       await db.update(executionControls).set({ phase: "manual", updatedAt: new Date(Date.now() + 1000) }).where(eq(executionControls.id, control!.id));

@@ -30,12 +30,12 @@ test("reassessment REST enforces live authority, revisions and revocation", { sk
   assert.equal(executionGrantResponse.status, 201);
   const executionGrant = await executionGrantResponse.json() as any;
   const [control] = await db.insert(executionControls).values({ requirementId: requirement!.id, projectId: f.project.id, daemonId: randomUUID(), runId: randomUUID(), revision: requirement!.planRevision, reason: "Plan changed", phase: "stopped", deadline: new Date() }).returning();
-  const interrupted = { grantId: executionGrant.id, projectId: f.project.id, requirementId: requirement!.id, expectedRevision: requirement!.planRevision, controlId: control!.id, expectedControlUpdatedAt: control!.updatedAt.toISOString(), decision: "accept", inputs: [{ reference: "workspace", observation: "Reviewed state" }], inputsAvailable: true, uncertainExternalEffects: false, rationale: "Reviewed local state" };
+  const interrupted = { grantId: executionGrant.id, projectId: f.project.id, requirementId: requirement!.id, expectedRevision: requirement!.planRevision, controlId: control!.id, expectedControlUpdatedAt: control!.updatedAt.toISOString(), expectedRunId: control!.runId, expectedLeaseGeneration: 0, decision: "accept", inputs: [], notes: "Reviewed state", uncertainExternalEffects: false, rationale: "Reviewed local state" };
   assert.notEqual((await request("/interrupted", f.owner.headers, interrupted)).status, 201);
   assert.notEqual((await request("/interrupted", agentHeaders, { ...interrupted, grantId: grant.id })).status, 201);
   const assessed = await request("/interrupted", agentHeaders, interrupted);
   assert.equal(assessed.status, 201, await assessed.clone().text());
-  assert.equal((await assessed.json() as any).disposition, "accept");
+  assert.equal((await assessed.json() as any).disposition, "escalate");
   assert.equal((await (await request("/interrupted", agentHeaders, { ...interrupted, uncertainExternalEffects: true })).json() as any).disposition, "escalate");
   assert.equal((await db.select().from(executionControls).where(eq(executionControls.id, control!.id)))[0]!.phase, "stopped");
   await request(`/grants/${executionGrant.id}/revoke`, managerHeaders, { projectId: f.project.id });

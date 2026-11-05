@@ -60,12 +60,14 @@ export function createReassessmentGrantService(context: VerifiedRequestContext) 
 }
 
 /** Hold the grant lock through the caller's transaction; never use this as an execution lease. */
-export async function lockReassessmentGrant(tx: Transaction, context: VerifiedRequestContext, input: { grantId: string; projectId: string; requirementId: string; operation: "revalidate_evidence" | "assess_interrupted_execution" }) {
+export async function lockReassessmentGrant(tx: Transaction, context: VerifiedRequestContext, input: { grantId: string; projectId: string; requirementId: string; operation: "revalidate_evidence" | "assess_interrupted_execution"; requirementAlreadyLocked?: boolean }) {
   await lockIdentityLifecycle(tx);
   const authority = await resourceAuthority(tx, context);
   if (authority.actor.type !== "agent") throw new AuthorizationError();
   await requireResource(tx as unknown as Database, authority, "requirement", input.requirementId);
-  const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, input.requirementId)).for("update");
+  const [requirement] = input.requirementAlreadyLocked
+    ? await tx.select().from(requirements).where(eq(requirements.id, input.requirementId))
+    : await tx.select().from(requirements).where(eq(requirements.id, input.requirementId)).for("update");
   const [grant] = await tx.select().from(reassessmentGrants).where(eq(reassessmentGrants.id, input.grantId)).for("update");
   if (!requirement || requirement.projectId !== input.projectId || !grant || grant.projectId !== input.projectId ||
       (grant.requirementId !== null && grant.requirementId !== input.requirementId) || grant.agentId !== authority.actor.id ||
