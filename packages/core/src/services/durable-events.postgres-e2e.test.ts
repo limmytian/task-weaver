@@ -56,6 +56,21 @@ test("live event authorization and principal-owned checkpoints", { skip: !url, t
   assert.equal(batch.status, "valid");
   if (batch.status === "valid") { assert.equal(batch.cursor, "16"); assert.deepEqual(batch.events.map(e => e.sequence), Array.from({ length: 13 }, (_, i) => String(i + 1))); }
   await assert.rejects(replayDurableEvents(db, { projectId: project!.id, cursor: "0" }, other.context));
+  // A disconnected consumer resumes from its last acknowledged position; an
+  // unacknowledged batch can be delivered again after a new connection.
+  const firstBatch = await replayDurableEvents(db, { projectId: project!.id, cursor: "0", limit: 5 }, owner.context);
+  assert.equal(firstBatch.status, "valid");
+  const reconnect = createDb(url!);
+  try {
+    const replayed = await replayDurableEvents(reconnect, { projectId: project!.id, cursor: "0", limit: 5 }, owner.context);
+    assert.deepEqual(replayed, firstBatch);
+    assert.equal((await acknowledgeDurableEvents(reconnect, { projectId: project!.id, consumer: "worker", cursor: "5" }, owner.context)).cursor, "5");
+    assert.equal((await acknowledgeDurableEvents(reconnect, { projectId: project!.id, consumer: "worker", cursor: "5" }, owner.context)).cursor, "5");
+  } finally { await reconnect.$client.end(); }
+  assert.equal((await getDurableEventCheckpoint(db, { projectId: project!.id, consumer: "worker" }, owner.context)).cursor, "5");
+  const resumed = await replayDurableEvents(db, { projectId: project!.id, cursor: "5", limit: 5 }, owner.context);
+  assert.equal(resumed.status, "valid");
+  if (resumed.status === "valid") assert.deepEqual(resumed.events.map(e => e.sequence), ["6", "7", "8", "9", "10"]);
   await acknowledgeDurableEvents(db, { projectId: project!.id, consumer: "worker", cursor: "16" }, owner.context);
   await db.insert(projectMemberships).values({ projectId: project!.id, actorId: other.actor.id, actorType: "human", role: "viewer" });
   assert.equal((await getDurableEventCheckpoint(db, { projectId: project!.id, consumer: "worker" }, other.context)).cursor, "0");
@@ -84,6 +99,8 @@ test("live event authorization and principal-owned checkpoints", { skip: !url, t
   releaseRetention(); await retention;
   assert.equal((await racingReplay).status, "expired");
   assert.equal((await replayDurableEvents(db, { projectId: project!.id, cursor: "2" }, owner.context)).status, "valid");
+  assert.deepEqual(await acknowledgeDurableEvents(db, { projectId: project!.id, consumer: "expired", cursor: "1" }, owner.context), { status: "expired", cursor: "1", retentionFloor: "2" });
+  assert.equal((await getDurableEventCheckpoint(db, { projectId: project!.id, consumer: "expired" }, owner.context)).cursor, "0");
   let releaseRevocation!: () => void, revocationLocked!: () => void;
   const revocationReady = new Promise<void>(resolve => { revocationLocked = resolve; });
   const revocationRelease = new Promise<void>(resolve => { releaseRevocation = resolve; });
