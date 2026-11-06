@@ -21,7 +21,7 @@ export function failureObservation(tool: ExecutorTool, profileId: string, failur
 }
 const codes: Record<string, ExecutorFailure> = {
   rate_limit_exceeded: 'rate_limited', rate_limit_error: 'rate_limited', rate_limit: 'rate_limited',
-  usage_limit_reached: 'quota_exhausted', insufficient_quota: 'quota_exhausted', quota_exceeded: 'quota_exhausted',
+  usage_limit_reached: 'quota_exhausted', usage_limit_exceeded: 'quota_exhausted', insufficient_quota: 'quota_exhausted', quota_exceeded: 'quota_exhausted',
   billing_hard_limit_reached: 'billing_blocked', billing_error: 'billing_blocked',
   authentication_error: 'auth_required', invalid_api_key: 'auth_required', unauthorized: 'auth_required',
 };
@@ -32,7 +32,7 @@ export function classifyExecutorLine(tool: ExecutorTool, line: string, stream: '
     if (!['error', 'turn.failed', 'result'].includes(event.type)) return null
     if (event.type === 'result' && event.is_error !== true) return null
     const error = event.error
-    const code = typeof error === 'object' ? error?.code ?? error?.type : event.code ?? event.subtype
+    const code = typeof error === 'object' ? error?.code ?? error?.type ?? error?.codex_error_info : event.code ?? event.subtype
     if (typeof code === 'string' && codes[code]) {
       const retry = error?.retry_after ?? event.retryAfterSeconds
       return { failure: codes[code], source: 'structured_error' as const, retryAfterSeconds: typeof retry === 'number' && retry >= 0 && retry <= 604800 ? retry : null }
