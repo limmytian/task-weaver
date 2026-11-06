@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import test from 'node:test'
+import { prepareThinPushSandbox } from './thin-git-delivery.js'
 import { applyThinDeliveries, captureThinPatches, packageThinArtifacts } from './thin-workspace-artifacts.js'
 import type { Config } from './config.js'
 import {
@@ -15,6 +16,7 @@ import {
   provisionCompositeWorkspace,
   provisionThinWorkspace,
   fetchThinIntegrationTarget,
+  createThinPushRunner,
   verifyThinWorkspaceBaselines,
   withRepositoryWorkspaceLock,
   type RequirementRepositoryEntry,
@@ -120,6 +122,14 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
     const target = await fetchThinIntegrationTarget({ ...baselineOptions, repositoryId: repository.repository.id })
     assert.equal(target, git(['rev-parse', 'HEAD'], join(root, 'thin-seed')))
     assert.notEqual(target, first.repositories[0]!.headCommit)
+    const sandbox = await prepareThinPushSandbox({ source: first.repositories[0]!.worktreePath, commit: first.repositories[0]!.headCommit!, assertAuthority: async () => {} })
+    try {
+      const runner = createThinPushRunner({ config: options(0).config, entry: repository, gitDir: sandbox.gitDir })
+      assert.equal(runner.remote, remote)
+      const observed = await runner.git(['ls-remote', '--exit-code', runner.remote, 'refs/heads/main'])
+      assert.equal(observed.ok, true)
+      assert.equal(observed.stdout.trim(), `${target}\trefs/heads/main`)
+    } finally { await sandbox.cleanup() }
     await assert.rejects(fetchThinIntegrationTarget({ ...baselineOptions, entries: [{ ...repository, link: { ...repository.link, workingBranch: null } }], repositoryId: repository.repository.id }), /configured requirement branch/)
     assert.equal(await readFile(join(first.repositories[0]!.worktreePath, 'README.md'), 'utf8'), 'dirty first\n')
     git(['config', 'user.name', 'Task Weaver Test'], second.repositories[0]!.worktreePath)
