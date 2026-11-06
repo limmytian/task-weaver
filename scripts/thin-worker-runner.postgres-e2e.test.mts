@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 import { createRequire } from 'node:module';
 import { createDb, runMigrations, requirements, requirementRepositories, repositories, tasks, taskDependencies, thinGitDeliveries, workerAcceptanceSnapshots, workerAttempts } from '../packages/db/src/index';
+import { BASIC_WORKFLOW } from '../packages/contracts/src/index';
 import { createThinWorkerService } from '../packages/core/src/services/thin-worker';
 import { resourcePostgresFixture } from '../apps/api/src/resource-postgres-fixture';
 import { runThinOnce, type ThinExecutor } from '../apps/cli/src/thin-worker';
@@ -133,7 +134,7 @@ test('once worker runs a bounded deterministic executor and parks empty results'
   git(seed, 'init'); git(seed, 'checkout', '-b', 'main'); git(seed, 'config', 'user.name', 'Fixture'); git(seed, 'config', 'user.email', 'fixture@example.test');
   await writeFile(join(seed, 'base.txt'), 'base\n'); git(seed, 'add', '.'); git(seed, 'commit', '-m', 'base');
   git(root, 'init', '--bare', bare); git(seed, 'remote', 'add', 'origin', bare); git(seed, 'push', 'origin', 'main'); git(bare, 'symbolic-ref', 'HEAD', 'refs/heads/main');
-  const [gitReq] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Git delivery fixture', status: 'approved', createdBy: f.owner.context.actor.id }).returning();
+  const [gitReq] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Git delivery fixture', status: 'approved', workflow: BASIC_WORKFLOW, createdBy: f.owner.context.actor.id }).returning();
   const [gitRepo] = await db.insert(repositories).values({ displayName: 'Git runner fixture', provider: 'github', host: 'github.com', namespace: 'fixture', name: 'git-runner', canonicalKey: `fixture-${gitReq!.id}`, httpsCloneUrl: pathToFileURL(bare).href, defaultBranch: 'main', authPolicy: { allowedTransports: ['https'], preferredTransport: 'https', allowedOperations: ['read', 'push'], allowNativeDefault: true }, createdBy: f.owner.context.actor.id }).returning();
   await db.insert(requirementRepositories).values({ requirementId: gitReq!.id, repositoryId: gitRepo!.id, workingBranch: 'main', baseBranch: 'release' });
   const [gitTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: gitReq!.id, title: 'Git task', createdBy: f.owner.context.actor.id }).returning();
@@ -255,6 +256,7 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     const integrated = await runThinOnce({ ...opts, requirementId: gitReq!.id, gitIdentity: { name: 'Fixture', email: 'fixture@example.test' }, executor: versionExecutor, config: { ...config, nodeId: 'version-retry-fixture' } });
     assert.equal(versionResolutions, 1);
     assert.equal(integrated.taskId, integration!.id); assert.equal(integrated.state, 'completed', integrated.reason);
+    assert.equal((await db.query.requirements.findFirst({ where: eq(requirements.id, gitReq!.id) }))!.status, 'done');
     const versionTip = git(bare, 'rev-parse', 'refs/heads/release');
     git(bare, 'merge-base', '--is-ancestor', acceptedSnapshot!.commit, versionTip);
     git(bare, 'merge-base', '--is-ancestor', concurrentVersion, versionTip);
