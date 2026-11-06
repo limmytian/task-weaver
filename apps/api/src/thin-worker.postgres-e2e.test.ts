@@ -86,6 +86,7 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   const [first] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'One winner', createdBy: f.owner.context.actor.id }).returning();
   const workerIds = [randomUUID(), randomUUID()];
   const input = (workerId: string) => ({ projectId: f.project.id, workerId, nodeId: 'fixture-node', executor: 'codex' as const, model: 'gpt-6.1-terra', durationSeconds: 120 });
+  assert.equal((await worker.acquire(db, { ...input(randomUUID()), requirementId: randomUUID() })).attempt, null, 'requirement scope must not consume another queue');
   const streamController = new AbortController();
   const stream = await f.app.request(`/api/v1/thin-workers/events?projectId=${f.project.id}`, { headers: new Headers({ authorization: `Bearer ${workerKey.rawKey}` }), signal: streamController.signal });
   assert.equal(stream.status, 200);
@@ -98,7 +99,7 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   assert.doesNotMatch(event, /One winner/);
   streamController.abort();
   await reader.cancel();
-  const claims = await Promise.all(workerIds.map(id => worker.acquire(db, input(id))));
+  const claims = await Promise.all(workerIds.map(id => worker.acquire(db, { ...input(id), requirementId: req!.id })));
   assert.equal(claims.filter(claim => claim.attempt).length, 1);
   const winner = claims.find(claim => claim.attempt)!;
   assert.equal(winner.task!.id, first!.id);

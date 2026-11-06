@@ -133,6 +133,7 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
           WHERE t.project_id = ${input.projectId} AND t.scope = 'project' AND t.status = 'todo'
             AND (t.assignee IS NULL OR (t.assignee_type = 'agent' AND t.assignee = ${authority.actor.id}))
             AND r.project_id = ${input.projectId} AND r.status IN ('approved', 'in_progress')
+            AND (${input.requirementId ?? null}::uuid IS NULL OR r.id = ${input.requirementId ?? null}::uuid)
             AND t.execution_slice_id IS NULL
             AND NOT EXISTS (SELECT 1 FROM execution_slices es WHERE es.requirement_id = r.id AND es.status NOT IN ('done', 'cancelled'))
             AND (t.requested_provider IS NULL OR t.requested_provider = 'codex')
