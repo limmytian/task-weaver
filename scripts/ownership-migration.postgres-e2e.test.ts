@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 const require = createRequire(new URL("../apps/api/package.json", import.meta.url));
-const { createDb, runMigrations, authInstanceState, projects, documents, daemons, apiKeys, requirements, requirementClaims, taskClaims, tasks, tiAgentRuns, tiAgentPolicies, tiAgentModelConfigs, repositoryCheckoutBindings, repositories, authMigrationReceipts, projectMemberships } = require("@task-weaver/db");
+const { createDb, runMigrations, authInstanceState, projects, documents, daemons, apiKeys, requirements, requirementClaims, taskClaims, workerAttempts, tasks, tiAgentRuns, tiAgentPolicies, tiAgentModelConfigs, repositoryCheckoutBindings, repositories, authMigrationReceipts, projectMemberships } = require("@task-weaver/db");
 const { createAuthenticationRuntime, createResourceServices, inspectOwnershipMigration, applyOwnershipMigration } = require("@task-weaver/core");
 const { eq, sql } = require("drizzle-orm");
 const databaseUrl = process.env.TW_AUTH_E2E_DATABASE_URL;
@@ -50,8 +50,15 @@ test("offline ownership migration is explicit, restricted, atomic and replay-saf
   const [unowned] = await db.insert(documents).values({ title: "Unknown note", content: "migration-content-canary", createdBy: "anonymous" }).returning();
   const [approvedGlobal] = await db.insert(documents).values({ title: "Approved global note", content: "Public fixture", createdBy: "tw-cli" }).returning();
   const [daemon] = await db.insert(daemons).values({ name: "Legacy active runner", actorId: "tw-cli", actorType: "agent", status: "busy", activeTaskIds: [task.id], capabilities: ["codex"] }).returning();
-  await db.insert(requirementClaims).values({ requirementId: requirement.id, claimedBy: "tw-cli", claimedByType: "agent", daemonId: daemon.id, generation: 7, expiresAt: new Date(Date.now() + 600000) });
-  await db.insert(taskClaims).values({ taskId: task.id, claimedBy: "tw-cli", claimedByType: "agent", expiresAt: new Date(Date.now() + 600000) });
+  // Seed rows that predate the worker-only trigger; normal writes remain fenced.
+  await db.transaction(async (tx: any) => {
+    await tx.execute(sql`ALTER TABLE task_weaver.requirement_claims DISABLE TRIGGER guard_legacy_requirement_claim_mode`);
+    await tx.execute(sql`ALTER TABLE task_weaver.task_claims DISABLE TRIGGER guard_legacy_task_claim_mode`);
+    await tx.insert(requirementClaims).values({ requirementId: requirement.id, claimedBy: "tw-cli", claimedByType: "agent", daemonId: daemon.id, generation: 7, expiresAt: new Date(Date.now() + 600000) });
+    await tx.insert(taskClaims).values({ taskId: task.id, claimedBy: "tw-cli", claimedByType: "agent", expiresAt: new Date(Date.now() + 600000) });
+    await tx.execute(sql`ALTER TABLE task_weaver.requirement_claims ENABLE TRIGGER guard_legacy_requirement_claim_mode`);
+    await tx.execute(sql`ALTER TABLE task_weaver.task_claims ENABLE TRIGGER guard_legacy_task_claim_mode`);
+  });
   const [key] = await db.insert(apiKeys).values({ name: "Legacy key", keyHash: "a".repeat(64), keyPrefix: "tw_legacy" }).returning();
   const [run] = await db.insert(tiAgentRuns).values({ taskId: task.id, createdBy: "apikey:legacy", status: "running", leaseOwnerId: "tw-cli", leaseOwnerType: "agent", leaseExpiresAt: new Date(Date.now() + 600000) }).returning();
   await db.insert(tiAgentPolicies).values({ ownerId: "apikey:legacy", ownerType: "agent", enabled: true, executionMode: "live" });
@@ -133,9 +140,9 @@ test("offline ownership migration is explicit, restricted, atomic and replay-saf
   await t.test("same receipt replay cannot revoke a fresh session, key or lease", async () => {
     const fresh = await runtime.identity.issueKey(owner.headers, owner.context.actor.id, { name: "Explicit replacement", expiresAt: null, grants: [{ scope: "project", projectId: project.id, permissions: ["resource.read"] }] });
     assert.equal((await runtime.verify(new Headers({ authorization: `Bearer ${fresh.rawKey}` }))).actor.id, owner.context.actor.id);
-    await db.insert(requirementClaims).values({ requirementId: requirement.id, claimedBy: agent.id, claimedByType: "agent", generation: 9, expiresAt: new Date(Date.now() + 600000) });
+    const [attempt] = await db.insert(workerAttempts).values({ projectId: project.id, requirementId: requirement.id, taskId: task.id, actorId: agent.id, credentialId: fresh.id, workerId: randomUUID(), nodeId: 'replay-fixture', tokenHash: 'a'.repeat(64), planRevision: 0, expiresAt: new Date(Date.now() + 600000) }).returning();
     assert.equal((await applyOwnershipMigration(db, manifest, before.fingerprint)).replayed, true);
-    assert.equal((await db.select().from(requirementClaims).where(eq(requirementClaims.requirementId, requirement.id))).length, 1);
+    assert.equal((await db.select().from(workerAttempts).where(eq(workerAttempts.id, attempt.id)))[0].status, 'running');
     assert.equal((await runtime.verify(owner.headers)).actor.id, owner.context.actor.id);
     await assert.rejects(applyOwnershipMigration(db, { ...manifest, ownership: [] }, before.fingerprint));
   });
