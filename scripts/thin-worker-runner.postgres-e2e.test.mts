@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 import { createRequire } from 'node:module';
-import { createDb, runMigrations, requirements, requirementRepositories, repositories, tasks, taskDependencies, thinGitDeliveries, workerAttempts } from '../packages/db/src/index';
+import { createDb, runMigrations, requirements, requirementRepositories, repositories, tasks, taskDependencies, thinGitDeliveries, workerAcceptanceSnapshots, workerAttempts } from '../packages/db/src/index';
 import { resourcePostgresFixture } from '../apps/api/src/resource-postgres-fixture';
 import { runThinOnce, type ThinExecutor } from '../apps/cli/src/thin-worker';
 const apiRequire = createRequire(new URL('../apps/api/package.json', import.meta.url));
@@ -179,6 +179,8 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     } };
     const gitReviewed = await runThinOnce({ ...opts, requirementId: gitReq!.id, executor: gitReviewer, config: { ...config, nodeId: 'git-review-fixture' } });
     assert.equal(gitReviewed.taskId, gitAcceptance!.id); assert.equal(gitReviewed.state, 'completed', gitReviewed.reason);
+    const [acceptedSnapshot] = await db.select().from(workerAcceptanceSnapshots).where(eq(workerAcceptanceSnapshots.attemptId, gitReviewed.attemptId!));
+    assert.equal(acceptedSnapshot?.repositoryId, gitRepo!.id); assert.equal(acceptedSnapshot?.commit, git(bare, 'rev-parse', 'refs/heads/main'));
 
   } finally { globalThis.fetch = actualFetch; }
   const [networkTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Network interruption', createdBy: f.owner.context.actor.id }).returning();

@@ -378,6 +378,8 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         if (prior && (prior.branch !== link.workingBranch || prior.commit !== input.expectedHead || prior.repositoryIdentity !== identity)) throw new ConflictError('Acceptance snapshot already fixed to another commit', requirement.planRevision);
         if (!observed || prior) return { repository, branch: link.workingBranch, snapshot: prior };
         const [snapshot] = await tx.insert(workerAcceptanceSnapshots).values({ attemptId: attempt.id, repositoryId: repository.id, branch: link.workingBranch, commit: input.expectedHead, repositoryIdentity: identity }).returning();
+        const [live] = await tx.select({ id: workerAttempts.id }).from(workerAttempts).where(and(eq(workerAttempts.id, attempt.id), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`));
+        if (!live) throw new ConflictError('Acceptance attempt expired before snapshot commit', requirement.planRevision);
         return { repository, branch: link.workingBranch, snapshot };
       });
       const before = await inspect();
@@ -515,6 +517,14 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         if (input.outcome === 'done' && task.tags?.includes('worker:acceptance')) {
           if (input.acceptanceDecision !== 'accept') throw new ValidationError('Acceptance requires an explicit decision');
           await acceptanceInputs(tx, authority, task.id, attempt.planRevision);
+          const links = await tx.select().from(requirementRepositories).where(eq(requirementRepositories.requirementId, requirement.id)).for('share');
+          const snapshots = await tx.select().from(workerAcceptanceSnapshots).where(eq(workerAcceptanceSnapshots.attemptId, attempt.id)).for('share');
+          if (links.length !== snapshots.length) throw new ConflictError('Acceptance requires a snapshot of every linked repository', requirement.planRevision);
+          for (const link of links) {
+            const [repository] = await tx.select().from(repositories).where(and(eq(repositories.id, link.repositoryId), repositoryPredicate(authority))).for('share');
+            const snapshot = snapshots.find(item => item.repositoryId === link.repositoryId);
+            if (!repository || repository.status !== 'active' || !link.workingBranch || !snapshot || snapshot.branch !== link.workingBranch || snapshot.repositoryIdentity !== gitRepositoryIdentity(repository)) throw new ConflictError('Acceptance repository snapshot changed', requirement.planRevision);
+          }
         }
         if (input.outputId) {
           const [output] = await tx.select().from(workflowOutputs).where(and(eq(workflowOutputs.id, input.outputId!), eq(workflowOutputs.taskId, task.id), eq(workflowOutputs.requirementId, requirement.id))).for('share');
