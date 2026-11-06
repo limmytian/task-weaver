@@ -168,8 +168,9 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
           await request('POST', '/api/v1/thin-workers/plan', submission, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })
         }
       }
-      if (!options.gitIdentity || coordinator || acceptance) await verifyThinWorkspaceBaselines({ config: options.config, workspace, entries, assertAuthority: heartbeat, signal: controller.signal })
+      if (coordinator || acceptance) await verifyThinWorkspaceBaselines({ config: options.config, workspace, entries, assertAuthority: heartbeat, signal: controller.signal })
       const patches = await captureThinPatches(workspace, heartbeat)
+      if (!coordinator && !acceptance && patches.length && !options.gitIdentity) return finish('Git delivery requires a signoff name and email; configure --git-name and --git-email')
       const reportPath = join(workspace.rootPath, 'result.md')
       const reportExists = await stat(reportPath).then(value => value.isFile()).catch(() => false)
       const decision = acceptance ? workerAcceptanceDecisionSchema.parse(await readBoundedJson(join(workspace.rootPath, 'decision.json'), 16384)) : null

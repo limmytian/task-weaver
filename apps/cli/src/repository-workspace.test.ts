@@ -137,6 +137,7 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
     const calls: string[] = []
     let allowPush = true
     let occupied = 0
+    let workerAttempt = '00000000-0000-4000-8000-000000000014'
     const server = createServer((req, res) => {
       const chunks: Buffer[] = []
       req.on('data', chunk => chunks.push(Buffer.from(chunk)))
@@ -147,7 +148,7 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
         if (path.endsWith('/prepare') && occupied > 0) { occupied--; res.statusCode = 409; res.end(JSON.stringify({ error: 'Branch delivery is occupied or requires inspection' })); return }
         const raw = Buffer.concat(chunks).toString('utf8')
         const body = path.includes('/attachments') || !raw ? {} : JSON.parse(raw)
-        const response = path.endsWith('/acquire') ? { attempt: { id: '00000000-0000-4000-8000-000000000014', workerId: body.workerId, requirementId, taskId: taskIds[0], planRevision: 2 }, task: { id: taskIds[0], title: 'Worker Git fixture', description: null, requirementId, tags: [] }, token: 'fixture' }
+        const response = path.endsWith('/acquire') ? { attempt: { id: workerAttempt, workerId: body.workerId, requirementId, taskId: taskIds[0], planRevision: 2 }, task: { id: taskIds[0], title: 'Worker Git fixture', description: null, requirementId, tags: [] }, token: 'fixture' }
           : path.endsWith('/repositories') ? [repository] : req.method === 'GET' && path.includes('/requirements/') ? { id: requirementId, title: 'Fixture', description: null }
           : path.endsWith('/attachments') || path.endsWith('/output') ? { id: attemptIds[1] }
           : path.endsWith('/prepare') ? { id: attemptIds[0] } : path.endsWith('/transition') ? { shouldPush: body.event === 'start_push' && allowPush } : { state: 'confirmed' }
@@ -192,6 +193,14 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
       const workerTip = git(['rev-parse', 'refs/heads/main'], join(root, 'thin.git'))
       assert.notEqual(workerTip, delivered.commit)
       assert.equal(git(['show', `${workerTip}:worker.txt`], join(root, 'thin.git')), 'worker delivery')
+      workerAttempt = '00000000-0000-4000-8000-000000000015'
+      const missingIdentity = await runThinOnce({ config: { ...options(0).config, apiUrl: `http://127.0.0.1:${address.port}`, apiKey: 'fixture' }, projectId, requirementId, model: 'fixture', effort: 'low', timeoutMs: 10000, executor: {
+        async preflight() { return { blocked: false, reason: 'fixture', retryAt: null } },
+        async execute(input) { const manifest = JSON.parse(await readFile(join(input.cwd, 'repository-manifest.json'), 'utf8')); await writeFile(join(input.cwd, manifest.repositories[0].relativePath, 'missing-identity.txt'), 'must not publish\n'); return { ok: true, reason: 'fixture', quotaBlocked: false } },
+      } })
+      assert.equal(missingIdentity.state, 'attention'); assert.match(missingIdentity.reason!, /signoff name and email/)
+      assert.equal(git(['rev-parse', 'refs/heads/main'], join(root, 'thin.git')), workerTip)
+
 
 
     } finally { await new Promise<void>(resolve => server.close(() => resolve())) }

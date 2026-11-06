@@ -45,7 +45,7 @@ export function registerThinWorker(program: Command) {
     .requiredOption('--model <model>', 'Codex model')
     .option('--think <effort>', 'Codex reasoning effort', 'low')
     .option('--once', 'process at most one task')
-    .option('--git-name <name>', 'enable task Git delivery with this signoff name')
+    .option('--git-name <name>', 'signoff name for task Git delivery')
     .option('--git-email <email>', 'signoff email for task Git delivery')
     .option('--poll-seconds <seconds>', 'idle polling interval', '30')
     .option('--timeout-minutes <minutes>', 'maximum executor duration', '60')
