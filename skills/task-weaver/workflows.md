@@ -640,6 +640,31 @@ tw worker start --project "$PROJECT_ID" --model "$MODEL" --think low \
   --git-name "$GIT_NAME" --git-email "$GIT_EMAIL"
 ```
 
+Codex uses its `workspace-write` sandbox. A Kubernetes runtime must support the
+nested sandbox operations that Codex uses; a successful basic bubblewrap probe
+alone does not establish that network namespace creation works. For a gVisor
+runtime that cannot create the nested network namespace, an operator may opt
+in to network access for a dedicated Codex profile at
+`$TW_CODEX_HOME/config.toml`:
+
+```toml
+[sandbox_workspace_write]
+network_access = true
+```
+
+This retains the workspace-write filesystem policy but permits commands inside
+the executor to access the network. It is not equivalent to the default
+network-isolated sandbox. Use it only where that access is acceptable and apply
+the deployment's network and credential isolation separately. A Pod network
+policy, when enforced, applies to the Worker as well as its executor; it does
+not distinguish them. Do not assume that removing credentials from environment
+variables prevents the executor from reading files accessible to its user.
+Keep the service account unmounted and use a dedicated, non-privileged Pod;
+do not give it host mounts or additional capabilities to make a probe pass.
+The Worker does not enable this profile setting automatically. If the executor
+reports a possible sandbox initialization failure, inspect its session and
+runtime before assessing whether a retry is safe.
+
 For a requirement with linked repositories, configure each repository's requirement working branch and distinct version target branch. A coordinator plan contains implementation tasks, one `worker:acceptance` task depending on every implementation task, and one `worker:integration` task depending on acceptance. The acceptance worker fixes server-verified requirement branch snapshots. The integration worker merges those accepted commits into the configured version branches, resolves conflicts through its executor, and records confirmed delivery before completing. If a requirement branch changes after acceptance, run acceptance again. For requirements without linked repositories, retain the acceptance task and artifact delivery without an integration task.
 
 Add `--once` to handle at most one task, or `--requirement "$REQ_ID"` to restrict the queue. The worker pulls eligible tasks, renews the task attempt, and uses notifications as wakeups with polling fallback. It prepares a task-local commit, integrates the latest requirement branch, resolves conflicts through the executor, and submits a normal fast-forward push under a server-side delivery slot. Non-code work can deliver an artifact without Git signoff settings.
