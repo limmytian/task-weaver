@@ -292,6 +292,26 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   const accepted = await worker.acquire(db, input(randomUUID()));
   assert.equal(accepted.task!.id, acceptance!.id);
   const acceptedFence = { attemptId: accepted.attempt!.id, workerId: accepted.attempt!.workerId, token: accepted.token! };
+  const snapshotInput = { ...acceptedFence, repositoryId: gitRepository!.id, expectedHead: 'b'.repeat(40) };
+  await assert.rejects(verifier.snapshotAcceptanceRepository(db, { ...snapshotInput, expectedHead: 'c'.repeat(40) }), /does not match/);
+  const snapshotRace = createThinWorkerService(workerContext, { forgeFetch: async (url, init) => {
+    const response = await fakeFetch(url, init);
+    await db.update(requirementRepositories).set({ workingBranch: 'requirement/changed' }).where(eq(requirementRepositories.requirementId, req!.id));
+    return response;
+  } });
+  await assert.rejects(snapshotRace.snapshotAcceptanceRepository(db, snapshotInput), /repository changed/);
+  await db.update(requirementRepositories).set({ workingBranch: 'requirement/fixture' }).where(eq(requirementRepositories.requirementId, req!.id));
+  const snapshotExpiry = createThinWorkerService(workerContext, { forgeFetch: async (url, init) => {
+    const response = await fakeFetch(url, init);
+    await db.update(workerAttempts).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(workerAttempts.id, accepted.attempt!.id));
+    return response;
+  } });
+  await assert.rejects(snapshotExpiry.snapshotAcceptanceRepository(db, snapshotInput));
+  await db.update(workerAttempts).set({ expiresAt: new Date(Date.now() + 120000) }).where(eq(workerAttempts.id, accepted.attempt!.id));
+  const snapshot = await verifier.snapshotAcceptanceRepository(db, snapshotInput);
+  assert.equal(snapshot.commit, snapshotInput.expectedHead);
+  assert.equal((await verifier.snapshotAcceptanceRepository(db, snapshotInput)).id, snapshot.id);
+  await assert.rejects(verifier.snapshotAcceptanceRepository(db, { ...snapshotInput, expectedHead: 'c'.repeat(40) }), /already fixed/);
   const acceptanceEvidence = await worker.inputs(db, acceptedFence);
   assert.ok(acceptanceEvidence.inputs.some(item => item.attemptId === run.attempt!.id && item.gitDeliveries.some(git => git.repositoryId === gitRepository!.id)));
   await db.update(repositories).set({ visibility: 'private', ownerId: f.outsider.context.actor.id, ownerType: 'human' }).where(eq(repositories.id, gitRepository!.id));

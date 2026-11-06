@@ -1,8 +1,8 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { createHash, randomBytes } from 'node:crypto';
-import { activityLog, documentFileVersions, documents, executionControls, planDrafts, projects, requirementClaims, requirementRepositories, repositories, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinGitDeliveries, thinWorkers, workerAttempts, workerPlanReceipts, workflowOutputs, type Database } from '@task-weaver/db';
-import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
+import { activityLog, documentFileVersions, documents, executionControls, planDrafts, projects, requirementClaims, requirementRepositories, repositories, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinGitDeliveries, thinWorkers, workerAttempts, workerPlanReceipts, workerAcceptanceSnapshots, workflowOutputs, type Database } from '@task-weaver/db';
+import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { lockIdentityLifecycle } from './auth-security';
 import { resourceAuthority, requireResource } from './resource-authorization';
 import { attachmentStorage } from './attachment-storage';
@@ -11,7 +11,7 @@ import { createResourceServices } from './resource-services';
 import { createPlanDraft, validatePlanDraft, applyPlanDraft } from './plans';
 import { advanceGitDelivery } from './thin-git-delivery-policy';
 import { repositoryPredicate } from './repository-authorization';
-import { gitRepositoryIdentity, readTrustedDirectMerge, verifyTrustedGitAncestry } from './trusted-forge';
+import { gitRepositoryIdentity, readTrustedBranchHead, readTrustedDirectMerge, verifyTrustedGitAncestry } from './trusted-forge';
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 const safeText = (value: string, limit: number) => redactObservabilityText(value, limit).value.replace(/\b(?:tw|twd|twb|twa)_[0-9a-f]{64}\b/gi, '[redacted]');
@@ -354,6 +354,37 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         if (!updated) throw new ConflictError('Attempt expired or authority changed', 0);
         return publicAttempt(updated);
       });
+    },
+    async snapshotAcceptanceRepository(db: Database, raw: z.input<typeof workerAcceptanceSnapshotSchema>) {
+      const input = workerAcceptanceSnapshotSchema.parse(raw);
+      const inspect = (observed?: { repositoryIdentity: string; branch: string }) => transact(db, async (tx, authority) => {
+        if (authority.actor.type !== 'agent' || context.credential.kind !== 'api_key') throw new AuthorizationError();
+        const [existing] = await tx.select().from(workerAttempts).where(eq(workerAttempts.id, input.attemptId));
+        if (!existing) throw new NotFoundError('Attempt not found');
+        await requireResource(tx, authority, 'task', existing.taskId, 'execution.run');
+        await requireResource(tx, authority, 'task', existing.taskId, 'resource.write');
+        const project = await lockProject(tx, existing.projectId);
+        const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, existing.requirementId)).for('update');
+        const [task] = await tx.select().from(tasks).where(eq(tasks.id, existing.taskId)).for('update');
+        const [attempt] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.id, input.attemptId), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`)).for('update');
+        if (project.workerMode !== 'thin' || !attempt || attempt.actorId !== authority.actor.id || attempt.credentialId !== context.credential.id || attempt.workerId !== input.workerId || attempt.tokenHash !== digest(input.token)) throw new AuthorizationError();
+        if (!requirement || !task || task.status !== 'in_progress' || !task.tags?.includes('worker:acceptance') || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Acceptance attempt or plan changed', requirement?.planRevision ?? 0);
+        const [repository] = await tx.select().from(repositories).where(and(eq(repositories.id, input.repositoryId), repositoryPredicate(authority))).for('share');
+        const [link] = await tx.select().from(requirementRepositories).where(and(eq(requirementRepositories.requirementId, requirement.id), eq(requirementRepositories.repositoryId, input.repositoryId))).for('share');
+        if (!repository || repository.status !== 'active' || !link?.workingBranch) throw new ValidationError('Configured requirement branch is unavailable');
+        const identity = gitRepositoryIdentity(repository);
+        if (observed && (observed.repositoryIdentity !== identity || observed.branch !== link.workingBranch)) throw new ConflictError('Acceptance repository changed', requirement.planRevision);
+        const [prior] = await tx.select().from(workerAcceptanceSnapshots).where(and(eq(workerAcceptanceSnapshots.attemptId, attempt.id), eq(workerAcceptanceSnapshots.repositoryId, repository.id)));
+        if (prior && (prior.branch !== link.workingBranch || prior.commit !== input.expectedHead || prior.repositoryIdentity !== identity)) throw new ConflictError('Acceptance snapshot already fixed to another commit', requirement.planRevision);
+        if (!observed || prior) return { repository, branch: link.workingBranch, snapshot: prior };
+        const [snapshot] = await tx.insert(workerAcceptanceSnapshots).values({ attemptId: attempt.id, repositoryId: repository.id, branch: link.workingBranch, commit: input.expectedHead, repositoryIdentity: identity }).returning();
+        return { repository, branch: link.workingBranch, snapshot };
+      });
+      const before = await inspect();
+      if (before.snapshot) return before.snapshot;
+      const trusted = await readTrustedBranchHead(before.repository, before.branch, { fetch: options.forgeFetch });
+      if (trusted.commit !== input.expectedHead) throw new ConflictError('Acceptance workspace does not match the trusted requirement branch', 0);
+      return (await inspect({ repositoryIdentity: gitRepositoryIdentity(before.repository), branch: before.branch })).snapshot!;
     },
     async inputs(db: Database, raw: z.input<typeof workerFenceSchema>) {
       const input = workerFenceSchema.parse(raw);
