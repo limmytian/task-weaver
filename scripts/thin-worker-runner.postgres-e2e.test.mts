@@ -232,6 +232,13 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     await assert.rejects(integrationService.confirmGitDelivery(db, { ...integrationFence, deliveryId: nextVersion.id }), /changed after acceptance/);
     git(bare, 'update-ref', 'refs/heads/main', reviewedTip);
     assert.equal((await integrationService.confirmGitDelivery(db, { ...integrationFence, deliveryId: nextVersion.id })).state, 'confirmed');
+    const recoveryVersion = await integrationService.prepareIntegrationDelivery(db, { ...prepareVersion, operationKey: crypto.randomUUID(), expectedHead: targetBefore, proposedHead: reviewedTip });
+    assert.equal((await integrationService.authorizeIntegrationPush(db, { ...integrationFence, deliveryId: recoveryVersion.id })).shouldPush, true);
+    await integrationService.transitionGitDelivery(db, { ...integrationFence, deliveryId: recoveryVersion.id, event: 'response_lost' });
+    await db.update(workerAttempts).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(workerAttempts.id, lane.attempt.id));
+    const ownerService = createThinWorkerService(await f.auth.resolve(new Headers({ authorization: `Bearer ${owner.rawKey}` })));
+    assert.equal((await ownerService.reconcileGitDelivery(db, { deliveryId: recoveryVersion.id, reason: 'Checked remote version branch after lost response' })).state, 'confirmed');
+
 
 
 
