@@ -112,3 +112,14 @@ test("single-commit inspection requires an actual parent and handles roots expli
   const root = await readTrustedCommit(repository, head, undefined, { fetch: async () => Response.json({ sha: head, parents: [], files: [{ filename: "root.txt", status: "added", patch: "+root" }] }) });
   assert.equal(root.parent, null); assert.equal(root.files[0]?.patch, "+root");
 });
+
+test('trusted ancestry rejects a divergent proposed commit', async () => {
+  const { verifyTrustedGitAncestry } = await import('./trusted-forge');
+  const base = 'a'.repeat(40), head = 'b'.repeat(40);
+  await verifyTrustedGitAncestry(repository, base, head, { fetch: async () => Response.json({ status: 'ahead', base_commit: { sha: base }, merge_base_commit: { sha: base } }) });
+  await assert.rejects(verifyTrustedGitAncestry(repository, base, head, { fetch: async () => Response.json({ status: 'diverged', base_commit: { sha: base }, merge_base_commit: { sha: 'c'.repeat(40) } }) }), /does not contain/);
+  const repo = { ...repository, host: 'forge.example', provider: 'gitea' };
+  const connection = { host: repo.host, provider: 'gitea' as const, apiBaseUrl: 'https://api.forge.example/api/v1', repositoryIds: [repo.id], repositories: ['acme/app'] };
+  await verifyTrustedGitAncestry(repo, base, head, { connection, fetch: async () => Response.json({ sha: head, parents: [{ sha: base }] }) });
+  await assert.rejects(verifyTrustedGitAncestry(repo, base, head, { connection, fetch: async () => Response.json({ sha: head, parents: [] }) }), /could not be verified/);
+});
