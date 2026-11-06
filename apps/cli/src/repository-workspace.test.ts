@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
 import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
@@ -6,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import test from 'node:test'
+import { deliverThinGitRepository } from './thin-git-orchestrator.js'
 import { prepareThinPushSandbox } from './thin-git-delivery.js'
 import { applyThinDeliveries, captureThinPatches, packageThinArtifacts } from './thin-workspace-artifacts.js'
 import type { Config } from './config.js'
@@ -131,6 +133,39 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
       assert.equal(observed.stdout.trim(), `${target}\trefs/heads/main`)
     } finally { await sandbox.cleanup() }
     await assert.rejects(fetchThinIntegrationTarget({ ...baselineOptions, entries: [{ ...repository, link: { ...repository.link, workingBranch: null } }], repositoryId: repository.repository.id }), /configured requirement branch/)
+    const calls: string[] = []
+    let allowPush = true
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = []
+      req.on('data', chunk => chunks.push(Buffer.from(chunk)))
+      req.on('end', () => {
+        calls.push(req.url ?? '')
+        res.setHeader('content-type', 'application/json')
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+        res.end(JSON.stringify(req.url?.endsWith('/prepare') ? { id: attemptIds[0] } : req.url?.endsWith('/transition') ? { shouldPush: body.event === 'start_push' && allowPush } : { state: 'confirmed' }))
+      })
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('Fixture server unavailable')
+      const deliveryAttempt = '00000000-0000-4000-8000-000000000010'
+      const deliveryWorkspace = await provisionThinWorkspace({ ...options(0), attemptId: deliveryAttempt })
+      await writeFile(join(deliveryWorkspace.repositories[0]!.worktreePath, 'delivery.txt'), 'task delivery\n')
+      const delivered = await deliverThinGitRepository({ config: { ...options(0).config, apiUrl: `http://127.0.0.1:${address.port}`, apiKey: 'fixture' }, workspace: deliveryWorkspace, entries: [repository], repositoryId: repository.repository.id, fence: { attemptId: deliveryAttempt, workerId: attemptIds[0]!, token: 'fixture' }, identity: { name: 'Fixture', email: 'fixture@example.test' }, message: 'Deliver fixture', assertAuthority: async () => {}, resolveConflict: async () => { throw new Error('Unexpected conflict') } })
+      assert.equal(delivered.state, 'confirmed')
+      assert.equal(git(['rev-parse', 'refs/heads/main'], join(root, 'thin.git')), delivered.commit)
+      assert.deepEqual(calls.map(path => path.split('/').at(-1)), ['prepare', 'transition', 'confirm'])
+      allowPush = false
+      const deniedAttempt = '00000000-0000-4000-8000-000000000011'
+      const deniedWorkspace = await provisionThinWorkspace({ ...options(0), attemptId: deniedAttempt })
+      await writeFile(join(deniedWorkspace.repositories[0]!.worktreePath, 'denied.txt'), 'must not push\n')
+      await assert.rejects(deliverThinGitRepository({ config: { ...options(0).config, apiUrl: `http://127.0.0.1:${address.port}`, apiKey: 'fixture' }, workspace: deniedWorkspace, entries: [repository], repositoryId: repository.repository.id, fence: { attemptId: deniedAttempt, workerId: attemptIds[0]!, token: 'fixture' }, identity: { name: 'Fixture', email: 'fixture@example.test' }, message: 'Denied fixture', assertAuthority: async () => {}, resolveConflict: async () => {} }), /not newly granted/)
+      assert.equal(git(['rev-parse', 'refs/heads/main'], join(root, 'thin.git')), delivered.commit)
+      assert.deepEqual(calls.map(path => path.split('/').at(-1)), ['prepare', 'transition', 'confirm', 'prepare', 'transition'])
+
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())) }
+
     assert.equal(await readFile(join(first.repositories[0]!.worktreePath, 'README.md'), 'utf8'), 'dirty first\n')
     git(['config', 'user.name', 'Task Weaver Test'], second.repositories[0]!.worktreePath)
     git(['config', 'user.email', 'test@example.test'], second.repositories[0]!.worktreePath)
