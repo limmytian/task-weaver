@@ -357,7 +357,7 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
     },
     async integrationInputs(db: Database, raw: z.input<typeof workerFenceSchema>) {
       const input = workerFenceSchema.parse(raw);
-      return transact(db, async (tx, authority) => {
+      const inspect = () => transact(db, async (tx, authority) => {
         if (authority.actor.type !== 'agent' || context.credential.kind !== 'api_key') throw new AuthorizationError();
         const [existing] = await tx.select().from(workerAttempts).where(eq(workerAttempts.id, input.attemptId));
         if (!existing) throw new NotFoundError('Attempt not found');
@@ -388,12 +388,21 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
           const [repository] = await tx.select().from(repositories).where(and(eq(repositories.id, link.repositoryId), repositoryPredicate(authority))).for('share');
           const snapshot = snapshots.find(item => item.repositoryId === link.repositoryId);
           if (!repository || repository.status !== 'active' || !link.workingBranch || !link.baseBranch || link.workingBranch === link.baseBranch || !snapshot || snapshot.branch !== link.workingBranch || snapshot.repositoryIdentity !== gitRepositoryIdentity(repository)) throw new ConflictError('Accepted repository or branch configuration changed', requirement.planRevision);
-          sources.push({ repositoryId: repository.id, sourceBranch: snapshot.branch, sourceCommit: snapshot.commit, targetBranch: link.baseBranch });
+          sources.push({ repositoryId: repository.id, sourceBranch: snapshot.branch, sourceCommit: snapshot.commit, targetBranch: link.baseBranch, repository });
         }
         const [live] = await tx.select({ id: workerAttempts.id }).from(workerAttempts).where(and(eq(workerAttempts.id, attempt.id), sql`${workerAttempts.expiresAt} > clock_timestamp()`));
         if (!live) throw new ConflictError('Integration attempt expired', requirement.planRevision);
         return { acceptanceTaskId: acceptance.taskId, acceptanceAttemptId: acceptance.id, planRevision: requirement.planRevision, sources };
       });
+      const before = await inspect();
+      for (const source of before.sources) {
+        const head = await readTrustedBranchHead(source.repository, source.sourceBranch, { fetch: options.forgeFetch });
+        if (head.commit !== source.sourceCommit) throw new ConflictError('Requirement branch changed after acceptance', before.planRevision);
+      }
+      const after = await inspect();
+      const fingerprint = (value: typeof before) => canonical({ acceptanceTaskId: value.acceptanceTaskId, acceptanceAttemptId: value.acceptanceAttemptId, planRevision: value.planRevision, sources: value.sources.map(source => ({ repositoryId: source.repositoryId, sourceBranch: source.sourceBranch, sourceCommit: source.sourceCommit, targetBranch: source.targetBranch, repositoryIdentity: gitRepositoryIdentity(source.repository) })).sort((a, b) => a.repositoryId.localeCompare(b.repositoryId)) });
+      if (fingerprint(before) !== fingerprint(after)) throw new ConflictError('Integration inputs changed during verification', after.planRevision);
+      return { ...after, sources: after.sources.map(({ repository: _repository, ...source }) => source) };
     },
     async snapshotAcceptanceRepository(db: Database, raw: z.input<typeof workerAcceptanceSnapshotSchema>) {
       const input = workerAcceptanceSnapshotSchema.parse(raw);
