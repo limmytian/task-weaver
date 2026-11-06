@@ -121,6 +121,7 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   const humanActor = { id: f.owner.context.actor.id, type: 'human' as const };
   await assert.rejects(sliceService.createExecutionSlice(db, req!.id, { title: 'New slice', allowParallel: false }, humanActor), /Execution slices are historical/);
   await assert.rejects(sliceService.updateExecutionSlice(db, historicalSlice!.id, { title: 'Changed' }, humanActor), /Execution slices are historical/);
+  await assert.rejects(sliceService.deleteExecutionSlice(db, historicalSlice!.id, humanActor), /Execution slices are historical/);
   await assert.rejects(db.update(executionSlices).set({ title: 'Changed' }).where(eq(executionSlices.id, historicalSlice!.id)), historicalFence);
   await assert.rejects(db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, executionSliceId: historicalSlice!.id, title: 'New assignment', createdBy: f.owner.context.actor.id }), historicalFence);
   const [unassignedHistory] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Unassigned history', status: 'cancelled', createdBy: f.owner.context.actor.id }).returning();
