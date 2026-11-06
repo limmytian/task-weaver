@@ -487,6 +487,10 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         }
         if (candidates.length !== 1) throw new ValidationError('Integration requires exactly one accepted task dependency for the current plan');
         const acceptance = candidates[0]!;
+        const requirementTasks = await tx.select().from(tasks).where(eq(tasks.requirementId, requirement.id)).for('share');
+        const required = requirementTasks.filter(item => item.id !== task.id && item.id !== acceptance.taskId && item.status === 'done' && !item.tags?.includes('worker:coordinator') && !item.tags?.includes('worker:integration'));
+        const acceptedDependencies = await tx.select().from(taskDependencies).where(and(eq(taskDependencies.taskId, acceptance.taskId), eq(taskDependencies.type, 'blocks'))).for('share');
+        if (required.some(item => !acceptedDependencies.some(edge => edge.dependsOnTaskId === item.id))) throw new ConflictError('Acceptance does not cover every completed requirement task', requirement.planRevision);
         const links = await tx.select().from(requirementRepositories).where(eq(requirementRepositories.requirementId, requirement.id)).for('share');
         const snapshots = await tx.select().from(workerAcceptanceSnapshots).where(eq(workerAcceptanceSnapshots.attemptId, acceptance.id)).for('share');
         if (!links.length || links.length !== snapshots.length) throw new ConflictError('Accepted repository snapshots are incomplete', requirement.planRevision);
