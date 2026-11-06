@@ -430,14 +430,6 @@ test("assistant authorization isolates accounts and resources across REST and tR
   const orchestrated = await rest("assistant/chat", owner.headers, "POST", { message: "Make it depend on the existing task", context: { projectId: project.id } });
   assert.equal(orchestrated.status, 201);
   assert.equal(orchestrated.body.actions[0].status, "succeeded");
-  modelReplies.push(
-    { content: null, tool_calls: [toolCall("create_execution_slice", { requirementId: createdRequirementId, title: "Chat execution plan", taskIds: [createdTaskId], allowParallel: false })] },
-    { content: "Execution slice created" },
-  );
-  const sliceOperation = await rest("assistant/chat", owner.headers, "POST", { message: "Put the task in an ordered execution slice", context: { projectId: project.id } });
-  assert.equal(sliceOperation.status, 201);
-  assert.equal(sliceOperation.body.actions[0].status, "succeeded");
-  assert.equal((await owner.service.requirementService.listExecutionSlices(db, createdRequirementId))[0].title, "Chat execution plan");
   const directory = await mkdtemp(join(tmpdir(), "tw-chat-assets-"));
   const previousStorage = process.env.SKILL_PACKAGE_STORAGE_DIR;
   process.env.SKILL_PACKAGE_STORAGE_DIR = directory;
@@ -445,6 +437,8 @@ test("assistant authorization isolates accounts and resources across REST and tR
   const readTools = apiRequire("../../packages/core/src/services/assistant-read-tools.ts");
   const pool = apiRequire("../../packages/core/src/services/mcp-pool.ts").mcpPool;
   const operationCatalog = apiRequire("../../packages/core/src/services/assistant-operations.ts").assistantOperations;
+  assert.equal(Object.hasOwn(operationCatalog, "create_execution_slice"), false);
+  assert.equal(Object.hasOwn(operationCatalog, "update_execution_slice"), false);
   assert(!Object.keys(operationCatalog).some(name => /repository|membership|shell|partners/.test(name)));
   const chatOperation = async (name: string, args: Record<string, unknown>, existingConversationId?: string) => {
     modelReplies.push({ content: null, tool_calls: [toolCall(name, args)] }, { content: "Requested operation completed" });
