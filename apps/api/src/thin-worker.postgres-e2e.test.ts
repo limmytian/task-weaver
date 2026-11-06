@@ -96,6 +96,9 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   const [cascadeRequirement] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Cascade fixture', createdBy: f.owner.context.actor.id }).returning();
   const [cascadeSlice] = await db.insert(executionSlices).values({ requirementId: cascadeRequirement!.id, title: 'Cascade slice' }).returning();
   await db.insert(tasks).values({ projectId: f.project.id, requirementId: cascadeRequirement!.id, executionSliceId: cascadeSlice!.id, title: 'Cascade task', status: 'cancelled', createdBy: f.owner.context.actor.id });
+  const legacyHuman = { id: f.owner.context.actor.id, type: 'human' as const };
+  const legacyTasks = createResourceServices(await context(ownerKey.rawKey)).taskService;
+  await assert.rejects(legacyTasks.updateTaskStatus(db, first!.id, 'in_progress', legacyHuman), /slice/i);
   await owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Preserve the legacy slice as history' });
   await db.update(tasks).set({ executionSliceId: null }).where(eq(tasks.id, clearableHistory!.id));
   await db.delete(requirements).where(eq(requirements.id, cascadeRequirement!.id));
