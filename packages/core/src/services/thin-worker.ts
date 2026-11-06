@@ -1,8 +1,8 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { createHash, randomBytes } from 'node:crypto';
-import { activityLog, documentFileVersions, documents, executionControls, planDrafts, projects, requirementClaims, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinWorkers, workerAttempts, workerPlanReceipts, workflowOutputs, type Database } from '@task-weaver/db';
-import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
+import { activityLog, documentFileVersions, documents, executionControls, planDrafts, projects, requirementClaims, requirementRepositories, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinGitDeliveries, thinWorkers, workerAttempts, workerPlanReceipts, workflowOutputs, type Database } from '@task-weaver/db';
+import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerGitPrepareSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { lockIdentityLifecycle } from './auth-security';
 import { resourceAuthority, requireResource } from './resource-authorization';
 import { attachmentStorage } from './attachment-storage';
@@ -58,6 +58,33 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
     return inputs;
   };
   return {
+    async prepareGitDelivery(db: Database, raw: z.input<typeof workerGitPrepareSchema>) {
+      const input = workerGitPrepareSchema.parse(raw);
+      return transact(db, async (tx, authority) => {
+        if (authority.actor.type !== 'agent' || context.credential.kind !== 'api_key') throw new AuthorizationError();
+        const [existing] = await tx.select().from(workerAttempts).where(eq(workerAttempts.id, input.attemptId));
+        if (!existing) throw new NotFoundError('Attempt not found');
+        await requireResource(tx, authority, 'task', existing.taskId, 'execution.run');
+        await requireResource(tx, authority, 'task', existing.taskId, 'resource.write');
+        const project = await lockProject(tx, existing.projectId);
+        if (project.workerMode !== 'thin' || existing.actorId !== authority.actor.id || existing.credentialId !== context.credential.id || existing.workerId !== input.workerId || existing.tokenHash !== digest(input.token)) throw new AuthorizationError();
+        const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, existing.requirementId)).for('update');
+        const [attempt] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.id, existing.id), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`)).for('update');
+        const [task] = await tx.select().from(tasks).where(eq(tasks.id, existing.taskId)).for('update');
+        if (!attempt || !requirement || !task || task.status !== 'in_progress' || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Attempt or plan is no longer current', requirement?.planRevision ?? 0);
+        const [link] = await tx.select().from(requirementRepositories).where(and(eq(requirementRepositories.requirementId, requirement.id), eq(requirementRepositories.repositoryId, input.repositoryId)));
+        if (!link?.workingBranch || link.workingBranch !== input.targetBranch) throw new ValidationError('Target must be the configured requirement branch');
+        const [prior] = await tx.select().from(thinGitDeliveries).where(and(eq(thinGitDeliveries.projectId, project.id), eq(thinGitDeliveries.operationKey, input.operationKey)));
+        if (prior) {
+          if (prior.attemptId !== attempt.id || prior.repositoryId !== input.repositoryId || prior.targetBranch !== input.targetBranch || prior.expectedHead !== input.expectedHead || prior.proposedHead !== input.proposedHead) throw new ConflictError('Delivery operation key was already used', requirement.planRevision);
+          return prior;
+        }
+        const [active] = await tx.select().from(thinGitDeliveries).where(and(eq(thinGitDeliveries.repositoryId, input.repositoryId), eq(thinGitDeliveries.targetBranch, input.targetBranch), sql`${thinGitDeliveries.state} IN ('prepared', 'pushing', 'uncertain')`));
+        if (active) throw new ConflictError('Branch delivery is occupied or requires inspection', requirement.planRevision);
+        const [delivery] = await tx.insert(thinGitDeliveries).values({ projectId: project.id, repositoryId: input.repositoryId, attemptId: attempt.id, operationKey: input.operationKey, targetBranch: input.targetBranch, expectedHead: input.expectedHead, proposedHead: input.proposedHead, state: 'prepared' }).returning();
+        return delivery!;
+      });
+    },
     async presence(db: Database, raw: z.input<typeof workerPresenceSchema>) {
       const input = workerPresenceSchema.parse(raw);
       return transact(db, async (tx, authority) => {
@@ -111,6 +138,7 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
           EXISTS (SELECT 1 FROM ${taskClaims} tc JOIN ${tasks} t ON t.id = tc.task_id WHERE t.project_id = ${input.projectId}) OR
           EXISTS (SELECT 1 FROM ${tasks} t WHERE t.project_id = ${input.projectId} AND t.status = 'in_progress') OR
           EXISTS (SELECT 1 FROM ${executionControls} ec JOIN ${requirements} r ON r.id = ec.requirement_id WHERE ec.project_id = ${input.projectId} AND ec.phase NOT IN ('resumed', 'manual') AND NOT (ec.phase = 'blocked' AND r.status = 'draft')) OR
+          EXISTS (SELECT 1 FROM ${thinGitDeliveries} gd WHERE gd.project_id = ${input.projectId} AND gd.state IN ('prepared', 'pushing', 'uncertain')) OR
           EXISTS (SELECT 1 FROM ${workerAttempts} wa WHERE wa.project_id = ${input.projectId} AND wa.status IN ('running', 'attention'))`) as unknown as Array<{ busy: number }>;
         if (busy) throw new ValidationError('Drain claims and resolve interrupted or uncertain work before changing worker mode');
         await tx.update(projects).set({ workerMode: input.mode }).where(eq(projects.id, input.projectId));
