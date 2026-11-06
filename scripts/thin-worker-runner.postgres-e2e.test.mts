@@ -203,6 +203,11 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     await db.update(tasks).set({ status: 'in_review' }).where(eq(tasks.id, gitAcceptance!.id));
     assert.equal((await readIntegration()).status, 409, 'acceptance must remain completed');
     await db.update(tasks).set({ status: 'done' }).where(eq(tasks.id, gitAcceptance!.id));
+    const [unfinished] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: gitReq!.id, title: 'Unfinished requirement work', createdBy: f.owner.context.actor.id }).returning();
+    assert.equal((await readIntegration()).status, 409, 'integration must wait for all requirement tasks');
+    await db.update(tasks).set({ status: 'cancelled' }).where(eq(tasks.id, unfinished!.id));
+    assert.equal((await readIntegration()).status, 200);
+
 
     const premature = await fetch(`${apiUrl}/api/v1/thin-workers/result`, { method: 'POST', headers: { authorization: `Bearer ${key.rawKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ attemptId: lane.attempt.id, workerId: integrationWorker, token: lane.token, resultKey: crypto.randomUUID(), outcome: 'done', summary: 'Premature integration', outputId: crypto.randomUUID() }) });
     assert.equal(premature.status, 400); assert.match((await premature.json() as any).error, /not yet available/);
