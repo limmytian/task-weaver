@@ -262,6 +262,22 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     assert.equal(git(bare, 'show', `${versionTip}:base.txt`), 'resolved version and requirement');
     const versionRows = await db.select().from(thinGitDeliveries).where(eq(thinGitDeliveries.attemptId, integrated.attemptId!));
     assert.ok(versionRows.some(row => row.purpose === 'integration' && row.state === 'confirmed' && row.acceptedCommit === acceptedSnapshot!.commit));
+    const [plannedGitReq] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Code planner fixture', status: 'approved', createdBy: f.owner.context.actor.id }).returning();
+    await db.insert(requirementRepositories).values({ requirementId: plannedGitReq!.id, repositoryId: gitRepo!.id, workingBranch: 'main', baseBranch: 'release' });
+    const [gitCoordinator] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: plannedGitReq!.id, title: 'Plan code work', tags: ['worker:coordinator'], createdBy: f.owner.context.actor.id }).returning();
+    const gitPlanner: ThinExecutor = { ...executor, async execute(input) {
+      assert.match(input.prompt, /final integration task tagged worker:integration/);
+      await writeFile(join(input.cwd, 'result.md'), 'Code plan and evidence.\n');
+      await writeFile(join(input.cwd, 'plan.json'), JSON.stringify({ projectId: f.project.id, requirements: [{ key: 'current', existingId: plannedGitReq!.id, tasks: [{ key: 'work', title: 'Implement' }, { key: 'accept', title: 'Accept', tags: ['worker:acceptance'], dependsOn: ['work'] }, { key: 'integrate', title: 'Integrate', tags: ['worker:integration'], dependsOn: ['accept'] }] }] }));
+      return { ok: true, reason: 'Code plan', quotaBlocked: false };
+    } };
+    const codePlanned = await runThinOnce({ ...opts, requirementId: plannedGitReq!.id, executor: gitPlanner, config: { ...config, nodeId: 'code-planner' } });
+    assert.equal(codePlanned.taskId, gitCoordinator!.id); assert.equal(codePlanned.state, 'completed', codePlanned.reason);
+    const plannedTasks = await db.select().from(tasks).where(eq(tasks.requirementId, plannedGitReq!.id));
+    const planAccept = plannedTasks.find(row => row.tags?.includes('worker:acceptance'))!, planIntegration = plannedTasks.find(row => row.tags?.includes('worker:integration'))!;
+    const planEdges = await db.select().from(taskDependencies).where(eq(taskDependencies.taskId, planIntegration.id));
+    assert.ok(planEdges.some(edge => edge.dependsOnTaskId === planAccept.id && edge.type === 'blocks'));
+
 
 
 
@@ -275,7 +291,7 @@ test('once worker runs a bounded deterministic executor and parks empty results'
 
   } finally { globalThis.fetch = actualFetch; }
   const [networkTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Network interruption', createdBy: f.owner.context.actor.id }).returning();
-  const interrupted = await runThinOnce({ ...opts, config: { ...config, nodeId: 'other-node' }, executor: { ...executor, async execute(input) { await writeFile(join(input.cwd, 'result.md'), 'Local work\n'); server.close(); server.closeAllConnections(); return { ok: true, reason: 'Fixture', quotaBlocked: false } } } });
+  const interrupted = await runThinOnce({ ...opts, requirementId: req!.id, config: { ...config, nodeId: 'other-node' }, executor: { ...executor, async execute(input) { await writeFile(join(input.cwd, 'result.md'), 'Local work\n'); server.close(); server.closeAllConnections(); return { ok: true, reason: 'Fixture', quotaBlocked: false } } } });
   assert.equal(interrupted.taskId, networkTask!.id);
   assert.equal(interrupted.state, 'attention');
   assert.equal((await db.query.tasks.findFirst({ where: eq(tasks.id, networkTask!.id) }))!.status, 'in_progress');
