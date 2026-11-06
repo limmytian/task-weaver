@@ -918,6 +918,8 @@ export async function updateExecutionSlice(
 
 export async function deleteExecutionSlice(db: Database, sliceId: string, actor: Actor) {
   const existing = await getExecutionSlice(db, sliceId);
+  const [project] = await db.select({ workerMode: projects.workerMode }).from(projects).where(eq(projects.id, existing.requirement.projectId)).for("update");
+  if (project?.workerMode === "thin") throw new ValidationError("Execution slices are historical in thin worker projects");
 
   await db
     .update(tasks)
