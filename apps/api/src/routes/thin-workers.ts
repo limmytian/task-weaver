@@ -45,6 +45,11 @@ routes.post('/acquire', async c => {
   if (!input.success) return c.json({ error: 'Invalid worker acquisition' }, 400);
   return c.json(await createThinWorkerService(c.get('identity')).acquire(c.get('db'), input.data));
 });
+routes.get('/git/deliveries', async c => {
+  const project = z.string().uuid().safeParse(c.req.query('projectId'));
+  if (!project.success) return c.json({ error: 'Invalid project' }, 400);
+  return c.json(await createThinWorkerService(c.get('identity')).listGitDeliveries(c.get('db'), project.data));
+});
 routes.post('/git/prepare', async c => {
   const input = workerGitPrepareSchema.safeParse(await c.req.json().catch(() => null));
   if (!input.success) return c.json({ error: 'Invalid Git delivery preparation' }, 400);

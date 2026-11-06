@@ -1,6 +1,6 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
-  ["GET", /^\/api\/v1\/thin-workers\/(?:attempts|events|presence)\/?$/],
+  ["GET", /^\/api\/v1\/thin-workers\/(?:attempts|events|presence|git\/deliveries)\/?$/],
   ["POST", /^\/api\/v1\/thin-workers\/(?:mode|acquire|heartbeat|inputs|output|plan|result|release|resolve|presence(?:\/stop)?|git\/(?:prepare|transition|confirm|abandon-prepared|reconcile))\/?$/],
   ["GET", /^\/api\/v1\/reassessment\/(?:grants|decisions)\/?$/],
   ["POST", /^\/api\/v1\/reassessment\/(?:grants|decisions|apply|interrupted|grants\/[0-9a-fA-F-]{36}\/revoke)\/?$/],

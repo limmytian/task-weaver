@@ -61,6 +61,17 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
     return inputs;
   };
   return {
+    async listGitDeliveries(db: Database, projectId: string) {
+      z.string().uuid().parse(projectId);
+      return transact(db, async (tx, authority) => {
+        if (authority.actor.type !== 'human') throw new AuthorizationError();
+        await requireResource(tx, authority, 'project', projectId, 'project.manage');
+        return tx.select({ delivery: thinGitDeliveries }).from(thinGitDeliveries)
+          .innerJoin(repositories, eq(repositories.id, thinGitDeliveries.repositoryId))
+          .where(and(eq(thinGitDeliveries.projectId, projectId), repositoryPredicate(authority)))
+          .orderBy(desc(thinGitDeliveries.updatedAt)).limit(100).then(rows => rows.map(row => row.delivery));
+      });
+    },
     async reconcileGitDelivery(db: Database, raw: z.input<typeof workerGitReconcileSchema>) {
       const input = workerGitReconcileSchema.parse(raw);
       const inspect = (before?: { delivery: typeof thinGitDeliveries.$inferSelect; repository: typeof repositories.$inferSelect; attemptId: string }) => transact(db, async (tx, authority) => {

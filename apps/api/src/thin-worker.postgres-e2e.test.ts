@@ -259,6 +259,16 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   assert.equal(conflict.status, 409);
   assert.equal((await conflict.json() as any).currentVersion, stale.attempt!.planRevision + 1);
   await assert.rejects(owner.resolve(db, { attemptId: winner.attempt!.id, disposition: 'retry', reason: 'External effects checked' }));
+  const ownerHeaders = new Headers({ authorization: `Bearer ${ownerKey.rawKey}` });
+  const deliveriesResponse = await f.app.request(`/api/v1/thin-workers/git/deliveries?projectId=${f.project.id}`, { headers: ownerHeaders });
+  assert.equal(deliveriesResponse.status, 200, await deliveriesResponse.clone().text());
+  assert.ok(((await deliveriesResponse.json()) as Array<{ id: string; state: string }>).some(row => row.id === next.id && row.state === 'uncertain'));
+  assert.notEqual((await f.app.request(`/api/v1/thin-workers/git/deliveries?projectId=${f.project.id}`, { headers: gitHeaders })).status, 200);
+  await db.update(repositories).set({ visibility: 'private', ownerId: f.outsider.context.actor.id, ownerType: 'human' }).where(eq(repositories.id, gitRepository!.id));
+  const hiddenDeliveries = await f.app.request(`/api/v1/thin-workers/git/deliveries?projectId=${f.project.id}`, { headers: ownerHeaders });
+  assert.equal(hiddenDeliveries.status, 200);
+  assert.equal(((await hiddenDeliveries.json()) as unknown[]).length, 0);
+  await db.update(repositories).set({ visibility: 'instance', ownerId: null, ownerType: null }).where(eq(repositories.id, gitRepository!.id));
   const reconciliation = { deliveryId: next.id, reason: 'Verified the submitted branch on the trusted forge' };
   await assert.rejects(worker.reconcileGitDelivery(db, reconciliation));
   const failedReconciliation = createThinWorkerService(await context(ownerKey.rawKey), { forgeFetch: async () => new Response('{}', { status: 200 }) });
