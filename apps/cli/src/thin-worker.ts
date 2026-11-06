@@ -9,6 +9,7 @@ import { ExecutorSignalCollector, queryCodexQuota } from './executor-availabilit
 import { runCommand } from './async-command.js'
 import { buildAiEnvironment } from './repository-credentials.js'
 import { normalizeRequirementRepositoryEntries, provisionThinWorkspace, verifyThinWorkspaceBaselines } from './repository-workspace.js'
+import { deliverThinVersion, type ThinIntegrationSource } from './thin-version-integration.js'
 import { deliverThinGitRepository } from './thin-git-orchestrator.js'
 import { readThinCooldown, writeThinCooldown } from './thin-worker-cooldown.js'
 import { applyThinDeliveries, captureThinPatches, packageThinArtifacts, publishThinArtifact } from './thin-workspace-artifacts.js'
@@ -104,7 +105,6 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
     }
     try {
       await options.onPhase?.('preparing')
-      if (task.tags?.includes('worker:integration')) return finish('Version branch integration is not yet available in this worker')
       await heartbeat()
       const requirement = await request<{ id: string; title: string; description: string | null }>('GET', `/api/v1/requirements/${attempt.requirementId}`, undefined, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })
       const rawEntries = await request<unknown[]>('GET', `/api/v1/requirements/${attempt.requirementId}/repositories`, undefined, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })
@@ -113,6 +113,31 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
       workspacePath = workspace.rootPath
       const coordinator = task.tags?.includes('worker:coordinator') === true
       const acceptance = task.tags?.includes('worker:acceptance') === true
+      if (task.tags?.includes('worker:integration')) {
+        if (!options.gitIdentity) return finish('Version integration requires a signoff name and email; configure --git-name and --git-email')
+        const input = await request<{ acceptanceAttemptId: string; sources: ThinIntegrationSource[] }>('POST', '/api/v1/thin-workers/integration/inputs', fence, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]) })
+        if (input.sources.length !== workspace.repositories.length) throw new Error('Integration workspace does not match accepted repositories')
+        const delivered: Array<{ repositoryId: string; deliveryId: string; commit: string }> = []
+        await options.onPhase?.('publishing')
+        for (const source of input.sources) {
+          const version = await deliverThinVersion({ config: options.config, workspace, entries, source, fence, identity: options.gitIdentity, assertAuthority: heartbeat, signal: controller.signal,
+            resolveConflict: async cwd => {
+              const resolution = await executor.execute({ prompt: 'Resolve the current Git merge conflicts in this integration worktree. Preserve both accepted requirement and target branch changes, stage all resolved files, and do not commit, push, access credentials, or perform external side effects.', cwd, environment, model: options.model, effort: options.effort, signal: controller.signal, timeoutMs: options.timeoutMs })
+              if (!resolution.ok || controller.signal.aborted) throw new Error('Merge conflict resolution failed; inspect the preserved workspace')
+            },
+          })
+          if (version.state === 'uncertain') return finish('Version branch push outcome is uncertain; inspect the delivery before retrying')
+          delivered.push(version)
+        }
+        await heartbeat()
+        await mkdir(join(workspace.rootPath, 'artifacts'), { mode: 0o700 })
+        const reportPath = join(workspace.rootPath, 'result.md')
+        await writeFile(reportPath, `Accepted attempt: ${input.acceptanceAttemptId}\nVersion deliveries:\n${delivered.map(item => `- ${item.repositoryId}: ${item.commit} (delivery ${item.deliveryId})`).join('\n')}\n`, { mode: 0o600, flag: 'wx' })
+        const packagePath = await packageThinArtifacts(workspace, [], heartbeat, reportPath)
+        const output = await publishThinArtifact({ ...credential, projectId: options.projectId, ...fence, path: packagePath, assertAuthority: heartbeat, signal: controller.signal })
+        await request('POST', '/api/v1/thin-workers/result', { ...fence, resultKey: randomUUID(), outcome: 'done', summary: 'Accepted requirement integrated into its configured version branches', outputId: output.outputId }, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]) })
+        return { state: 'completed', taskId: task.id, attemptId: attempt.id, workspacePath, usage }
+      }
       if (acceptance) {
         for (const repository of workspace.repositories) {
           if (!repository.headCommit) throw new Error('Acceptance workspace baseline is unavailable')
