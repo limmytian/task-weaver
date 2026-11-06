@@ -369,6 +369,12 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   const submission = { attemptId: planning.attempt!.id, workerId: planning.attempt!.workerId, token: planning.token!, operationKey: randomUUID(), expectedRevision: planning.attempt!.planRevision, plan };
   const noManage = await f.identity.issueKey(f.owner.headers, agent.id, { name: 'Executor only', expiresAt: null, grants: [{ scope: 'project', projectId: f.project.id, permissions: ['resource.read', 'resource.write', 'execution.run'] }] });
   await assert.rejects(createThinWorkerService(await context(noManage.rawKey)).applyPlan(db, submission));
+  const noIntegration = { ...plan, requirements: [{ ...plan.requirements[0]!, tasks: plan.requirements[0]!.tasks.filter(task => task.key !== 'integrate') }] };
+  await assert.rejects(worker.applyPlan(db, { ...submission, operationKey: randomUUID(), plan: noIntegration }), /one version integration/);
+  const backwards = { ...plan, requirements: [{ ...plan.requirements[0]!, tasks: plan.requirements[0]!.tasks.map(task => task.key === 'accept' ? { ...task, dependsOn: ['one', 'two', 'integrate'] } : task) }] };
+  await assert.rejects(worker.applyPlan(db, { ...submission, operationKey: randomUUID(), plan: backwards }), /must follow acceptance/);
+  const noAcceptanceEdge = { ...plan, requirements: [{ ...plan.requirements[0]!, tasks: plan.requirements[0]!.tasks.map(task => task.key === 'integrate' ? { ...task, dependsOn: ['one'] } : task) }] };
+  await assert.rejects(worker.applyPlan(db, { ...submission, operationKey: randomUUID(), plan: noAcceptanceEdge }), /must depend on acceptance/);
   const unsafePlan = { ...plan, requirements: [{ ...plan.requirements[0]!, tasks: [{ key: 'one', title: 'Planned one' }, { key: 'two', title: 'Planned two' }, { key: 'accept', title: 'Review', tags: ['worker:acceptance'], dependsOn: ['one'] }] }] };
   await assert.rejects(worker.applyPlan(db, { ...submission, operationKey: randomUUID(), plan: unsafePlan }));
   const applied = await worker.applyPlan(db, submission);
