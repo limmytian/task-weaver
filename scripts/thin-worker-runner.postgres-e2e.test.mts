@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readdir } from 'node:fs/promises';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { once } from 'node:events';
 import { createRequire } from 'node:module';
 import { createDb, runMigrations, requirements, tasks, taskDependencies, workerAttempts } from '../packages/db/src/index';
 import { resourcePostgresFixture } from '../apps/api/src/resource-postgres-fixture';
 import { runThinOnce, type ThinExecutor } from '../apps/cli/src/thin-worker';
 const apiRequire = createRequire(new URL('../apps/api/package.json', import.meta.url));
+const cliRequire = createRequire(new URL('../apps/cli/package.json', import.meta.url));
 const { serve } = await import(apiRequire.resolve('@hono/node-server'));
 const { eq } = await import(apiRequire.resolve('drizzle-orm'));
 const url = process.env.TW_EXECUTION_RECOVERY_E2E_DATABASE_URL;
@@ -23,7 +27,7 @@ test('once worker runs a bounded deterministic executor and parks empty results'
   const agent = await f.identity.createAgent(f.owner.headers, { displayName: 'Deterministic executor' });
   await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: 'maintainer', explicitPermissions: [] });
   const issue = (id: string, manage: boolean) => f.identity.issueKey(f.owner.headers, id, { name: 'Runner fixture', expiresAt: null, grants: [{ scope: 'project', projectId: f.project.id, permissions: ['resource.read', 'resource.write', 'execution.run', ...(manage ? ['project.manage' as const] : [])] }] });
-  const owner = await issue(f.owner.context.actor.id, true), key = await issue(agent.id, false);
+  const owner = await issue(f.owner.context.actor.id, true), key = await issue(agent.id, true);
   const server = serve({ fetch: f.app.fetch, hostname: '127.0.0.1', port: 0 }); t.after(() => server.close()); if (!server.listening) await once(server, 'listening');
   const address = server.address(); assert.ok(address && typeof address !== 'string'); const apiUrl = `http://127.0.0.1:${address.port}`;
   const mode = await fetch(`${apiUrl}/api/v1/thin-workers/mode`, { method: 'POST', headers: { authorization: `Bearer ${owner.rawKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ projectId: f.project.id, mode: 'thin', inspection: 'Disposable fixture is empty' }) }); assert.equal(mode.status, 200);
@@ -37,6 +41,7 @@ test('once worker runs a bounded deterministic executor and parks empty results'
   const runs = await Promise.all([runThinOnce(opts), runThinOnce(opts)]);
   assert.deepEqual(new Set(runs.map(run => run.taskId)), new Set(children.map(child => child.id)));
   assert.ok(runs.every(run => run.state === 'completed'));
+  assert.ok(runs.every(run => run.usage === 'unknown'));
   for (const run of runs) {
     const attempt = await db.query.workerAttempts.findFirst({ where: eq(workerAttempts.id, run.attemptId!) });
     assert.ok(attempt!.heartbeatAt.getTime() > attempt!.createdAt.getTime());
@@ -50,6 +55,75 @@ test('once worker runs a bounded deterministic executor and parks empty results'
   assert.equal(quota.state, 'cooldown'); assert.equal((await db.select().from(workerAttempts)).length, before);
   const repeated = await runThinOnce({ ...opts, executor: { ...executor, async preflight() { throw new Error('Cooldown must avoid a new probe') } } });
   assert.equal(repeated.state, 'cooldown');
+  const [cliTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'CLI executor', createdBy: f.owner.context.actor.id }).returning();
+  const bin = join(root, 'bin'); await mkdir(bin);
+  const fakeCodex = join(bin, 'codex');
+  await writeFile(fakeCodex, `#!${process.execPath}\nconst fs=require('node:fs'),path=require('node:path'),readline=require('node:readline'); if(process.argv.includes('--version')) { console.log('fixture-codex'); } else if(process.argv.includes('app-server')) { readline.createInterface({input:process.stdin}).on('line',line=>{const v=JSON.parse(line); if(v.id===1) console.log(JSON.stringify({id:1,result:{}})); if(v.id===2) console.log(JSON.stringify({id:2,result:{rateLimits:{limitId:'fixture',primary:{usedPercent:5}}}}));}); } else { const i=process.argv.indexOf('-C'); fs.writeFileSync(path.join(process.argv[i+1],'result.md'),'CLI fixture evidence\\n'); }\n`);
+  await chmod(fakeCodex, 0o700);
+  const cli = await promisify(execFile)('pnpm', ['exec', 'tsx', 'src/index.ts', 'worker', 'start', '--project', f.project.id, '--model', 'fixture', '--think', 'low', '--once'], { cwd: resolve('apps/cli'), timeout: 30000, env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}`, TW_CONFIG_DIR: join(root, 'cli-process'), TW_API_URL: apiUrl, TW_API_KEY: key.rawKey, TW_NODE_ID: 'cli-fixture', TW_CODEX_HOME: join(root, 'codex-home') } });
+  const cliOutcome = JSON.parse(cli.stdout);
+  assert.equal(cliOutcome.taskId, cliTask!.id); assert.equal(cliOutcome.state, 'completed');
+  const presenceResponse = await fetch(`${apiUrl}/api/v1/thin-workers/presence?${new URLSearchParams({ projectId: f.project.id })}`, { headers: { authorization: `Bearer ${key.rawKey}` } });
+  assert.equal(presenceResponse.status, 200);
+  const presenceRows = await presenceResponse.json() as Array<{ nodeId: string; status: string }>;
+  assert.equal(presenceRows.find(row => row.nodeId === 'cli-fixture')?.status, 'offline');
+  const residentEnv = { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}`, TW_CONFIG_DIR: join(root, 'resident-process'), TW_API_URL: apiUrl, TW_API_KEY: key.rawKey, TW_NODE_ID: 'resident-fixture', TW_CODEX_HOME: join(root, 'resident-codex-home') };
+  const resident = spawn(process.execPath, ['--import', cliRequire.resolve('tsx'), 'src/index.ts', 'worker', 'start', '--project', f.project.id, '--model', 'fixture', '--think', 'low', '--poll-seconds', '30'], { cwd: resolve('apps/cli'), env: residentEnv, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  t.after(() => { try { if (resident.pid) process.kill(-resident.pid, 'SIGKILL'); } catch {} });
+  let residentOutput = '', residentError = '';
+  resident.stdout.on('data', chunk => { residentOutput += chunk.toString() });
+  resident.stderr.on('data', chunk => { residentError += chunk.toString() });
+  const until = async (condition: () => boolean | Promise<boolean>, label: string) => {
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) { if (await condition()) return; await new Promise(resolve => setTimeout(resolve, 100)); }
+    throw new Error(`${label}; stdout=${residentOutput.slice(0, 1000)} stderr=${residentError.slice(0, 1000)}`);
+  };
+  await until(() => /"state":\s*"empty"/.test(residentOutput), 'Resident worker did not perform its initial queue query');
+  const create = await fetch(`${apiUrl}/api/v1/projects/${f.project.id}/tasks`, { method: 'POST', headers: { authorization: `Bearer ${owner.rawKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ requirementId: req!.id, title: 'SSE wake task' }) });
+  assert.equal(create.status, 201, await create.clone().text());
+  const wakeTask = await create.json() as { id: string };
+  await until(async () => (await db.query.tasks.findFirst({ where: eq(tasks.id, wakeTask.id) }))?.status === 'done', 'SSE did not wake the resident worker');
+  if (resident.pid) process.kill(resident.pid, 'SIGTERM');
+  await until(() => resident.exitCode !== null || resident.signalCode !== null, 'Resident worker did not stop');
+  await until(async () => {
+    const rows = await (await fetch(`${apiUrl}/api/v1/thin-workers/presence?${new URLSearchParams({ projectId: f.project.id })}`, { headers: { authorization: `Bearer ${key.rawKey}` } })).json() as Array<{ nodeId: string; status: string }>;
+    return rows.find(row => row.nodeId === 'resident-fixture')?.status === 'offline';
+  }, 'Resident presence did not report a clean stop');
+  const [coordinator] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Coordinator', tags: ['worker:coordinator'], createdBy: f.owner.context.actor.id }).returning();
+  const planner: ThinExecutor = { ...executor, async execute(input) {
+    await writeFile(join(input.cwd, 'result.md'), 'Plan and acceptance criteria recorded.\n');
+    await writeFile(join(input.cwd, 'plan.json'), JSON.stringify({ projectId: f.project.id, requirements: [{ key: 'current', existingId: req!.id, tasks: [{ key: 'one', title: 'Planned A' }, { key: 'two', title: 'Planned B' }, { key: 'accept', title: 'Planned acceptance', tags: ['worker:acceptance'], dependsOn: ['one', 'two'] }] }] }));
+    return { ok: true, reason: 'Fixture plan', quotaBlocked: false };
+  } };
+  const planned = await runThinOnce({ ...opts, config: { ...config, nodeId: 'planner-node' }, executor: planner });
+  assert.equal(planned.taskId, coordinator!.id); assert.equal(planned.state, 'completed');
+  const implementations = await Promise.all(['child-node-a', 'child-node-b'].map(nodeId => runThinOnce({ ...opts, config: { ...config, nodeId } })));
+  assert.ok(implementations.every(result => result.state === 'completed'));
+  const reviewer: ThinExecutor = { ...executor, async execute(input) {
+    assert.equal((await readdir(join(input.cwd, 'inputs'))).length, 3);
+    await writeFile(join(input.cwd, 'result.md'), 'Both task artifacts reviewed.\n');
+    await writeFile(join(input.cwd, 'decision.json'), JSON.stringify({ decision: 'accept', summary: 'Both artifacts verified' }));
+    return { ok: true, reason: 'Fixture review', quotaBlocked: false };
+  } };
+  const reviewed = await runThinOnce({ ...opts, config: { ...config, nodeId: 'review-node' }, executor: reviewer });
+  assert.equal(reviewed.state, 'completed');
+  const reviewedTask = await db.query.tasks.findFirst({ where: eq(tasks.id, reviewed.taskId!) });
+  assert.equal(reviewedTask!.title, 'Planned acceptance');
+  const [needsWork] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Requires follow-up', createdBy: f.owner.context.actor.id }).returning();
+  const [rejectTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Review findings', tags: ['worker:acceptance'], createdBy: f.owner.context.actor.id }).returning();
+  await db.insert(taskDependencies).values({ taskId: rejectTask!.id, dependsOnTaskId: needsWork!.id, type: 'blocks' });
+  assert.equal((await runThinOnce({ ...opts, config: { ...config, nodeId: 'work-node' } })).taskId, needsWork!.id);
+  const findingReviewer: ThinExecutor = { ...reviewer, async execute(input) {
+    await writeFile(join(input.cwd, 'result.md'), 'A required check is missing.\n');
+    await writeFile(join(input.cwd, 'decision.json'), JSON.stringify({ decision: 'changes_requested', summary: 'Required check missing' }));
+    return { ok: true, reason: 'Fixture review', quotaBlocked: false };
+  } };
+  const finding = await runThinOnce({ ...opts, config: { ...config, nodeId: 'finding-node' }, executor: findingReviewer });
+  assert.equal(finding.taskId, rejectTask!.id); assert.equal(finding.state, 'attention');
+  assert.equal((await db.query.tasks.findFirst({ where: eq(tasks.id, rejectTask!.id) }))!.status, 'in_review');
+  const findingAttempt = await db.query.workerAttempts.findFirst({ where: eq(workerAttempts.id, finding.attemptId!) });
+  assert.equal(findingAttempt!.result!.acceptanceDecision, 'changes_requested');
+  assert.ok(findingAttempt!.result!.outputId);
   const [networkTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Network interruption', createdBy: f.owner.context.actor.id }).returning();
   const interrupted = await runThinOnce({ ...opts, config: { ...config, nodeId: 'other-node' }, executor: { ...executor, async execute(input) { await writeFile(join(input.cwd, 'result.md'), 'Local work\n'); server.close(); server.closeAllConnections(); return { ok: true, reason: 'Fixture', quotaBlocked: false } } } });
   assert.equal(interrupted.taskId, networkTask!.id);

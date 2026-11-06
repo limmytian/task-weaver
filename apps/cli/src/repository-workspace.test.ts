@@ -19,6 +19,11 @@ import {
   type RequirementRepositoryEntry,
 } from './repository-workspace.js'
 
+// Fixture repositories use file URLs and must never consult host credential helpers.
+process.env.GIT_CONFIG_SYSTEM = '/dev/null'
+process.env.GIT_TERMINAL_PROMPT = '0'
+process.env.GIT_ASKPASS = '/usr/bin/false'
+
 test('repository entries normalize Drizzle relation rows at the daemon API boundary', () => {
   const repository = {
     id: 'repository-1',
@@ -48,6 +53,7 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
   const previousHome = process.env.HOME
   const home = join(root, 'home')
   await mkdir(home, { recursive: true })
+  await writeFile(join(home, '.gitconfig'), '[credential]\n\thelper = store --file /dev/null\n')
   process.env.HOME = home
   try {
     const remote = await createRemote(root, 'thin')

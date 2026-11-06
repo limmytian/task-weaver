@@ -25,10 +25,12 @@ test('deterministic workers acquire, isolate, publish and unblock acceptance', {
   await runMigrations(url!);
   const db = createDb(url!); t.after(() => db.$client.end());
   const root = await mkdtemp(join(tmpdir(), 'tw-thin-deterministic-'));
-  const oldHome = process.env.HOME, oldStorage = process.env.TW_ATTACHMENT_STORAGE_DIR;
+  const oldHome = process.env.HOME, oldStorage = process.env.TW_ATTACHMENT_STORAGE_DIR, oldSystem = process.env.GIT_CONFIG_SYSTEM, oldGlobal = process.env.GIT_CONFIG_GLOBAL;
   process.env.HOME = join(root, 'home'); process.env.TW_ATTACHMENT_STORAGE_DIR = join(root, 'storage');
+  process.env.GIT_CONFIG_SYSTEM = '/dev/null'; process.env.GIT_CONFIG_GLOBAL = join(root, 'gitconfig');
   await mkdir(process.env.HOME, { recursive: true });
-  t.after(async () => { if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; if (oldStorage === undefined) delete process.env.TW_ATTACHMENT_STORAGE_DIR; else process.env.TW_ATTACHMENT_STORAGE_DIR = oldStorage; await rm(root, { recursive: true, force: true }); });
+  await writeFile(process.env.GIT_CONFIG_GLOBAL, '[credential]\n\thelper = store --file /dev/null\n');
+  t.after(async () => { for (const [key, value] of [['HOME', oldHome], ['TW_ATTACHMENT_STORAGE_DIR', oldStorage], ['GIT_CONFIG_SYSTEM', oldSystem], ['GIT_CONFIG_GLOBAL', oldGlobal]] as const) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } await rm(root, { recursive: true, force: true }); });
   const git = (args: string[], cwd: string) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   const seed = join(root, 'seed'), remotePath = join(root, 'remote.git'); await mkdir(seed);
   git(['init'], seed); git(['checkout', '-b', 'main'], seed); git(['config', 'user.name', 'Fixture'], seed); git(['config', 'user.email', 'fixture@example.test'], seed);

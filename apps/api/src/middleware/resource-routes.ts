@@ -1,7 +1,7 @@
 /** Exact authorized resource/retrieval routes; execution and unconverted surfaces remain closed. */
 const ordinaryRoutes: Array<[string, RegExp]> = [
-  ["GET", /^\/api\/v1\/thin-workers\/(?:attempts|events)\/?$/],
-  ["POST", /^\/api\/v1\/thin-workers\/(?:mode|acquire|heartbeat|output|result|release|resolve)\/?$/],
+  ["GET", /^\/api\/v1\/thin-workers\/(?:attempts|events|presence)\/?$/],
+  ["POST", /^\/api\/v1\/thin-workers\/(?:mode|acquire|heartbeat|inputs|output|plan|result|release|resolve|presence(?:\/stop)?)\/?$/],
   ["GET", /^\/api\/v1\/reassessment\/(?:grants|decisions)\/?$/],
   ["POST", /^\/api\/v1\/reassessment\/(?:grants|decisions|apply|interrupted|grants\/[0-9a-fA-F-]{36}\/revoke)\/?$/],
   ["GET", /^\/api\/v1\/events(?:\/(?:checkpoint|incidents))?\/?$/],
