@@ -2,13 +2,14 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { createHash, randomBytes } from 'node:crypto';
 import { activityLog, documentFileVersions, documents, executionControls, planDrafts, projects, requirementClaims, requirementRepositories, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinGitDeliveries, thinWorkers, workerAttempts, workerPlanReceipts, workflowOutputs, type Database } from '@task-weaver/db';
-import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerGitPrepareSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
+import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { lockIdentityLifecycle } from './auth-security';
 import { resourceAuthority, requireResource } from './resource-authorization';
 import { attachmentStorage } from './attachment-storage';
 import { emit } from '@task-weaver/realtime';
 import { createResourceServices } from './resource-services';
 import { createPlanDraft, validatePlanDraft, applyPlanDraft } from './plans';
+import { advanceGitDelivery } from './thin-git-delivery-policy';
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 const safeText = (value: string, limit: number) => redactObservabilityText(value, limit).value.replace(/\b(?:tw|twd|twb|twa)_[0-9a-f]{64}\b/gi, '[redacted]');
@@ -58,6 +59,30 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
     return inputs;
   };
   return {
+    async transitionGitDelivery(db: Database, raw: z.input<typeof workerGitTransitionSchema>) {
+      const input = workerGitTransitionSchema.parse(raw);
+      return transact(db, async (tx, authority) => {
+        if (authority.actor.type !== 'agent' || context.credential.kind !== 'api_key') throw new AuthorizationError();
+        const [existing] = await tx.select().from(workerAttempts).where(eq(workerAttempts.id, input.attemptId));
+        if (!existing) throw new NotFoundError('Attempt not found');
+        await requireResource(tx, authority, 'task', existing.taskId, 'execution.run');
+        await requireResource(tx, authority, 'task', existing.taskId, 'resource.write');
+        const project = await lockProject(tx, existing.projectId);
+        if (project.workerMode !== 'thin' || existing.actorId !== authority.actor.id || existing.credentialId !== context.credential.id || existing.workerId !== input.workerId || existing.tokenHash !== digest(input.token)) throw new AuthorizationError();
+        const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, existing.requirementId)).for('update');
+        const [attempt] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.id, existing.id), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`)).for('update');
+        const [task] = await tx.select().from(tasks).where(eq(tasks.id, existing.taskId)).for('update');
+        if (!attempt || !requirement || !task || task.status !== 'in_progress' || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Attempt or plan is no longer current', requirement?.planRevision ?? 0);
+        const [delivery] = await tx.select().from(thinGitDeliveries).where(and(eq(thinGitDeliveries.id, input.deliveryId), eq(thinGitDeliveries.attemptId, attempt.id))).for('update');
+        if (!delivery) throw new NotFoundError('Delivery not found');
+        if ((input.event === 'start_push' && delivery.state === 'pushing') || (input.event === 'response_lost' && delivery.state === 'uncertain')) return delivery;
+        let state: ReturnType<typeof advanceGitDelivery>;
+        try { state = advanceGitDelivery(delivery.state, input.event); }
+        catch { throw new ConflictError('Delivery state changed', requirement.planRevision); }
+        const [updated] = await tx.update(thinGitDeliveries).set({ state, updatedAt: sql`clock_timestamp()` }).where(eq(thinGitDeliveries.id, delivery.id)).returning();
+        return updated!;
+      });
+    },
     async prepareGitDelivery(db: Database, raw: z.input<typeof workerGitPrepareSchema>) {
       const input = workerGitPrepareSchema.parse(raw);
       return transact(db, async (tx, authority) => {
