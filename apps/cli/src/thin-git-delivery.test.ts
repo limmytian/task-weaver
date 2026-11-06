@@ -21,11 +21,11 @@ test('task commits preserve the baseline and refuse lost authority', async t => 
   await writeFile(join(cwd, 'file.txt'), 'changed\n')
   await assert.rejects(commitThinWorkspace({ cwd, baseline, message: 'Task', assertAuthority: async () => { throw new Error('expired') } }), /expired/)
   assert.equal(git('rev-parse', 'HEAD'), baseline)
-  const result = await commitThinWorkspace({ cwd, baseline, message: 'Task delivery', assertAuthority: async () => {} })
+  const result = await commitThinWorkspace({ cwd, baseline, message: 'Task delivery', identity: { name: 'Delivery Operator', email: 'delivery@example.test' }, assertAuthority: async () => {} })
   assert.equal(result.changed, true)
   assert.equal(git('rev-parse', 'HEAD'), result.commit)
   assert.equal(git('rev-parse', 'HEAD^'), baseline)
-  assert.match(git('log', '-1', '--format=%B'), /Signed-off-by: Fixture <fixture@example.test>/)
+  assert.match(git('log', '-1', '--format=%B'), /Signed-off-by: Delivery Operator <delivery@example.test>/)
   await assert.rejects(commitThinWorkspace({ cwd, baseline, message: 'Stale', assertAuthority: async () => {} }), /baseline/)
 })
 
