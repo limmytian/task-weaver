@@ -824,3 +824,33 @@ export async function verifyThinWorkspaceBaselines(options: {
   }
   await options.assertAuthority()
 }
+
+/** Fetch the current requirement branch without modifying the task worktree. */
+export async function fetchThinIntegrationTarget(options: {
+  config: Config
+  workspace: CompositeWorkspace
+  entries: RequirementRepositoryEntry[]
+  repositoryId: string
+  assertAuthority: () => Promise<void>
+  signal?: AbortSignal
+}) {
+  const repository = options.workspace.repositories.find(item => item.repositoryId === options.repositoryId)
+  const entry = options.entries.find(item => item.repository.id === options.repositoryId && item.link.id === repository?.linkId)
+  if (!repository || !entry || !repository.headCommit || !entry.link.workingBranch || entry.link.workingBranch !== repository.baseBranch) throw new Error('A configured requirement branch is required for Git delivery')
+  return withRepositoryWorkspaceLock({ config: options.config, repository: entry.repository, operation: 'task-integration-target', signal: options.signal }, async () => {
+    await options.assertAuthority()
+    const credential = resolveRepositoryCredential(options.config, entry.repository, 'read')
+    if (credential.state !== 'available') throw new Error(`Repository ${entry.repository.canonicalKey} is not ready: ${credential.reasonCode}`)
+    const adapter = cancellableAdapter(entry.repository.provider, options.signal, options.assertAuthority)
+    const remote = remoteFor(entry.repository, credential.transport)
+    if (!remote || await existingOrigin(adapter, credential, repository.basePath) !== remote) throw new Error('Workspace remote identity changed')
+    const valid = await adapter.git(credential, ['check-ref-format', '--branch', entry.link.workingBranch!], repository.basePath)
+    if (!valid.ok) throw new Error('Invalid requirement branch')
+    const fetched = await adapter.git(credential, ['fetch', '--prune', 'origin'], repository.basePath)
+    if (!fetched.ok) throw new Error('Unable to fetch the requirement branch')
+    const target = await adapter.git(credential, ['rev-parse', '--verify', `refs/remotes/origin/${entry.link.workingBranch}^{commit}`], repository.basePath)
+    if (!target.ok || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(target.stdout.trim())) throw new Error('Requirement branch is unavailable')
+    await options.assertAuthority()
+    return target.stdout.trim()
+  })
+}

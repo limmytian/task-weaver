@@ -14,6 +14,7 @@ import {
   normalizeRequirementRepositoryEntries,
   provisionCompositeWorkspace,
   provisionThinWorkspace,
+  fetchThinIntegrationTarget,
   verifyThinWorkspaceBaselines,
   withRepositoryWorkspaceLock,
   type RequirementRepositoryEntry,
@@ -116,6 +117,10 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
     git(['commit', '-m', 'advance baseline'], join(root, 'thin-seed'))
     git(['push', 'origin', 'main'], join(root, 'thin-seed'))
     await assert.rejects(verifyThinWorkspaceBaselines(baselineOptions), /baseline changed/)
+    const target = await fetchThinIntegrationTarget({ ...baselineOptions, repositoryId: repository.repository.id })
+    assert.equal(target, git(['rev-parse', 'HEAD'], join(root, 'thin-seed')))
+    assert.notEqual(target, first.repositories[0]!.headCommit)
+    await assert.rejects(fetchThinIntegrationTarget({ ...baselineOptions, entries: [{ ...repository, link: { ...repository.link, workingBranch: null } }], repositoryId: repository.repository.id }), /configured requirement branch/)
     assert.equal(await readFile(join(first.repositories[0]!.worktreePath, 'README.md'), 'utf8'), 'dirty first\n')
     git(['config', 'user.name', 'Task Weaver Test'], second.repositories[0]!.worktreePath)
     git(['config', 'user.email', 'test@example.test'], second.repositories[0]!.worktreePath)
