@@ -189,6 +189,17 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     const inputResponse = await fetch(`${apiUrl}/api/v1/thin-workers/integration/inputs`, { method: 'POST', headers: { authorization: `Bearer ${key.rawKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ attemptId: lane.attempt.id, workerId: integrationWorker, token: lane.token }) });
     assert.equal(inputResponse.status, 200, await inputResponse.clone().text()); const integrationInputs = await inputResponse.json() as any;
     assert.equal(integrationInputs.acceptanceAttemptId, gitReviewed.attemptId); assert.equal(integrationInputs.sources[0].sourceCommit, acceptedSnapshot!.commit); assert.equal(integrationInputs.sources[0].targetBranch, 'release');
+    const integrationFence = { attemptId: lane.attempt.id, workerId: integrationWorker, token: lane.token };
+    const readIntegration = () => fetch(`${apiUrl}/api/v1/thin-workers/integration/inputs`, { method: 'POST', headers: { authorization: `Bearer ${key.rawKey}`, 'content-type': 'application/json' }, body: JSON.stringify(integrationFence) });
+    await db.update(requirementRepositories).set({ baseBranch: 'main' }).where(eq(requirementRepositories.repositoryId, gitRepo!.id));
+    assert.equal((await readIntegration()).status, 409, 'source and target must remain distinct');
+    await db.update(requirementRepositories).set({ baseBranch: 'release', workingBranch: 'changed' }).where(eq(requirementRepositories.repositoryId, gitRepo!.id));
+    assert.equal((await readIntegration()).status, 409, 'changed source branch invalidates acceptance');
+    await db.update(requirementRepositories).set({ workingBranch: 'main' }).where(eq(requirementRepositories.repositoryId, gitRepo!.id));
+    await db.update(tasks).set({ status: 'in_review' }).where(eq(tasks.id, gitAcceptance!.id));
+    assert.equal((await readIntegration()).status, 409, 'acceptance must remain completed');
+    await db.update(tasks).set({ status: 'done' }).where(eq(tasks.id, gitAcceptance!.id));
+
     const premature = await fetch(`${apiUrl}/api/v1/thin-workers/result`, { method: 'POST', headers: { authorization: `Bearer ${key.rawKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ attemptId: lane.attempt.id, workerId: integrationWorker, token: lane.token, resultKey: crypto.randomUUID(), outcome: 'done', summary: 'Premature integration', outputId: crypto.randomUUID() }) });
     assert.equal(premature.status, 400); assert.match((await premature.json() as any).error, /not yet available/);
 
