@@ -95,8 +95,13 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         if (!attempt || attempt.live || !delivery || !['pushing', 'uncertain', 'confirmed'].includes(delivery.state)) throw new ConflictError('Only an expired or finished submitted delivery can be reconciled', 0);
         const [repository] = await tx.select().from(repositories).where(and(eq(repositories.id, delivery.repositoryId), repositoryPredicate(authority))).for('share');
         const [link] = await tx.select().from(requirementRepositories).where(and(eq(requirementRepositories.requirementId, initialAttempt.requirementId), eq(requirementRepositories.repositoryId, delivery.repositoryId))).for('share');
-        if (!repository || repository.status !== 'active' || link?.workingBranch !== delivery.targetBranch) throw new ConflictError('Repository or target changed', 0);
-        if (before && (attempt.id !== before.attemptId || delivery.repositoryId !== before.delivery.repositoryId || delivery.targetBranch !== before.delivery.targetBranch || delivery.expectedHead !== before.delivery.expectedHead || delivery.proposedHead !== before.delivery.proposedHead || gitRepositoryIdentity(repository) !== gitRepositoryIdentity(before.repository))) throw new ConflictError('Delivery evidence changed', 0);
+        if (!repository || repository.status !== 'active' || (delivery.purpose === 'integration' ? link?.baseBranch : link?.workingBranch) !== delivery.targetBranch) throw new ConflictError('Repository or target changed', 0);
+        if (delivery.purpose === 'integration') {
+          const [accepted] = delivery.acceptanceAttemptId ? await tx.select().from(workerAttempts).where(and(eq(workerAttempts.id, delivery.acceptanceAttemptId), eq(workerAttempts.status, 'completed'))).for('share') : [];
+          const [snapshot] = accepted ? await tx.select().from(workerAcceptanceSnapshots).where(and(eq(workerAcceptanceSnapshots.attemptId, accepted.id), eq(workerAcceptanceSnapshots.repositoryId, delivery.repositoryId))).for('share') : [];
+          if (!accepted || accepted.result?.acceptanceDecision !== 'accept' || accepted.result.outcome !== 'done' || !snapshot || snapshot.commit !== delivery.acceptedCommit || snapshot.branch !== delivery.sourceBranch || snapshot.repositoryIdentity !== gitRepositoryIdentity(repository) || link?.workingBranch !== delivery.sourceBranch) throw new ConflictError('Accepted integration provenance changed', 0);
+        }
+        if (before && (attempt.id !== before.attemptId || delivery.repositoryId !== before.delivery.repositoryId || delivery.targetBranch !== before.delivery.targetBranch || delivery.expectedHead !== before.delivery.expectedHead || delivery.proposedHead !== before.delivery.proposedHead || delivery.purpose !== before.delivery.purpose || delivery.acceptedCommit !== before.delivery.acceptedCommit || delivery.acceptanceAttemptId !== before.delivery.acceptanceAttemptId || delivery.sourceBranch !== before.delivery.sourceBranch || gitRepositoryIdentity(repository) !== gitRepositoryIdentity(before.repository))) throw new ConflictError('Delivery evidence changed', 0);
         if (before && delivery.state !== 'confirmed') {
           const [updated] = await tx.update(thinGitDeliveries).set({ state: 'confirmed', updatedAt: sql`clock_timestamp()` }).where(eq(thinGitDeliveries.id, delivery.id)).returning();
           await tx.insert(activityLog).values({ entityType: 'task', entityId: initialAttempt.taskId, action: 'worker_git_delivery_reconciled', actorId: authority.actor.id, actorType: authority.actor.type, metadata: { deliveryId: delivery.id, attemptId: attempt.id, reason: safeText(input.reason, 2000) } });
@@ -107,6 +112,10 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
       const before = await inspect();
       if (before.delivery.state === 'confirmed') return before.delivery;
       await verifyTrustedGitAncestry(before.repository, before.delivery.expectedHead, before.delivery.proposedHead, { fetch: options.forgeFetch });
+      if (before.delivery.purpose === 'integration') {
+        if (!before.delivery.acceptedCommit) throw new ValidationError('Accepted commit is unavailable');
+        await verifyTrustedGitAncestry(before.repository, before.delivery.acceptedCommit, before.delivery.proposedHead, { fetch: options.forgeFetch });
+      }
       await readTrustedDirectMerge(before.repository, before.delivery.targetBranch, before.delivery.proposedHead, { fetch: options.forgeFetch });
       return (await inspect(before)).delivery;
     },
