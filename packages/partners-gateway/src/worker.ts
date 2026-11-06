@@ -1,4 +1,5 @@
 import { createGatewayTwAuthority } from './tw-authority.js';
+export { createGatewayTwAuthority };
 import type { Database } from "@task-weaver/db";
 import { hostname } from "node:os";
 import {
@@ -7,7 +8,6 @@ import {
   buildTiCompletionFromGateway,
   createPartnersGatewayClient,
   getPartnersGatewayWorkerConfig,
-  isTransientGatewayError,
   normalizeGatewayArtifactReferences,
   type PartnersGatewayConfig,
   type PartnersGatewayJob,
@@ -223,24 +223,6 @@ export class TiAgentGatewayWorker {
       if (signal.aborted) return true;
       const message = error instanceof Error ? error.message : String(error);
       this.lastError = message.slice(0, 8000);
-      if (isTransientGatewayError(error)) {
-        const delayMs = tiAgentService.tiAgentRetryBackoffMs(
-          run.retryCount + 1,
-          this.options.retryBaseDelayMs,
-          this.options.retryMaxDelayMs,
-        );
-        const retry = await this.dependencies.scheduleRunRetry(this.db, run.id, {
-          workerId: this.options.workerId,
-          errorMessage: message,
-          delayMs,
-        }, this.options.actor);
-        if (retry) {
-          this.dependencies.log.info(
-            `Partners Gateway Ti run '${run.id}' retry ${retry.retryCount}/${retry.maxRetries} scheduled for ${retry.nextAttemptAt?.toISOString()}`,
-          );
-          return true;
-        }
-      }
       await this.dependencies.completeRun(this.db, run.id, {
         status: "failed",
         actualProvider: "partners-gateway",

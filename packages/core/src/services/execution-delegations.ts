@@ -42,8 +42,8 @@ export async function liveExecutionAuthority(db: AuthDatabase, id: string, now =
     if (!row.tiRunId || row.daemonId) throw new AuthenticationError('invalid_credential');
     const live = await liveTiRunAuthority(database, row.tiRunId);
     if (live.binding.executorActorId !== row.actorId || live.binding.executorCredentialId !== row.parentCredentialId
-      || live.binding.initiatorActorId !== row.initiatorActorId || live.binding.claimId !== row.runId
-      || live.binding.leaseGeneration !== Number(row.leaseGeneration) || live.claim?.workerIndex !== row.workerIndex
+      || live.binding.initiatorActorId !== row.initiatorActorId || live.binding.attemptId !== row.runId
+      || live.binding.leaseGeneration !== Number(row.leaseGeneration) || live.attempt?.nodeId !== row.workerIndex
       || row.taskIds.length !== 1 || row.taskIds[0] !== live.task.id || live.task.projectId !== row.projectId || live.task.requirementId !== row.requirementId) throw new AuthenticationError('invalid_credential');
     if (!grantsAreCovered(credentialGrantsSchema.parse(row.grants), live.initiator.grants)) throw new AuthorizationError();
   } else {

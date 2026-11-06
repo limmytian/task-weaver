@@ -187,7 +187,7 @@ test("shutdown after acquisition does not submit new gateway work", async () => 
   assert.deepEqual(calls, []);
 });
 
-test("transient gateway failures schedule durable retry without terminal completion", async () => {
+test("uncertain gateway failures are recorded for inspection without automatic retry", async () => {
   const calls: string[] = [];
   const worker = new TiAgentGatewayWorker(
     {} as never,
@@ -217,6 +217,6 @@ test("transient gateway failures schedule durable retry without terminal complet
     },
   );
 
-  assert.equal(await worker.runOnce(new AbortController().signal), true);
-  assert.deepEqual(calls, ["retry:100"]);
+  await assert.rejects(() => worker.runOnce(new AbortController().signal), /network unavailable/);
+  assert.deepEqual(calls, ["complete"]);
 });

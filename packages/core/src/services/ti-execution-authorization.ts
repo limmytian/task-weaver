@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { and, eq } from 'drizzle-orm';
-import { tiAgentRuns, tiAgentPolicies, tiAgentModelConfigs, tasks, requirementClaims, requirements, taskDependencies, type Database } from '@task-weaver/db';
+import { tiAgentRuns, tiAgentPolicies, tiAgentModelConfigs, tasks, workerAttempts, requirements, taskDependencies, type Database } from '@task-weaver/db';
 import { AuthenticationError, AuthorizationError, credentialGrantsSchema } from '@task-weaver/contracts';
 import { getBoundCredentialAuthority } from './api-keys';
 import { intersectGrants } from './auth-principals';
@@ -12,6 +12,7 @@ export const tiRunAuthorizationSchema = z.object({
   modelConfigId: z.string().uuid(), modelVersion: z.string(), policyId: z.string().uuid(), policyVersion: z.string(),
   ownerId: z.string().uuid(), executorActorId: z.string().uuid(),
   executorCredentialId: z.string().uuid().nullable(), claimId: z.string().uuid().nullable(),
+  attemptId: z.string().uuid().nullable().optional(),
   attemptExpiresAt: z.string().datetime().nullable(), leaseGeneration: z.number().int().positive().nullable(), workerId: z.string().min(1).nullable(),
 }).strict();
 
@@ -38,19 +39,19 @@ export async function liveTiRunAuthority(db: Database, runId: string, requireLea
     if (!schedule || schedule.targetScope !== 'project' || schedule.projectId !== task.projectId || schedule.requirementId !== task.requirementId || scheduled?.generatedTaskId !== task.id || schedule.status !== 'active') throw new AuthorizationError();
   }
   if (requireLease) {
-    if (!binding.attemptExpiresAt || Date.parse(binding.attemptExpiresAt) <= Date.now() || !binding.executorCredentialId || !binding.claimId || !binding.leaseGeneration || !binding.workerId || !run.leaseExpiresAt || run.leaseExpiresAt <= new Date() || !['running', 'in_review'].includes(run.status)) throw new AuthenticationError('invalid_credential');
+    if (!binding.attemptExpiresAt || Date.parse(binding.attemptExpiresAt) <= Date.now() || !binding.executorCredentialId || !binding.attemptId || !binding.leaseGeneration || !binding.workerId || !run.leaseExpiresAt || run.leaseExpiresAt <= new Date() || !['running', 'in_review'].includes(run.status)) throw new AuthenticationError('invalid_credential');
     const executor = await getBoundCredentialAuthority(db, { actorId: binding.executorActorId, credentialId: binding.executorCredentialId, credentialKind: 'api_key' });
     await requireResource(db, executor, 'task', task.id, 'execution.run');
     await requireResource(db, executor, 'task', task.id, 'resource.write');
-    const claim = await db.query.requirementClaims.findFirst({ where: eq(requirementClaims.id, binding.claimId) });
+    const attempt = await db.query.workerAttempts.findFirst({ where: eq(workerAttempts.id, binding.attemptId) });
     const requirement = await db.query.requirements.findFirst({ where: eq(requirements.id, task.requirementId) });
-    if (!claim || claim.requirementId !== task.requirementId || claim.claimedBy !== binding.executorActorId || claim.claimedByType !== 'agent' || claim.daemonId !== null
-      || claim.workerIndex !== `ti:${run.id}:${binding.workerId}` || claim.generation !== binding.leaseGeneration || claim.expiresAt <= new Date()
-      || !requirement || requirement.projectId !== task.projectId || requirement.leaseGeneration !== binding.leaseGeneration || ['done', 'cancelled', 'archived'].includes(requirement.status)
+    if (!attempt || attempt.requirementId !== task.requirementId || attempt.projectId !== task.projectId || attempt.taskId !== task.id || attempt.actorId !== binding.executorActorId || attempt.credentialId !== binding.executorCredentialId
+      || attempt.nodeId !== `ti:${run.id}:${binding.workerId}` || attempt.status !== 'running' || attempt.expiresAt <= new Date()
+      || !requirement || requirement.projectId !== task.projectId || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)
       || run.leaseOwnerId !== binding.workerId || run.leaseOwnerType !== 'agent') throw new AuthenticationError('invalid_credential');
-    return { run, binding, task, policy, model, initiator: authority, executor, claim };
+    return { run, binding, task, policy, model, initiator: authority, executor, attempt };
   }
-  return { run, binding, task, policy, model, initiator: authority, executor: null, claim: null };
+  return { run, binding, task, policy, model, initiator: authority, executor: null, attempt: null };
 }
 
 export async function assertTiTaskReady(db: Database, task: typeof tasks.$inferSelect) {

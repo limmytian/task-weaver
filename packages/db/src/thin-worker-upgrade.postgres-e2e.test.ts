@@ -34,6 +34,11 @@ test('worker-only upgrade preserves history and refuses active legacy daemons', 
   const [claim] = await client`INSERT INTO task_weaver.requirement_claims (requirement_id, claimed_by, claimed_by_type, daemon_id, expires_at) VALUES (${requirement!.id}, 'fixture', 'agent', ${daemon!.id}, clock_timestamp() + interval '2 minutes') RETURNING id`;
   await assert.rejects(runMigrations(url!), /Drain legacy daemon activity/);
   await client`UPDATE task_weaver.requirement_claims SET expires_at = clock_timestamp() - interval '1 second' WHERE id = ${claim!.id}`;
+  const [tiRun] = await client`INSERT INTO task_weaver.ti_agent_runs (status, created_by) VALUES ('running', 'fixture') RETURNING id`;
+  await assert.rejects(runMigrations(url!), /Inspect and resolve outstanding Ti runs/);
+  await client`UPDATE task_weaver.ti_agent_runs SET status = 'queued' WHERE id = ${tiRun!.id}`;
+  await assert.rejects(runMigrations(url!), /Inspect and resolve outstanding Ti runs/);
+  await client`UPDATE task_weaver.ti_agent_runs SET status = 'cancelled' WHERE id = ${tiRun!.id}`;
   await runMigrations(url!);
   await runMigrations(url!);
   const db = createDb(url!);
@@ -44,6 +49,8 @@ test('worker-only upgrade preserves history and refuses active legacy daemons', 
   assert.equal(upgraded[0]!.workerMode, 'thin');
   const historicalSlice = await client`SELECT title FROM task_weaver.execution_slices WHERE id = ${slice!.id}`;
   assert.equal(historicalSlice[0]!.title, 'Historical slice');
+  const historicalTi = await client`SELECT status FROM task_weaver.ti_agent_runs WHERE id = ${tiRun!.id}`;
+  assert.equal(historicalTi[0]!.status, 'cancelled');
   await assert.rejects(client`UPDATE task_weaver.projects SET worker_mode = 'legacy' WHERE id = ${before!.id}`);
   const legacy = await client`SELECT id, name, status FROM task_weaver.projects WHERE id = ${before!.id}`;
   assert.equal(legacy[0]!.name, 'Existing project');
