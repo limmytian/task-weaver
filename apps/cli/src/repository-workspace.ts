@@ -854,3 +854,26 @@ export async function fetchThinIntegrationTarget(options: {
     return target.stdout.trim()
   })
 }
+
+/** Bind a push to configured repository metadata and worker-owned bare Git configuration. */
+export function createThinPushRunner(options: {
+  config: Config
+  entry: RequirementRepositoryEntry
+  gitDir: string
+  signal?: AbortSignal
+}) {
+  const credential = resolveRepositoryCredential(options.config, options.entry.repository, 'push')
+  if (credential.state !== 'available' || !credential.trustedEnvironment) throw new Error(`Repository ${options.entry.repository.canonicalKey} is not ready for push: ${credential.reasonCode}`)
+  const remote = remoteFor(options.entry.repository, credential.transport)
+  if (!remote || !options.gitDir.startsWith('/') || remote.startsWith('-') || /[\x00-\x1f]/.test(remote)) throw new Error('Invalid trusted Git push destination')
+  const environment: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(credential.trustedEnvironment)) {
+    if (!key.startsWith('GIT_') || key === 'GIT_SSH_COMMAND') environment[key] = value
+  }
+  Object.assign(environment, { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/usr/bin/false', SSH_ASKPASS: '/usr/bin/false' })
+  const config = credential.trustedGitConfig ?? []
+  return {
+    remote,
+    git: (args: string[]) => runTrustedGitCommand('git', [...config, '-c', 'core.hooksPath=/dev/null', '--git-dir', options.gitDir, ...args], options.gitDir, environment, options.signal),
+  }
+}
