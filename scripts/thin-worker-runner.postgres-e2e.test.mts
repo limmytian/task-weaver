@@ -206,6 +206,8 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     git(bare, 'update-ref', 'refs/heads/main', reviewedTip);
     await db.update(tasks).set({ status: 'in_review' }).where(eq(tasks.id, gitAcceptance!.id));
     assert.equal((await readIntegration()).status, 409, 'acceptance must remain completed');
+    await db.update(tasks).set({ status: 'cancelled' }).where(eq(tasks.id, gitAcceptance!.id));
+    assert.equal((await readIntegration()).status, 409, 'cancelled acceptance cannot authorize integration');
     await db.update(tasks).set({ status: 'done' }).where(eq(tasks.id, gitAcceptance!.id));
     const [unfinished] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: gitReq!.id, title: 'Unfinished requirement work', createdBy: f.owner.context.actor.id }).returning();
     assert.equal((await readIntegration()).status, 409, 'integration must wait for all requirement tasks');
