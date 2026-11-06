@@ -48,14 +48,17 @@ The CLI wraps the REST API. Both share the same data and authentication.
 
 ## Operating Modes
 
-You may be running in one of two modes. **Identify which one you are in before touching tasks**, because the claiming protocol differs.
+Identify whether you are in an interactive session, a task worker, or a legacy daemon lane. **Identify which one you are in before touching tasks**, because the claiming protocol differs.
 
 | Mode | How you got here | Claiming protocol |
 |------|------------------|-------------------|
 | **Interactive / collaborative** | A human (or another agent) is directing you; you pick what to work on | **You** claim → work → release (see [Task Locking](#task-locking-claiming)) |
-| **Daemon / executor** | You were spawned by `tw daemon` to resolve one requirement lane | The daemon **already claimed** the requirement and selected the first task. Do **not** claim or release the requirement yourself |
+| **Task worker / executor** | A thin worker launched you for one task in an isolated workspace | The worker owns the task attempt and lease; do not claim, report, commit, or push independently |
+| **Legacy daemon / executor** | You were spawned by `tw daemon` to resolve one requirement lane | The daemon **already claimed** the requirement and selected the first task. Do **not** claim or release the requirement yourself |
 
-**How to tell you're in daemon/executor mode:** your launching prompt explicitly names a Requirement ID, branch/worktree, an initial Task ID, and a requirement task roadmap. In that case:
+**Task worker mode:** Follow the worker-provided prompt and work only in its isolated workspace. Leave changes and `result.md` for the worker; the worker renews the task lease, performs configured Git delivery, and publishes the outcome. Coordinator and acceptance tasks are ordinary tasks with additional output instructions.
+
+**How to tell you're in legacy daemon/executor mode:** your launching prompt explicitly names a Requirement ID, branch/worktree, an initial Task ID, and a requirement task roadmap. In that case:
 
 - Do **not** claim or release the requirement lane; the daemon owns `requirement_claims` heartbeat/release.
 - Start with the initial task, then continue through remaining unblocked tasks under the same requirement.
@@ -106,9 +109,9 @@ Belongs to exactly one project.
 | `modelTier` | enum | default | `fast` \| `standard` \| `strong` |
 | `tags` | string[] | no | |
 
-### Execution Slice
+### Execution Slice (Legacy)
 
-Requirements can be planned into ordered execution slices. A daemon still claims one requirement lane, but spawns a fresh AI CLI process per slice when slices exist. This bounds execution context while keeping branch ownership at requirement granularity.
+Historical daemon plans can contain ordered execution slices. New task-worker plans use task dependencies instead; slices do not gate thin-worker acquisition. Historically, requirements could be planned into ordered execution slices. A daemon still claims one requirement lane, but spawns a fresh AI CLI process per slice when slices exist. This bounds execution context while keeping branch ownership at requirement granularity.
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
@@ -149,9 +152,9 @@ Sub-entities: **Comments** (taskId + content), **Notes** (taskId + content + pin
 
 **Concurrency**: Tasks have a `version` field (auto-incremented on every update). Pass `expectedVersion` when updating to enable optimistic concurrency control — returns 409 Conflict on mismatch.
 
-### Requirement Claims
+### Requirement Claims (Legacy)
 
-Daemon workers coordinate at requirement granularity using `requirement_claims`:
+Legacy daemon workers coordinate at requirement granularity using `requirement_claims`:
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|

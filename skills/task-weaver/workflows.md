@@ -571,7 +571,7 @@ Every agent must follow this cycle:
 | Duplicate work | Check task list + activity before starting | One completes, other redirects |
 | Dependency deadlock | System blocks status if blockers incomplete | Use `--force` only if justified |
 
-### Daemon Requirement-Lane Protocol
+### Legacy Daemon Requirement-Lane Protocol
 
 Daemon workers use a different coordination unit from interactive agents:
 
@@ -629,3 +629,17 @@ For human integration without a PR, use `tw req repo sync-direct` to verify the 
 ### Consuming durable events
 
 A separately authorized parent or external agent can use `tw events cursor --project <id> --consumer <name>` to read its checkpoint, then `tw events list --project <id> --cursor <sequence>` to replay events. Process each returned batch before calling `tw events ack --project <id> --consumer <name> --cursor <returned-cursor>`. The cursor also advances across events the caller cannot access. `tw events watch --project <id> --consumer <name>` polls from the checkpoint and does not acknowledge automatically; acknowledge only after processing. Restarting may redeliver unacknowledged events. An expired cursor requires resynchronization from authoritative state; do not silently skip lost history. MCP clients can use `tw_events_cursor`, `tw_events_list`, and `tw_events_ack`. Each operation checks current access. Check before consequential steps and after reconnecting; push and mid-run interruption are not guaranteed. Keep parent credentials out of worker processes and never treat notification as permission to bypass an execution fence.
+
+
+### Task worker operation
+
+Use a project enabled for thin-worker mode and a scoped agent credential. Code tasks use an isolated attempt worktree and require a configured requirement working branch, repository read and push credentials, a trusted server-side forge connection, and a signoff identity:
+
+```bash
+tw worker start --project "$PROJECT_ID" --model "$MODEL" --think low \
+  --git-name "$GIT_NAME" --git-email "$GIT_EMAIL"
+```
+
+Add `--once` to handle at most one task, or `--requirement "$REQ_ID"` to restrict the queue. The worker pulls eligible tasks, renews the task attempt, and uses notifications as wakeups with polling fallback. It prepares a task-local commit, integrates the latest requirement branch, resolves conflicts through the executor, and submits a normal fast-forward push under a server-side delivery slot. Non-code work can deliver an artifact without Git signoff settings.
+
+For an interrupted or uncertain delivery, a project manager with repository access can inspect `tw worker attempts --project "$PROJECT_ID"` and `tw worker git-deliveries --project "$PROJECT_ID"`. Use `tw worker git-reconcile "$DELIVERY_ID" --reason "..."` only to verify that the trusted forge contains the submitted commit. `tw worker git-abandon-prepared "$DELIVERY_ID" --reason "..."` releases only an unstarted preparation whose attempt has ended or expired. Neither command asserts that an external process stopped. An uncertain push retains its branch slot until its outcome is verified. Review the attempt and workspace before `tw worker resolve` permits a retry.
