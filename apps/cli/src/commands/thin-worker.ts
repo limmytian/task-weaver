@@ -27,6 +27,18 @@ export function registerThinWorker(program: Command) {
     .option('--retry-safe', 'confirm that repeating the work is safe').action(async (attemptId, options) => {
       printJson(await post('/api/v1/thin-workers/resolve', { attemptId, disposition: options.disposition, reason: options.reason, retrySafe: Boolean(options.retrySafe) }))
     })
+  worker.command('git-deliveries').description('inspect Git delivery recovery state as a project manager')
+    .requiredOption('--project <id>', 'project scope').action(async options => {
+      printJson(await get(`/api/v1/thin-workers/git/deliveries?${new URLSearchParams({ projectId: options.project })}`))
+    })
+  worker.command('git-reconcile <delivery-id>').description('verify a submitted delivery on the trusted Git service')
+    .requiredOption('--reason <text>', 'inspection and recovery reason').action(async (deliveryId, options) => {
+      printJson(await post('/api/v1/thin-workers/git/reconcile', { deliveryId, reason: options.reason }))
+    })
+  worker.command('git-abandon-prepared <delivery-id>').description('release an expired or finished unstarted Git preparation')
+    .requiredOption('--reason <text>', 'inspection and recovery reason').action(async (deliveryId, options) => {
+      printJson(await post('/api/v1/thin-workers/git/abandon-prepared', { deliveryId, reason: options.reason }))
+    })
   worker.command('start').description('pull one task or remain available for scoped work')
     .requiredOption('--project <id>', 'project to serve')
     .option('--requirement <id>', 'restrict acquisition to one requirement')
