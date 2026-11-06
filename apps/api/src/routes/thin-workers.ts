@@ -50,6 +50,11 @@ routes.get('/git/deliveries', async c => {
   if (!project.success) return c.json({ error: 'Invalid project' }, 400);
   return c.json(await createThinWorkerService(c.get('identity')).listGitDeliveries(c.get('db'), project.data));
 });
+routes.post('/integration/inputs', async c => {
+  const input = workerFenceSchema.safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: 'Invalid integration input request' }, 400);
+  return c.json(await createThinWorkerService(c.get('identity')).integrationInputs(c.get('db'), input.data));
+});
 routes.post('/acceptance/snapshot', async c => {
   const input = workerAcceptanceSnapshotSchema.safeParse(await c.req.json().catch(() => null));
   if (!input.success) return c.json({ error: 'Invalid acceptance snapshot' }, 400);

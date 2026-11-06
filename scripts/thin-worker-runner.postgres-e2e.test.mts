@@ -134,7 +134,7 @@ test('once worker runs a bounded deterministic executor and parks empty results'
   git(root, 'init', '--bare', bare); git(seed, 'remote', 'add', 'origin', bare); git(seed, 'push', 'origin', 'main'); git(bare, 'symbolic-ref', 'HEAD', 'refs/heads/main');
   const [gitReq] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Git delivery fixture', status: 'approved', createdBy: f.owner.context.actor.id }).returning();
   const [gitRepo] = await db.insert(repositories).values({ displayName: 'Git runner fixture', provider: 'github', host: 'github.com', namespace: 'fixture', name: 'git-runner', canonicalKey: `fixture-${gitReq!.id}`, httpsCloneUrl: pathToFileURL(bare).href, defaultBranch: 'main', authPolicy: { allowedTransports: ['https'], preferredTransport: 'https', allowedOperations: ['read', 'push'], allowNativeDefault: true }, createdBy: f.owner.context.actor.id }).returning();
-  await db.insert(requirementRepositories).values({ requirementId: gitReq!.id, repositoryId: gitRepo!.id, workingBranch: 'main' });
+  await db.insert(requirementRepositories).values({ requirementId: gitReq!.id, repositoryId: gitRepo!.id, workingBranch: 'main', baseBranch: 'release' });
   const [gitTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: gitReq!.id, title: 'Git task', createdBy: f.owner.context.actor.id }).returning();
   const [gitTaskB] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: gitReq!.id, title: 'Git task B', createdBy: f.owner.context.actor.id }).returning();
   const [gitAcceptance] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: gitReq!.id, title: 'Git acceptance', tags: ['worker:acceptance'], createdBy: f.owner.context.actor.id }).returning();
@@ -181,6 +181,18 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     assert.equal(gitReviewed.taskId, gitAcceptance!.id); assert.equal(gitReviewed.state, 'completed', gitReviewed.reason);
     const [acceptedSnapshot] = await db.select().from(workerAcceptanceSnapshots).where(eq(workerAcceptanceSnapshots.attemptId, gitReviewed.attemptId!));
     assert.equal(acceptedSnapshot?.repositoryId, gitRepo!.id); assert.equal(acceptedSnapshot?.commit, git(bare, 'rev-parse', 'refs/heads/main'));
+    const [integration] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: gitReq!.id, title: 'Integrate version', tags: ['worker:integration'], createdBy: f.owner.context.actor.id }).returning();
+    await db.insert(taskDependencies).values({ taskId: integration!.id, dependsOnTaskId: gitAcceptance!.id, type: 'blocks' });
+    const integrationWorker = crypto.randomUUID();
+    const integrationResponse = await fetch(`${apiUrl}/api/v1/thin-workers/acquire`, { method: 'POST', headers: { authorization: `Bearer ${key.rawKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ projectId: f.project.id, requirementId: gitReq!.id, workerId: integrationWorker, nodeId: 'integration-fixture', executor: 'codex', model: 'fixture', durationSeconds: 120 }) });
+    assert.equal(integrationResponse.status, 200); const lane = await integrationResponse.json() as any; assert.equal(lane.task.id, integration!.id);
+    const inputResponse = await fetch(`${apiUrl}/api/v1/thin-workers/integration/inputs`, { method: 'POST', headers: { authorization: `Bearer ${key.rawKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ attemptId: lane.attempt.id, workerId: integrationWorker, token: lane.token }) });
+    assert.equal(inputResponse.status, 200, await inputResponse.clone().text()); const integrationInputs = await inputResponse.json() as any;
+    assert.equal(integrationInputs.acceptanceAttemptId, gitReviewed.attemptId); assert.equal(integrationInputs.sources[0].sourceCommit, acceptedSnapshot!.commit); assert.equal(integrationInputs.sources[0].targetBranch, 'release');
+    const premature = await fetch(`${apiUrl}/api/v1/thin-workers/result`, { method: 'POST', headers: { authorization: `Bearer ${key.rawKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ attemptId: lane.attempt.id, workerId: integrationWorker, token: lane.token, resultKey: crypto.randomUUID(), outcome: 'done', summary: 'Premature integration', outputId: crypto.randomUUID() }) });
+    assert.equal(premature.status, 400); assert.match((await premature.json() as any).error, /not yet available/);
+
+
 
   } finally { globalThis.fetch = actualFetch; }
   const [networkTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Network interruption', createdBy: f.owner.context.actor.id }).returning();

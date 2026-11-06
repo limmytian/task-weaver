@@ -355,6 +355,46 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         return publicAttempt(updated);
       });
     },
+    async integrationInputs(db: Database, raw: z.input<typeof workerFenceSchema>) {
+      const input = workerFenceSchema.parse(raw);
+      return transact(db, async (tx, authority) => {
+        if (authority.actor.type !== 'agent' || context.credential.kind !== 'api_key') throw new AuthorizationError();
+        const [existing] = await tx.select().from(workerAttempts).where(eq(workerAttempts.id, input.attemptId));
+        if (!existing) throw new NotFoundError('Attempt not found');
+        await requireResource(tx, authority, 'task', existing.taskId, 'execution.run');
+        const project = await lockProject(tx, existing.projectId);
+        const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, existing.requirementId)).for('update');
+        const [task] = await tx.select().from(tasks).where(eq(tasks.id, existing.taskId)).for('update');
+        const [attempt] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.id, input.attemptId), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`)).for('update');
+        if (project.workerMode !== 'thin' || !attempt || attempt.actorId !== authority.actor.id || attempt.credentialId !== context.credential.id || attempt.workerId !== input.workerId || attempt.tokenHash !== digest(input.token)) throw new AuthorizationError();
+        if (!requirement || !task || task.status !== 'in_progress' || !task.tags?.includes('worker:integration') || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Integration attempt or plan changed', requirement?.planRevision ?? 0);
+        const dependencies = await tx.select().from(taskDependencies).where(and(eq(taskDependencies.taskId, task.id), eq(taskDependencies.type, 'blocks')));
+        const candidates: Array<typeof workerAttempts.$inferSelect> = [];
+        for (const dependency of dependencies) {
+          await requireResource(tx, authority, 'task', dependency.dependsOnTaskId);
+          const [dependencyTask] = await tx.select().from(tasks).where(eq(tasks.id, dependency.dependsOnTaskId)).for('share');
+          if (!dependencyTask || dependencyTask.requirementId !== requirement.id || dependencyTask.status !== 'done') throw new ConflictError('Integration dependency is incomplete', requirement.planRevision);
+          if (!dependencyTask.tags?.includes('worker:acceptance')) continue;
+          const [accepted] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.taskId, dependencyTask.id), eq(workerAttempts.status, 'completed'), eq(workerAttempts.planRevision, requirement.planRevision))).orderBy(desc(workerAttempts.completedAt)).limit(1);
+          if (accepted?.result?.acceptanceDecision === 'accept' && accepted.result.outcome === 'done') candidates.push(accepted);
+        }
+        if (candidates.length !== 1) throw new ValidationError('Integration requires exactly one accepted task dependency for the current plan');
+        const acceptance = candidates[0]!;
+        const links = await tx.select().from(requirementRepositories).where(eq(requirementRepositories.requirementId, requirement.id)).for('share');
+        const snapshots = await tx.select().from(workerAcceptanceSnapshots).where(eq(workerAcceptanceSnapshots.attemptId, acceptance.id)).for('share');
+        if (!links.length || links.length !== snapshots.length) throw new ConflictError('Accepted repository snapshots are incomplete', requirement.planRevision);
+        const sources = [];
+        for (const link of links) {
+          const [repository] = await tx.select().from(repositories).where(and(eq(repositories.id, link.repositoryId), repositoryPredicate(authority))).for('share');
+          const snapshot = snapshots.find(item => item.repositoryId === link.repositoryId);
+          if (!repository || repository.status !== 'active' || !link.workingBranch || !link.baseBranch || link.workingBranch === link.baseBranch || !snapshot || snapshot.branch !== link.workingBranch || snapshot.repositoryIdentity !== gitRepositoryIdentity(repository)) throw new ConflictError('Accepted repository or branch configuration changed', requirement.planRevision);
+          sources.push({ repositoryId: repository.id, sourceBranch: snapshot.branch, sourceCommit: snapshot.commit, targetBranch: link.baseBranch });
+        }
+        const [live] = await tx.select({ id: workerAttempts.id }).from(workerAttempts).where(and(eq(workerAttempts.id, attempt.id), sql`${workerAttempts.expiresAt} > clock_timestamp()`));
+        if (!live) throw new ConflictError('Integration attempt expired', requirement.planRevision);
+        return { acceptanceTaskId: acceptance.taskId, acceptanceAttemptId: acceptance.id, planRevision: requirement.planRevision, sources };
+      });
+    },
     async snapshotAcceptanceRepository(db: Database, raw: z.input<typeof workerAcceptanceSnapshotSchema>) {
       const input = workerAcceptanceSnapshotSchema.parse(raw);
       const inspect = (observed?: { repositoryIdentity: string; branch: string }) => transact(db, async (tx, authority) => {
@@ -508,6 +548,7 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
           throw new ConflictError('Attempt already has a different result', 0);
         }
         if (!requirement || !task || task.status !== 'in_progress' || task.requirementId !== requirement.id || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Task or plan changed', requirement?.planRevision ?? 0);
+        if (input.outcome === 'done' && task.tags?.includes('worker:integration')) throw new ValidationError('Version branch delivery is not yet available');
         if (input.outcome === 'done') {
           const [unresolvedDelivery] = await tx.select({ id: thinGitDeliveries.id }).from(thinGitDeliveries).where(and(eq(thinGitDeliveries.attemptId, attempt.id), sql`${thinGitDeliveries.state} IN ('prepared', 'pushing', 'uncertain')`)).limit(1);
           if (unresolvedDelivery) throw new ConflictError('Git delivery must be resolved before task completion', requirement.planRevision);
