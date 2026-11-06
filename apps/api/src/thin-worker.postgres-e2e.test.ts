@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
-import { apiKeys, createDb, runMigrations, requirements, tasks, taskDependencies, workerAttempts, workflowOutputs } from '@task-weaver/db';
+import { apiKeys, createDb, runMigrations, requirements, requirementClaims, tasks, taskClaims, taskDependencies, workerAttempts, workflowOutputs } from '@task-weaver/db';
 import { createResourceServices, createThinWorkerService } from '@task-weaver/core';
 import { emit } from '@task-weaver/realtime';
 import { resourcePostgresFixture } from './resource-postgres-fixture';
@@ -49,11 +49,21 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   const [rollbackTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: legacyReq!.id, title: 'Rollback fixture', createdBy: f.owner.context.actor.id }).returning();
   const legacyClaims = createResourceServices(workerContext).claimService;
   await assert.rejects(legacyClaims.claimTask(db, rollbackTask!.id, { id: agent.id, type: 'agent' }, 2));
+  const oldClaim = { claimedBy: agent.id, claimedByType: 'agent' as const, expiresAt: new Date(Date.now() + 120000) };
+  const modeFence = (error: unknown) => error instanceof Error && error.cause instanceof Error && /Legacy acquisition is disabled/.test(error.cause.message);
+  await assert.rejects(db.insert(taskClaims).values({ ...oldClaim, taskId: rollbackTask!.id }), modeFence);
+  await assert.rejects(db.insert(requirementClaims).values({ ...oldClaim, requirementId: legacyReq!.id }), modeFence);
   await owner.setMode(db, { projectId: f.project.id, mode: 'legacy', inspection: 'No active thin attempts; fixture inspected' });
   await assert.rejects(worker.acquire(db, { projectId: f.project.id, workerId: randomUUID(), nodeId: 'rollback-fixture', executor: 'codex', model: 'gpt-6.1-terra', durationSeconds: 120 }));
   await legacyClaims.claimTask(db, rollbackTask!.id, { id: agent.id, type: 'agent' }, 2);
   await assert.rejects(owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Legacy claim still active' }));
   await legacyClaims.releaseTask(db, rollbackTask!.id, { id: agent.id, type: 'agent' });
+  const oldRace = await Promise.allSettled([
+    owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Legacy fixture drained and inspected' }),
+    db.insert(taskClaims).values({ ...oldClaim, taskId: rollbackTask!.id }),
+  ]);
+  assert.equal(oldRace.filter(item => item.status === 'fulfilled').length, 1, 'old binary claim and mode switch must serialize');
+  if (oldRace[1]!.status === 'fulfilled') await db.delete(taskClaims).where(eq(taskClaims.taskId, rollbackTask!.id));
   await db.update(tasks).set({ status: 'cancelled' }).where(eq(tasks.id, rollbackTask!.id));
   await owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Legacy fixture drained and inspected' });
   const presenceId = randomUUID();

@@ -680,6 +680,13 @@
       "when": 1793761564111,
       "tag": "0096_thin_worker_activity",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1793761564112,
+      "tag": "0097_legacy_claim_mode_fence",
+      "breakpoints": true
     }
   ]
 }
