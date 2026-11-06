@@ -75,12 +75,13 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
         if (!attempt || !requirement || !task || task.status !== 'in_progress' || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Attempt or plan is no longer current', requirement?.planRevision ?? 0);
         const [delivery] = await tx.select().from(thinGitDeliveries).where(and(eq(thinGitDeliveries.id, input.deliveryId), eq(thinGitDeliveries.attemptId, attempt.id))).for('update');
         if (!delivery) throw new NotFoundError('Delivery not found');
-        if ((input.event === 'start_push' && delivery.state === 'pushing') || (input.event === 'response_lost' && delivery.state === 'uncertain')) return delivery;
+        // A replayed start response cannot authorize another external push: the first response may have been lost after the caller proceeded.
+        if ((input.event === 'start_push' && delivery.state === 'pushing') || (input.event === 'response_lost' && delivery.state === 'uncertain')) return { delivery, shouldPush: false };
         let state: ReturnType<typeof advanceGitDelivery>;
         try { state = advanceGitDelivery(delivery.state, input.event); }
         catch { throw new ConflictError('Delivery state changed', requirement.planRevision); }
         const [updated] = await tx.update(thinGitDeliveries).set({ state, updatedAt: sql`clock_timestamp()` }).where(eq(thinGitDeliveries.id, delivery.id)).returning();
-        return updated!;
+        return { delivery: updated!, shouldPush: input.event === 'start_push' };
       });
     },
     async prepareGitDelivery(db: Database, raw: z.input<typeof workerGitPrepareSchema>) {
