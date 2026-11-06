@@ -135,8 +135,6 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
             AND r.project_id = ${input.projectId} AND r.status IN ('approved', 'in_progress')
             AND (${input.requirementId ?? null}::uuid IS NULL OR r.id = ${input.requirementId ?? null}::uuid)
             AND NOT EXISTS (SELECT 1 FROM execution_controls ec WHERE ec.id = (SELECT latest.id FROM execution_controls latest WHERE latest.requirement_id = r.id ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) AND ec.phase <> 'resumed')
-            AND t.execution_slice_id IS NULL
-            AND NOT EXISTS (SELECT 1 FROM execution_slices es WHERE es.requirement_id = r.id AND es.status NOT IN ('done', 'cancelled'))
             AND (t.requested_provider IS NULL OR t.requested_provider = 'codex')
             AND (t.requested_model IS NULL OR t.requested_model = ${input.model})
             AND NOT EXISTS (SELECT 1 FROM unnest(COALESCE(t.tags, ARRAY[]::text[])) tag WHERE tag LIKE 'capability:%' OR tag LIKE 'capability-any:%')
@@ -158,7 +156,6 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
         const [changed] = await tx.execute(sql`SELECT 1 AS changed WHERE
           EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks b ON b.id = d.depends_on_task_id WHERE d.task_id = ${candidate.task_id} AND d.type = 'blocks' AND b.status <> 'done') OR
           EXISTS (SELECT 1 FROM requirement_dependencies d JOIN requirements b ON b.id = d.depends_on_requirement_id WHERE d.requirement_id = ${candidate.requirement_id} AND d.type = 'blocks' AND b.status NOT IN ('done', 'cancelled')) OR
-          EXISTS (SELECT 1 FROM execution_slices es WHERE es.requirement_id = ${candidate.requirement_id} AND es.status NOT IN ('done', 'cancelled')) OR
           EXISTS (SELECT 1 FROM execution_controls ec WHERE ec.id = (SELECT latest.id FROM execution_controls latest WHERE latest.requirement_id = ${candidate.requirement_id} ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) AND ec.phase <> 'resumed') OR
           EXISTS (SELECT 1 FROM requirement_claims rc WHERE rc.requirement_id = ${candidate.requirement_id}) OR
           EXISTS (SELECT 1 FROM task_claims tc WHERE tc.task_id = ${candidate.task_id}) OR
