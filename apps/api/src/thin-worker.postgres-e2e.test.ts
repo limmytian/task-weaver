@@ -129,6 +129,10 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   await db.update(repositories).set({ visibility: 'private', ownerId: f.outsider.context.actor.id, ownerType: 'human' }).where(eq(repositories.id, gitRepository!.id));
   await assert.rejects(worker.prepareGitDelivery(db, prepare), /Resource not found/);
   await db.update(repositories).set({ visibility: 'instance', ownerId: null, ownerType: null }).where(eq(repositories.id, gitRepository!.id));
+  const cancelledPreparation = await worker.prepareGitDelivery(db, { ...prepare, operationKey: randomUUID() });
+  const cancelTransition = { attemptId: prepare.attemptId, workerId: prepare.workerId, token: prepare.token, deliveryId: cancelledPreparation.id, event: 'definitely_not_started' as const };
+  assert.equal((await worker.transitionGitDelivery(db, cancelTransition)).delivery.state, 'abandoned');
+  await assert.rejects(worker.transitionGitDelivery(db, { ...cancelTransition, event: 'start_push' }));
   const prepared = await worker.prepareGitDelivery(db, prepare);
   assert.equal((await worker.prepareGitDelivery(db, prepare)).id, prepared.id, 'same operation safely replays');
   await assert.rejects(worker.prepareGitDelivery(db, { ...prepare, proposedHead: 'c'.repeat(40) }));
@@ -136,6 +140,7 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   const transition = { attemptId: prepare.attemptId, workerId: prepare.workerId, token: prepare.token, deliveryId: prepared.id };
   const started = await worker.transitionGitDelivery(db, { ...transition, event: 'start_push' });
   assert.equal(started.delivery.state, 'pushing'); assert.equal(started.shouldPush, true);
+  await assert.rejects(worker.transitionGitDelivery(db, { ...transition, event: 'definitely_not_started' }));
   const replayedStart = await worker.transitionGitDelivery(db, { ...transition, event: 'start_push' });
   assert.equal(replayedStart.delivery.state, 'pushing'); assert.equal(replayedStart.shouldPush, false);
   assert.equal((await worker.transitionGitDelivery(db, { ...transition, event: 'response_lost' })).delivery.state, 'uncertain');
