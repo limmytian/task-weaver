@@ -136,8 +136,9 @@ test('once worker runs a bounded deterministic executor and parks empty results'
   const [gitRepo] = await db.insert(repositories).values({ displayName: 'Git runner fixture', provider: 'github', host: 'github.com', namespace: 'fixture', name: 'git-runner', canonicalKey: `fixture-${gitReq!.id}`, httpsCloneUrl: pathToFileURL(bare).href, defaultBranch: 'main', authPolicy: { allowedTransports: ['https'], preferredTransport: 'https', allowedOperations: ['read', 'push'], allowNativeDefault: true }, createdBy: f.owner.context.actor.id }).returning();
   await db.insert(requirementRepositories).values({ requirementId: gitReq!.id, repositoryId: gitRepo!.id, workingBranch: 'main' });
   const [gitTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: gitReq!.id, title: 'Git task', createdBy: f.owner.context.actor.id }).returning();
+  const [gitTaskB] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: gitReq!.id, title: 'Git task B', createdBy: f.owner.context.actor.id }).returning();
   const [gitAcceptance] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: gitReq!.id, title: 'Git acceptance', tags: ['worker:acceptance'], createdBy: f.owner.context.actor.id }).returning();
-  await db.insert(taskDependencies).values({ taskId: gitAcceptance!.id, dependsOnTaskId: gitTask!.id, type: 'blocks' });
+  await db.insert(taskDependencies).values([gitTask!, gitTaskB!].map(item => ({ taskId: gitAcceptance!.id, dependsOnTaskId: item.id, type: 'blocks' as const })));
   const actualFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const target = String(input);
@@ -147,14 +148,17 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     return new Response(JSON.stringify({ name: 'main', commit: { sha: git(bare, 'rev-parse', 'refs/heads/main') } }), { status: 200 });
   }) as typeof fetch;
   try {
-    const gitExecutor: ThinExecutor = { ...executor, async execute(input) { const manifest = JSON.parse(await (await import('node:fs/promises')).readFile(join(input.cwd, 'repository-manifest.json'), 'utf8')); await writeFile(join(input.cwd, manifest.repositories[0].relativePath, 'worker.txt'), 'delivered\n'); await writeFile(join(input.cwd, 'result.md'), 'Git delivery verified\n'); return { ok: true, reason: 'Fixture Git work', quotaBlocked: false }; } };
-    const gitRun = await runThinOnce({ ...opts, requirementId: gitReq!.id, gitIdentity: { name: 'Fixture', email: 'fixture@example.test' }, executor: gitExecutor, config: { ...config, nodeId: 'git-fixture' } });
-    assert.equal(gitRun.taskId, gitTask!.id); assert.equal(gitRun.state, 'completed', gitRun.reason);
-    const [stored] = await db.select().from(thinGitDeliveries).where(eq(thinGitDeliveries.attemptId, gitRun.attemptId!));
-    assert.equal(stored?.state, 'confirmed'); assert.equal(git(bare, 'rev-parse', 'refs/heads/main'), stored?.proposedHead); assert.equal(git(bare, 'show', `${stored!.proposedHead}:worker.txt`), 'delivered');
+    const gitExecutor: ThinExecutor = { ...executor, async execute(input) { const manifest = JSON.parse(await (await import('node:fs/promises')).readFile(join(input.cwd, 'repository-manifest.json'), 'utf8')); await writeFile(join(input.cwd, manifest.repositories[0].relativePath, input.prompt.includes('Git task B') ? 'worker-b.txt' : 'worker.txt'), 'delivered\n'); await writeFile(join(input.cwd, 'result.md'), 'Git delivery verified\n'); return { ok: true, reason: 'Fixture Git work', quotaBlocked: false }; } };
+    const gitRuns = await Promise.all(['git-fixture-a', 'git-fixture-b'].map(nodeId => runThinOnce({ ...opts, requirementId: gitReq!.id, gitIdentity: { name: 'Fixture', email: 'fixture@example.test' }, executor: gitExecutor, config: { ...config, nodeId } })));
+    assert.deepEqual(new Set(gitRuns.map(run => run.taskId)), new Set([gitTask!.id, gitTaskB!.id]));
+    assert.ok(gitRuns.every(run => run.state === 'completed'), JSON.stringify(gitRuns));
+    const tip = git(bare, 'rev-parse', 'refs/heads/main');
+    for (const run of gitRuns) { const rows = await db.select().from(thinGitDeliveries).where(eq(thinGitDeliveries.attemptId, run.attemptId!)); const stored = rows.find(row => row.state === 'confirmed'); assert.ok(stored, JSON.stringify(rows.map(row => row.state))); git(bare, 'merge-base', '--is-ancestor', stored.proposedHead, tip); }
+    assert.equal(git(bare, 'show', `${tip}:worker.txt`), 'delivered'); assert.equal(git(bare, 'show', `${tip}:worker-b.txt`), 'delivered');
     const gitReviewer: ThinExecutor = { ...executor, async execute(input) {
       const fs = await import('node:fs/promises'); const manifest = JSON.parse(await fs.readFile(join(input.cwd, 'repository-manifest.json'), 'utf8'));
       assert.equal(await fs.readFile(join(input.cwd, manifest.repositories[0].relativePath, 'worker.txt'), 'utf8'), 'delivered\n');
+      assert.equal(await fs.readFile(join(input.cwd, manifest.repositories[0].relativePath, 'worker-b.txt'), 'utf8'), 'delivered\n');
       await writeFile(join(input.cwd, 'result.md'), 'Reviewed the delivered branch and evidence.\n');
       await writeFile(join(input.cwd, 'decision.json'), JSON.stringify({ decision: 'accept', summary: 'Git delivery reviewed' }));
       return { ok: true, reason: 'Fixture Git acceptance', quotaBlocked: false };
