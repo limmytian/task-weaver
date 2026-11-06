@@ -45,6 +45,7 @@ export async function integrateThinTarget(options: {
   taskCommit: string
   targetCommit: string
   identity?: GitIdentity
+  resolveConflict?: () => Promise<void>
   assertAuthority: () => Promise<void>
   signal?: AbortSignal
 }) {
@@ -60,7 +61,22 @@ export async function integrateThinTarget(options: {
   if (!target.ok) throw new Error('Target commit is unavailable locally')
   await options.assertAuthority()
   const merge = await git(['merge', '--no-edit', '--no-ff', '--signoff', options.targetCommit])
-  if (!merge.ok) throw new Error('Target integration requires conflict resolution in the preserved workspace')
+  if (!merge.ok) {
+    if (!options.resolveConflict) throw new Error('Target integration requires conflict resolution in the preserved workspace')
+    const mergeHead = await git(['rev-parse', '--verify', 'MERGE_HEAD'])
+    if (!mergeHead.ok || mergeHead.stdout.trim() !== options.targetCommit) throw new Error('Target merge failed before conflict resolution')
+    await options.assertAuthority()
+    await options.resolveConflict()
+    await options.assertAuthority()
+    const unchangedHead = await git(['rev-parse', '--verify', 'HEAD'])
+    const pendingMerge = await git(['rev-parse', '--verify', 'MERGE_HEAD'])
+    const unmerged = await git(['diff', '--name-only', '--diff-filter=U'])
+    const unstaged = await git(['diff', '--quiet', '--exit-code'])
+    const untracked = await git(['ls-files', '--others', '--exclude-standard'])
+    if (!unchangedHead.ok || unchangedHead.stdout.trim() !== options.taskCommit || !pendingMerge.ok || pendingMerge.stdout.trim() !== options.targetCommit || !unmerged.ok || unmerged.stdout.trim() || unstaged.status !== 0 || !untracked.ok || untracked.stdout.trim()) throw new Error('Conflict resolution must stage all changes without changing the merge inputs')
+    const resolved = await git(['commit', '--no-edit', '--signoff'])
+    if (!resolved.ok) throw new Error('Resolved merge could not be committed')
+  }
   const result = await git(['rev-parse', '--verify', 'HEAD'])
   if (!result.ok || !commitId.test(result.stdout.trim())) throw new Error('Integrated commit could not be verified')
   const includesTarget = await git(['merge-base', '--is-ancestor', options.targetCommit, result.stdout.trim()])
