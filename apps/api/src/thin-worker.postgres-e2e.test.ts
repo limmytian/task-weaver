@@ -144,6 +144,11 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   assert.equal((await worker.result(db, result)).task!.status, 'done');
   assert.equal((await worker.result(db, result)).task!.status, 'done');
   await assert.rejects(worker.result(db, { ...result, summary: 'Different result' }));
+  const ordinaryTasks = createResourceServices(workerContext).taskService;
+  await assert.rejects(ordinaryTasks.updateTaskStatus(db, run.task!.id, 'todo', { id: agent.id, type: 'agent' }, 'Late old executor'));
+  await assert.rejects(ordinaryTasks.updateTask(db, run.task!.id, { title: 'Late overwrite' }, { id: agent.id, type: 'agent' }));
+  await assert.rejects(ordinaryTasks.batchUpdateTasks(db, { updates: [{ id: run.task!.id, status: 'todo' }] }, { id: agent.id, type: 'agent' }));
+  assert.equal((await db.select().from(tasks).where(eq(tasks.id, run.task!.id)))[0]!.status, 'done');
   assert.equal((await worker.acquire(db, input(randomUUID()))).attempt, null, 'acceptance must wait for both sibling outputs');
   const other = parallel[1]!;
   const otherOutput = await worker.registerOutput(db, { attemptId: other.attempt!.id, token: other.token!, workerId: other.attempt!.workerId, documentId: document.id, summary: 'Second fixture output' });

@@ -139,6 +139,14 @@ function bindServices(context?: VerifiedRequestContext) {
           const call = [...args];
           call[0] = txDb;
           await authorizeOperation(txDb, authority, group, name, call, context);
+          if (actor.type === "agent" && group === "task" && ["updateTask", "updateTaskStatus", "batchUpdateTasks"].includes(name)) {
+            const ids: string[] = name === "batchUpdateTasks" ? call[1].updates.map((update: { id: string }) => update.id) : [call[1]];
+            const projectRows = await tx.select({ id: projects.id, workerMode: projects.workerMode }).from(projects)
+              .innerJoin(tasks, eq(tasks.projectId, projects.id)).where(inArray(tasks.id, ids)).orderBy(projects.id).for("update", { of: projects });
+            if (projectRows.some(project => project.workerMode === "thin")) {
+              throw new ValidationError("Agent task updates require a fenced thin worker result in this project");
+            }
+          }
           if (group === "plan" && name === "applyPlan") call[3] = createResourceServices(context);
           if (group === "plan" && name === "validatePlanDraft") call[4] = createResourceServices(context);
           if (group === "plan" && name === "applyPlanDraft") call[6] = createResourceServices(context);
