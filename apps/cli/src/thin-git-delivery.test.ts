@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { commitThinWorkspace, integrateThinTarget, pushThinDelivery } from './thin-git-delivery.js'
+import { commitThinWorkspace, integrateThinTarget, pushThinDelivery, prepareThinPushSandbox } from './thin-git-delivery.js'
 import { runCommand } from './async-command.js'
 
 test('task commits preserve the baseline and refuse lost authority', async t => {
@@ -44,6 +44,13 @@ test('normal push refuses an advanced branch and preserves uncertainty after a l
   const base = git('rev-parse', 'HEAD')
   await writeFile(join(cwd, 'file.txt'), 'two\n'); git('add', '.'); git('commit', '-m', 'delivery')
   const proposed = git('rev-parse', 'HEAD')
+  git('config', 'remote.origin.pushurl', '/invalid/executor-controlled-destination')
+  const sandbox = await prepareThinPushSandbox({ source: cwd, commit: proposed, assertAuthority: async () => {} })
+  t.after(sandbox.cleanup)
+  const sandboxGit = (...args: string[]) => execFileSync('git', ['--git-dir', sandbox.gitDir, ...args], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  assert.equal(sandboxGit('cat-file', '-t', proposed), 'commit')
+  assert.equal(sandboxGit('remote'), '', 'executor-controlled origin must not be copied')
+  git('config', '--unset', 'remote.origin.pushurl')
   let starts = 0, uncertain = 0
   const run = (args: string[]) => runCommand('git', args, { cwd, env })
   const result = await pushThinDelivery({ targetBranch: 'requirement', expectedHead: base, proposedHead: proposed, git: async args => {
