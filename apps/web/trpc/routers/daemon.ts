@@ -1,6 +1,7 @@
 import { router, resourceProcedure, ordinaryResourceProcedure } from "../init";
 import {
   createResourceServices,
+  createThinWorkerService,
   executorToolSchema,
   resumeExecutorSchema,
 
@@ -17,6 +18,10 @@ import {
 import { z } from "zod";
 
 export const daemonRouter = router({
+  thinWorkers: ordinaryResourceProcedure.input(z.object({ projectId: z.string().uuid() }))
+    .query(({ ctx, input }) => createThinWorkerService(ctx.identity).listWorkers(ctx.db, input.projectId)),
+  thinAttempts: ordinaryResourceProcedure.input(z.object({ projectId: z.string().uuid() }))
+    .query(({ ctx, input }) => createThinWorkerService(ctx.identity).list(ctx.db, input.projectId)),
   executorDaemons: ordinaryResourceProcedure.query(({ ctx }) => createResourceServices(ctx.identity).daemonService.listExecutorDaemons(ctx.db)),
   executorProfiles: ordinaryResourceProcedure.input(z.object({ daemonId: z.string().uuid() }))
     .query(({ ctx, input }) => createResourceServices(ctx.identity).daemonService.listExecutorProfiles(ctx.db, input.daemonId)),
