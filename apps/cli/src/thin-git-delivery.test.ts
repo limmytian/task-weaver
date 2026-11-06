@@ -52,14 +52,14 @@ test('normal push refuses an advanced branch and preserves uncertainty after a l
   assert.equal(sandboxGit('remote'), '', 'executor-controlled origin must not be copied')
   git('config', '--unset', 'remote.origin.pushurl')
   let starts = 0, uncertain = 0
-  const run = (args: string[]) => runCommand('git', args, { cwd, env })
-  const result = await pushThinDelivery({ targetBranch: 'requirement', expectedHead: base, proposedHead: proposed, git: async args => {
+  const run = (args: string[]) => runCommand('git', ['--git-dir', sandbox.gitDir, ...args], { cwd, env })
+  const result = await pushThinDelivery({ targetBranch: 'requirement', expectedHead: base, proposedHead: proposed, remote, git: async args => {
     const actual = await run(args)
     return args[0] === 'push' ? { ...actual, ok: false, status: null, stderr: 'connection lost' } : actual
   }, authorizePush: async () => { starts++; return true }, markUncertain: async () => { uncertain++ } })
   assert.equal(result.state, 'uncertain'); assert.equal(starts, 1); assert.equal(uncertain, 1)
   assert.equal(git('ls-remote', 'origin', 'refs/heads/requirement').split('\t')[0], proposed)
-  await assert.rejects(pushThinDelivery({ targetBranch: 'requirement', expectedHead: base, proposedHead: proposed, git: run, authorizePush: async () => { starts++; return true }, markUncertain: async () => {} }), /advanced/)
+  await assert.rejects(pushThinDelivery({ targetBranch: 'requirement', expectedHead: base, proposedHead: proposed, remote, git: run, authorizePush: async () => { starts++; return true }, markUncertain: async () => {} }), /advanced/)
   assert.equal(starts, 1, 'an advanced target must be rejected before push authorization')
 })
 

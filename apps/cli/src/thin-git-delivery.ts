@@ -94,23 +94,24 @@ export async function pushThinDelivery(options: {
   targetBranch: string
   expectedHead: string
   proposedHead: string
+  remote: string
   git: (args: string[]) => Promise<{ ok: boolean; status: number | null; stdout: string; stderr: string }>
   authorizePush: () => Promise<boolean>
   markUncertain: () => Promise<void>
 }) {
-  if (!commitId.test(options.expectedHead) || !commitId.test(options.proposedHead) || !options.targetBranch || options.targetBranch.length > 255) throw new Error('Invalid push parameters')
+  if (!commitId.test(options.expectedHead) || !commitId.test(options.proposedHead) || !options.targetBranch || options.targetBranch.length > 255 || !options.remote || options.remote.startsWith('-') || options.remote.length > 2048 || /[\x00-\x1f]/.test(options.remote)) throw new Error('Invalid push parameters')
   const valid = await options.git(['check-ref-format', '--branch', options.targetBranch])
   if (!valid.ok) throw new Error('Invalid target branch')
-  const head = await options.git(['rev-parse', '--verify', 'HEAD'])
-  if (!head.ok || head.stdout.trim() !== options.proposedHead) throw new Error('Proposed commit is not checked out')
+  const proposed = await options.git(['cat-file', '-e', `${options.proposedHead}^{commit}`])
+  if (!proposed.ok) throw new Error('Proposed commit is unavailable')
   const ancestry = await options.git(['merge-base', '--is-ancestor', options.expectedHead, options.proposedHead])
   if (!ancestry.ok) throw new Error('Proposed commit does not contain the expected target')
   const ref = `refs/heads/${options.targetBranch}`
-  const remote = await options.git(['ls-remote', '--exit-code', 'origin', ref])
+  const remote = await options.git(['ls-remote', '--exit-code', options.remote, ref])
   if (!remote.ok || remote.stdout.trim() !== `${options.expectedHead}\t${ref}`) throw new Error('Target branch advanced; integrate its latest commit')
   if (!await options.authorizePush()) throw new Error('Push authorization was not newly granted')
   try {
-    const push = await options.git(['push', '--porcelain', 'origin', `${options.proposedHead}:${ref}`])
+    const push = await options.git(['push', '--porcelain', options.remote, `${options.proposedHead}:${ref}`])
     if (push.ok) return { state: 'submitted' as const }
   } catch { /* The remote may already have accepted the update. */ }
   await options.markUncertain()
