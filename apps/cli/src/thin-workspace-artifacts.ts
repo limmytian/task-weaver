@@ -125,6 +125,7 @@ export async function applyThinDeliveries(options: {
   attemptId: string
   planRevision: number
   packages: string[]
+  integrated?: Record<string, { attemptId: string; deliveries: Array<{ repositoryId: string; commit: string }> }>
   assertAuthority: () => Promise<void>
   assertBaseline: () => Promise<void>
 }) {
@@ -162,6 +163,14 @@ export async function applyThinDeliveries(options: {
     if (delivery.version !== 1 || delivery.manifest?.projectId !== options.projectId || delivery.manifest?.requirementId !== options.requirementId || delivery.manifest?.planRevision !== options.planRevision || !uuid.test(delivery.manifest?.taskId ?? '') || !uuid.test(delivery.manifest?.attemptId ?? '') || !Array.isArray(delivery.manifest?.repositories) || !Array.isArray(delivery.repositories) || delivery.repositories.length > options.workspace.repositories.length || new Set(delivery.repositories.map((item: any) => item?.repositoryId)).size !== delivery.repositories.length) throw new Error('Invalid task delivery package')
     for (const item of delivery.repositories) {
       const repository = options.workspace.repositories.find(value => value.repositoryId === item.repositoryId)
+      const integrated = options.integrated?.[options.packages[index]!]
+      const confirmed = integrated && integrated.attemptId === delivery.manifest.attemptId ? integrated.deliveries.find(value => value.repositoryId === item.repositoryId) : undefined
+      if (confirmed) {
+        if (!repository || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(confirmed.commit)) throw new Error('Invalid confirmed Git delivery')
+        const contained = await runCommand('git', ['merge-base', '--is-ancestor', confirmed.commit, repository.headCommit!], { cwd: repository.worktreePath, env })
+        if (!contained.ok) throw new Error('Confirmed Git delivery is missing from the integration branch')
+        continue
+      }
       if (!repository || item.baseCommit !== repository.headCommit || !delivery.manifest.repositories.some((entry: any) => entry.repositoryId === item.repositoryId && entry.baseCommit === item.baseCommit && entry.workingBranch === item.branch) || item.encoding !== 'base64' || typeof item.patch !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(item.patch)) throw new Error('Delivery does not match the integration baseline')
       const bytes = Buffer.from(item.patch, 'base64')
       if (!bytes.length || bytes.length > 30 * 1024 * 1024 || bytes.toString('base64') !== item.patch) throw new Error('Invalid patch payload')

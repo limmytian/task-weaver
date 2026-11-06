@@ -39,7 +39,7 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
   const acceptanceInputs = async (tx: Database, authority: Awaited<ReturnType<typeof resourceAuthority>>, taskId: string, revision: number) => {
     const dependencies = await tx.select().from(taskDependencies).where(and(eq(taskDependencies.taskId, taskId), eq(taskDependencies.type, 'blocks')));
     if (!dependencies.length || dependencies.length > 100) throw new ValidationError('Acceptance requires bounded blocking dependencies');
-    const inputs: Array<{ taskId: string; outputId: string; documentId: string; fileVersion: number; sha256: string; sizeBytes: number; mimeType: string; originalFilename: string; kind: 'worker' | 'human' }> = [];
+    const inputs: Array<{ taskId: string; outputId: string; documentId: string; fileVersion: number; sha256: string; sizeBytes: number; mimeType: string; originalFilename: string; kind: 'worker' | 'human'; attemptId: string | null; gitDeliveries: Array<{ repositoryId: string; commit: string }> }> = [];
     for (const dependency of dependencies) {
       await requireResource(tx, authority, 'task', dependency.dependsOnTaskId);
       const [blocker] = await tx.select().from(tasks).where(eq(tasks.id, dependency.dependsOnTaskId)).for('share');
@@ -56,7 +56,8 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
       if (!document || !file || document.currentFileVersionId !== file.id || file.storageBackend !== 'local' || !/^[a-f0-9]{64}$/.test(file.sha256)) throw new ConflictError('Acceptance dependency evidence changed', revision);
       try { const verified = await attachmentStorage().getVerifiedObject(file.objectKey, { sha256: file.sha256, sizeBytes: file.sizeBytes }); verified.body.destroy(); }
       catch { throw new ConflictError('Acceptance dependency evidence cannot be verified', revision); }
-      inputs.push({ taskId: blocker.id, outputId: output.id, documentId: document.id, fileVersion: file.version, sha256: file.sha256, sizeBytes: file.sizeBytes, mimeType: file.mimeType, originalFilename: file.originalFilename, kind: output.workerAttemptId ? 'worker' : 'human' });
+      const deliveries = output.workerAttemptId ? await tx.select({ repositoryId: thinGitDeliveries.repositoryId, commit: thinGitDeliveries.proposedHead }).from(thinGitDeliveries).where(and(eq(thinGitDeliveries.attemptId, output.workerAttemptId), eq(thinGitDeliveries.state, 'confirmed'))) : [];
+      inputs.push({ taskId: blocker.id, outputId: output.id, documentId: document.id, fileVersion: file.version, sha256: file.sha256, sizeBytes: file.sizeBytes, mimeType: file.mimeType, originalFilename: file.originalFilename, kind: output.workerAttemptId ? 'worker' : 'human', attemptId: output.workerAttemptId ?? null, gitDeliveries: deliveries });
     }
     return inputs;
   };

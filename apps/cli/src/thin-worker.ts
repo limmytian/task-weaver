@@ -112,9 +112,10 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
       const coordinator = task.tags?.includes('worker:coordinator') === true
       const acceptance = task.tags?.includes('worker:acceptance') === true
       if (acceptance) {
-        const response = await request<{ inputs: Array<{ taskId: string; outputId: string; documentId: string; fileVersion: number; sha256: string; sizeBytes: number; mimeType: string; originalFilename: string; kind: 'worker' | 'human' }> }>('POST', '/api/v1/thin-workers/inputs', fence, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })
+        const response = await request<{ inputs: Array<{ taskId: string; outputId: string; documentId: string; fileVersion: number; sha256: string; sizeBytes: number; mimeType: string; originalFilename: string; kind: 'worker' | 'human'; attemptId: string | null; gitDeliveries: Array<{ repositoryId: string; commit: string }> }> }>('POST', '/api/v1/thin-workers/inputs', fence, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })
         const inputRoot = join(workspace.rootPath, 'inputs'); await mkdir(inputRoot, { mode: 0o700 })
         const packages: string[] = []
+        const integrated: Record<string, { attemptId: string; deliveries: Array<{ repositoryId: string; commit: string }> }> = {}
         const manifest: Array<Record<string, unknown>> = []
         for (const input of response.inputs) {
           if (!/^[0-9a-f-]{36}$/i.test(input.outputId) || !/^[0-9a-f-]{36}$/i.test(input.documentId) || !Number.isSafeInteger(input.fileVersion) || input.fileVersion < 1 || !/^[a-f0-9]{64}$/.test(input.sha256) || !Number.isSafeInteger(input.sizeBytes) || input.sizeBytes < 0 || input.sizeBytes > 50 * 1024 * 1024) throw new Error('Invalid acceptance evidence metadata')
@@ -140,10 +141,13 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
           const file = await open(path, 'wx', 0o600)
           try { await file.writeFile(bytes) } finally { await file.close() }
           manifest.push({ taskId: input.taskId, outputId: input.outputId, filename, kind: input.kind, mimeType: input.mimeType, originalFilename: input.originalFilename, sha256: input.sha256 })
-          if (input.kind === 'worker') packages.push(path)
+          if (input.kind === 'worker') {
+            packages.push(path)
+            if (input.attemptId && input.gitDeliveries?.length) integrated[path] = { attemptId: input.attemptId, deliveries: input.gitDeliveries }
+          }
         }
         await writeFile(join(inputRoot, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', { mode: 0o600, flag: 'wx' })
-        if (packages.length) await applyThinDeliveries({ workspace, projectId: options.projectId, requirementId: attempt.requirementId, taskId: task.id, attemptId: attempt.id, planRevision: attempt.planRevision, packages, assertAuthority: heartbeat, assertBaseline: () => verifyThinWorkspaceBaselines({ config: options.config, workspace, entries, assertAuthority: heartbeat, signal: controller.signal }) })
+        if (packages.length) await applyThinDeliveries({ workspace, projectId: options.projectId, requirementId: attempt.requirementId, taskId: task.id, attemptId: attempt.id, planRevision: attempt.planRevision, packages, integrated, assertAuthority: heartbeat, assertBaseline: () => verifyThinWorkspaceBaselines({ config: options.config, workspace, entries, assertAuthority: heartbeat, signal: controller.signal }) })
       }
       const planInstructions = coordinator ? `\nThis is a coordinator task. Write plan.json at the workspace root using this shape: {"projectId":"${options.projectId}","requirements":[{"key":"current","existingId":"${attempt.requirementId}","tasks":[{"key":"implementation","title":"...","description":"..."},{"key":"acceptance","title":"...","tags":["worker:acceptance"],"dependsOn":["implementation"]}]}]}. Include one acceptance task that directly blocks on every other new task. Only create new tasks in this requirement; do not include documents, assignments, existing tasks or slices. Record contracts and acceptance criteria in the task descriptions and result.md.` : ''
       const acceptanceInstructions = acceptance ? '\nThis is an acceptance task. Review the verified dependency artifacts under inputs/ and the staged integration workspace. Run appropriate checks and explain the evidence and any unresolved findings in result.md. Write decision.json at the workspace root as {"decision":"accept" or "changes_requested","summary":"..."}. Use changes_requested whenever findings remain or evidence is insufficient.' : ''
