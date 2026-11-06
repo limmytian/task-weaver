@@ -139,6 +139,33 @@ export async function readTrustedGitComparison(repository: ForgeRepositoryIdenti
   return { ...comparison, files, truncated };
 }
 
+/** Verify ancestry using the configured server-side forge, never a worker-supplied URL. */
+export async function verifyTrustedGitAncestry(repository: ForgeRepositoryIdentity, ancestor: string, descendant: string, options: ForgeReadOptions = {}) {
+  const base = fullObjectId.parse(ancestor).toLowerCase();
+  const head = fullObjectId.parse(descendant).toLowerCase();
+  if (base === head) return;
+  const provider = repository.provider === 'github' || repository.host === 'github.com' ? 'github' : repository.provider;
+  if (provider === 'github') {
+    const result = await trustedForgeRequest(repository, provider, `compare/${base}...${head}`, options);
+    const row = z.object({ status: z.enum(['ahead', 'behind', 'diverged', 'identical']), base_commit: z.object({ sha: fullObjectId }), merge_base_commit: z.object({ sha: fullObjectId }) }).safeParse(result.data);
+    if (!row.success || !['ahead', 'identical'].includes(row.data.status) || row.data.base_commit.sha.toLowerCase() !== base || row.data.merge_base_commit.sha.toLowerCase() !== base) throw new ValidationError('The proposed commit does not contain the expected target');
+    return;
+  }
+  if (provider !== 'gitea') throw new ValidationError('Trusted Git ancestry verification supports GitHub and Gitea repositories');
+  const pending = [head]; const seen = new Set<string>(); const deadline = Date.now() + 20_000;
+  while (pending.length && seen.size < 128 && Date.now() < deadline) {
+    const next = pending.shift()!;
+    if (next === base) return;
+    if (seen.has(next)) continue;
+    seen.add(next);
+    const result = await trustedForgeRequest(repository, provider, `git/commits/${next}`, options);
+    const row = z.object({ sha: fullObjectId, parents: z.array(z.object({ sha: fullObjectId })).max(100) }).safeParse(result.data);
+    if (!row.success || row.data.sha.toLowerCase() !== next) throw new ValidationError('Trusted forge returned incomplete commit ancestry evidence');
+    pending.push(...row.data.parents.map(parent => parent.sha.toLowerCase()).filter(parent => !seen.has(parent)));
+  }
+  throw new ValidationError('The proposed commit ancestry could not be verified');
+}
+
 /** Verify a direct integration against the server-observed target branch. */
 export async function readTrustedDirectMerge(repository: ForgeRepositoryIdentity, baseBranch: string, commit: string, options: ForgeReadOptions = {}) {
   const provider = repository.provider === "github" || repository.host === "github.com" ? "github" : repository.provider;
