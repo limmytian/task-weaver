@@ -201,6 +201,10 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
         : error instanceof ApiError && [401, 403].includes(error.status) ? 'Worker authorization ended; inspect the attempt and credentials'
         : error instanceof ApiError && error.status === 409 ? 'Plan or dependency evidence changed; inspect the current task and retry only after review'
         : error instanceof Error && error.message.includes('baseline changed') ? 'Integration baseline changed; revalidate the preserved workspace'
+        : error instanceof Error && error.message === 'Requirement branch remained busy; inspect the delivery and retry after review' ? error.message
+        : error instanceof Error && error.message === 'Merge conflict resolution failed; inspect the preserved workspace' ? error.message
+        : error instanceof Error && error.message === 'Conflict resolution must stage all changes without changing the merge inputs' ? error.message
+        : error instanceof Error && error.message === 'Push authorization was not newly granted' ? 'Push authorization was already used or is uncertain; inspect the delivery before retrying'
         : 'Task preparation or delivery failed; inspect the preserved workspace'
       return finish(reason)
     }
