@@ -33,7 +33,6 @@ test('once worker runs a bounded deterministic executor and parks empty results'
   const owner = await issue(f.owner.context.actor.id, true), key = await issue(agent.id, true);
   const server = serve({ fetch: f.app.fetch, hostname: '127.0.0.1', port: 0 }); t.after(() => server.close()); if (!server.listening) await once(server, 'listening');
   const address = server.address(); assert.ok(address && typeof address !== 'string'); const apiUrl = `http://127.0.0.1:${address.port}`;
-  const mode = await fetch(`${apiUrl}/api/v1/thin-workers/mode`, { method: 'POST', headers: { authorization: `Bearer ${owner.rawKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ projectId: f.project.id, mode: 'thin', inspection: 'Disposable fixture is empty' }) }); assert.equal(mode.status, 200);
   const [req] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Runner fixture', status: 'approved', createdBy: f.owner.context.actor.id }).returning();
   const children = await db.insert(tasks).values(['A', 'B'].map(title => ({ projectId: f.project.id, requirementId: req!.id, title, createdBy: f.owner.context.actor.id }))).returning();
   const [accept] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Acceptance', createdBy: f.owner.context.actor.id }).returning();

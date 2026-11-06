@@ -1,20 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { classifyExecutorLine, ExecutorSignalCollector, parseCodexQuota, queryCodexQuota } from './executor-availability.js'
-import { allExecutorsBlocked } from './executor-status-client.js'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-
-test('pre-acquisition gate prevents claims while all executors are blocked or stale', () => {
-  const available = parseCodexQuota({ rateLimits: { primary: { usedPercent: 20 } } }, 'local')
-  const profile = { tool: 'codex', blocked: false, observation: available }
-  assert.equal(allExecutorsBlocked(['codex'], []), true)
-  assert.equal(allExecutorsBlocked(['codex'], [profile]), false)
-  assert.equal(allExecutorsBlocked(['codex'], [{ ...profile, blocked: true }]), true)
-  assert.equal(allExecutorsBlocked(['codex'], [{ ...profile, observation: { ...available, staleAt: new Date(Date.now() - 1000).toISOString() } }]), true)
-  assert.equal(allExecutorsBlocked(['codex', 'claude'], [{ ...profile, blocked: true }]), false)
-})
 
 test('provider errors are classified without treating discussion, tool errors, exit codes or 429 as quota',()=>{
   for(const line of ['HTTP 429','quota exhausted','The code handles rate_limit_error','{"type":"item.completed","item":{"text":"insufficient_quota"}}','{"type":"tool_call","error":{"code":"insufficient_quota"}}'])

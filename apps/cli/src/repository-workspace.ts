@@ -11,7 +11,7 @@ import {
   runTrustedGitCommand,
   type RepositoryDeliveryResult,
 } from './git-provider.js'
-import { throwIfCancelled } from './daemon-lifecycle.js'
+import { throwIfCancelled } from './cancellation.js'
 import { runCommand } from './async-command.js'
 import {
   redactTrustedOutput,

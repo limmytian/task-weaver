@@ -8,7 +8,7 @@ import { get, post, request } from '../client.js'
 import { startThinWake } from '../thin-worker-wake.js'
 
 export function registerThinWorker(program: Command) {
-  const worker = program.command('worker').description('run one explicitly enabled task worker')
+  const worker = program.command('worker').description('run a task worker')
   worker.command('attempts').description('inspect recent task attempts and lease state')
     .requiredOption('--project <id>', 'project scope').action(async options => {
       printJson(await get(`/api/v1/thin-workers/attempts?${new URLSearchParams({ projectId: options.project })}`))
@@ -16,11 +16,6 @@ export function registerThinWorker(program: Command) {
   worker.command('presence').description('inspect recent worker liveness')
     .requiredOption('--project <id>', 'project scope').action(async options => {
       printJson(await get(`/api/v1/thin-workers/presence?${new URLSearchParams({ projectId: options.project })}`))
-    })
-  worker.command('mode').description('switch a drained project between worker modes')
-    .requiredOption('--project <id>', 'project scope').requiredOption('--set <mode>', 'legacy or thin')
-    .requiredOption('--inspection <text>', 'what was inspected before cutover').action(async options => {
-      printJson(await post('/api/v1/thin-workers/mode', { projectId: options.project, mode: options.set, inspection: options.inspection }))
     })
   worker.command('resolve <attempt-id>').description('record a human decision for interrupted work')
     .requiredOption('--disposition <value>', 'review or retry').requiredOption('--reason <text>', 'inspection and decision')

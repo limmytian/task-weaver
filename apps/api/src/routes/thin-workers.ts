@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { ConflictError, ValidationError, authenticationFailure, createAuthorizedEventStream, createThinWorkerService, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerIntegrationPrepareSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerModeSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerReleaseSchema, workerResolveSchema, workerResultSchema } from '@task-weaver/core';
+import { ConflictError, ValidationError, authenticationFailure, createAuthorizedEventStream, createThinWorkerService, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerIntegrationPrepareSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerReleaseSchema, workerResolveSchema, workerResultSchema } from '@task-weaver/core';
 import { z } from 'zod';
 import type { Env } from '../middleware/actor.js';
 
@@ -34,11 +34,6 @@ routes.post('/presence/stop', async c => {
   const input = workerPresenceSchema.safeParse(await c.req.json().catch(() => null));
   if (!input.success) return c.json({ error: 'Invalid worker presence' }, 400);
   return c.json(await createThinWorkerService(c.get('identity')).stopPresence(c.get('db'), input.data));
-});
-routes.post('/mode', async c => {
-  const input = workerModeSchema.safeParse(await c.req.json().catch(() => null));
-  if (!input.success) return c.json({ error: 'Invalid worker mode request' }, 400);
-  return c.json(await createThinWorkerService(c.get('identity')).setMode(c.get('db'), input.data));
 });
 routes.post('/acquire', async c => {
   const input = workerAcquireSchema.safeParse(await c.req.json().catch(() => null));

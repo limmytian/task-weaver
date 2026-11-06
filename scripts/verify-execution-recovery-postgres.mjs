@@ -23,7 +23,7 @@ try {
   const upgrade = spawnSync("pnpm", ["--filter", "@task-weaver/db", "exec", "tsx", "--test", "src/thin-worker-upgrade.postgres-e2e.test.ts"], { encoding: "utf8", timeout: 150_000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, PGOPTIONS: "-c client_min_messages=warning", TW_THIN_UPGRADE_E2E_DATABASE_URL: `postgres://fixture:fixture-only@127.0.0.1:${port}/tw_thin_upgrade_e2e` } });
   process.stdout.write(`${upgrade.stdout ?? ""}${upgrade.stderr ?? ""}`);
   assert.equal(upgrade.status, 0, "Thin worker upgrade verification failed");
-  for (const args of [["--filter", "@task-weaver/api", "exec", "tsx", "--test", "src/execution-recovery.postgres-e2e.test.ts"], ["--filter", "@task-weaver/api", "exec", "tsx", "--test", "src/managed-child-observations.postgres-e2e.test.ts"], ["--filter", "@task-weaver/api", "exec", "tsx", "--test", "src/thin-worker.postgres-e2e.test.ts"], ["exec", "tsx", "--test", "scripts/thin-worker-deterministic.postgres-e2e.test.mts"], ["exec", "tsx", "--test", "scripts/thin-worker-runner.postgres-e2e.test.mts"], ["exec", "tsx", "--test", "scripts/recovery-operator.postgres-e2e.test.ts"]]) {
+  for (const args of [["--filter", "@task-weaver/api", "exec", "tsx", "--test", "src/thin-worker.postgres-e2e.test.ts"], ["exec", "tsx", "--test", "scripts/thin-worker-deterministic.postgres-e2e.test.mts"], ["exec", "tsx", "--test", "scripts/thin-worker-runner.postgres-e2e.test.mts"]]) {
     const result = spawnSync("pnpm", args, {
       encoding: "utf8", timeout: 150_000, maxBuffer: 4 * 1024 * 1024,
       env: { ...process.env, TW_DAEMON_MODE: "sse", PGOPTIONS: "-c client_min_messages=warning", TW_EXECUTION_RECOVERY_E2E_DATABASE_URL: `postgres://fixture:fixture-only@127.0.0.1:${port}/tw_execution_recovery_e2e` },

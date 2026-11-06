@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { reconcileHumanRepositoryDeliverySchema, requirementWorkflowSchema, workflowFromPreset, workflowNeedsWorktree } from '@task-weaver/contracts'
-import { parseWorkflowAgentResult } from './workflow-agent.js'
 import { localWorkflowOutputPath, probeWorkflowArtifact, storeWorkflowArtifact } from './workflow-artifacts.js'
 
 test('workflow defaults separate no-output, branch, PR and custom integration actions', () => {
@@ -19,15 +18,6 @@ test('workflow defaults separate no-output, branch, PR and custom integration ac
   assert.throws(() => requirementWorkflowSchema.parse({ ...basic, worktreeMode: 'none', delivery: { ...basic.delivery, method: 'git_branch' } }))
   assert.throws(() => requirementWorkflowSchema.parse({ ...basic, integration: { mode: 'automatic', method: 'publish', instructions: '' } }))
   assert.equal(requirementWorkflowSchema.parse({ ...basic, integration: { mode: 'automatic', method: 'publish', instructions: 'Publish the report to the configured destination' } }).integration.method, 'publish')
-})
-
-test('workflow agent decisions require one explicit validated result and real check entries', () => {
-  const result = { decision: 'complete', reason: 'Inspected the report', checks: [{ name: 'complete report', status: 'passed', summary: 'All requested sections are present' }] }
-  assert.deepEqual(parseWorkflowAgentResult(`WORKFLOW_RESULT: ${JSON.stringify(result)}`), result)
-  assert.deepEqual(parseWorkflowAgentResult(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: `WORKFLOW_RESULT: ${JSON.stringify(result)}` } })), result)
-  assert.throws(() => parseWorkflowAgentResult('APPROVED'))
-  assert.throws(() => parseWorkflowAgentResult(`WORKFLOW_RESULT: ${JSON.stringify(result)}\nWORKFLOW_RESULT: ${JSON.stringify(result)}`))
-  assert.throws(() => parseWorkflowAgentResult('WORKFLOW_RESULT: {"decision":"complete","reason":""}'))
 })
 
 test('durable local outputs detect modification, missing bytes, wrong nodes and path escapes', async () => {

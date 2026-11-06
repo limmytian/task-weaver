@@ -1,5 +1,4 @@
 import { createEvidenceRoutes } from './routes/evidence.js';
-import { createWorkerConsoleRoutes } from './routes/worker-console.js';
 import { Hono } from "hono";
 import type { Database } from "@task-weaver/db";
 import {
@@ -26,7 +25,6 @@ import activityRoutes from "./routes/activity.js";
 import apiKeyRoutes from "./routes/api-keys.js";
 import assistantRoutes from "./routes/assistant.js";
 import contextRoutes from "./routes/context.js";
-import daemonRoutes from "./routes/daemons.js";
 import thinWorkerRoutes from "./routes/thin-workers.js";
 import documentRoutes from "./routes/documents.js";
 import embeddingRoutes from "./routes/embeddings.js";
@@ -120,14 +118,12 @@ const consoleLogger: ApplicationLogger = {
 };
 
 function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
-  const consoleRuntime = createWorkerConsoleRoutes(env);
   const evidenceRuntime = createEvidenceRoutes(env.TW_EVIDENCE_READ_ENABLED === 'true');
   let webhookQueue = Promise.resolve();
   let pendingWebhooks = 0;
   let webhookBackground: Promise<void> | undefined;
   return {
     apiRoutes: [
-      { id: "worker-console", method: "POST", path: "/api/v1/worker-console", route: consoleRuntime.router },
       { id: "evidence", method: "POST", path: "/api/v1/evidence", route: evidenceRuntime.router },
       {
         id: "agent-usage",
@@ -230,12 +226,6 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
         route: graphqlRoutes,
       },
       {
-        id: "daemons",
-        method: "GET",
-        path: "/api/v1/daemons",
-        route: daemonRoutes,
-      },
-      {
         id: "observability",
         method: "GET",
         path: "/api/v1/observability",
@@ -263,7 +253,6 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
       },
     ],
     workers: [
-      { id: "worker-console", start() {}, async stop() { consoleRuntime.close(); } },
       { id: "evidence", start() {}, async stop() { evidenceRuntime.close(); } },
       {
         id: "durable-webhook-delivery",

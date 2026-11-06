@@ -15,7 +15,7 @@ Task Weaver is a project management platform where both humans (via Web UI) and 
 - **Database**: PostgreSQL + pgvector + Drizzle ORM
 - **Frontend API**: tRPC v11
 - **General API**: REST (Hono routes)
-- **AI Interface**: `tw` CLI (wraps REST) + autonomous task daemon (`tw daemon`)
+- **AI Interface**: `tw` CLI (wraps REST) + task worker (`tw worker`)
 - **MCP Tool Registry**: hosts and proxies external MCP servers so agents can discover/call their tools (@modelcontextprotocol/sdk as client)
 - **Frontend**: Next.js 16 (App Router) + shadcn/ui + Tailwind CSS
 - **Validation**: Zod (shared across tRPC/REST/CLI)
@@ -27,7 +27,7 @@ Task Weaver is a project management platform where both humans (via Web UI) and 
 task-weaver/
 ├── apps/
 │   ├── web/              # Next.js frontend
-│   ├── api/              # Hono API server (tRPC + REST + daemon/MCP-registry routes)
+│   ├── api/              # Hono API server (tRPC + REST + worker/MCP-registry routes)
 │   └── cli/              # `tw` CLI for humans and AI agents (wraps REST)
 ├── packages/
 │   ├── core/             # Business logic, Zod schemas, type definitions
@@ -45,15 +45,11 @@ AI agents can interact with Task Weaver through these channels:
 - **REST API** (`apps/api/`): HTTP/JSON at `/api/v1/`. Authentication uses a revocable browser session or a subject-bound scoped API key (`Authorization: Bearer <api-key>`). Actor identity comes from the verified credential; `X-Actor-Id` / `X-Actor-Type` headers are not trusted.
 - **Skills** (`skills/`): Standard `SKILL.md` format skill that teaches AI agents how to use the platform.
 
-### Autonomous Task Daemon
+### Task Worker
 
-`tw daemon start` runs a long-lived local runner that auto-fetches and auto-executes tasks:
+`tw worker start` runs one task or remains available for work in a scoped project. The API atomically acquires tasks and renews fenced leases. Workers use SSE wakeups with polling fallback, create isolated task workspaces, execute Codex, and publish verified artifacts. Git tasks integrate into a requirement branch under a delivery slot; acceptance and version-branch integration are ordinary dependent tasks. Historical daemon and slice records are retained for audit and are not schedulable.
 
-1. **Register** with the API (`POST /api/v1/daemons/register`), advertising detected local AI CLI tools (`codex`, `claude`, `agy`, `aider`, `cursor`) as capabilities, and negotiates a config (polling vs SSE).
-2. **Acquire work** via polling (`POST /api/v1/daemons/{id}/apply-task`, with exponential backoff) or SSE push (`/api/v1/daemons/events`, auto-falling back to polling on disconnect). A heartbeat is sent every 30s.
-3. **Execute** by spawning the chosen AI CLI tool with a generated prompt that instructs it to claim the task, do the work via `tw` commands, set status to `done`/`in_review`, and release the claim. The daemon runs one task at a time and returns to idle on completion.
-
-Daemon-facing routes live in `apps/api/src/routes/daemons.ts`; the runner in `apps/cli/src/commands/daemon.ts`.
+Worker-facing routes live in `apps/api/src/routes/thin-workers.ts`; the runner is in `apps/cli/src/commands/thin-worker.ts`.
 
 ### MCP Tool Registry
 
