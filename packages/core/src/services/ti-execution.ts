@@ -134,8 +134,9 @@ export function createTiExecutionService(context: VerifiedRequestContext) {
             if (blocked) continue;
             await requireResource(tx, authority, 'task', task.id, 'execution.run');
             await requireResource(tx, authority, 'task', task.id, 'resource.write');
-            const running = await tx.select({ id: tiAgentRuns.id }).from(tiAgentRuns).where(and(eq(tiAgentRuns.assignedAgentId, actor.id), inArray(tiAgentRuns.status, ['running', 'in_review']), sql`${tiAgentRuns.leaseExpiresAt} > now()`));
-            if (running.length >= live.policy.maxConcurrentRuns) return null;
+            // An expired or failed attempt still consumes capacity until its effects are inspected.
+            const unresolved = await tx.select({ id: workerAttempts.id }).from(workerAttempts).where(and(eq(workerAttempts.actorId, actor.id), inArray(workerAttempts.status, ['running', 'attention']), sql`${workerAttempts.nodeId} LIKE 'ti:%'`));
+            if (unresolved.length >= live.policy.maxConcurrentRuns) return null;
             const [usage] = await tx.select({ daily: sql<number>`count(*) FILTER (WHERE ${tiAgentRuns.startedAt} >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')`, monthly: sql<number>`count(*) FILTER (WHERE ${tiAgentRuns.startedAt} >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')` }).from(tiAgentRuns).where(eq(tiAgentRuns.assignedAgentId, actor.id));
             if ((live.policy.dailyRunLimit > 0 && Number(usage?.daily) >= live.policy.dailyRunLimit) || (live.policy.monthlyRunLimit > 0 && Number(usage?.monthly) >= live.policy.monthlyRunLimit)) return null;
             const generation = (live.binding.leaseGeneration ?? 0) + 1;

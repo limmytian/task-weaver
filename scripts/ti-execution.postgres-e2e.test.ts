@@ -229,7 +229,10 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     await db.update(workerAttempts).set({ expiresAt: new Date(Date.now() - 1_000) }).where(eq(workerAttempts.id, stored.authorization.attemptId));
     await assert.rejects(() => runtime.verify(new Headers({ authorization: `Bearer ${old.token}` })));
     await assert.rejects(() => supervisor.invoke(db, "heartbeatRunLease", [first.id, { ...firstFence, durationMinutes: 15 }]));
+    const otherTask = await owner.service.taskService.createTask(db, { projectId: project.id, requirementId: requirement.id, title: 'Waiting for executor capacity', assignee: agent.id, assigneeType: 'agent' }, owner.actor);
+    const otherRun = await owner.service.tiAgentService.createRun(db, { taskId: otherTask.id, assignedAgentId: agent.id, assignedAgentType: 'agent' }, owner.actor);
     assert.equal(await executor.service.tiAgentService.acquireRun(db, worker, executor.actor), null);
+    await createTiExecutionService(owner.context).invoke(db, 'cancelRun', [otherRun.id, {}]);
     await createThinWorkerService(owner.context).resolve(db, { attemptId: stored.authorization.attemptId, disposition: 'retry', retrySafe: true, reason: 'Executor stopped and effects inspected' });
     assert.equal((await db.query.tiAgentRuns.findFirst({ where: eq(tiAgentRuns.id, first.id) })).status, 'cancelled');
     const replacement = await owner.service.tiAgentService.createRun(db, { taskId: task.id, assignedAgentId: agent.id, assignedAgentType: 'agent', maxRetries: 1 }, owner.actor);
