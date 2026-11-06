@@ -81,6 +81,9 @@
       "@humanfs/node": "0.16.8",
       "@esbuild-kit/core-utils>esbuild": "0.25.12",
       "esbuild@0.27": "0.28.2"
+    },
+    "patchedDependencies": {
+      "postgres@3.4.8": "patches/postgres@3.4.8.patch"
     }
   },
   "engines": {
