@@ -136,6 +136,7 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
     await assert.rejects(fetchThinIntegrationTarget({ ...baselineOptions, entries: [{ ...repository, link: { ...repository.link, workingBranch: null } }], repositoryId: repository.repository.id }), /configured requirement branch/)
     const calls: string[] = []
     let allowPush = true
+    let occupied = 0
     const server = createServer((req, res) => {
       const chunks: Buffer[] = []
       req.on('data', chunk => chunks.push(Buffer.from(chunk)))
@@ -143,6 +144,7 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
         calls.push(req.url ?? '')
         res.setHeader('content-type', 'application/json')
         const path = req.url ?? ''
+        if (path.endsWith('/prepare') && occupied > 0) { occupied--; res.statusCode = 409; res.end(JSON.stringify({ error: 'Branch delivery is occupied or requires inspection' })); return }
         const raw = Buffer.concat(chunks).toString('utf8')
         const body = path.includes('/attachments') || !raw ? {} : JSON.parse(raw)
         const response = path.endsWith('/acquire') ? { attempt: { id: '00000000-0000-4000-8000-000000000014', workerId: body.workerId, requirementId, taskId: taskIds[0], planRevision: 2 }, task: { id: taskIds[0], title: 'Worker Git fixture', description: null, requirementId, tags: [] }, token: 'fixture' }
@@ -179,11 +181,14 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
       assert.equal(git(['rev-parse', 'refs/heads/main'], join(root, 'thin.git')), delivered.commit)
       assert.deepEqual(calls.map(path => path.split('/').at(-1)), ['prepare', 'transition', 'confirm', 'prepare', 'transition'])
       allowPush = true
+      occupied = 1
+      const priorPrepareCount = calls.filter(path => path.endsWith('/prepare')).length
       const outcome = await runThinOnce({ config: { ...options(0).config, apiUrl: `http://127.0.0.1:${address.port}`, apiKey: 'fixture' }, projectId, requirementId, model: 'fixture', effort: 'low', timeoutMs: 10000, gitIdentity: { name: 'Fixture', email: 'fixture@example.test' }, executor: {
         async preflight() { return { blocked: false, reason: 'fixture', retryAt: null } },
         async execute(input) { const manifest = JSON.parse(await readFile(join(input.cwd, 'repository-manifest.json'), 'utf8')); await writeFile(join(input.cwd, manifest.repositories[0].relativePath, 'worker.txt'), 'worker delivery\n'); await writeFile(join(input.cwd, 'result.md'), 'Worker evidence\n'); return { ok: true, reason: 'fixture', quotaBlocked: false } },
       } })
       assert.equal(outcome.state, 'completed')
+      assert.equal(calls.filter(path => path.endsWith('/prepare')).length - priorPrepareCount, 2, 'busy branch should be retried before push authorization')
       const workerTip = git(['rev-parse', 'refs/heads/main'], join(root, 'thin.git'))
       assert.notEqual(workerTip, delivered.commit)
       assert.equal(git(['show', `${workerTip}:worker.txt`], join(root, 'thin.git')), 'worker delivery')
