@@ -75,6 +75,8 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   assert.equal(cooling.activity, 'cooldown');
   assert.match(cooling.reason!, /\[redacted\]/);
   assert.equal(cooling.retryAt!.toISOString(), '2030-01-01T00:00:00.000Z');
+  await worker.presence(db, { ...presence, activity: 'cooldown' });
+  assert.equal((await worker.listWorkers(db, f.project.id))[0]!.activityChangedAt.getTime(), cooling.activityChangedAt.getTime(), 'heartbeat must not pretend the phase changed');
   const otherKey = await issue(agent.id);
   const otherWorker = createThinWorkerService(await context(otherKey.rawKey));
   await assert.rejects(otherWorker.presence(db, presence));
