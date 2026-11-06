@@ -26,7 +26,7 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   const agent = await f.identity.createAgent(f.owner.headers, { displayName: 'Thin worker fixture' });
   await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: 'maintainer', explicitPermissions: [] });
   const permissions = ['resource.read', 'resource.write', 'execution.run', 'project.manage'] as const;
-  const issue = (actorId: string) => f.identity.issueKey(f.owner.headers, actorId, { name: 'Thin fixture', expiresAt: null, grants: [{ scope: 'project', projectId: f.project.id, permissions: [...permissions] }] });
+  const issue = (actorId: string) => f.identity.issueKey(f.owner.headers, actorId, { name: 'Thin fixture', expiresAt: null, grants: [{ scope: 'project', projectId: f.project.id, permissions: [...permissions] }, { scope: 'global', permissions: ['resource.read'] }] });
   const ownerKey = await issue(f.owner.context.actor.id);
   const workerKey = await issue(agent.id);
   const context = async (key: string) => f.auth.resolve(new Headers({ authorization: `Bearer ${key}` }));
@@ -115,7 +115,7 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   assert.equal(claims.filter(claim => claim.attempt).length, 1);
   const winner = claims.find(claim => claim.attempt)!;
   assert.equal(winner.task!.id, first!.id);
-  const [gitRepository] = await db.insert(repositories).values({ displayName: 'Delivery fixture', host: 'fixture.invalid', namespace: 'test', name: randomUUID(), canonicalKey: randomUUID(), createdBy: f.owner.context.actor.id }).returning();
+  const [gitRepository] = await db.insert(repositories).values({ displayName: 'Delivery fixture', provider: 'github', host: 'github.com', namespace: 'test', name: randomUUID(), canonicalKey: randomUUID(), createdBy: f.owner.context.actor.id }).returning();
   const delivery = { projectId: f.project.id, repositoryId: gitRepository!.id, attemptId: winner.attempt!.id, operationKey: randomUUID(), targetBranch: 'requirement/fixture', expectedHead: 'a'.repeat(40), proposedHead: 'b'.repeat(40), state: 'prepared' as const };
   const [slot] = await db.insert(thinGitDeliveries).values(delivery).returning();
   await assert.rejects(db.insert(thinGitDeliveries).values({ ...delivery, operationKey: randomUUID() }));
@@ -126,6 +126,9 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   await db.insert(requirementRepositories).values({ requirementId: req!.id, repositoryId: gitRepository!.id, workingBranch: 'requirement/fixture' });
   const prepare = { attemptId: winner.attempt!.id, workerId: winner.attempt!.workerId, token: winner.token!, repositoryId: gitRepository!.id, operationKey: randomUUID(), targetBranch: 'requirement/fixture', expectedHead: 'a'.repeat(40), proposedHead: 'b'.repeat(40) };
   await assert.rejects(worker.prepareGitDelivery(db, { ...prepare, targetBranch: 'main' }));
+  await db.update(repositories).set({ visibility: 'private', ownerId: f.outsider.context.actor.id, ownerType: 'human' }).where(eq(repositories.id, gitRepository!.id));
+  await assert.rejects(worker.prepareGitDelivery(db, prepare), /Resource not found/);
+  await db.update(repositories).set({ visibility: 'instance', ownerId: null, ownerType: null }).where(eq(repositories.id, gitRepository!.id));
   const prepared = await worker.prepareGitDelivery(db, prepare);
   assert.equal((await worker.prepareGitDelivery(db, prepare)).id, prepared.id, 'same operation safely replays');
   await assert.rejects(worker.prepareGitDelivery(db, { ...prepare, proposedHead: 'c'.repeat(40) }));
@@ -137,6 +140,37 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   assert.equal(replayedStart.delivery.state, 'pushing'); assert.equal(replayedStart.shouldPush, false);
   assert.equal((await worker.transitionGitDelivery(db, { ...transition, event: 'response_lost' })).delivery.state, 'uncertain');
   await assert.rejects(worker.transitionGitDelivery(db, { ...transition, event: 'start_push' }));
+  const confirmation = { attemptId: transition.attemptId, workerId: transition.workerId, token: transition.token, deliveryId: transition.deliveryId };
+  const fakeFetch: typeof fetch = async (url) => {
+    const path = String(url);
+    const body = path.includes('/compare/')
+      ? { status: 'ahead', base_commit: { sha: 'a'.repeat(40) }, merge_base_commit: { sha: 'a'.repeat(40) } }
+      : { name: 'requirement/fixture', commit: { sha: 'b'.repeat(40) } };
+    return new Response(JSON.stringify(body), { status: 200 });
+  };
+  const invalidForge = createThinWorkerService(workerContext, { forgeFetch: async () => new Response('{}', { status: 200 }) });
+  await assert.rejects(invalidForge.confirmGitDelivery(db, confirmation));
+  const verifier = createThinWorkerService(workerContext, { forgeFetch: fakeFetch });
+  const raceVerifier = createThinWorkerService(workerContext, { forgeFetch: async (url, init) => {
+    const response = await fakeFetch(url, init);
+    if (String(url).includes('/branches/')) await db.update(requirementRepositories).set({ workingBranch: 'requirement/changed' }).where(eq(requirementRepositories.requirementId, req!.id));
+    return response;
+  } });
+  await assert.rejects(raceVerifier.confirmGitDelivery(db, confirmation), /changed/);
+  await db.update(requirementRepositories).set({ workingBranch: 'requirement/fixture' }).where(eq(requirementRepositories.requirementId, req!.id));
+  const expiredVerifier = createThinWorkerService(workerContext, { forgeFetch: async (url, init) => {
+    const response = await fakeFetch(url, init);
+    if (String(url).includes('/branches/')) await db.update(workerAttempts).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(workerAttempts.id, winner.attempt!.id));
+    return response;
+  } });
+  await assert.rejects(expiredVerifier.confirmGitDelivery(db, confirmation));
+  await db.update(workerAttempts).set({ expiresAt: new Date(Date.now() + 120000) }).where(eq(workerAttempts.id, winner.attempt!.id));
+  assert.equal((await verifier.confirmGitDelivery(db, confirmation)).state, 'confirmed');
+  assert.equal((await verifier.confirmGitDelivery(db, confirmation)).state, 'confirmed');
+  const next = await worker.prepareGitDelivery(db, { ...prepare, operationKey: randomUUID() });
+  const nextTransition = { ...transition, deliveryId: next.id };
+  await worker.transitionGitDelivery(db, { ...nextTransition, event: 'start_push' });
+  await worker.transitionGitDelivery(db, { ...nextTransition, event: 'response_lost' });
   await assert.rejects(worker.result(db, { attemptId: transition.attemptId, workerId: transition.workerId, token: transition.token, resultKey: randomUUID(), outcome: 'done', summary: 'Premature', outputId: randomUUID() }), /Git delivery must be resolved/);
   assert.equal('tokenHash' in winner.attempt!, false);
   const listing = await f.app.request(`/api/v1/thin-workers/attempts?projectId=${f.project.id}`, { headers: new Headers({ authorization: `Bearer ${workerKey.rawKey}` }) });
@@ -204,7 +238,7 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   assert.equal(conflict.status, 409);
   assert.equal((await conflict.json() as any).currentVersion, stale.attempt!.planRevision + 1);
   await assert.rejects(owner.resolve(db, { attemptId: winner.attempt!.id, disposition: 'retry', reason: 'External effects checked' }));
-  await db.update(thinGitDeliveries).set({ state: 'confirmed' }).where(eq(thinGitDeliveries.id, prepared.id));
+  await db.update(thinGitDeliveries).set({ state: 'confirmed' }).where(eq(thinGitDeliveries.id, next.id));
   await owner.resolve(db, { attemptId: winner.attempt!.id, disposition: 'retry', retrySafe: true, reason: 'External effects checked' });
   const replacement = await worker.acquire(db, input(randomUUID()));
   assert.equal(replacement.task!.id, first!.id);
