@@ -52,6 +52,7 @@ import { KanbanBoard } from "@/components/kanban-board";
 import { AssistantDialog } from "@/components/assistant-dialog";
 import { ProjectWorkspaceLinks, WorkspaceBreadcrumbs } from "@/components/project-navigation";
 import { RepositoryChips } from "@/components/repository-links";
+import { ThinWorkerStatus } from "@/components/thin-worker-status";
 
 const HealthDashboard = deferView(() => import("@/components/health-dashboard").then(module => module.HealthDashboard));
 const GanttChart = deferView(() => import("@/components/gantt-chart").then(module => module.GanttChart));
@@ -218,10 +219,12 @@ export default function ProjectDetailPage({
               Graph
             </TabsTrigger>
             <TabsTrigger value="activity"><Activity aria-hidden="true" className="mr-1 h-3.5 w-3.5" />Activity</TabsTrigger>
+            <TabsTrigger value="workers">Workers</TabsTrigger>
             <TabsTrigger value="settings"><Settings aria-hidden="true" className="mr-1 h-3.5 w-3.5" />Settings</TabsTrigger>
           </TabsList>
 
           <TabsContent value="plans" className="mt-4"><PlanDrafts projectId={id} /></TabsContent>
+          <TabsContent value="workers" className="mt-4"><ThinWorkerStatus projectId={id} /></TabsContent>
           <TabsContent value="requirements" className="mt-4">
             <RequirementsTab
               projectId={id}
