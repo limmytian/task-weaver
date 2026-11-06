@@ -9,4 +9,7 @@ export const thinWorkers = pgTable('thin_workers', {
   nodeId: text('node_id').notNull(),
   heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }).notNull().defaultNow(),
   stoppedAt: timestamp('stopped_at', { withTimezone: true }),
+  activity: text('activity', { enum: ['unknown', 'checking', 'idle', 'cooldown', 'attention'] }).notNull().default('unknown'),
+  activityReason: text('activity_reason'),
+  retryAt: timestamp('retry_at', { withTimezone: true }),
 }, table => [index('idx_thin_workers_project_heartbeat').on(table.projectId, table.heartbeatAt)]);

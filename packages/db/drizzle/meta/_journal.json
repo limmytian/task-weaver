@@ -673,6 +673,13 @@
       "when": 1793761564110,
       "tag": "0095_worker_plan_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1793761564111,
+      "tag": "0096_thin_worker_activity",
+      "breakpoints": true
     }
   ]
 }
