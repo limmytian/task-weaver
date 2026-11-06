@@ -88,7 +88,8 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   assert.equal((await worker.listWorkers(db, f.project.id))[0]!.status, 'offline');
   await owner.setMode(db, { projectId: f.project.id, mode: 'legacy', inspection: 'Create historical slice before thin cutover' });
   const [req] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Thin fixture', status: 'approved', createdBy: f.owner.context.actor.id }).returning();
-  const [historicalSlice] = await db.insert(executionSlices).values({ requirementId: req!.id, title: 'Historical slice' }).returning();
+  await db.insert(executionSlices).values({ requirementId: req!.id, title: 'Earlier historical slice', orderIndex: 0 });
+  const [historicalSlice] = await db.insert(executionSlices).values({ requirementId: req!.id, title: 'Historical slice', orderIndex: 1 }).returning();
   await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Human owned', priority: 'urgent', assignee: f.owner.context.actor.id, assigneeType: 'human', createdBy: f.owner.context.actor.id });
   const [first] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, executionSliceId: historicalSlice!.id, title: 'One winner', createdBy: f.owner.context.actor.id }).returning();
   const [clearableHistory] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, executionSliceId: historicalSlice!.id, title: 'Clearable history', status: 'cancelled', createdBy: f.owner.context.actor.id }).returning();
@@ -111,6 +112,9 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   assert.equal((await db.select().from(executionSlices).where(eq(executionSlices.id, historicalSlice!.id)))[0]!.title, 'Historical slice');
   await db.update(tasks).set({ title: 'One winner' }).where(eq(tasks.id, first!.id));
 
+  const interactiveTasks = createResourceServices(await context(ownerKey.rawKey)).taskService;
+  await interactiveTasks.updateTaskStatus(db, first!.id, 'in_progress', humanActor);
+  await interactiveTasks.updateTaskStatus(db, first!.id, 'todo', humanActor);
   const workerIds = [randomUUID(), randomUUID()];
   const input = (workerId: string) => ({ projectId: f.project.id, workerId, nodeId: 'fixture-node', executor: 'codex' as const, model: 'gpt-6.1-terra', durationSeconds: 120 });
   assert.equal((await worker.acquire(db, { ...input(randomUUID()), requirementId: randomUUID() })).attempt, null, 'requirement scope must not consume another queue');

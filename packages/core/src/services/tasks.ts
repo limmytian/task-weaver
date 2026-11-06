@@ -14,6 +14,7 @@ import {
   requirementRepositories,
   requirements,
   repositories,
+  projects,
 } from "@task-weaver/db";
 import { emitDurable } from "./durable-events";
 import type { Actor } from "@task-weaver/contracts";
@@ -531,7 +532,8 @@ export async function updateTaskStatus(
     task.executionSliceId
     && (newStatus === "in_progress" || newStatus === "in_review" || newStatus === "done")
   ) {
-    await assertExecutionSliceCanAdvance(db, task.executionSliceId);
+    const project = task.projectId ? await db.query.projects.findFirst({ where: eq(projects.id, task.projectId), columns: { workerMode: true } }) : null;
+    if (project?.workerMode !== "thin") await assertExecutionSliceCanAdvance(db, task.executionSliceId);
   }
 
   // Dependency enforcement: block advancement when upstream tasks are incomplete
