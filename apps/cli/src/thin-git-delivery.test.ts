@@ -4,7 +4,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { commitThinWorkspace, integrateThinTarget } from './thin-git-delivery.js'
+import { commitThinWorkspace, integrateThinTarget, pushThinDelivery } from './thin-git-delivery.js'
+import { runCommand } from './async-command.js'
 
 test('task commits preserve the baseline and refuse lost authority', async t => {
   const cwd = await mkdtemp(join(tmpdir(), 'tw-git-delivery-'))
@@ -27,6 +28,32 @@ test('task commits preserve the baseline and refuse lost authority', async t => 
   assert.equal(git('rev-parse', 'HEAD^'), baseline)
   assert.match(git('log', '-1', '--format=%B'), /Signed-off-by: Delivery Operator <delivery@example.test>/)
   await assert.rejects(commitThinWorkspace({ cwd, baseline, message: 'Stale', assertAuthority: async () => {} }), /baseline/)
+})
+
+test('normal push refuses an advanced branch and preserves uncertainty after a lost response', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'tw-git-push-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const cwd = join(root, 'work'), remote = join(root, 'remote.git')
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/usr/bin/false', SSH_ASKPASS: '/usr/bin/false' }
+  execFileSync('git', ['init', '--bare', remote], { env, stdio: 'ignore' })
+  execFileSync('git', ['clone', remote, cwd], { env, stdio: 'ignore' })
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.test')
+  git('switch', '-c', 'requirement')
+  await writeFile(join(cwd, 'file.txt'), 'one\n'); git('add', '.'); git('commit', '-m', 'base'); git('push', 'origin', 'HEAD:refs/heads/requirement')
+  const base = git('rev-parse', 'HEAD')
+  await writeFile(join(cwd, 'file.txt'), 'two\n'); git('add', '.'); git('commit', '-m', 'delivery')
+  const proposed = git('rev-parse', 'HEAD')
+  let starts = 0, uncertain = 0
+  const run = (args: string[]) => runCommand('git', args, { cwd, env })
+  const result = await pushThinDelivery({ targetBranch: 'requirement', expectedHead: base, proposedHead: proposed, git: async args => {
+    const actual = await run(args)
+    return args[0] === 'push' ? { ...actual, ok: false, status: null, stderr: 'connection lost' } : actual
+  }, authorizePush: async () => { starts++; return true }, markUncertain: async () => { uncertain++ } })
+  assert.equal(result.state, 'uncertain'); assert.equal(starts, 1); assert.equal(uncertain, 1)
+  assert.equal(git('ls-remote', 'origin', 'refs/heads/requirement').split('\t')[0], proposed)
+  await assert.rejects(pushThinDelivery({ targetBranch: 'requirement', expectedHead: base, proposedHead: proposed, git: run, authorizePush: async () => { starts++; return true }, markUncertain: async () => {} }), /advanced/)
+  assert.equal(starts, 1, 'an advanced target must be rejected before push authorization')
 })
 
 test('parallel task integrates the latest target and preserves real conflicts', async t => {
