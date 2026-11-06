@@ -61,6 +61,25 @@ test('normal push refuses an advanced branch and preserves uncertainty after a l
   assert.equal(git('ls-remote', 'origin', 'refs/heads/requirement').split('\t')[0], proposed)
   await assert.rejects(pushThinDelivery({ targetBranch: 'requirement', expectedHead: base, proposedHead: proposed, remote, git: run, authorizePush: async () => { starts++; return true }, markUncertain: async () => {} }), /advanced/)
   assert.equal(starts, 1, 'an advanced target must be rejected before push authorization')
+  const newer = join(root, 'newer')
+  execFileSync('git', ['clone', '--branch', 'requirement', remote, newer], { env, stdio: 'ignore' })
+  const newGit = (...args: string[]) => execFileSync('git', args, { cwd: newer, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  newGit('config', 'user.name', 'Fixture'); newGit('config', 'user.email', 'fixture@example.test')
+  await writeFile(join(newer, 'newer.txt'), 'newer delivery\n'); newGit('add', '.'); newGit('commit', '-m', 'newer delivery')
+  const newerCommit = newGit('rev-parse', 'HEAD')
+  await writeFile(join(cwd, 'old.txt'), 'late delivery\n'); git('add', '.'); git('commit', '-m', 'late delivery')
+  const lateCommit = git('rev-parse', 'HEAD')
+  const lateSandbox = await prepareThinPushSandbox({ source: cwd, commit: lateCommit, assertAuthority: async () => {} })
+  t.after(lateSandbox.cleanup)
+  const lateRun = (args: string[]) => runCommand('git', ['--git-dir', lateSandbox.gitDir, ...args], { cwd, env })
+  let lateUncertain = false
+  const late = await pushThinDelivery({ targetBranch: 'requirement', expectedHead: proposed, proposedHead: lateCommit, remote, git: lateRun,
+    authorizePush: async () => { newGit('push', 'origin', 'HEAD:refs/heads/requirement'); return true },
+    markUncertain: async () => { lateUncertain = true },
+  })
+  assert.equal(late.state, 'uncertain'); assert.equal(lateUncertain, true)
+  assert.equal(newGit('ls-remote', 'origin', 'refs/heads/requirement').split('\t')[0], newerCommit, 'late authorized push must not overwrite the newer delivery')
+
 })
 
 test('parallel task integrates the latest target and preserves real conflicts', async t => {
