@@ -364,6 +364,7 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   const plan = { projectId: f.project.id, requirements: [{ key: 'current', existingId: req!.id, tasks: [
     { key: 'one', title: 'Planned one' }, { key: 'two', title: 'Planned two' },
     { key: 'accept', title: 'Review both', tags: ['worker:acceptance'], dependsOn: ['one', 'two'] },
+    { key: 'integrate', title: 'Integrate version', tags: ['worker:integration'], dependsOn: ['accept'] },
   ] }] };
   const submission = { attemptId: planning.attempt!.id, workerId: planning.attempt!.workerId, token: planning.token!, operationKey: randomUUID(), expectedRevision: planning.attempt!.planRevision, plan };
   const noManage = await f.identity.issueKey(f.owner.headers, agent.id, { name: 'Executor only', expiresAt: null, grants: [{ scope: 'project', projectId: f.project.id, permissions: ['resource.read', 'resource.write', 'execution.run'] }] });

@@ -619,7 +619,17 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         const accept = acceptance[0]!;
         const blockers = new Set([...accept.dependsOn, ...accept.dependencies].flatMap(dep => typeof dep === 'string' ? [dep] : dep.type === 'blocks' ? [dep.task] : []));
         for (const edge of plan.taskDependencies) if (edge.task === accept.key && edge.type === 'blocks') blockers.add(edge.dependsOn);
-        if (selected.tasks.some(item => item.key !== accept.key && !blockers.has(item.key))) throw new ValidationError('Acceptance must depend on every other planned task');
+        const integrations = selected.tasks.filter(item => item.tags?.includes('worker:integration'));
+        const linkedRepositories = await tx.select({ id: requirementRepositories.id }).from(requirementRepositories).where(eq(requirementRepositories.requirementId, requirement.id)).limit(1);
+        if (linkedRepositories.length ? integrations.length !== 1 : integrations.length !== 0) throw new ValidationError('Code plans require one version integration task; non-code plans require none');
+        const integration = integrations[0];
+        if (integration && (integration.key === accept.key || blockers.has(integration.key))) throw new ValidationError('Version integration must follow acceptance');
+        if (selected.tasks.some(item => item.key !== accept.key && item.key !== integration?.key && !blockers.has(item.key))) throw new ValidationError('Acceptance must depend on every implementation task');
+        if (integration) {
+          const integrationBlockers = new Set([...integration.dependsOn, ...integration.dependencies].flatMap(dep => typeof dep === 'string' ? [dep] : dep.type === 'blocks' ? [dep.task] : []));
+          for (const edge of plan.taskDependencies) if (edge.task === integration.key && edge.type === 'blocks') integrationBlockers.add(edge.dependsOn);
+          if (!integrationBlockers.has(accept.key)) throw new ValidationError('Version integration must depend on acceptance');
+        }
         const planDigest = digest(canonical(JSON.parse(JSON.stringify({ plan, expectedRevision: input.expectedRevision }))));
         const [prior] = await tx.select().from(workerPlanReceipts).where(and(eq(workerPlanReceipts.projectId, project.id), eq(workerPlanReceipts.operationKey, input.operationKey))).for('update');
         if (prior) {
