@@ -659,6 +659,20 @@
       "when": 1793761564108,
       "tag": "0093_worker_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1793761564109,
+      "tag": "0094_thin_worker_presence",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1793761564110,
+      "tag": "0095_worker_plan_receipts",
+      "breakpoints": true
     }
   ]
 }

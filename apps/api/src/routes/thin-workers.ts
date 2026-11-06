@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { ConflictError, ValidationError, authenticationFailure, createAuthorizedEventStream, createThinWorkerService, workerAcquireSchema, workerHeartbeatSchema, workerModeSchema, workerOutputSchema, workerReleaseSchema, workerResolveSchema, workerResultSchema } from '@task-weaver/core';
+import { ConflictError, ValidationError, authenticationFailure, createAuthorizedEventStream, createThinWorkerService, workerAcquireSchema, workerFenceSchema, workerHeartbeatSchema, workerModeSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerReleaseSchema, workerResolveSchema, workerResultSchema } from '@task-weaver/core';
 import { z } from 'zod';
 import type { Env } from '../middleware/actor.js';
 
@@ -20,6 +20,21 @@ routes.get('/attempts', async c => {
   if (!project.success) return c.json({ error: 'Invalid project' }, 400);
   return c.json(await createThinWorkerService(c.get('identity')).list(c.get('db'), project.data));
 });
+routes.get('/presence', async c => {
+  const project = z.string().uuid().safeParse(c.req.query('projectId'));
+  if (!project.success) return c.json({ error: 'Invalid project' }, 400);
+  return c.json(await createThinWorkerService(c.get('identity')).listWorkers(c.get('db'), project.data));
+});
+routes.post('/presence', async c => {
+  const input = workerPresenceSchema.safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: 'Invalid worker presence' }, 400);
+  return c.json(await createThinWorkerService(c.get('identity')).presence(c.get('db'), input.data));
+});
+routes.post('/presence/stop', async c => {
+  const input = workerPresenceSchema.safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: 'Invalid worker presence' }, 400);
+  return c.json(await createThinWorkerService(c.get('identity')).stopPresence(c.get('db'), input.data));
+});
 routes.post('/mode', async c => {
   const input = workerModeSchema.safeParse(await c.req.json().catch(() => null));
   if (!input.success) return c.json({ error: 'Invalid worker mode request' }, 400);
@@ -39,6 +54,16 @@ routes.post('/output', async c => {
   const input = workerOutputSchema.safeParse(await c.req.json().catch(() => null));
   if (!input.success) return c.json({ error: 'Invalid worker output' }, 400);
   return c.json(await createThinWorkerService(c.get('identity')).registerOutput(c.get('db'), input.data));
+});
+routes.post('/inputs', async c => {
+  const input = workerFenceSchema.safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: 'Invalid acceptance input request' }, 400);
+  return c.json(await createThinWorkerService(c.get('identity')).inputs(c.get('db'), input.data));
+});
+routes.post('/plan', async c => {
+  const input = workerPlanSchema.safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: 'Invalid coordinator plan' }, 400);
+  return c.json(await createThinWorkerService(c.get('identity')).applyPlan(c.get('db'), input.data));
 });
 routes.post('/result', async c => {
   const input = workerResultSchema.safeParse(await c.req.json().catch(() => null));

@@ -1,16 +1,23 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { createHash, randomBytes } from 'node:crypto';
-import { activityLog, documentFileVersions, documents, executionControls, projects, requirementClaims, requirements, taskClaims, taskStatusLog, tasks, workerAttempts, workflowOutputs, type Database } from '@task-weaver/db';
-import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerHeartbeatSchema, workerOutputSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
+import { activityLog, documentFileVersions, documents, executionControls, planDrafts, projects, requirementClaims, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinWorkers, workerAttempts, workerPlanReceipts, workflowOutputs, type Database } from '@task-weaver/db';
+import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { lockIdentityLifecycle } from './auth-security';
 import { resourceAuthority, requireResource } from './resource-authorization';
 import { attachmentStorage } from './attachment-storage';
 import { emit } from '@task-weaver/realtime';
+import { createResourceServices } from './resource-services';
+import { createPlanDraft, validatePlanDraft, applyPlanDraft } from './plans';
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 const safeText = (value: string, limit: number) => redactObservabilityText(value, limit).value.replace(/\b(?:tw|twd|twb|twa)_[0-9a-f]{64}\b/gi, '[redacted]');
 const publicAttempt = ({ tokenHash: _tokenHash, credentialId: _credentialId, ...attempt }: typeof workerAttempts.$inferSelect) => attempt;
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(',')}}`;
+  return JSON.stringify(value);
+}
 
 /** The credential is held by the worker; executors never receive it. */
 export function createThinWorkerService(context: VerifiedRequestContext) {
@@ -26,7 +33,61 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
     if (!project || project.status !== 'active') throw new NotFoundError('Project not found');
     return project;
   };
+  const acceptanceInputs = async (tx: Database, authority: Awaited<ReturnType<typeof resourceAuthority>>, taskId: string, revision: number) => {
+    const dependencies = await tx.select().from(taskDependencies).where(and(eq(taskDependencies.taskId, taskId), eq(taskDependencies.type, 'blocks')));
+    if (!dependencies.length || dependencies.length > 100) throw new ValidationError('Acceptance requires bounded blocking dependencies');
+    const inputs: Array<{ taskId: string; outputId: string; documentId: string; fileVersion: number; sha256: string; sizeBytes: number; mimeType: string; originalFilename: string; kind: 'worker' | 'human' }> = [];
+    for (const dependency of dependencies) {
+      await requireResource(tx, authority, 'task', dependency.dependsOnTaskId);
+      const [blocker] = await tx.select().from(tasks).where(eq(tasks.id, dependency.dependsOnTaskId)).for('share');
+      if (!blocker || blocker.status !== 'done') throw new ConflictError('Acceptance dependency is incomplete', revision);
+      const [completed] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.taskId, blocker.id), eq(workerAttempts.status, 'completed'), eq(workerAttempts.planRevision, revision))).orderBy(desc(workerAttempts.completedAt)).limit(1);
+      const outputId = typeof completed?.result?.outputId === 'string' ? completed.result.outputId : null;
+      const [output] = outputId
+        ? await tx.select().from(workflowOutputs).where(and(eq(workflowOutputs.id, outputId), eq(workflowOutputs.workerAttemptId, completed!.id))).for('share')
+        : await tx.select().from(workflowOutputs).where(and(eq(workflowOutputs.taskId, blocker.id), eq(workflowOutputs.createdByType, 'human'), eq(workflowOutputs.planRevision, revision), eq(workflowOutputs.type, 'attachment'))).orderBy(desc(workflowOutputs.createdAt)).limit(1).for('share');
+      if (!output || output.taskId !== blocker.id || output.planRevision !== revision || output.availability !== 'available' || output.type !== 'attachment' || !output.referenceId || !output.attachmentFileVersionId) throw new ConflictError('Acceptance dependency evidence is unavailable', revision);
+      await requireResource(tx, authority, 'document', output.referenceId);
+      const [document] = await tx.select().from(documents).where(eq(documents.id, output.referenceId)).for('share');
+      const [file] = await tx.select().from(documentFileVersions).where(and(eq(documentFileVersions.id, output.attachmentFileVersionId), eq(documentFileVersions.documentId, output.referenceId))).for('share');
+      if (!document || !file || document.currentFileVersionId !== file.id || file.storageBackend !== 'local' || !/^[a-f0-9]{64}$/.test(file.sha256)) throw new ConflictError('Acceptance dependency evidence changed', revision);
+      try { const verified = await attachmentStorage().getVerifiedObject(file.objectKey, { sha256: file.sha256, sizeBytes: file.sizeBytes }); verified.body.destroy(); }
+      catch { throw new ConflictError('Acceptance dependency evidence cannot be verified', revision); }
+      inputs.push({ taskId: blocker.id, outputId: output.id, documentId: document.id, fileVersion: file.version, sha256: file.sha256, sizeBytes: file.sizeBytes, mimeType: file.mimeType, originalFilename: file.originalFilename, kind: output.workerAttemptId ? 'worker' : 'human' });
+    }
+    return inputs;
+  };
   return {
+    async presence(db: Database, raw: z.input<typeof workerPresenceSchema>) {
+      const input = workerPresenceSchema.parse(raw);
+      return transact(db, async (tx, authority) => {
+        if (authority.actor.type !== 'agent' || context.credential.kind !== 'api_key') throw new AuthorizationError();
+        await requireResource(tx, authority, 'project', input.projectId, 'execution.run');
+        const project = await lockProject(tx, input.projectId);
+        if (project.workerMode !== 'thin') throw new ValidationError('Thin worker mode is not enabled');
+        const [row] = await tx.insert(thinWorkers).values({ id: input.workerId, projectId: input.projectId, actorId: authority.actor.id, credentialId: context.credential.id, nodeId: input.nodeId }).onConflictDoUpdate({ target: thinWorkers.id, set: { heartbeatAt: sql`clock_timestamp()`, stoppedAt: null }, setWhere: and(eq(thinWorkers.projectId, input.projectId), eq(thinWorkers.actorId, authority.actor.id), eq(thinWorkers.credentialId, context.credential.id), eq(thinWorkers.nodeId, input.nodeId)) }).returning();
+        if (!row) throw new ConflictError('Worker identity belongs to another registration', 0);
+        return { workerId: row.id, nodeId: row.nodeId, heartbeatAt: row.heartbeatAt };
+      });
+    },
+    async stopPresence(db: Database, raw: z.input<typeof workerPresenceSchema>) {
+      const input = workerPresenceSchema.parse(raw);
+      return transact(db, async (tx, authority) => {
+        if (authority.actor.type !== 'agent' || context.credential.kind !== 'api_key') throw new AuthorizationError();
+        await requireResource(tx, authority, 'project', input.projectId, 'execution.run');
+        const [row] = await tx.update(thinWorkers).set({ stoppedAt: sql`clock_timestamp()` }).where(and(eq(thinWorkers.id, input.workerId), eq(thinWorkers.projectId, input.projectId), eq(thinWorkers.nodeId, input.nodeId), eq(thinWorkers.actorId, authority.actor.id), eq(thinWorkers.credentialId, context.credential.id))).returning();
+        if (!row) throw new NotFoundError('Worker not found');
+        return { stopped: true };
+      });
+    },
+    async listWorkers(db: Database, projectId: string) {
+      z.string().uuid().parse(projectId);
+      return transact(db, async (tx, authority) => {
+        await requireResource(tx, authority, 'project', projectId);
+        const rows = await tx.select().from(thinWorkers).where(eq(thinWorkers.projectId, projectId)).orderBy(sql`${thinWorkers.heartbeatAt} DESC`).limit(100);
+        return rows.map(row => ({ workerId: row.id, nodeId: row.nodeId, heartbeatAt: row.heartbeatAt, status: !row.stoppedAt && Date.now() - row.heartbeatAt.getTime() <= 90000 ? 'online' : 'offline' }));
+      });
+    },
     async list(db: Database, projectId: string) {
       z.string().uuid().parse(projectId);
       return transact(db, async (tx, authority) => {
@@ -118,6 +179,25 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
         return publicAttempt(updated);
       });
     },
+    async inputs(db: Database, raw: z.input<typeof workerFenceSchema>) {
+      const input = workerFenceSchema.parse(raw);
+      return transact(db, async (tx, authority) => {
+        if (authority.actor.type !== 'agent' || context.credential.kind !== 'api_key') throw new AuthorizationError();
+        const [existing] = await tx.select().from(workerAttempts).where(eq(workerAttempts.id, input.attemptId));
+        if (!existing) throw new NotFoundError('Attempt not found');
+        await requireResource(tx, authority, 'task', existing.taskId, 'execution.run');
+        const project = await lockProject(tx, existing.projectId);
+        if (project.workerMode !== 'thin' || existing.actorId !== authority.actor.id || existing.credentialId !== context.credential.id || existing.workerId !== input.workerId || existing.tokenHash !== digest(input.token)) throw new AuthorizationError();
+        const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, existing.requirementId)).for('update');
+        const [task] = await tx.select().from(tasks).where(eq(tasks.id, existing.taskId)).for('update');
+        const [attempt] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.id, existing.id), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`)).for('update');
+        if (!attempt || !requirement || !task || task.status !== 'in_progress' || !task.tags?.includes('worker:acceptance') || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Acceptance attempt or plan changed', requirement?.planRevision ?? 0);
+        const inputs = await acceptanceInputs(tx, authority, task.id, attempt.planRevision);
+        const [live] = await tx.select({ id: workerAttempts.id }).from(workerAttempts).where(and(eq(workerAttempts.id, attempt.id), sql`${workerAttempts.expiresAt} > clock_timestamp()`));
+        if (!live) throw new ConflictError('Acceptance attempt expired', requirement.planRevision);
+        return { inputs };
+      });
+    },
     async registerOutput(db: Database, raw: z.input<typeof workerOutputSchema>) {
       const input = workerOutputSchema.parse(raw);
       return transact(db, async (tx, authority) => {
@@ -152,6 +232,54 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
         return output!;
       });
     },
+    async applyPlan(db: Database, raw: z.input<typeof workerPlanSchema>) {
+      const input = workerPlanSchema.parse(raw);
+      return transact(db, async (tx, authority) => {
+        if (authority.actor.type !== 'agent' || context.credential.kind !== 'api_key') throw new AuthorizationError();
+        const [existing] = await tx.select().from(workerAttempts).where(eq(workerAttempts.id, input.attemptId));
+        if (!existing) throw new NotFoundError('Attempt not found');
+        await requireResource(tx, authority, 'project', existing.projectId, 'project.manage');
+        await requireResource(tx, authority, 'task', existing.taskId, 'execution.run');
+        await requireResource(tx, authority, 'task', existing.taskId, 'resource.write');
+        const project = await lockProject(tx, existing.projectId);
+        if (project.workerMode !== 'thin' || existing.actorId !== authority.actor.id || existing.credentialId !== context.credential.id || existing.workerId !== input.workerId || existing.tokenHash !== digest(input.token)) throw new AuthorizationError();
+        const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, existing.requirementId)).for('update');
+        const [task] = await tx.select().from(tasks).where(eq(tasks.id, existing.taskId)).for('update');
+        const [attempt] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.id, input.attemptId), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`)).for('update');
+        if (!attempt || !requirement || !task || task.status !== 'in_progress' || !task.tags?.includes('worker:coordinator') || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Coordinator attempt is no longer authorized', requirement?.planRevision ?? 0);
+        const plan = input.plan, selected = plan.requirements[0];
+        if (plan.projectId !== project.id || plan.requirements.length !== 1 || selected?.existingId !== requirement.id || plan.documents.length || plan.requirementDependencies.length || plan.documentLinks.length || plan.documentTaskLinks.length || plan.documentRequirementLinks.length || selected.dependsOn.length || selected.dependencies.length || selected.documents.length || selected.slices.length || selected.tasks.length < 2 || selected.tasks.length > 20) throw new ValidationError('Coordinator plan must contain only new tasks in its current requirement');
+        const keys = new Set(selected.tasks.map(item => item.key));
+        if (keys.size !== selected.tasks.length || selected.tasks.some(item => item.existingId || item.assignee || item.assigneeType || item.slice || item.branchName || item.documents.length || item.comments.length || item.notes.length)) throw new ValidationError('Coordinator plan contains unsupported task operations');
+        const references = selected.tasks.flatMap(item => [...item.dependsOn, ...item.dependencies].map(dep => typeof dep === 'string' ? dep : dep.task));
+        if (references.some(ref => !keys.has(ref)) || plan.taskDependencies.some(edge => !keys.has(edge.task) || !keys.has(edge.dependsOn))) throw new ValidationError('Coordinator task dependencies must stay within the new plan');
+        const acceptance = selected.tasks.filter(item => item.tags?.includes('worker:acceptance'));
+        if (acceptance.length !== 1) throw new ValidationError('Coordinator plan requires one acceptance task');
+        const accept = acceptance[0]!;
+        const blockers = new Set([...accept.dependsOn, ...accept.dependencies].flatMap(dep => typeof dep === 'string' ? [dep] : dep.type === 'blocks' ? [dep.task] : []));
+        for (const edge of plan.taskDependencies) if (edge.task === accept.key && edge.type === 'blocks') blockers.add(edge.dependsOn);
+        if (selected.tasks.some(item => item.key !== accept.key && !blockers.has(item.key))) throw new ValidationError('Acceptance must depend on every other planned task');
+        const planDigest = digest(canonical(JSON.parse(JSON.stringify({ plan, expectedRevision: input.expectedRevision }))));
+        const [prior] = await tx.select().from(workerPlanReceipts).where(and(eq(workerPlanReceipts.projectId, project.id), eq(workerPlanReceipts.operationKey, input.operationKey))).for('update');
+        if (prior) {
+          if (prior.attemptId !== attempt.id || prior.planDigest !== planDigest) throw new ConflictError('Plan operation key was already used', requirement.planRevision);
+          const [draft] = await tx.select().from(planDrafts).where(eq(planDrafts.id, prior.draftId));
+          if (!draft?.receipt) throw new ConflictError('Plan receipt is unavailable', requirement.planRevision);
+          return { result: draft.receipt, planRevision: prior.resultingRevision, replayed: true };
+        }
+        if (requirement.planRevision !== input.expectedRevision || attempt.planRevision !== input.expectedRevision) throw new ConflictError('Plan changed; inspect and replan', requirement.planRevision);
+        const actor = { id: authority.actor.id, type: authority.actor.type };
+        const services = createResourceServices(context);
+        const draft = await createPlanDraft(tx, { plan, source: 'assistant' }, actor);
+        await validatePlanDraft(tx, project.id, draft.id, actor, services);
+        const applied = await applyPlanDraft(tx, project.id, draft.id, draft.revision, input.operationKey, actor, services);
+        const [current] = await tx.select().from(requirements).where(eq(requirements.id, requirement.id));
+        const [live] = await tx.update(workerAttempts).set({ planRevision: current!.planRevision }).where(and(eq(workerAttempts.id, attempt.id), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`)).returning();
+        if (!live) throw new ConflictError('Coordinator attempt expired before plan commit', current!.planRevision);
+        await tx.insert(workerPlanReceipts).values({ projectId: project.id, attemptId: attempt.id, operationKey: input.operationKey, draftId: draft.id, planDigest, resultingRevision: current!.planRevision });
+        return { result: applied.result, planRevision: current!.planRevision, replayed: false };
+      });
+    },
     async result(db: Database, raw: z.input<typeof workerResultSchema>) {
       const input = workerResultSchema.parse(raw);
       const result = await transact(db, async (tx, authority) => {
@@ -165,15 +293,19 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
         const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, existing.requirementId)).for('update');
         const [task] = await tx.select().from(tasks).where(eq(tasks.id, existing.taskId)).for('update');
         const [attempt] = await tx.select().from(workerAttempts).where(eq(workerAttempts.id, input.attemptId)).for('update');
-        const result = { outcome: input.outcome, summary: safeText(input.summary, 4000), outputId: input.outputId ?? null };
+        const result = { outcome: input.outcome, summary: safeText(input.summary, 4000), outputId: input.outputId ?? null, acceptanceDecision: input.acceptanceDecision ?? null };
         if (attempt?.status !== 'running') {
-          if (attempt?.status !== 'resolved' && attempt?.resultKey === input.resultKey && attempt.result?.outcome === result.outcome && attempt.result?.summary === result.summary && attempt.result?.outputId === result.outputId) return { attempt: publicAttempt(attempt), task };
+          if (attempt?.status !== 'resolved' && attempt?.resultKey === input.resultKey && attempt.result?.outcome === result.outcome && attempt.result?.summary === result.summary && attempt.result?.outputId === result.outputId && (attempt.result?.acceptanceDecision ?? null) === result.acceptanceDecision) return { attempt: publicAttempt(attempt), task };
           throw new ConflictError('Attempt already has a different result', 0);
         }
         if (!requirement || !task || task.status !== 'in_progress' || task.requirementId !== requirement.id || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Task or plan changed', requirement?.planRevision ?? 0);
         const [blocked] = await tx.execute(sql`SELECT 1 AS blocked WHERE EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks b ON b.id = d.depends_on_task_id WHERE d.task_id = ${task.id} AND d.type = 'blocks' AND b.status <> 'done') OR EXISTS (SELECT 1 FROM requirement_dependencies d JOIN requirements b ON b.id = d.depends_on_requirement_id WHERE d.requirement_id = ${requirement.id} AND d.type = 'blocks' AND b.status NOT IN ('done', 'cancelled'))`) as unknown as Array<{ blocked: number }>;
         if (blocked) throw new ConflictError('Task dependencies changed', requirement.planRevision);
-        if (input.outcome === 'done') {
+        if (input.outcome === 'done' && task.tags?.includes('worker:acceptance')) {
+          if (input.acceptanceDecision !== 'accept') throw new ValidationError('Acceptance requires an explicit decision');
+          await acceptanceInputs(tx, authority, task.id, attempt.planRevision);
+        }
+        if (input.outputId) {
           const [output] = await tx.select().from(workflowOutputs).where(and(eq(workflowOutputs.id, input.outputId!), eq(workflowOutputs.taskId, task.id), eq(workflowOutputs.requirementId, requirement.id))).for('share');
           if (!output || output.workerAttemptId !== attempt.id || output.planRevision !== attempt.planRevision || output.createdAt < attempt.createdAt || output.availability !== 'available' || output.type !== 'attachment' || !output.referenceId || !output.attachmentFileVersionId) throw new ValidationError('A current, available attempt attachment is required');
           await requireResource(tx, authority, 'document', output.referenceId);

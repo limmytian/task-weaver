@@ -46,6 +46,16 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   }
   await db.update(tasks).set({ status: 'cancelled' }).where(eq(tasks.id, legacyTask!.id));
   await owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Fixture queue inspected' });
+  const presenceId = randomUUID();
+  const presence = { projectId: f.project.id, workerId: presenceId, nodeId: 'presence-fixture' };
+  await worker.presence(db, presence);
+  assert.equal((await worker.listWorkers(db, f.project.id))[0]!.status, 'online');
+  const otherKey = await issue(agent.id);
+  const otherWorker = createThinWorkerService(await context(otherKey.rawKey));
+  await assert.rejects(otherWorker.presence(db, presence));
+  await assert.rejects(otherWorker.stopPresence(db, presence));
+  await worker.stopPresence(db, presence);
+  assert.equal((await worker.listWorkers(db, f.project.id))[0]!.status, 'offline');
   const [req] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Thin fixture', status: 'approved', createdBy: f.owner.context.actor.id }).returning();
   await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Human owned', priority: 'urgent', assignee: f.owner.context.actor.id, assigneeType: 'human', createdBy: f.owner.context.actor.id });
   const [first] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'One winner', createdBy: f.owner.context.actor.id }).returning();
@@ -135,6 +145,33 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   assert.equal(release.status, 200, await release.clone().text());
   assert.equal((await release.json() as any).task.status, 'in_review');
   await assert.rejects(worker.heartbeat(db, { attemptId: replacement.attempt!.id, workerId: replacement.attempt!.workerId, token: replacement.token! }));
+  const [coordinator] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Coordinator', tags: ['worker:coordinator'], createdBy: f.owner.context.actor.id }).returning();
+  const planning = await worker.acquire(db, input(randomUUID()));
+  assert.equal(planning.task!.id, coordinator!.id);
+  const plan = { projectId: f.project.id, requirements: [{ key: 'current', existingId: req!.id, tasks: [
+    { key: 'one', title: 'Planned one' }, { key: 'two', title: 'Planned two' },
+    { key: 'accept', title: 'Review both', tags: ['worker:acceptance'], dependsOn: ['one', 'two'] },
+  ] }] };
+  const submission = { attemptId: planning.attempt!.id, workerId: planning.attempt!.workerId, token: planning.token!, operationKey: randomUUID(), expectedRevision: planning.attempt!.planRevision, plan };
+  const noManage = await f.identity.issueKey(f.owner.headers, agent.id, { name: 'Executor only', expiresAt: null, grants: [{ scope: 'project', projectId: f.project.id, permissions: ['resource.read', 'resource.write', 'execution.run'] }] });
+  await assert.rejects(createThinWorkerService(await context(noManage.rawKey)).applyPlan(db, submission));
+  const unsafePlan = { ...plan, requirements: [{ ...plan.requirements[0]!, tasks: [{ key: 'one', title: 'Planned one' }, { key: 'two', title: 'Planned two' }, { key: 'accept', title: 'Review', tags: ['worker:acceptance'], dependsOn: ['one'] }] }] };
+  await assert.rejects(worker.applyPlan(db, { ...submission, operationKey: randomUUID(), plan: unsafePlan }));
+  const applied = await worker.applyPlan(db, submission);
+  assert.equal(applied.replayed, false); assert.ok(applied.planRevision > submission.expectedRevision);
+  assert.equal((await worker.applyPlan(db, submission)).replayed, true);
+  await assert.rejects(worker.applyPlan(db, { ...submission, operationKey: randomUUID() }));
+  await assert.rejects(worker.applyPlan(db, { ...submission, plan: { ...plan, requirements: [{ ...plan.requirements[0]!, tasks: [{ key: 'other', title: 'Other' }, { key: 'accept', title: 'Review', tags: ['worker:acceptance'], dependsOn: ['other'] }] }] } }));
+  const planned = await db.select().from(tasks).where(eq(tasks.requirementId, req!.id));
+  assert.equal(planned.filter(row => row.title.startsWith('Planned ')).length, 2);
+  await worker.heartbeat(db, { attemptId: planning.attempt!.id, workerId: planning.attempt!.workerId, token: planning.token! });
+  const [untrustedReq] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Untrusted coordinator', status: 'approved', createdBy: f.owner.context.actor.id }).returning();
+  await db.insert(tasks).values({ projectId: f.project.id, requirementId: untrustedReq!.id, title: 'Untrusted plan task', priority: 'urgent', tags: ['worker:coordinator'], createdBy: f.owner.context.actor.id });
+  const untrustedWorker = createThinWorkerService(await context(noManage.rawKey));
+  const untrusted = await untrustedWorker.acquire(db, input(randomUUID()));
+  assert.equal(untrusted.task!.title, 'Untrusted plan task');
+  const untrustedPlan = { ...plan, requirements: [{ ...plan.requirements[0]!, existingId: untrustedReq!.id }] };
+  await assert.rejects(untrustedWorker.applyPlan(db, { attemptId: untrusted.attempt!.id, workerId: untrusted.attempt!.workerId, token: untrusted.token!, operationKey: randomUUID(), expectedRevision: untrusted.attempt!.planRevision, plan: untrustedPlan }));
   await db.update(apiKeys).set({ revokedAt: new Date() }).where(eq(apiKeys.id, workerKey.id));
   await assert.rejects(worker.acquire(db, input(randomUUID())));
 });
