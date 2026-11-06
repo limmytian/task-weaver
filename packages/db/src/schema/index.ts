@@ -51,3 +51,4 @@ export * from "./worker-attempts";
 export * from "./thin-workers";
 export * from "./worker-plan-receipts";
 export * from "./thin-git-deliveries";
+export * from "./worker-acceptance-snapshots";

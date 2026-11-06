@@ -708,6 +708,13 @@
       "when": 1793761564115,
       "tag": "0100_thin_slice_write_fence",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1793761564116,
+      "tag": "0101_worker_acceptance_snapshots",
+      "breakpoints": true
     }
   ]
 }
