@@ -50,3 +50,4 @@ export * from "./managed-child-observations";
 export * from "./worker-attempts";
 export * from "./thin-workers";
 export * from "./worker-plan-receipts";
+export * from "./thin-git-deliveries";
