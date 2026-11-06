@@ -113,6 +113,10 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
       const coordinator = task.tags?.includes('worker:coordinator') === true
       const acceptance = task.tags?.includes('worker:acceptance') === true
       if (acceptance) {
+        for (const repository of workspace.repositories) {
+          if (!repository.headCommit) throw new Error('Acceptance workspace baseline is unavailable')
+          await request('POST', '/api/v1/thin-workers/acceptance/snapshot', { ...fence, repositoryId: repository.repositoryId, expectedHead: repository.headCommit }, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]) })
+        }
         const response = await request<{ inputs: Array<{ taskId: string; outputId: string; documentId: string; fileVersion: number; sha256: string; sizeBytes: number; mimeType: string; originalFilename: string; kind: 'worker' | 'human'; attemptId: string | null; gitDeliveries: Array<{ repositoryId: string; commit: string }> }> }>('POST', '/api/v1/thin-workers/inputs', fence, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })
         const inputRoot = join(workspace.rootPath, 'inputs'); await mkdir(inputRoot, { mode: 0o700 })
         const packages: string[] = []

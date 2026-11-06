@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { ConflictError, ValidationError, authenticationFailure, createAuthorizedEventStream, createThinWorkerService, workerAcquireSchema, workerFenceSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerModeSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerReleaseSchema, workerResolveSchema, workerResultSchema } from '@task-weaver/core';
+import { ConflictError, ValidationError, authenticationFailure, createAuthorizedEventStream, createThinWorkerService, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerModeSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerReleaseSchema, workerResolveSchema, workerResultSchema } from '@task-weaver/core';
 import { z } from 'zod';
 import type { Env } from '../middleware/actor.js';
 
@@ -49,6 +49,11 @@ routes.get('/git/deliveries', async c => {
   const project = z.string().uuid().safeParse(c.req.query('projectId'));
   if (!project.success) return c.json({ error: 'Invalid project' }, 400);
   return c.json(await createThinWorkerService(c.get('identity')).listGitDeliveries(c.get('db'), project.data));
+});
+routes.post('/acceptance/snapshot', async c => {
+  const input = workerAcceptanceSnapshotSchema.safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: 'Invalid acceptance snapshot' }, 400);
+  return c.json(await createThinWorkerService(c.get('identity')).snapshotAcceptanceRepository(c.get('db'), input.data));
 });
 routes.post('/git/prepare', async c => {
   const input = workerGitPrepareSchema.safeParse(await c.req.json().catch(() => null));
