@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
-import { apiKeys, createDb, executionControls, executionSlices, repositories, runMigrations, requirements, requirementClaims, requirementRepositories, tasks, taskClaims, taskDependencies, thinGitDeliveries, workerAttempts, workflowOutputs } from '@task-weaver/db';
+import { apiKeys, createDb, executionControls, executionSlices, projects, repositories, runMigrations, requirements, requirementClaims, requirementRepositories, tasks, taskClaims, taskDependencies, thinGitDeliveries, workerAttempts, workflowOutputs } from '@task-weaver/db';
 import { createResourceServices, createThinWorkerService } from '@task-weaver/core';
 import { emit } from '@task-weaver/realtime';
 import { resourcePostgresFixture } from './resource-postgres-fixture';
@@ -100,6 +100,19 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   const legacyTasks = createResourceServices(await context(ownerKey.rawKey)).taskService;
   await assert.rejects(legacyTasks.updateTaskStatus(db, first!.id, 'in_progress', legacyHuman), /slice/i);
   await owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Preserve the legacy slice as history' });
+
+  await owner.setMode(db, { projectId: f.project.id, mode: 'legacy', inspection: 'Exercise slice fence during mode transition' });
+  let locked!: () => void; const lockedProject = new Promise<void>(resolve => { locked = resolve; });
+  let releaseModeLock!: () => void; const releaseProject = new Promise<void>(resolve => { releaseModeLock = resolve; });
+  const switchTransaction = db.transaction(async tx => {
+    await tx.update(projects).set({ workerMode: 'thin' }).where(eq(projects.id, f.project.id));
+    locked(); await releaseProject;
+  });
+  await lockedProject;
+  const concurrentSlice = db.insert(executionSlices).values({ requirementId: req!.id, title: 'Concurrent slice' }).then(() => null, error => error);
+  releaseModeLock(); await switchTransaction;
+  const sliceRaceError = await concurrentSlice;
+  assert.ok(sliceRaceError instanceof Error && sliceRaceError.cause instanceof Error && /Execution slices are historical/.test(sliceRaceError.cause.message), 'slice insertion must observe the committed project mode');
   await db.update(tasks).set({ executionSliceId: null }).where(eq(tasks.id, clearableHistory!.id));
   await db.delete(requirements).where(eq(requirements.id, cascadeRequirement!.id));
   const historicalFence = (error: unknown) => error instanceof Error && error.cause instanceof Error && /Execution slices are historical/.test(error.cause.message);
