@@ -210,6 +210,7 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     assert.equal((await readIntegration()).status, 200);
     const integrationService = createThinWorkerService(await f.auth.resolve(new Headers({ authorization: `Bearer ${key.rawKey}` })));
     const prepareVersion = { ...integrationFence, operationKey: crypto.randomUUID(), repositoryId: gitRepo!.id, expectedHead: 'a'.repeat(40), proposedHead: 'b'.repeat(40) };
+    await assert.rejects(integrationService.prepareGitDelivery(db, { ...prepareVersion, targetBranch: 'main' }), /cannot prepare task-branch deliveries/);
     const versionDelivery = await integrationService.prepareIntegrationDelivery(db, prepareVersion);
     assert.equal(versionDelivery.purpose, 'integration'); assert.equal(versionDelivery.acceptanceAttemptId, gitReviewed.attemptId); assert.equal(versionDelivery.acceptedCommit, acceptedSnapshot!.commit); assert.equal(versionDelivery.targetBranch, 'release');
     assert.equal((await integrationService.prepareIntegrationDelivery(db, prepareVersion)).id, versionDelivery.id);

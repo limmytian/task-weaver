@@ -250,6 +250,7 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         const [attempt] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.id, existing.id), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`)).for('update');
         const [task] = await tx.select().from(tasks).where(eq(tasks.id, existing.taskId)).for('update');
         if (!attempt || !requirement || !task || task.status !== 'in_progress' || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Attempt or plan is no longer current', requirement?.planRevision ?? 0);
+        if (task.tags?.includes('worker:integration')) throw new ValidationError('Integration tasks cannot prepare task-branch deliveries');
         const [repository] = await tx.select().from(repositories).where(and(eq(repositories.id, input.repositoryId), repositoryPredicate(authority))).for('share');
         if (!repository) throw new NotFoundError('Resource not found');
         if (repository.status !== 'active') throw new ValidationError('Repository is archived');
