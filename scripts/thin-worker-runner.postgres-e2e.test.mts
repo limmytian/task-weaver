@@ -196,6 +196,10 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     await db.update(requirementRepositories).set({ baseBranch: 'release', workingBranch: 'changed' }).where(eq(requirementRepositories.repositoryId, gitRepo!.id));
     assert.equal((await readIntegration()).status, 409, 'changed source branch invalidates acceptance');
     await db.update(requirementRepositories).set({ workingBranch: 'main' }).where(eq(requirementRepositories.repositoryId, gitRepo!.id));
+    const reviewedTip = git(bare, 'rev-parse', 'refs/heads/main');
+    git(bare, 'update-ref', 'refs/heads/main', git(bare, 'rev-parse', `${reviewedTip}^`));
+    assert.equal((await readIntegration()).status, 409, 'remote branch movement after acceptance must be rejected');
+    git(bare, 'update-ref', 'refs/heads/main', reviewedTip);
     await db.update(tasks).set({ status: 'in_review' }).where(eq(tasks.id, gitAcceptance!.id));
     assert.equal((await readIntegration()).status, 409, 'acceptance must remain completed');
     await db.update(tasks).set({ status: 'done' }).where(eq(tasks.id, gitAcceptance!.id));
