@@ -1,8 +1,8 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { createHash, randomBytes } from 'node:crypto';
-import { activityLog, documentFileVersions, documents, executionControls, planDrafts, projects, requirementClaims, requirementRepositories, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinGitDeliveries, thinWorkers, workerAttempts, workerPlanReceipts, workflowOutputs, type Database } from '@task-weaver/db';
-import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
+import { activityLog, documentFileVersions, documents, executionControls, planDrafts, projects, requirementClaims, requirementRepositories, repositories, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinGitDeliveries, thinWorkers, workerAttempts, workerPlanReceipts, workflowOutputs, type Database } from '@task-weaver/db';
+import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { lockIdentityLifecycle } from './auth-security';
 import { resourceAuthority, requireResource } from './resource-authorization';
 import { attachmentStorage } from './attachment-storage';
@@ -10,6 +10,8 @@ import { emit } from '@task-weaver/realtime';
 import { createResourceServices } from './resource-services';
 import { createPlanDraft, validatePlanDraft, applyPlanDraft } from './plans';
 import { advanceGitDelivery } from './thin-git-delivery-policy';
+import { repositoryPredicate } from './repository-authorization';
+import { gitRepositoryIdentity, readTrustedDirectMerge, verifyTrustedGitAncestry } from './trusted-forge';
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 const safeText = (value: string, limit: number) => redactObservabilityText(value, limit).value.replace(/\b(?:tw|twd|twb|twa)_[0-9a-f]{64}\b/gi, '[redacted]');
@@ -21,7 +23,7 @@ function canonical(value: unknown): string {
 }
 
 /** The credential is held by the worker; executors never receive it. */
-export function createThinWorkerService(context: VerifiedRequestContext) {
+export function createThinWorkerService(context: VerifiedRequestContext, options: { forgeFetch?: typeof fetch } = {}) {
   const transact = async <T>(db: Database, run: (tx: Database, authority: Awaited<ReturnType<typeof resourceAuthority>>) => Promise<T>) => db.transaction(async transaction => {
     await lockIdentityLifecycle(transaction);
     const tx = transaction as unknown as Database;
@@ -59,6 +61,50 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
     return inputs;
   };
   return {
+    async confirmGitDelivery(db: Database, raw: z.input<typeof workerGitConfirmSchema>) {
+      const input = workerGitConfirmSchema.parse(raw);
+      const inspect = () => transact(db, async (tx, authority) => {
+        if (authority.actor.type !== 'agent' || context.credential.kind !== 'api_key') throw new AuthorizationError();
+        const [existing] = await tx.select().from(workerAttempts).where(eq(workerAttempts.id, input.attemptId));
+        if (!existing) throw new NotFoundError('Attempt not found');
+        await requireResource(tx, authority, 'task', existing.taskId, 'execution.run');
+        await requireResource(tx, authority, 'task', existing.taskId, 'resource.write');
+        const project = await lockProject(tx, existing.projectId);
+        if (project.workerMode !== 'thin' || existing.actorId !== authority.actor.id || existing.credentialId !== context.credential.id || existing.workerId !== input.workerId || existing.tokenHash !== digest(input.token)) throw new AuthorizationError();
+        const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, existing.requirementId)).for('update');
+        const [attempt] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.id, existing.id), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`)).for('update');
+        const [task] = await tx.select().from(tasks).where(eq(tasks.id, existing.taskId)).for('update');
+        if (!attempt || !requirement || !task || task.status !== 'in_progress' || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Attempt or plan is no longer current', requirement?.planRevision ?? 0);
+        const [delivery] = await tx.select().from(thinGitDeliveries).where(and(eq(thinGitDeliveries.id, input.deliveryId), eq(thinGitDeliveries.attemptId, attempt.id))).for('update');
+        if (!delivery) throw new NotFoundError('Delivery not found');
+        if (!['pushing', 'uncertain', 'confirmed'].includes(delivery.state)) throw new ConflictError('Delivery has not been submitted', requirement.planRevision);
+        const [repository] = await tx.select().from(repositories).where(and(eq(repositories.id, delivery.repositoryId), repositoryPredicate(authority))).for('share');
+        const [link] = await tx.select().from(requirementRepositories).where(and(eq(requirementRepositories.requirementId, requirement.id), eq(requirementRepositories.repositoryId, delivery.repositoryId))).for('share');
+        if (!repository || repository.status !== 'active' || link?.workingBranch !== delivery.targetBranch) throw new ConflictError('Repository or target changed', requirement.planRevision);
+        return { delivery, repository, taskId: attempt.taskId, requirementId: attempt.requirementId, revision: requirement.planRevision };
+      });
+      const before = await inspect();
+      if (before.delivery.state === 'confirmed') return before.delivery;
+      await verifyTrustedGitAncestry(before.repository, before.delivery.expectedHead, before.delivery.proposedHead, { fetch: options.forgeFetch });
+      await readTrustedDirectMerge(before.repository, before.delivery.targetBranch, before.delivery.proposedHead, { fetch: options.forgeFetch });
+      return transact(db, async (tx, authority) => {
+        if (authority.actor.type !== 'agent' || context.credential.kind !== 'api_key') throw new AuthorizationError();
+        await requireResource(tx, authority, 'task', before.taskId, 'execution.run');
+        const project = await lockProject(tx, before.delivery.projectId);
+        const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, before.requirementId)).for('update');
+        const [attempt] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.id, input.attemptId), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`)).for('update');
+        if (!attempt || project.workerMode !== 'thin' || attempt.actorId !== authority.actor.id || attempt.credentialId !== context.credential.id || attempt.workerId !== input.workerId || attempt.tokenHash !== digest(input.token) || attempt.taskId !== before.taskId || attempt.requirementId !== before.requirementId) throw new AuthorizationError();
+        await requireResource(tx, authority, 'task', attempt.taskId, 'resource.write');
+        const [task] = await tx.select().from(tasks).where(eq(tasks.id, attempt.taskId)).for('update');
+        const [delivery] = await tx.select().from(thinGitDeliveries).where(and(eq(thinGitDeliveries.id, input.deliveryId), eq(thinGitDeliveries.attemptId, attempt.id))).for('update');
+        const [repository] = await tx.select().from(repositories).where(and(eq(repositories.id, before.repository.id), repositoryPredicate(authority))).for('share');
+        const [link] = await tx.select().from(requirementRepositories).where(and(eq(requirementRepositories.requirementId, attempt.requirementId), eq(requirementRepositories.repositoryId, before.repository.id))).for('share');
+        if (!requirement || !task || task.status !== 'in_progress' || requirement.planRevision !== attempt.planRevision || requirement.planRevision !== before.revision || !['approved', 'in_progress'].includes(requirement.status) || !repository || repository.status !== 'active' || gitRepositoryIdentity(repository) !== gitRepositoryIdentity(before.repository) || link?.workingBranch !== before.delivery.targetBranch || !delivery || delivery.expectedHead !== before.delivery.expectedHead || delivery.proposedHead !== before.delivery.proposedHead || delivery.targetBranch !== before.delivery.targetBranch || !['pushing', 'uncertain', 'confirmed'].includes(delivery.state)) throw new ConflictError('Delivery authority or evidence changed', requirement?.planRevision ?? 0);
+        if (delivery.state === 'confirmed') return delivery;
+        const [updated] = await tx.update(thinGitDeliveries).set({ state: 'confirmed', updatedAt: sql`clock_timestamp()` }).where(eq(thinGitDeliveries.id, delivery.id)).returning();
+        return updated!;
+      });
+    },
     async transitionGitDelivery(db: Database, raw: z.input<typeof workerGitTransitionSchema>) {
       const input = workerGitTransitionSchema.parse(raw);
       return transact(db, async (tx, authority) => {
@@ -98,7 +144,10 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
         const [attempt] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.id, existing.id), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`)).for('update');
         const [task] = await tx.select().from(tasks).where(eq(tasks.id, existing.taskId)).for('update');
         if (!attempt || !requirement || !task || task.status !== 'in_progress' || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Attempt or plan is no longer current', requirement?.planRevision ?? 0);
-        const [link] = await tx.select().from(requirementRepositories).where(and(eq(requirementRepositories.requirementId, requirement.id), eq(requirementRepositories.repositoryId, input.repositoryId)));
+        const [repository] = await tx.select().from(repositories).where(and(eq(repositories.id, input.repositoryId), repositoryPredicate(authority))).for('share');
+        if (!repository) throw new NotFoundError('Resource not found');
+        if (repository.status !== 'active') throw new ValidationError('Repository is archived');
+        const [link] = await tx.select().from(requirementRepositories).where(and(eq(requirementRepositories.requirementId, requirement.id), eq(requirementRepositories.repositoryId, input.repositoryId))).for('share');
         if (!link?.workingBranch || link.workingBranch !== input.targetBranch) throw new ValidationError('Target must be the configured requirement branch');
         const [prior] = await tx.select().from(thinGitDeliveries).where(and(eq(thinGitDeliveries.projectId, project.id), eq(thinGitDeliveries.operationKey, input.operationKey)));
         if (prior) {

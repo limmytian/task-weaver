@@ -6,6 +6,7 @@ export const workerAcquireSchema = z.object({ projectId: z.string().uuid(), requ
 export const workerPresenceSchema = z.object({ projectId: z.string().uuid(), workerId: z.string().uuid(), nodeId: z.string().regex(/^[a-zA-Z0-9._-]{1,120}$/), activity: z.enum(['unknown', 'checking', 'preflight', 'acquiring', 'preparing', 'executing', 'publishing', 'idle', 'cooldown', 'attention']).optional(), reason: z.string().trim().max(1000).optional(), retryAt: z.string().datetime({ offset: true }).nullable().optional() }).strict();
 export const workerFenceSchema = z.object({ attemptId: z.string().uuid(), workerId: z.string().uuid(), token: z.string().regex(/^twa_[0-9a-f]{64}$/) }).strict();
 export const workerGitPrepareSchema = workerFenceSchema.extend({ operationKey: z.string().uuid(), repositoryId: z.string().uuid(), targetBranch: z.string().min(1).max(255), expectedHead: z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/), proposedHead: z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/) }).strict();
+export const workerGitConfirmSchema = workerFenceSchema.extend({ deliveryId: z.string().uuid() }).strict();
 export const workerGitTransitionSchema = workerFenceSchema.extend({ deliveryId: z.string().uuid(), event: z.enum(['start_push', 'response_lost']) }).strict();
 export const workerHeartbeatSchema = workerFenceSchema.extend({ durationSeconds: z.number().int().min(30).max(900).default(120) }).strict();
 export const workerOutputSchema = workerFenceSchema.extend({ documentId: z.string().uuid(), summary: z.string().trim().min(1).max(1000) }).strict();
