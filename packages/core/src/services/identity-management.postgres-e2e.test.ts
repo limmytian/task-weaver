@@ -168,7 +168,7 @@ test(
       const [fileOutput] = await db.insert(workflowOutputs).values({ requirementId: requirement!.id, type: "attachment", referenceId: doc!.id, attachmentFileVersionId: file!.id, createdBy: agent.id, createdByType: "agent" }).returning();
       const [workflowInput] = await db.insert(workflowInputs).values({ requirementId: requirement!.id, outputId: fileOutput!.id, createdBy: owner.account.actorId }).returning();
       await db.update(requirements).set({ leaseGeneration: 1 }).where(eq(requirements.id, requirement!.id));
-      await db.insert(requirementClaims).values({ id: control!.runId, requirementId: requirement!.id, daemonId: control!.daemonId, claimedBy: agent.id, claimedByType: "agent", generation: 1, expiresAt: new Date(Date.now() + 60000) });
+      await assert.rejects(db.insert(requirementClaims).values({ id: control!.runId, requirementId: requirement!.id, daemonId: control!.daemonId, claimedBy: agent.id, claimedByType: "agent", generation: 1, expiresAt: new Date(Date.now() + 60000) }));
       const executionAssessment = { grantId: executionGrant.id, projectId: grantProject.id, requirementId: requirement!.id, expectedRevision: 1, controlId: control!.id, expectedControlUpdatedAt: control!.updatedAt.toISOString(), expectedRunId: control!.runId, expectedLeaseGeneration: 1, decision: "accept" as const, inputs: [{ type: "workflow_input" as const, inputId: workflowInput!.id }], notes: "Reviewed local state", uncertainExternalEffects: false, rationale: "Ready for human review" };
       await assert.rejects(interrupted.record(db, { ...executionAssessment, grantId: grant.id }), AuthorizationError);
       await assert.rejects(interrupted.record(db, { ...executionAssessment, expectedRevision: 0 }));
@@ -179,9 +179,7 @@ test(
       const verifiedAssessment = await interrupted.record(db, executionAssessment);
       const consume = { grantId: executionGrant.id, projectId: grantProject.id, requirementId: requirement!.id, assessmentId: verifiedAssessment.id };
       const freshForStale = await interrupted.record(db, executionAssessment);
-      await db.update(requirementClaims).set({ id: randomUUID() }).where(eq(requirementClaims.id, control!.runId));
       await assert.rejects(interrupted.consume(db, { ...consume, assessmentId: freshForStale.id }));
-      await db.update(requirementClaims).set({ id: control!.runId }).where(eq(requirementClaims.requirementId, requirement!.id));
       await db.update(reassessmentGrants).set({ expiresAt: new Date(0) }).where(eq(reassessmentGrants.id, executionGrant.id));
       await assert.rejects(interrupted.consume(db, { ...consume, assessmentId: freshForStale.id }), AuthorizationError);
       await db.update(reassessmentGrants).set({ expiresAt: input.expiresAt }).where(eq(reassessmentGrants.id, executionGrant.id));
