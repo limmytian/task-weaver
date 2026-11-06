@@ -66,7 +66,7 @@ export function registerRepositories(program: Command): void {
 
   repo.command('get <id>')
     .description('get repository identity, usage, delivery, and scoped readiness')
-    .option('--node <nodeId>', 'daemon node used for readiness evaluation')
+    .option('--node <nodeId>', 'worker node used for readiness evaluation')
     .option('--operation <operation>', 'read|push|forge', 'read')
     .option('--transport <transport>', 'ssh|https')
     .option('--json', 'output raw JSON')
@@ -194,7 +194,7 @@ export function registerRepositories(program: Command): void {
     .option('--provider <provider>', 'provider adapter identifier')
     .option('--operations <operations>', 'comma-separated read,push,forge', 'read,push')
     .option('--actor <actorId>', 'restrict to an actor ID')
-    .option('--node <nodeId>', 'restrict to a daemon node; defaults to this node')
+    .option('--node <nodeId>', 'restrict to a worker node; defaults to this node')
     .option('--shared', 'record explicit node-shared consent')
     .option('--known-hosts <path>', 'node-managed known_hosts path for SSH')
     .option('--json', 'output raw JSON')

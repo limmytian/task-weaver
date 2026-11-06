@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { registerThinWorker } from "./commands/thin-worker.js"
 import { registerEvents } from "./commands/events.js"
-import { registerExecution } from "./commands/execution.js";
 import { Command } from 'commander'
 import { APPLICATION_VERSION } from '@task-weaver/contracts'
 import { ApiError } from './client.js'
@@ -18,7 +17,6 @@ import { registerActivity } from './commands/activity.js'
 import { registerContext } from './commands/context.js'
 import { registerMcp } from './commands/mcp.js'
 import { registerMemory } from './commands/memory.js'
-import { registerDaemon } from './commands/daemon.js'
 import { registerSchedules } from './commands/schedules.js'
 import { registerTiAgent } from './commands/ti.js'
 import { registerPlans } from './commands/plans.js'
@@ -39,7 +37,6 @@ registerAgentUsage(program)
 registerAuth(program)
 registerProjects(program)
 registerRequirements(program)
-registerExecution(program)
 registerTasks(program)
 registerDocuments(program)
 registerSearch(program)
@@ -47,7 +44,6 @@ registerActivity(program)
 registerContext(program)
 registerMcp(program)
 registerMemory(program)
-registerDaemon(program)
 registerSchedules(program)
 registerTiAgent(program)
 registerPlans(program)

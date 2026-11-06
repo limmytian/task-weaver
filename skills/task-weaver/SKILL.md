@@ -48,25 +48,14 @@ The CLI wraps the REST API. Both share the same data and authentication.
 
 ## Operating Modes
 
-Identify whether you are in an interactive session, a task worker, or a legacy daemon lane. **Identify which one you are in before touching tasks**, because the claiming protocol differs.
+Identify whether you are in an interactive session or a task worker. **Identify which one you are in before touching tasks**, because the claiming protocol differs.
 
 | Mode | How you got here | Claiming protocol |
 |------|------------------|-------------------|
 | **Interactive / collaborative** | A human (or another agent) is directing you; you pick what to work on | **You** claim → work → release (see [Task Locking](#task-locking-claiming)) |
 | **Task worker / executor** | A thin worker launched you for one task in an isolated workspace | The worker owns the task attempt and lease; do not claim, report, commit, or push independently |
-| **Legacy daemon / executor** | You were spawned by `tw daemon` to resolve one requirement lane | The daemon **already claimed** the requirement and selected the first task. Do **not** claim or release the requirement yourself |
 
 **Task worker mode:** Follow the worker-provided prompt and work only in its isolated workspace. Leave changes and `result.md` for the worker; the worker renews the task lease, performs configured Git delivery, and publishes the outcome. Coordinator and acceptance tasks are ordinary tasks with additional output instructions.
-
-**How to tell you're in legacy daemon/executor mode:** your launching prompt explicitly names a Requirement ID, branch/worktree, an initial Task ID, and a requirement task roadmap. In that case:
-
-- Do **not** claim or release the requirement lane; the daemon owns `requirement_claims` heartbeat/release.
-- Start with the initial task, then continue through remaining unblocked tasks under the same requirement.
-- Set each completed task to `done`; use `in_review` for tasks that need human judgment.
-- Follow the Requirement's resolved `workflow`: register the configured output with `tw req output register` before finishing the last task. A Git worktree is relevant only when the work uses linked repositories.
-- Do **not** set the requirement final status. For a legacy Requirement with `workflow: null`, leave file changes in the daemon-provided worktree; the daemon owns commit, push, and provider PR handling.
-- When every task is terminal, the daemon advances automatic delivery from the configured output evidence. Manual stages wait for a human decision. The `basic` workflow requires no output and skips acceptance and integration.
-- The daemon renews the requirement claim while you run and releases it when you exit. If you exit abnormally, the daemon reverts the active task to `todo` for retry; if you exit cleanly without finalizing the active task, it routes that task to `in_review`.
 
 ## Data Model
 
@@ -111,7 +100,7 @@ Belongs to exactly one project.
 
 ### Execution Slice (Legacy)
 
-Historical daemon plans can contain ordered execution slices. New task-worker plans use task dependencies instead; slices do not gate thin-worker acquisition. Historically, requirements could be planned into ordered execution slices. A daemon still claims one requirement lane, but spawns a fresh AI CLI process per slice when slices exist. This bounds execution context while keeping branch ownership at requirement granularity.
+Historical execution slices are retained for audit; new plans use task dependencies.
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
@@ -135,7 +124,7 @@ Tasks can be project-scoped or personal-scoped. Project tasks belong to a projec
 | `scope` | enum | default | `project` \| `personal` |
 | `projectId` | UUID | project tasks | Parent project |
 | `requirementId` | UUID | project tasks | Parent requirement (required for project tasks, cascade delete) |
-| `executionSliceId` | UUID | no | Optional execution slice under the same requirement; project tasks only |
+| `executionSliceId` | UUID | no | Retained historical association; new tasks do not assign slices |
 | `personalOwnerId` | string | personal tasks | Owner identity for personal-space tasks |
 | `personalOwnerType` | enum | personal tasks | `human` \| `agent` |
 | `title` | string | yes | 1–500 chars |
@@ -152,22 +141,9 @@ Sub-entities: **Comments** (taskId + content), **Notes** (taskId + content + pin
 
 **Concurrency**: Tasks have a `version` field (auto-incremented on every update). Pass `expectedVersion` when updating to enable optimistic concurrency control — returns 409 Conflict on mismatch.
 
-### Requirement Claims (Legacy)
+### Requirement Claims
 
-Legacy daemon workers coordinate at requirement granularity using `requirement_claims`:
-
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| `id` | UUID | auto | Primary key |
-| `requirementId` | UUID | yes | Unique active lane owner per requirement |
-| `claimedBy` | string | yes | Daemon actor id |
-| `claimedByType` | enum | yes | `agent` for daemon claims |
-| `daemonId` | UUID | no | Owning daemon row |
-| `workerIndex` | string | no | Worker index inside the daemon process |
-| `expiresAt` | timestamp | yes | Lease expiry |
-| `heartbeatAt` | timestamp | yes | Last renewal |
-
-Requirement claims mirror task-claim semantics: row-lock acquisition, expired claim cleanup, same-holder renewal, conflict on different holder, holder-only heartbeat/release, and auto-release when the requirement reaches `done`, `cancelled`, or `archived`.
+Requirement claims support explicit human coordination. Task workers acquire individual tasks using fenced attempt leases.
 
 ### Requirement Dependencies
 
@@ -186,7 +162,7 @@ Rules:
 - Dependencies must stay inside one project.
 - Self-dependencies and cycles are rejected.
 - A `blocks` dependency is unblocked when the upstream requirement is `done` or `cancelled`.
-- Daemon `apply-requirement` and direct requirement claim both reject blocked downstream lanes.
+- Task acquisition and direct requirement claims respect blocking dependencies.
 
 ### Repository Catalog and Workspaces
 
@@ -196,8 +172,8 @@ Rules:
 
 - Search and reuse the canonical repository before creating one; the same entry may serve unrelated Projects.
 - Add a repository to the Requirement explicitly before linking it to a Task. `tw task repo add --add-to-requirement` performs both writes intentionally.
-- A running slice receives a frozen repository manifest. Execution-relevant workspace changes fence the old run and require reconciliation against a fresh manifest.
-- Catalog endpoints and authentication policies contain no credentials. Credential profile references and readiness are actor/node scoped; trusted daemon code performs Git and forge operations.
+- Each worker attempt receives a frozen repository manifest. Execution-relevant changes fence the old attempt and require reconciliation against current inputs.
+- Catalog endpoints and authentication policies contain no credentials. Credential profile references and readiness are actor/node scoped; the worker performs Git delivery and the server verifies forge evidence.
 - Multi-repository delivery is independent. A successful repository remains successful when a sibling fails and only the failed link is retried.
 
 ### Document
@@ -326,7 +302,7 @@ Source integration does not authorize release/deployment.
 ### Status Rules
 
 **Tasks**: Status changes are flexible, except `cancelled` is terminal. Dependency
-and execution-slice checks still apply.
+and dependency checks still apply.
 
 **Requirements** follow the server's delivery state machine. A `draft` must be
 approved before entering execution. `done` can remain done or be archived;
@@ -336,7 +312,7 @@ current requirement and workflow before changing its state.
 
 Side effects on tasks: `done` → sets `completedAt`; leaving `done` → clears it. Every status change → recorded in `task_status_log`.
 
-**Dependency enforcement**: Moving a task to `in_progress`, `in_review`, or `done` is blocked if it has unfinished task-level `blocks` dependencies. Daemon requirement-lane acquisition is blocked if the requirement has unfinished requirement-level `blocks` dependencies. Pass `--force` (CLI) or `force=true` (REST) only for task status transitions.
+**Dependency enforcement**: Moving a task to `in_progress`, `in_review`, or `done` is blocked if it has unfinished task-level `blocks` dependencies. Worker acquisition is blocked if the requirement has unfinished requirement-level `blocks` dependencies. Pass `--force` (CLI) or `force=true` (REST) only for task status transitions.
 
 **Projects**: `active` \| `archived`. Delete = archive.
 
@@ -413,11 +389,6 @@ tw task list --personal --status todo
 # Change task status
 tw task status $TASK_ID in_progress --reason "Starting now"
 
-# Plan requirement execution slices
-tw req update $REQ_ID --model-tier strong
-tw req slice create $REQ_ID --title "API routes" --model-tier strong --tasks "$TASK_ID,$OTHER_TASK_ID"
-tw req slice list $REQ_ID
-
 # Validate or atomically apply a batch planning file
 tw plan validate --file plan.yaml
 tw plan apply --file plan.yaml
@@ -447,7 +418,7 @@ tw doc link-task $DOC_ID $TASK_ID --type references
 tw doc link-req $DOC_ID $REQ_ID --type documents
 tw doc versions $DOC_ID
 
-# Inspect requirement-lane claims (daemon/debugging)
+# Inspect requirement claims
 tw req claims --project $PROJECT_ID --json
 tw req claim-status $REQ_ID --json
 
@@ -468,75 +439,7 @@ tw context package update $PACKAGE_ID --status deprecated
 tw task get $TASK_ID --json
 ```
 
-Execution slices are sequential by default. A task in a later slice cannot advance until every earlier slice is `done` or `cancelled`. Use `--allow-parallel` only for a slice that is intentionally independent. Daemon task tags use `executor:<name>` (or legacy `tool:<name>`) as an any-of AI executor allowlist, `capability:<name>` for required all-of auxiliary capabilities, and `capability-any:<group>:<name>` for grouped any-of auxiliary capabilities.
-
-## Daemon Requirement Lanes
-
-`tw daemon start` runs autonomous workers. With `--workers N`, concurrency is requirement-level. Workers can map model tiers to concrete Codex models:
-
-```bash
-tw daemon start --tools codex --project $PROJECT_ID --workers 3 \
-  --model fast:gpt-5.4-mini \
-  --model standard:gpt-5.5 \
-  --model strong:gpt-5.5 \
-  --think fast:low \
-  --think standard:medium \
-  --think strong:high \
-  --prompt-file ~/.config/tw/worker-extra.md
-```
-
-Each worker:
-
-1. registers/heartbeats as part of the daemon
-2. calls the daemon apply endpoint to claim one requirement lane
-3. prepares one isolated branch worktree per frozen Requirement repository under `~/.task-weaver/requirement-workspaces/...`, backed by node-local shared base checkouts
-4. writes a secret-free repository manifest and spawns the selected AI CLI at the composite workspace root for the next execution slice, or the whole lane if no slices exist; Codex workers also receive the mapped `model_reasoning_effort` when `--think <tier:effort>` is configured, and local extra instructions from `--prompt` / `--prompt-file` when supplied
-5. renews the requirement claim until the subprocess exits
-6. when all requirement tasks are terminal, independently commits and pushes each repository branch, discovers or creates provider-supported PRs when possible, records each delivery outcome, and moves the requirement to `in_review`
-7. releases the requirement claim and reports worker state for the Web Daemons page
-
-The Web Daemons page shows daemon status, active worker lanes, current requirement, active task, task roadmap, selected model tier/model, Codex think effort when configured, branch, worktree path, and stale lease indicators.
-
-## Daemon Review and Merge
-
-`tw daemon review` and `tw daemon merge` split review from final merge for requirement branches that have already been finalized to `in_review`:
-
-```bash
-tw daemon review --project $PROJECT_ID --workers 1 --base main \
-  --check "pnpm typecheck" \
-  --check "pnpm test" \
-  --prompt-file ~/.config/tw/review-extra.md
-```
-
-Each review worker:
-
-1. calls `POST /api/v1/daemons/:id/apply-review`
-2. receives one server-claimed `in_review` requirement lane for review ownership
-3. checks out the requirement branch worktree and merges `origin/<base>` into it
-4. runs configured `--check` commands
-5. runs AI review unless `--skip-ai-review` is set
-6. pushes the reviewed branch and marks the requirement `ready_to_merge`
-7. on conflicts, failed checks, or review findings, creates a new `todo` follow-up task under the same requirement, moves the requirement back to `in_progress`, comments the review summary, and releases the claim
-
-Each merge worker:
-
-1. calls `POST /api/v1/daemons/:id/apply-merge`
-2. receives one server-claimed `ready_to_merge` requirement lane
-3. merges `origin/<requirement-branch>` into `origin/<base>` from a detached merge worktree
-4. pushes `HEAD:<base>` and marks the requirement `done`
-5. on final merge conflicts, creates a new `todo` follow-up task under the same requirement, moves the requirement back to `in_progress`, comments the merge summary, and releases the claim
-
-The merge step uses Git push (`HEAD:<base>`), so it works with any Git remote that accepts that push, including Gitea repositories when branch permissions allow it. If branch protection requires PR-only merging, leave the requirement in `ready_to_merge` for manual handling or add a forge-specific merge provider later.
-
-Requirement-lane claim commands are available for debugging or manual lane ownership:
-
-```bash
-tw req claim <requirement-id> --duration 30
-tw req heartbeat <requirement-id> --extend 30
-tw req claim-status <requirement-id> --json
-tw req claims --project <project-id> --json
-tw req release <requirement-id> --reason "handing off"
-```
+Historical slices do not gate worker tasks. Model execution order with task dependencies.
 
 ## Relationship Graphs and DAG Views
 
@@ -608,7 +511,6 @@ For detailed step-by-step workflow guides, see [workflows.md](workflows.md).
 
 ## Task Locking (Claiming)
 
-> **Daemon/executor mode exception:** if you were spawned by `tw daemon`, the daemon already holds a requirement claim and selected the active task — **skip this whole section** (do not claim or release). Process the requirement roadmap and set task/requirement statuses. See [Operating Modes](#operating-modes).
 
 In **interactive/collaborative** mode, before starting work on any task you **MUST** lock (claim) it to prevent race conditions or duplicate execution by other agents:
 ```bash
@@ -671,7 +573,7 @@ Use this when a task needs a capability the core `tw` commands don't cover (e.g.
 5. **Use verified identities** — check the stable credential subject with `tw auth whoami`
 6. **Read before write** — query current state before making changes
 7. **Verify after batch operations** — use `tw activity` to confirm changes
-8. **Claim before working** — in interactive/multi-agent mode, always `tw task claim` before starting work. **Exception:** in daemon/executor mode the daemon already holds the requirement lane — don't claim or release (see [Operating Modes](#operating-modes))
+8. **Claim before working** — in interactive/multi-agent mode, always `tw task claim` before starting work. **Exception:** a task worker owns the lease; follow its prompt (see [Operating Modes](#operating-modes))
 9. **Use `--json`** — pipe CLI output to parse task IDs and other fields programmatically
 10. **Keep repository credentials local** — store only non-secret endpoints and profile references in Task Weaver; never put tokens in URLs, prompts, comments, or documents
 
@@ -720,61 +622,14 @@ optional unavailable execution can degrade to instructions.
 read/audit access and rechecks current asset visibility before counts/pagination.
 It shows unique visible references and separate progress reports, not call totals,
 proof of task usefulness or inferred model cost. Whole-process token reports stay
-in the existing Usage commands. Daemon children keep their bounded launch
-bootstrap; do not seek broader aggregate audit grants to improve their prompts.
+in the existing Usage commands. Worker attempts use scoped credentials; do not seek broader aggregate audit grants to improve their prompts.
 See [Capability diagnostics](rest-api-reference.md#capability-diagnostics) for
 coverage and input details. Installed copies require the existing staged/versioned
 refresh workflow; remote registration is a separate authorized action.
 
 ## Live Planning and Recovery
 
-Planning changes from every interface use core impact classification. Descriptions,
-acceptance text, DAG/slice changes, ownership, repository scope and declared inputs
-can revoke a running execution immediately. Comments and priority do not restart
-it. A draft requirement is not schedulable; a draft predecessor still blocks work.
-Old execution authority cannot complete tasks, register outputs or advance delivery.
-The healthy supervisor renews lane ownership while stopping and assessing work,
-then starts a new run with current inputs or releases capacity while dependencies
-block it. Do not claim/release the lane from a daemon child.
-
-Before substantive source work in every new task execution, inspect the frozen
-manifest and preserved-work provenance. Old dirty files may belong to an invalidated
-run; never blindly continue, discard or publish them. Use:
-
-```bash
-tw execution git fetch <repository-id> --json
-# Inspect and reconcile with ordinary local Git; resolve conflicts and validate.
-tw execution git verify <repository-id> --json
-```
-
-Verify freshly fetches the target branch and records that its observed tip is in
-local working history. Substantive delegated updates and completion are rejected
-until linked repositories are verified. Repeat before completion if remote code
-advances. Report blocked/review with a concrete reason if synchronization or required
-inputs cannot be established. Do not force push. The daemon supplies authenticated
-Git operations without exposing credentials; it does not resolve conflicts for you.
-There is no last-handoff-commit baseline or automatic `tw workspace sync` engine.
-
-`tw req get <id> --json` exposes revision, recovery phases, deadline, attempt budget
-and evidence review. A human can use `tw req revalidate <id> --revision <n> --reason
-'<evidence>'` or `tw req recover <id> <control-id> --revision <n> --reason '<verified
-outcome>'` after inspection. Retry policy is explicit, for example:
-
-```bash
-tw req update <id> --recovery-policy '{"retrySafe":true,"maxAttempts":2,"graceMs":120000}'
-```
-
-Unknown safety defaults to manual recovery. After fenced authority and bounded
-grace, retry-safe work may restart on another node using durable inputs and pushed
-code, losing local progress and duplicating computation. Dependency waiting keeps
-files/metadata while releasing worker capacity. Local-only required inputs and
-uncertain external outcomes need explicit handling. Returning stale nodes stop old
-managed work and retain it for inspection; they cannot overwrite the replacement.
-No shared checkpoint upload is required. Leases cannot undo network requests already
-sent and do not promise exactly-once physical execution.
-
-See [the execution recovery specification](../../docs/live-planning-recovery.md).
-
+Task workers use fenced task attempts and preserve interrupted workspaces. Inspect the attempt and any external effects before deciding whether a retry is safe. Use `tw worker attempts`, `tw worker git-deliveries`, and `tw worker resolve` for the selected project. Dependencies and acceptance are ordinary tasks. Leases do not undo external requests or prove that remote processes have stopped.
 
 ## Bootstrap and local instruction freshness
 

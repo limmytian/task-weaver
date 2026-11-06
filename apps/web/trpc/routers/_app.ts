@@ -16,7 +16,7 @@ import { apiKeyRouter } from "./api-key";
 import { mcpRouter } from "./mcp";
 import { memoryRouter } from "./memory";
 import { skillRouter } from "./skill";
-import { daemonRouter } from "./daemon";
+import { workerRouter } from "./worker";
 import { scheduleRouter } from "./schedule";
 import { tiAgentRouter } from "./ti-agent";
 import { assistantRouter } from "./assistant";
@@ -43,7 +43,7 @@ export const appRouter = router({
   mcp: mcpRouter,
   memory: memoryRouter,
   skill: skillRouter,
-  daemon: daemonRouter,
+  worker: workerRouter,
   schedule: scheduleRouter,
   tiAgent: tiAgentRouter,
   assistant: assistantRouter,

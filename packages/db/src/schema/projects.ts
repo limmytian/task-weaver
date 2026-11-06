@@ -7,7 +7,7 @@ export const projects = pgTable("projects", {
   status: text("status", { enum: ["active", "archived"] })
     .default("active")
     .notNull(),
-  workerMode: text("worker_mode", { enum: ["legacy", "thin"] }).default("legacy").notNull(),
+  workerMode: text("worker_mode", { enum: ["legacy", "thin"] }).default("thin").notNull(),
   executorFallbackPolicy: jsonb("executor_fallback_policy").$type<{ allowedTools: string[]; authenticationMode: "subscription"; allowPaidApi: false }>(),
   defaultWorkflow: jsonb("default_workflow").$type<Record<string, unknown>>(),
   pinnedAt: timestamp("pinned_at", { withTimezone: true }),

@@ -19,7 +19,7 @@ Task Weaver is a project management platform for human–AI collaboration. Human
 - **MCP registry:** Register external MCP servers and proxy calls to their tools.
 - **Memory:** Store and retrieve agent memories.
 - **Skills:** Import skill files into the database and discover them by intent.
-- **Daemon:** Register CLI daemons, send heartbeats, and claim work with leases.
+- **Task workers:** Atomically acquire tasks, renew fenced leases, and deliver verifiable results.
 - **Webhooks:** Deliver event-driven notifications with retries.
 
 ### 1.2 Principles
@@ -37,7 +37,7 @@ Task Weaver is a project management platform for human–AI collaboration. Human
 
 ```mermaid
 flowchart TD
-    CLI[CLI and daemon] -->|REST| API[Hono API application]
+    CLI[CLI and worker] -->|REST| API[Hono API application]
     WEB[Next.js Web and tRPC] --> CORE[Core business services]
     API --> CORE
     API --> GATEWAY[First-party Partners Gateway integration]
@@ -55,7 +55,7 @@ task-weaver/
 ├── apps/
 │   ├── web/                    # Next.js frontend and Web composition
 │   ├── api/                    # Hono API and module lifecycle composition
-│   └── cli/                    # CLI and daemon
+│   └── cli/                    # CLI and task worker
 ├── packages/
 │   ├── contracts/              # Shared schemas, types, and event contracts
 │   ├── core/                   # Business services and default runtime adapters
@@ -165,7 +165,7 @@ Detailed fields live in `packages/db/src/schema/`. The main tables are:
 | `task_status_log` | `tasks.ts` | Task status history |
 | `task_dependencies` | `tasks.ts` | Task dependencies: `blocks` or `related` |
 | `requirement_dependencies` | `requirements.ts` | Requirement dependencies: `blocks` or `related` |
-| `execution_slices` | `requirements.ts` | Ordered execution slices within a requirement lane |
+| `execution_slices` | `requirements.ts` | Historical execution-slice records (read-only) |
 | `task_comments` | `tasks.ts` | Task comments |
 | `task_notes` | `tasks.ts` | Task notes |
 | `documents` | `documents.ts` | Knowledge base documents and metadata |
@@ -181,7 +181,7 @@ Detailed fields live in `packages/db/src/schema/`. The main tables are:
 | `skill_package_versions` | `skill-packages.ts` | Immutable package versions and storage summaries |
 | `skill_package_storage_objects` | `skill-packages.ts` | Server-managed archive and file objects |
 | `skill_package_files` | `skill-packages.ts` | Versioned file manifest, hashes, flags, and indexed document links |
-| `daemons` | `daemons.ts` | Daemon registry, heartbeats, capabilities, and active workers |
+| `daemons` | `daemons.ts` | Historical daemon records (not schedulable) |
 | `requirement_claims` | `requirements.ts` | Distributed requirement-lane leases |
 | `repositories` | `repositories.ts` | Repository identities, endpoints, visibility, and non-secret auth policy |
 | `requirement_repositories` | `repositories.ts` | Requirement workspaces and repository delivery state |
@@ -274,7 +274,7 @@ Catch-up and expiry policy is intentionally separate from the core schedule iden
 
 ### 3.5 Server-Side Ti Agent Boundary
 
-Ti is the server-side Task Weaver agent: a bounded assigned-automation worker with a private execution adapter behind it. It is not the same execution path as `tw daemon`, and it must not claim arbitrary requirement lanes or project coding work.
+Ti is the server-side Task Weaver agent: a bounded assigned-automation worker with a private execution adapter behind it. It is not the same execution path as `tw worker`, and it must not claim arbitrary requirement lanes or project coding work.
 
 Allowed work:
 
@@ -454,7 +454,7 @@ Documents use `version` for optimistic concurrency. Each change is recorded in `
 ┌──────────────────────────────────────────────────────────────────────┐
 │                         Access channels                              │
 ├──────────────┬──────────────────┬───────────────┬────────────────────┤
-│   Web UI     │   AI Agent       │  CLI Daemon   │  Tools and scripts │
+│   Web UI     │   AI Agent       │  CLI Worker   │  Tools and scripts │
 │   (human)    │   (REST API)     │  (REST API)   │  (for example curl)│
 ├──────────────┼──────────────────┼───────────────┼────────────────────┤
 │   tRPC       │   REST API       │   REST API    │   REST API         │
@@ -480,82 +480,13 @@ Task Weaver registers external MCP servers and acts as a tool proxy:
 - **TTL and status:** Use `clientId`, `expiresAt`, and `ttl` for temporary registrations and expiry.
 
 ---
-## 9. Daemon System
+## 9. Task Workers
 
-The CLI daemon is the runtime carrier for autonomous AI agents. It registers with the API, advertises local AI tool capabilities, acquires work, spawns an AI CLI, and reports liveness and progress back to Task Weaver.
+Workers pull dependency-ready tasks atomically from Task Weaver. Each attempt has a fenced lease, a heartbeat and an isolated workspace. SSE events wake idle workers; polling and queue rechecks remain authoritative. A worker can execute once or remain available.
 
-- **Registration**: `tw daemon start` registers a daemon row and declares capabilities such as `["codex", "claude", "agy"]`.
-- **Heartbeat**: the daemon sends process heartbeats and per-worker requirement-claim heartbeats.
-- **Requirement lanes**: daemon workers acquire a requirement-level distributed lease instead of racing for isolated tasks.
-- **Execution slices**: a claimed requirement can be split into ordered slices; each slice is a bounded AI CLI spawn with its own model tier and handoff summary.
-- **Model controls**: workers can map model tiers to concrete Codex models and Codex `model_reasoning_effort`; unsupported tools ignore the think mapping.
-- **Local prompt controls**: daemon workers can receive local-only prompt fragments from `--prompt` and `--prompt-file` without storing machine-specific guidance in the API.
-- **Composite workspace isolation**: each slice receives a frozen, secret-free manifest and one isolated branch worktree per Requirement repository. Node-local base checkouts are shared, while concurrent Requirement branches remain separate.
-- **Configurable delivery**: each newly created Requirement resolves a versioned delivery, acceptance, and integration workflow. Delivery can require no output, a platform comment or attachment, a URL, a node-local file, a Git branch, or a PR. Project defaults and Requirement overrides use the same schema across Web, REST, and CLI. Existing Requirements with no workflow keep their prior Git finalization behavior.
-- **Independent finalization**: for Git delivery, spawned agents leave file changes in repository worktrees; the daemon owns commit, push, optional provider-specific PR creation, per-link delivery state, partial retry, review comments, and final Requirement routing.
-- **Review and merge**: `tw daemon review` combines local checks with normalized GitHub/Gitea checks and approvals, then commit-fences the structured decision. `tw daemon merge` resolves the effective provider/direct/manual policy and marks a Requirement `done` only after every repository is terminal.
-- **Worker visibility**: daemon status includes `activeWorkerStates`, which powers the Web Daemons page worker cards and task roadmap.
-- **State**: daemon rows use `idle` / `busy` / `offline`; requirement and task status remain the durable project state.
+Code tasks make signed-off commits and integrate them into the requirement branch under a serialized delivery slot. Acceptance and version-branch integration are dependent tasks; the server verifies Git delivery and rejects stale attempts. Non-code tasks publish artifacts. Historical daemon and execution-slice records are retained for audit and do not schedule new work.
 
-### Requirement-Lane Scheduling
-
-Daemon scheduling uses the requirement as the unit of ownership:
-
-1. A worker calls `POST /api/v1/daemons/:id/apply-requirement`.
-2. The server selects a requirement with at least one executable `todo` task.
-3. The server atomically inserts/renews a `requirement_claims` lease using the daemon actor id.
-4. If execution slices exist, the server selects the next executable slice and moves its first selected task to `in_progress`; otherwise it returns the whole requirement lane roadmap.
-5. The daemon freezes the Requirement repository set, provisions one isolated worktree per repository, writes the composite manifest, and spawns the AI CLI at the workspace root for that slice.
-6. The spawned agent processes the slice task roadmap sequentially and leaves a handoff summary.
-7. On exit, the daemon marks the slice `done` or `in_review`, releases the requirement claim, and performs fallback status routing if needed.
-8. When every task under a legacy Requirement is `done` or `cancelled`, the daemon independently finalizes each repository. For a configurable Requirement, it advances delivery only after the configured output evidence exists; Git finalization runs only for the selected Git delivery method, and PR creation runs only for `git_pr`.
-
-This keeps branch granularity at the requirement level while bounding each AI session to a planned slice. Different requirements in the same project can still run concurrently across daemon workers.
-
-Daemon finalization is review-oriented. A successful push with a PR URL gives humans a ready review target. Generic Git remains usable without forge capabilities. If there are no changes or forge access is unavailable, the daemon records the exact per-repository outcome. Commit, push, review, and merge failures stay attached to the affected Requirement repository link and remain independently retryable.
-
-Review and merge scheduling use the same server-owned lane model. A review worker calls `POST /api/v1/daemons/:id/apply-review`; the server selects an unclaimed `in_review` Requirement, creates a Requirement claim for the daemon actor, and returns its repository links. The local review daemon processes each repository branch independently. Passing review moves the Requirement to `ready_to_merge`; conflicts, failed checks, or review findings create repository-tagged follow-up tasks and move it back to `in_progress`.
-
-A merge worker calls `POST /api/v1/daemons/:id/apply-merge`; the server selects an unclaimed `ready_to_merge` Requirement and its repository links. Provider mode uses the forge's merge API with an expected-head fence, direct mode pushes a locally merged base branch, and manual mode is excluded from daemon acquisition and surfaced with an action URL. Normalized provider snapshots are synchronized through a revision-checked idempotent endpoint. A merged snapshot is terminal, a closed or reopened pull request is routed back to review as appropriate, and a changed head supersedes earlier review runs before it can be approved.
-
-### Requirement Dependencies
-
-`requirement_dependencies` models requirement-to-requirement links inside one project:
-
-- `requirement_id` is the downstream requirement.
-- `depends_on_requirement_id` is the upstream requirement.
-- `type` is `blocks` or `related`; only `blocks` affects scheduling.
-- Self-dependencies, cross-project dependencies, duplicate links, and cycles are rejected.
-- A blocking upstream requirement unblocks downstream work when it is `done` or `cancelled`.
-- Deleting a requirement cascades dependency rows through foreign keys.
-
-Daemon requirement-lane scheduling skips downstream requirements that have unfinished `blocks` dependencies. Direct requirement claims perform the same blocker check inside the claim transaction so a worker cannot bypass scheduling and acquire an invalid lane.
-
-### Requirement Claims
-
-`requirement_claims` mirrors `task_claims` semantics:
-
-- One active claim per requirement (`requirement_id` unique index).
-- Claims have `expiresAt` and `heartbeatAt`.
-- Same holder can renew; different holders get a conflict.
-- Only the holder can heartbeat or release.
-- Expired claims are cleaned before acquisition/listing.
-- `done`, `cancelled`, and `archived` requirements release active requirement claims.
-
-`task_claims` still exist for interactive/manual task-level coordination. Daemon scheduling uses requirement claims so that a worker owns the whole requirement lane and avoids duplicated context loading.
-
-### Daemon Web Visibility
-
-The Web Daemons page shows:
-
-- daemon name, id, status, capabilities, and heartbeat age
-- active worker lanes
-- current requirement id/title/status/branch
-- current active task
-- requirement task roadmap with per-task status
-- worktree path and lease freshness indicators
-
----
+Worker presence and recent attempts are shown on each project page. Interrupted attempts retain their workspace and need an explicit safety assessment before retry when effects are uncertain.
 
 ## 10. Memory
 

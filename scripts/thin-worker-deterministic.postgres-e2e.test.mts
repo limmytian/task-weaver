@@ -47,7 +47,6 @@ test('deterministic workers acquire, isolate, publish and unblock acceptance', {
     const response = await fetch(`${apiUrl}${path}`, { method: 'POST', headers: { authorization: `Bearer ${credential}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     assert.equal(response.status, 200, await response.clone().text()); return response.json() as Promise<any>;
   };
-  await post('/api/v1/thin-workers/mode', { projectId: f.project.id, mode: 'thin', inspection: 'Disposable fixture is empty' }, owner.rawKey);
   const [req] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Parallel delivery', status: 'approved', workflow: workflowFromPreset('attachment'), workflowRevision: 1, workflowStateRevision: 0, createdBy: f.owner.context.actor.id }).returning();
   const children = await db.insert(tasks).values(['Fixture A', 'Fixture B'].map(title => ({ projectId: f.project.id, requirementId: req!.id, title, createdBy: f.owner.context.actor.id }))).returning();
   const [acceptance] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Accept both', createdBy: f.owner.context.actor.id }).returning();

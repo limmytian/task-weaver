@@ -9,7 +9,7 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { createDb, runMigrations, projects } from './index';
 
 const url = process.env.TW_THIN_UPGRADE_E2E_DATABASE_URL;
-test('existing project upgrades additively and remains readable by legacy SQL', { skip: !url, timeout: 60000 }, async t => {
+test('worker-only upgrade preserves history and refuses active legacy daemons', { skip: !url, timeout: 60000 }, async t => {
   const parsed = new URL(url!);
   assert.equal(parsed.hostname, '127.0.0.1');
   assert.equal(parsed.pathname, '/tw_thin_upgrade_e2e');
@@ -26,6 +26,14 @@ test('existing project upgrades additively and remains readable by legacy SQL', 
   await client`CREATE SCHEMA IF NOT EXISTS task_weaver`;
   await migrate(drizzle(client), { migrationsFolder: root, migrationsTable: '__drizzle_migrations', migrationsSchema: 'task_weaver' });
   const [before] = await client`INSERT INTO task_weaver.projects (name, created_by) VALUES ('Existing project', 'fixture') RETURNING id`;
+  const [requirement] = await client`INSERT INTO task_weaver.requirements (project_id, title, created_by) VALUES (${before!.id}, 'Historical requirement', 'fixture') RETURNING id`;
+  const [slice] = await client`INSERT INTO task_weaver.execution_slices (requirement_id, title, order_index) VALUES (${requirement!.id}, 'Historical slice', 0) RETURNING id`;
+  const [daemon] = await client`INSERT INTO task_weaver.daemons (name, status) VALUES ('Active legacy fixture', 'idle') RETURNING id`;
+  await assert.rejects(runMigrations(url!), /Drain legacy daemon activity/);
+  await client`UPDATE task_weaver.daemons SET status = 'offline' WHERE id = ${daemon!.id}`;
+  const [claim] = await client`INSERT INTO task_weaver.requirement_claims (requirement_id, claimed_by, claimed_by_type, daemon_id, expires_at) VALUES (${requirement!.id}, 'fixture', 'agent', ${daemon!.id}, clock_timestamp() + interval '2 minutes') RETURNING id`;
+  await assert.rejects(runMigrations(url!), /Drain legacy daemon activity/);
+  await client`UPDATE task_weaver.requirement_claims SET expires_at = clock_timestamp() - interval '1 second' WHERE id = ${claim!.id}`;
   await runMigrations(url!);
   await runMigrations(url!);
   const db = createDb(url!);
@@ -33,7 +41,10 @@ test('existing project upgrades additively and remains readable by legacy SQL', 
   const upgraded = await db.select().from(projects);
   assert.equal(upgraded.length, 1);
   assert.equal(upgraded[0]!.id, before!.id);
-  assert.equal(upgraded[0]!.workerMode, 'legacy');
+  assert.equal(upgraded[0]!.workerMode, 'thin');
+  const historicalSlice = await client`SELECT title FROM task_weaver.execution_slices WHERE id = ${slice!.id}`;
+  assert.equal(historicalSlice[0]!.title, 'Historical slice');
+  await assert.rejects(client`UPDATE task_weaver.projects SET worker_mode = 'legacy' WHERE id = ${before!.id}`);
   const legacy = await client`SELECT id, name, status FROM task_weaver.projects WHERE id = ${before!.id}`;
   assert.equal(legacy[0]!.name, 'Existing project');
 });

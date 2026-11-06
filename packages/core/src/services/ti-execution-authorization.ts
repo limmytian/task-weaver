@@ -5,7 +5,6 @@ import { AuthenticationError, AuthorizationError, credentialGrantsSchema } from 
 import { getBoundCredentialAuthority } from './api-keys';
 import { intersectGrants } from './auth-principals';
 import { requireResource, requireScope } from './resource-authorization';
-import { assertExecutionSliceCanAdvance } from './execution-slice-policy';
 
 export const tiRunAuthorizationSchema = z.object({
   initiatorActorId: z.string().uuid(), initiatorCredentialId: z.string().uuid(),
@@ -56,7 +55,6 @@ export async function liveTiRunAuthority(db: Database, runId: string, requireLea
 
 export async function assertTiTaskReady(db: Database, task: typeof tasks.$inferSelect) {
   if (task.status === 'done' || task.status === 'cancelled') throw new AuthorizationError();
-  if (task.executionSliceId) await assertExecutionSliceCanAdvance(db, task.executionSliceId);
   const blockers = await db.select({ status: tasks.status }).from(taskDependencies).innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnTaskId)).where(and(eq(taskDependencies.taskId, task.id), eq(taskDependencies.type, 'blocks')));
   if (blockers.some(row => row.status !== 'done')) throw new AuthorizationError();
 }

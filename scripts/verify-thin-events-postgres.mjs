@@ -14,7 +14,7 @@ try {
   }
   assert.ok(ready, 'Disposable PostgreSQL did not become ready');
   const port = JSON.parse(docker('inspect', name))[0].NetworkSettings.Ports['5432/tcp'][0].HostPort;
-  for (const test of ['src/durable-events.postgres-e2e.test.ts', 'src/daemon-event-consumer.postgres-e2e.test.ts']) {
+  for (const test of ['src/durable-events.postgres-e2e.test.ts']) {
     const result = spawnSync('pnpm', ['--filter', '@task-weaver/api', 'exec', 'tsx', '--test', test], { encoding: 'utf8', timeout: 150_000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, PGOPTIONS: '-c client_min_messages=warning', TW_EVENT_E2E_DATABASE_URL: `postgres://fixture:fixture-only@127.0.0.1:${port}/tw_event_e2e` } });
     process.stdout.write(`${result.stdout ?? ''}${result.stderr ?? ''}`);
     assert.equal(result.status, 0, `${test} failed`);

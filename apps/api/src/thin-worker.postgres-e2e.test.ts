@@ -33,42 +33,15 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   const owner = createThinWorkerService(await context(ownerKey.rawKey));
   const workerContext = await context(workerKey.rawKey);
   const worker = createThinWorkerService(workerContext);
-  const [legacyReq] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Mode race', status: 'approved', createdBy: f.owner.context.actor.id }).returning();
   const [parkedReq] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Parked historical plan', status: 'draft', createdBy: f.owner.context.actor.id }).returning();
   await db.insert(tasks).values({ projectId: f.project.id, requirementId: parkedReq!.id, title: 'Preserved historical task', createdBy: f.owner.context.actor.id });
   await db.insert(executionControls).values({ projectId: f.project.id, requirementId: parkedReq!.id, daemonId: randomUUID(), runId: randomUUID(), revision: 1, reason: 'Preserved blocked historical execution', phase: 'blocked', deadline: new Date() });
-  const [legacyTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: legacyReq!.id, title: 'Legacy claim', createdBy: f.owner.context.actor.id }).returning();
-  const raced = await Promise.allSettled([
-    owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Fixture queue inspected' }),
-    createResourceServices(workerContext).claimService.claimTask(db, legacyTask!.id, { id: agent.id, type: 'agent' }, 2),
-  ]);
-  assert.equal(raced.filter(item => item.status === 'fulfilled').length, 1, 'mode switch and legacy claim cannot both succeed');
-  if (raced[1]!.status === 'fulfilled') {
-    await createResourceServices(workerContext).claimService.releaseTask(db, legacyTask!.id, { id: agent.id, type: 'agent' });
-    await owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Fixture queue inspected' });
-  }
-  await db.update(tasks).set({ status: 'cancelled' }).where(eq(tasks.id, legacyTask!.id));
-  await owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Fixture queue inspected' });
-  const [rollbackTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: legacyReq!.id, title: 'Rollback fixture', createdBy: f.owner.context.actor.id }).returning();
-  const legacyClaims = createResourceServices(workerContext).claimService;
-  await assert.rejects(legacyClaims.claimTask(db, rollbackTask!.id, { id: agent.id, type: 'agent' }, 2));
-  const oldClaim = { claimedBy: agent.id, claimedByType: 'agent' as const, expiresAt: new Date(Date.now() + 120000) };
-  const modeFence = (error: unknown) => error instanceof Error && error.cause instanceof Error && /Legacy acquisition is disabled/.test(error.cause.message);
-  await assert.rejects(db.insert(taskClaims).values({ ...oldClaim, taskId: rollbackTask!.id }), modeFence);
-  await assert.rejects(db.insert(requirementClaims).values({ ...oldClaim, requirementId: legacyReq!.id }), modeFence);
-  await owner.setMode(db, { projectId: f.project.id, mode: 'legacy', inspection: 'No active thin attempts; fixture inspected' });
-  await assert.rejects(worker.acquire(db, { projectId: f.project.id, workerId: randomUUID(), nodeId: 'rollback-fixture', executor: 'codex', model: 'gpt-6.1-terra', durationSeconds: 120 }));
-  await legacyClaims.claimTask(db, rollbackTask!.id, { id: agent.id, type: 'agent' }, 2);
-  await assert.rejects(owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Legacy claim still active' }));
-  await legacyClaims.releaseTask(db, rollbackTask!.id, { id: agent.id, type: 'agent' });
-  const oldRace = await Promise.allSettled([
-    owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Legacy fixture drained and inspected' }),
-    db.insert(taskClaims).values({ ...oldClaim, taskId: rollbackTask!.id }),
-  ]);
-  assert.equal(oldRace.filter(item => item.status === 'fulfilled').length, 1, 'old binary claim and mode switch must serialize');
-  if (oldRace[1]!.status === 'fulfilled') await db.delete(taskClaims).where(eq(taskClaims.taskId, rollbackTask!.id));
-  await db.update(tasks).set({ status: 'cancelled' }).where(eq(tasks.id, rollbackTask!.id));
-  await owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Legacy fixture drained and inspected' });
+  const [project] = await db.select().from(projects).where(eq(projects.id, f.project.id));
+  assert.equal(project!.workerMode, 'thin');
+  const retiredHeaders = { authorization: `Bearer ${ownerKey.rawKey}`, 'content-type': 'application/json' };
+  assert.equal((await f.app.request('/api/v1/daemons/register', { method: 'POST', headers: retiredHeaders, body: '{}' })).status, 404);
+  assert.equal((await f.app.request('/api/v1/thin-workers/mode', { method: 'POST', headers: retiredHeaders, body: '{}' })).status, 404);
+  assert.equal((await f.app.request(`/api/v1/requirements/${parkedReq!.id}/slices`, { method: 'POST', headers: retiredHeaders, body: '{}' })).status, 404);
   const presenceId = randomUUID();
   const presence = { projectId: f.project.id, workerId: presenceId, nodeId: 'presence-fixture' };
   await worker.presence(db, presence);
@@ -86,47 +59,14 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   await assert.rejects(otherWorker.stopPresence(db, presence));
   await worker.stopPresence(db, presence);
   assert.equal((await worker.listWorkers(db, f.project.id))[0]!.status, 'offline');
-  await owner.setMode(db, { projectId: f.project.id, mode: 'legacy', inspection: 'Create historical slice before thin cutover' });
   const [req] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Thin fixture', status: 'approved', createdBy: f.owner.context.actor.id }).returning();
-  await db.insert(executionSlices).values({ requirementId: req!.id, title: 'Earlier historical slice', orderIndex: 0 });
-  const [historicalSlice] = await db.insert(executionSlices).values({ requirementId: req!.id, title: 'Historical slice', orderIndex: 1 }).returning();
   await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Human owned', priority: 'urgent', assignee: f.owner.context.actor.id, assigneeType: 'human', createdBy: f.owner.context.actor.id });
-  const [first] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, executionSliceId: historicalSlice!.id, title: 'One winner', createdBy: f.owner.context.actor.id }).returning();
-  const [clearableHistory] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, executionSliceId: historicalSlice!.id, title: 'Clearable history', status: 'cancelled', createdBy: f.owner.context.actor.id }).returning();
-  const [cascadeRequirement] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Cascade fixture', createdBy: f.owner.context.actor.id }).returning();
-  const [cascadeSlice] = await db.insert(executionSlices).values({ requirementId: cascadeRequirement!.id, title: 'Cascade slice' }).returning();
-  await db.insert(tasks).values({ projectId: f.project.id, requirementId: cascadeRequirement!.id, executionSliceId: cascadeSlice!.id, title: 'Cascade task', status: 'cancelled', createdBy: f.owner.context.actor.id });
-  const legacyHuman = { id: f.owner.context.actor.id, type: 'human' as const };
-  const legacyTasks = createResourceServices(await context(ownerKey.rawKey)).taskService;
-  await assert.rejects(legacyTasks.updateTaskStatus(db, first!.id, 'in_progress', legacyHuman), /slice/i);
-  await owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Preserve the legacy slice as history' });
-
-  await owner.setMode(db, { projectId: f.project.id, mode: 'legacy', inspection: 'Exercise slice fence during mode transition' });
-  let locked!: () => void; const lockedProject = new Promise<void>(resolve => { locked = resolve; });
-  let releaseModeLock!: () => void; const releaseProject = new Promise<void>(resolve => { releaseModeLock = resolve; });
-  const switchTransaction = db.transaction(async tx => {
-    await tx.update(projects).set({ workerMode: 'thin' }).where(eq(projects.id, f.project.id));
-    locked(); await releaseProject;
-  });
-  await lockedProject;
-  const concurrentSlice = db.insert(executionSlices).values({ requirementId: req!.id, title: 'Concurrent slice' }).then(() => null, error => error);
-  releaseModeLock(); await switchTransaction;
-  const sliceRaceError = await concurrentSlice;
-  assert.ok(sliceRaceError instanceof Error && sliceRaceError.cause instanceof Error && /Execution slices are historical/.test(sliceRaceError.cause.message), 'slice insertion must observe the committed project mode');
-  await db.update(tasks).set({ executionSliceId: null }).where(eq(tasks.id, clearableHistory!.id));
-  await db.delete(requirements).where(eq(requirements.id, cascadeRequirement!.id));
-  const historicalFence = (error: unknown) => error instanceof Error && error.cause instanceof Error && /Execution slices are historical/.test(error.cause.message);
-  await assert.rejects(db.insert(executionSlices).values({ requirementId: req!.id, title: 'New slice' }), historicalFence);
-  const sliceService = createResourceServices(await context(ownerKey.rawKey)).requirementService;
+  const [first] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'One winner', createdBy: f.owner.context.actor.id }).returning();
+  const oldClaim = { claimedBy: agent.id, claimedByType: 'agent' as const, expiresAt: new Date(Date.now() + 120000) };
+  await assert.rejects(db.insert(taskClaims).values({ ...oldClaim, taskId: first!.id }));
+  await assert.rejects(db.insert(requirementClaims).values({ ...oldClaim, requirementId: req!.id }));
   const humanActor = { id: f.owner.context.actor.id, type: 'human' as const };
-  await assert.rejects(sliceService.createExecutionSlice(db, req!.id, { title: 'New slice', allowParallel: false }, humanActor), /Execution slices are historical/);
-  await assert.rejects(sliceService.updateExecutionSlice(db, historicalSlice!.id, { title: 'Changed' }, humanActor), /Execution slices are historical/);
-  await assert.rejects(sliceService.deleteExecutionSlice(db, historicalSlice!.id, humanActor), /Execution slices are historical/);
-  await assert.rejects(db.update(executionSlices).set({ title: 'Changed' }).where(eq(executionSlices.id, historicalSlice!.id)), historicalFence);
-  await assert.rejects(db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, executionSliceId: historicalSlice!.id, title: 'New assignment', createdBy: f.owner.context.actor.id }), historicalFence);
-  const [unassignedHistory] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Unassigned history', status: 'cancelled', createdBy: f.owner.context.actor.id }).returning();
-  await assert.rejects(db.update(tasks).set({ executionSliceId: historicalSlice!.id }).where(eq(tasks.id, unassignedHistory!.id)), historicalFence);
-  assert.equal((await db.select().from(executionSlices).where(eq(executionSlices.id, historicalSlice!.id)))[0]!.title, 'Historical slice');
+  await assert.rejects(db.insert(executionSlices).values({ requirementId: req!.id, title: 'New slice' }));
   await db.update(tasks).set({ title: 'One winner' }).where(eq(tasks.id, first!.id));
 
   const interactiveTasks = createResourceServices(await context(ownerKey.rawKey)).taskService;

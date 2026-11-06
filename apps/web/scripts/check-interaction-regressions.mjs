@@ -116,25 +116,6 @@ const checks = [
     ],
   },
   {
-    file: "app/projects/daemons/page.tsx",
-    relatedFiles: ["app/projects/daemons/worker-card.tsx", "app/projects/daemons/queue-panel.tsx", "app/projects/daemons/timeline-dialog.tsx", "app/projects/daemons/operator-action-dialog.tsx"],
-    label: "Daemon operational visibility feedback",
-    patterns: [
-      /QueryStatePanel/,
-      /RefreshCw/,
-      /staleCount/,
-      /workerCount/,
-      /refetchInterval: 30_000/,
-      /OperatorActionDialog/,
-      /TimelineDialog/,
-      /aria-label="Pipeline lifecycle controls"/,
-      /aria-live="polite"/,
-      /sm:max-w-3xl/,
-      /max-h-\[85vh\]/,
-      /Show run history for/,
-    ],
-  },
-  {
     file: "hooks/use-realtime.ts",
     label: "Daemon realtime timeline invalidation",
     patterns: [

@@ -10,7 +10,6 @@ export const navigation: readonly NavigationItem[] = [
       { id: "memories", label: "Memories", href: "/projects/memories", icon: "brain" },
       { id: "skills", label: "Skills", href: "/projects/skills", icon: "puzzle" },
       { id: "mcp", label: "MCP Servers", href: "/projects/mcp", icon: "server" },
-      { id: "daemons", label: "Daemons", href: "/projects/daemons", icon: "cpu" },
       { id: "usage", label: "Agent Usage", href: "/projects/usage", icon: "analytics" },
       { id: "agents", label: "Ti Agent", href: "/projects/agents", icon: "agent" },
       { id: "settings", label: "Settings", href: "/projects/settings", icon: "settings" },

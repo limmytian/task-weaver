@@ -14,7 +14,6 @@ import {
   ExternalLink,
   GitBranch,
   GitFork,
-  KeyRound,
   Pencil,
   RefreshCw,
   ShieldCheck,
@@ -113,7 +112,6 @@ export default function RepositoryDetailPage({ params }: { params: Promise<{ id:
             </div>
             <div className="flex flex-wrap gap-2">
               {repository.webUrl && <Button variant="outline" asChild><a href={repository.webUrl} target="_blank" rel="noreferrer">Open provider <ExternalLink className="h-4 w-4" /></a></Button>}
-              <Button variant="outline" asChild><Link href="/projects/daemons"><KeyRound className="h-4 w-4" /> Configure access</Link></Button>
               <Button variant="outline" onClick={() => setEditing(true)}><Pencil className="h-4 w-4" /> Edit</Button>
               <Button variant="destructive" onClick={() => setConfirmArchive(true)} disabled={repository.status === "archived"}><Archive className="h-4 w-4" /> Archive</Button>
             </div>

@@ -15,8 +15,8 @@ function time(value: Date | string) {
 }
 
 export function ThinWorkerStatus({ projectId }: { projectId: string }) {
-  const workers = trpc.daemon.thinWorkers.useQuery({ projectId }, { refetchInterval: 30000 });
-  const attempts = trpc.daemon.thinAttempts.useQuery({ projectId }, { refetchInterval: 30000 });
+  const workers = trpc.worker.thinWorkers.useQuery({ projectId }, { refetchInterval: 30000 });
+  const attempts = trpc.worker.thinAttempts.useQuery({ projectId }, { refetchInterval: 30000 });
 
   return <ThinWorkerStatusContent projectId={projectId}
     workers={{ data: workers.data, isLoading: workers.isLoading, error: workers.error?.message }}
@@ -25,8 +25,8 @@ export function ThinWorkerStatus({ projectId }: { projectId: string }) {
 
 export function ThinWorkerStatusContent({ projectId, workers, attempts }: {
   projectId: string;
-  workers: QueryView<Outputs['daemon']['thinWorkers']>;
-  attempts: QueryView<Outputs['daemon']['thinAttempts']>;
+  workers: QueryView<Outputs['worker']['thinWorkers']>;
+  attempts: QueryView<Outputs['worker']['thinAttempts']>;
 }) {
   return (
     <div className="space-y-4">

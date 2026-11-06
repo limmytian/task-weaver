@@ -25,7 +25,7 @@ Task Weaver 是一个面向人机协作场景的项目管理平台。人类通�
 - **MCP 管理**：注册和管理第三方 MCP Server，代理调用其工具
 - **Memory 系统**：AI Agent 的记忆存储与检索
 - **Skills 管理**：技能文件导入 DB，按 intent 语义搜索
-- **Daemon 系统**：CLI daemon 注册、心跳、任务 claiming/locking
+- **任务 Worker**：原子领取任务、续租并交付可验证结果
 - **Webhooks**：事件驱动的外部通知，支持重试
 
 ### 1.2 核心原则
@@ -43,7 +43,7 @@ Task Weaver 是一个面向人机协作场景的项目管理平台。人类通�
 
 ```mermaid
 flowchart TD
-    CLI[CLI and daemon] -->|REST| API[Hono API application]
+    CLI[CLI and worker] -->|REST| API[Hono API application]
     WEB[Next.js Web and tRPC] --> CORE[Core business services]
     API --> CORE
     API --> GATEWAY[First-party Partners Gateway integration]
@@ -61,7 +61,7 @@ task-weaver/
 ├── apps/
 │   ├── web/                    # Next.js frontend and Web composition
 │   ├── api/                    # Hono API and module lifecycle composition
-│   └── cli/                    # CLI and daemon
+│   └── cli/                    # CLI and task worker
 ├── packages/
 │   ├── contracts/              # Shared schemas, types, and event contracts
 │   ├── core/                   # Business services and default runtime adapters
@@ -167,7 +167,7 @@ Other project-visible or independent entities:
 | `task_status_log` | `tasks.ts` | 状态变更日志 |
 | `task_dependencies` | `tasks.ts` | 任务依赖（`blocks` / `related`） |
 | `requirement_dependencies` | `requirements.ts` | Requirement-to-requirement dependencies (`blocks` / `related`) |
-| `execution_slices` | `requirements.ts` | Ordered AI execution slices inside a requirement lane |
+| `execution_slices` | `requirements.ts` | Historical execution-slice records (read-only) |
 | `task_comments` | `tasks.ts` | 任务评论 |
 | `task_notes` | `tasks.ts` | 任务备注 |
 | `documents` | `documents.ts` | 知识库文档，含 `docType` / `version` / `summary` / `keywords` |
@@ -183,7 +183,7 @@ Other project-visible or independent entities:
 | `skill_package_versions` | `skill-packages.ts` | Immutable package version manifests and storage summaries |
 | `skill_package_storage_objects` | `skill-packages.ts` | Server-owned storage object metadata for archives and files |
 | `skill_package_files` | `skill-packages.ts` | Per-version file manifest with hashes, readability, executability, and indexed document links |
-| `daemons` | `daemons.ts` | CLI daemon registry (heartbeat, capabilities, active workers) |
+| `daemons` | `daemons.ts` | Historical daemon records (not schedulable) |
 | `requirement_claims` | `requirements.ts` | Distributed leases for daemon-owned requirement lanes |
 | `repositories` | `repositories.ts` | Instance catalog identity, safe endpoints, visibility, and non-secret auth policy |
 | `requirement_repositories` | `repositories.ts` | Requirement workspace membership and per-repository delivery lifecycle |
@@ -275,7 +275,7 @@ RRULE 是首选存储格式，因为它更适合表达带时区的本地日历�
 
 ### 3.5 服务端 Ti Agent 边界
 
-Ti 是 Task Weaver 的服务端 Agent：一个在受限范围内执行已分配自动化任务的 Worker，其背后是私有执行适配器。它与 `tw daemon` 不是同一执行路径，不能任意认领需求或项目编码工作。
+Ti 是 Task Weaver 的服务端 Agent：一个在受限范围内执行已分配自动化任务的 Worker，其背后是私有执行适配器。它与 `tw worker` 不是同一执行路径，不能任意认领需求或项目编码工作。
 
 允许的工作：
 
@@ -451,7 +451,7 @@ REST 搜索端点统一返回 `{ items: [...] }`，供机器读取。组合搜�
 ┌──────────────────────────────────────────────────────────────────────┐
 │                         Access channels                              │
 ├──────────────┬──────────────────┬───────────────┬────────────────────┤
-│   Web UI     │   AI Agent       │  CLI Daemon   │  Tools and scripts │
+│   Web UI     │   AI Agent       │  CLI Worker   │  Tools and scripts │
 │   (human)    │   (REST API)     │  (REST API)   │  (for example curl)│
 ├──────────────┼──────────────────┼───────────────┼────────────────────┤
 │   tRPC       │   REST API       │   REST API    │   REST API         │
@@ -461,7 +461,7 @@ REST 搜索端点统一返回 `{ items: [...] }`，供机器读取。组合搜�
 
 - **Web UI** → Next.js 前端通过 tRPC 调用 API
 - **AI Agent** → 通过 REST API（Bearer Token 认证）+ Skills 文件指引使用方式
-- **CLI Daemon** → 通过 REST API 注册、心跳、认领任务
+- **CLI Worker** → 通过 REST API 领取并完成带租约防护的任务
 - **第三方 MCP Server** → Task Weaver 作为 MCP 客户端，通过 MCP Pool 连接和调用外部 MCP Server 的工具
 
 ---
@@ -478,79 +478,14 @@ Task Weaver 可以注册和管理外部 MCP Server，作为工具的聚合代理
 
 ---
 
-## 9. Daemon 系统
+## 9. 任务 Worker
 
-CLI Daemon 是自主 AI Agent 的运行载体。它向 API 注册、声明本地 AI 工具能力、获取工作、启动 AI CLI，并向 Task Weaver 报告存活状态与进度。
+Worker 从 Task Weaver 原子领取依赖已满足的任务。每次执行拥有带防护的任务租约、心跳和独立工作区。SSE 只负责唤醒，轮询和队列重查仍是权威依据；Worker 可单次运行或常驻。
 
-- **注册：** `tw daemon start` 创建 Daemon 记录，声明 `codex`、`claude`、`agy` 等能力。
-- **心跳：** 发送进程心跳和各 Worker 的需求认领心跳。
-- **需求工作通道：** Worker 认领需求级分布式租约，而非争抢孤立任务。
-- **执行切片：** 一个需求可拆成有序切片；每片启动一次上下文有界的 AI CLI，带独立模型档位与交接摘要。
-- **模型控制：** 将模型档位映射到具体 Codex 模型和 `model_reasoning_effort`；不支持的工具忽略思考强度映射。
-- **本地提示控制：** `--prompt` 与 `--prompt-file` 为 Worker 注入只保留在本机的提示，不把机器特定指引写入 API。
-- **复合工作区隔离：** 每个切片收到冻结、无密钥的清单；需求关联的每个仓库各有隔离的分支 worktree。同节点共享基础检出，不同需求分支相互隔离。
-- **独立收尾：** Agent 将文件改动留在 worktree；Daemon 负责提交、推送、按提供商检测或创建 PR、记录各仓库交付状态、部分重试、审查评论和需求终态路由。
-- **审查与合并：** `tw daemon review` 综合本地检查与规范化的 GitHub/Gitea 检查和批准，并用提交哈希约束结构化决策。`tw daemon merge` 根据有效策略选择提供商、直接或人工合并；只有全部仓库进入终态，需求才能标记 `done`。
-- **Worker 可见性：** Daemon 状态包含 `activeWorkerStates`，供 Web Daemons 页面显示 Worker 卡片与任务路线。
-- **状态：** Daemon 使用 `idle`、`busy`、`offline`；需求与任务状态仍是项目的持久状态。
+代码任务生成带签署的提交，并通过串行交付槽合入需求分支。验收与版本分支整合作为依赖任务执行；服务端校验 Git 交付并拒绝过期执行。非代码任务交付产物。旧 daemon 和执行切片记录保留供审计，不再用于调度。
 
-### 需求通道调度
+项目页面展示 Worker 状态和近期执行。中断任务保留工作区；外部影响不确定时，重试前必须进行明确的安全评估。
 
-1. Worker 调用 `POST /api/v1/daemons/:id/apply-requirement`。
-2. 服务端挑选至少有一个可执行 `todo` 任务的需求。
-3. 服务端使用 Daemon 的 actor ID 原子地创建或续租 `requirement_claims`。
-4. 如有执行切片，挑选下一可执行切片，并将首个选中任务改为 `in_progress`；否则返回整个需求的任务路线。
-5. Daemon 冻结需求仓库集合，为每个仓库准备隔离 worktree，写入复合清单，并在工作区根目录为切片启动 AI CLI。
-6. Agent 顺序处理切片任务并留下交接摘要。
-7. 退出后，Daemon 将切片标记为 `done` 或 `in_review`、释放需求认领，并在需要时执行状态兜底路由。
-8. 当需求下所有任务为 `done` 或 `cancelled`，Daemon 独立收尾每个仓库：必要时提交改动、推送分支、尝试提供商支持的 PR 操作、记录结果；一个仓库失败时保留其他仓库的成功结果，写汇总评论并将需求转为 `in_review`。
-
-需求是分支和认领单位，切片则限制每次 Agent 会话的上下文。不同需求仍可在同一项目内由多个 Worker 并行处理。
-
-Daemon 收尾以审查为目标。成功推送且得到 PR URL 时，人工有明确的审查入口。即使没有 Forge 能力，通用 Git 仍可使用；没有改动或 Forge 无法访问时，Daemon 应记录每个仓库的准确结果。提交、推送、审查和合并失败都附在对应的需求仓库关联上，可分别重试。
-
-审查和合并调度复用服务端拥有的需求通道。审查 Worker 调用 `POST /api/v1/daemons/:id/apply-review`，服务端认领 `in_review` 需求并返回仓库关联。审查 Daemon 分别处理各分支；通过后需求进入 `ready_to_merge`。冲突、检查失败或审查发现会创建带仓库标签的后续任务，并将需求退回 `in_progress`。
-
-合并 Worker 调用 `POST /api/v1/daemons/:id/apply-merge`，获取未被认领的 `ready_to_merge` 需求。提供商模式用带预期 head 提交约束的 Forge 合并 API；直接模式推送本地合并后的基准分支；人工模式不进入 Daemon 自动获取，而显示操作 URL。规范化的 Forge 快照通过带版本校验的幂等端点同步。已合并快照为终态；关闭或重新打开的 PR 按情况返回审查；head 变化会使之前的审查运行失效，须重新批准。
-
-### 需求依赖
-
-`requirement_dependencies` 表示同一项目内需求之间的依赖：
-
-- `requirement_id` 是下游需求。
-- `depends_on_requirement_id` 是上游需求。
-- `type` 为 `blocks` 或 `related`，只有 `blocks` 影响调度。
-- 自依赖、跨项目依赖、重复关联和依赖环均被拒绝。
-- 阻塞需求处于 `done` 或 `cancelled` 时，下游解除阻塞。
-- 删除需求时，外键级联删除依赖记录。
-
-Daemon 调度会跳过存在未完成阻塞依赖的下游需求。直接认领需求也在事务内检查阻塞，不能绕过调度获取无效工作通道。
-
-### 需求认领
-
-`requirement_claims` 与 `task_claims` 的语义一致：
-
-- 每个需求只允许一个活跃认领，以 `requirement_id` 唯一索引保证。
-- 认领保存 `expiresAt` 和 `heartbeatAt`。
-- 同一持有者可续租，不同持有者会遇到冲突。
-- 只有持有者可发送心跳或释放认领。
-- 获取和列出认领前清理过期记录。
-- 需求进入 `done`、`cancelled` 或 `archived` 时自动释放活跃认领。
-
-交互式或人工任务协调仍使用 `task_claims`。Daemon 使用需求认领以拥有完整通道并避免重复加载上下文。
-
-### Daemon Web 页面
-
-Web Daemons 页面显示：
-
-- Daemon 名称、ID、状态、能力和距上次心跳的时间。
-- 活跃 Worker 通道。
-- 当前需求的 ID、标题、状态和分支。
-- 当前活跃任务。
-- 各任务状态组成的需求路线。
-- Worktree 路径和租约是否新鲜。
-
----
 ## 10. Memory 系统
 
 AI Agent 的结构化记忆存储：
