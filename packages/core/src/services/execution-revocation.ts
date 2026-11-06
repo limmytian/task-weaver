@@ -1,6 +1,15 @@
 import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
-import { authActors, executionDelegations, tiAgentRuns, tasks, tiSandboxWorkspaces } from '@task-weaver/db';
+import { authActors, executionDelegations, tiAgentRuns, tasks, tiSandboxWorkspaces, workerAttempts } from '@task-weaver/db';
+import { z } from 'zod';
 import type { AuthDatabase } from './auth-principals';
+
+export async function parkRevokedTiAttempts(db: AuthDatabase, runs: Array<{ authorization: unknown }>) {
+  const ids = runs.flatMap(run => {
+    const parsed = z.object({ attemptId: z.string().uuid().nullable().optional() }).passthrough().safeParse(run.authorization);
+    return parsed.success && parsed.data.attemptId ? [parsed.data.attemptId] : [];
+  });
+  if (ids.length) await db.update(workerAttempts).set({ status: 'attention', completedAt: new Date(), result: { outcome: 'attention', summary: 'Ti authority revoked; inspect the executor before resolving' } }).where(and(inArray(workerAttempts.id, ids), eq(workerAttempts.status, 'running')));
+}
 
 /** Policy changes end old execution grants permanently, even if membership is restored later. */
 export async function revokeActorExecutions(db: AuthDatabase, actorId: string, projectId?: string) {
@@ -15,7 +24,8 @@ export async function revokeActorExecutions(db: AuthDatabase, actorId: string, p
   const cancelledRuns = await db.update(tiAgentRuns).set({ status: 'cancelled', completedAt: new Date(), updatedAt: new Date(), leaseExpiresAt: new Date() }).where(and(
     inArray(tiAgentRuns.status, ['queued', 'running', 'in_review']), inArray(tiAgentRuns.taskId, affectedTasks),
     or(inArray(tiAgentRuns.assignedAgentId, actors), sql`${tiAgentRuns.authorization}->>'initiatorActorId' = ${actorId}`),
-  )).returning({ id: tiAgentRuns.id });
+  )).returning({ id: tiAgentRuns.id, authorization: tiAgentRuns.authorization });
+  await parkRevokedTiAttempts(db, cancelledRuns);
   await db.update(tiSandboxWorkspaces).set({ state: 'cleanup_pending', cancelRequestedAt: new Date(),
     cleanupRequestedAt: new Date(), nextCleanupAt: new Date(), updatedAt: new Date() }).where(and(
       or(cancelledRuns.length ? inArray(tiSandboxWorkspaces.runId, cancelledRuns.map(run => run.id)) : undefined,

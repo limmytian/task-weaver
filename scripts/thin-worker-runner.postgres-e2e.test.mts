@@ -18,10 +18,10 @@ const apiRequire = createRequire(new URL('../apps/api/package.json', import.meta
 const cliRequire = createRequire(new URL('../apps/cli/package.json', import.meta.url));
 const { serve } = await import(apiRequire.resolve('@hono/node-server'));
 const { eq } = await import(apiRequire.resolve('drizzle-orm'));
-const url = process.env.TW_EXECUTION_RECOVERY_E2E_DATABASE_URL;
+const url = process.env.TW_EXECUTION_RECOVERY_E2E_DATABASE_URL ?? process.env.TW_AUTH_E2E_DATABASE_URL;
 
 test('once worker runs a bounded deterministic executor and parks empty results', { skip: !url, timeout: 120000 }, async t => {
-  const parsed = new URL(url!); assert.equal(parsed.hostname, '127.0.0.1'); assert.equal(parsed.pathname, '/tw_execution_recovery_e2e');
+  const parsed = new URL(url!); assert.equal(parsed.hostname, '127.0.0.1'); assert.ok(['/tw_execution_recovery_e2e', '/tw_auth_e2e'].includes(parsed.pathname));
   await runMigrations(url!); const db = createDb(url!); t.after(() => db.$client.end());
   const root = await mkdtemp(join(tmpdir(), 'tw-thin-runner-')), oldHome = process.env.HOME, oldStorage = process.env.TW_ATTACHMENT_STORAGE_DIR, oldConfig = process.env.TW_CONFIG_DIR;
   process.env.HOME = root; process.env.TW_CONFIG_DIR = join(root, 'cli'); process.env.TW_ATTACHMENT_STORAGE_DIR = join(root, 'storage');
