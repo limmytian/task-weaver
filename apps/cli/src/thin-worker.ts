@@ -60,7 +60,7 @@ export function codexThinExecutor(): ThinExecutor {
   }
 }
 
-export async function runThinOnce(options: { config: Config; projectId: string; model: string; effort: string; timeoutMs: number; executor?: ThinExecutor; signal?: AbortSignal; workerId?: string; heartbeatIntervalMs?: number }): Promise<ThinOnceOutcome> {
+export async function runThinOnce(options: { config: Config; projectId: string; requirementId?: string; model: string; effort: string; timeoutMs: number; executor?: ThinExecutor; signal?: AbortSignal; workerId?: string; heartbeatIntervalMs?: number }): Promise<ThinOnceOutcome> {
   if (!options.config.apiKey || !options.config.nodeId) throw new Error('Thin worker requires an API key and node identity')
   const credential = { apiUrl: options.config.apiUrl, apiKey: options.config.apiKey }
   const workerId = options.workerId ?? randomUUID()
@@ -80,7 +80,7 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
     const preflight = await executor.preflight(environment)
     const usage = preflight.usage ?? 'unknown'
     if (preflight.blocked) return { state: 'cooldown', reason: preflight.reason, retryAt: await writeThinCooldown(options.config.nodeId, codexHome, preflight.retryAt), usage }
-    const lane = await request<ThinLane>('POST', '/api/v1/thin-workers/acquire', { projectId: options.projectId, workerId, nodeId: options.config.nodeId, executor: 'codex', model: options.model, durationSeconds: 120 }, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })
+    const lane = await request<ThinLane>('POST', '/api/v1/thin-workers/acquire', { projectId: options.projectId, ...(options.requirementId ? { requirementId: options.requirementId } : {}), workerId, nodeId: options.config.nodeId, executor: 'codex', model: options.model, durationSeconds: 120 }, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })
     if (!lane.attempt || !lane.task || !lane.token) return { state: 'empty', usage }
     const attempt = lane.attempt, task = lane.task, fence = { attemptId: attempt.id, workerId, token: lane.token }
     let workspacePath: string | undefined

@@ -29,6 +29,7 @@ export function registerThinWorker(program: Command) {
     })
   worker.command('start').description('pull one task or remain available for scoped work')
     .requiredOption('--project <id>', 'project to serve')
+    .option('--requirement <id>', 'restrict acquisition to one requirement')
     .requiredOption('--model <model>', 'Codex model')
     .option('--think <effort>', 'Codex reasoning effort', 'low')
     .option('--once', 'process at most one task')
@@ -36,6 +37,7 @@ export function registerThinWorker(program: Command) {
     .option('--timeout-minutes <minutes>', 'maximum executor duration', '60')
     .action(async options => {
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(options.project)) throw new Error('A project UUID is required')
+      if (options.requirement && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(options.requirement)) throw new Error('A requirement UUID is required')
       if (!['minimal', 'low', 'medium', 'high', 'xhigh'].includes(options.think)) throw new Error('Invalid Codex reasoning effort')
       const poll = Number(options.pollSeconds), timeout = Number(options.timeoutMinutes)
       if (!Number.isFinite(poll) || poll < 5 || poll > 3600 || !Number.isFinite(timeout) || timeout < 1 || timeout > 1440) throw new Error('Invalid worker polling or timeout interval')
@@ -57,7 +59,7 @@ export function registerThinWorker(program: Command) {
       try {
         do {
           activity = { activity: 'checking' }
-          const outcome = await runThinOnce({ config, projectId: options.project, model: options.model, effort: options.think, timeoutMs: timeout * 60000, signal: controller.signal, workerId })
+          const outcome = await runThinOnce({ config, projectId: options.project, requirementId: options.requirement, model: options.model, effort: options.think, timeoutMs: timeout * 60000, signal: controller.signal, workerId })
           printJson(outcome)
           activity = outcome.state === 'cooldown' || outcome.state === 'attention' ? { activity: outcome.state, reason: outcome.reason, retryAt: outcome.retryAt } : { activity: 'idle' }
           await reporting
