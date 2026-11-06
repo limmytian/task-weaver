@@ -155,6 +155,20 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     const tip = git(bare, 'rev-parse', 'refs/heads/main');
     for (const run of gitRuns) { const rows = await db.select().from(thinGitDeliveries).where(eq(thinGitDeliveries.attemptId, run.attemptId!)); const stored = rows.find(row => row.state === 'confirmed'); assert.ok(stored, JSON.stringify(rows.map(row => row.state))); git(bare, 'merge-base', '--is-ancestor', stored.proposedHead, tip); }
     assert.equal(git(bare, 'show', `${tip}:worker.txt`), 'delivered'); assert.equal(git(bare, 'show', `${tip}:worker-b.txt`), 'delivered');
+    const conflictTasks = await db.insert(tasks).values(['Conflict A', 'Conflict B'].map(title => ({ projectId: f.project.id, requirementId: gitReq!.id, title, createdBy: f.owner.context.actor.id }))).returning();
+    await db.insert(taskDependencies).values(conflictTasks.map(item => ({ taskId: gitAcceptance!.id, dependsOnTaskId: item.id, type: 'blocks' as const })));
+    let entered = 0; let release!: () => void; const bothReady = new Promise<void>(resolve => { release = resolve; }); let resolutions = 0;
+    const conflictExecutor: ThinExecutor = { ...executor, async execute(input) {
+      if (input.prompt.startsWith('Resolve the current Git merge conflicts')) { resolutions++; await writeFile(join(input.cwd, 'base.txt'), 'resolved both changes\n'); git(input.cwd, 'add', 'base.txt'); return { ok: true, reason: 'Fixture conflict resolved', quotaBlocked: false }; }
+      const fs = await import('node:fs/promises'); const manifest = JSON.parse(await fs.readFile(join(input.cwd, 'repository-manifest.json'), 'utf8'));
+      await writeFile(join(input.cwd, manifest.repositories[0].relativePath, 'base.txt'), input.prompt.includes('Conflict A') ? 'change A\n' : 'change B\n');
+      await writeFile(join(input.cwd, 'result.md'), 'Conflict fixture evidence\n'); if (++entered === 2) release(); await bothReady;
+      return { ok: true, reason: 'Fixture conflict work', quotaBlocked: false };
+    } };
+    const conflictRuns = await Promise.all(['conflict-a', 'conflict-b'].map(nodeId => runThinOnce({ ...opts, requirementId: gitReq!.id, gitIdentity: { name: 'Fixture', email: 'fixture@example.test' }, executor: conflictExecutor, config: { ...config, nodeId } })));
+    assert.ok(conflictRuns.every(run => run.state === 'completed'), JSON.stringify(conflictRuns)); assert.equal(resolutions, 1);
+    assert.equal(git(bare, 'show', 'refs/heads/main:base.txt'), 'resolved both changes');
+
     const gitReviewer: ThinExecutor = { ...executor, async execute(input) {
       const fs = await import('node:fs/promises'); const manifest = JSON.parse(await fs.readFile(join(input.cwd, 'repository-manifest.json'), 'utf8'));
       assert.equal(await fs.readFile(join(input.cwd, manifest.repositories[0].relativePath, 'worker.txt'), 'utf8'), 'delivered\n');
