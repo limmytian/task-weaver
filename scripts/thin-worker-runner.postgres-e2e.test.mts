@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { chmod, mkdir, readdir } from 'node:fs/promises';
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 import { createRequire } from 'node:module';
-import { createDb, runMigrations, requirements, tasks, taskDependencies, workerAttempts } from '../packages/db/src/index';
+import { createDb, runMigrations, requirements, requirementRepositories, repositories, tasks, taskDependencies, thinGitDeliveries, workerAttempts } from '../packages/db/src/index';
 import { resourcePostgresFixture } from '../apps/api/src/resource-postgres-fixture';
 import { runThinOnce, type ThinExecutor } from '../apps/cli/src/thin-worker';
 const apiRequire = createRequire(new URL('../apps/api/package.json', import.meta.url));
@@ -26,7 +27,7 @@ test('once worker runs a bounded deterministic executor and parks empty results'
   const f = await resourcePostgresFixture(db, url!);
   const agent = await f.identity.createAgent(f.owner.headers, { displayName: 'Deterministic executor' });
   await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: 'maintainer', explicitPermissions: [] });
-  const issue = (id: string, manage: boolean) => f.identity.issueKey(f.owner.headers, id, { name: 'Runner fixture', expiresAt: null, grants: [{ scope: 'project', projectId: f.project.id, permissions: ['resource.read', 'resource.write', 'execution.run', ...(manage ? ['project.manage' as const] : [])] }] });
+  const issue = (id: string, manage: boolean) => f.identity.issueKey(f.owner.headers, id, { name: 'Runner fixture', expiresAt: null, grants: [{ scope: 'project', projectId: f.project.id, permissions: ['resource.read', 'resource.write', 'execution.run', ...(manage ? ['project.manage' as const] : [])] }, { scope: 'global', permissions: ['resource.read'] }] });
   const owner = await issue(f.owner.context.actor.id, true), key = await issue(agent.id, true);
   const server = serve({ fetch: f.app.fetch, hostname: '127.0.0.1', port: 0 }); t.after(() => server.close()); if (!server.listening) await once(server, 'listening');
   const address = server.address(); assert.ok(address && typeof address !== 'string'); const apiUrl = `http://127.0.0.1:${address.port}`;
@@ -126,6 +127,30 @@ test('once worker runs a bounded deterministic executor and parks empty results'
   const findingAttempt = await db.query.workerAttempts.findFirst({ where: eq(workerAttempts.id, finding.attemptId!) });
   assert.equal(findingAttempt!.result!.acceptanceDecision, 'changes_requested');
   assert.ok(findingAttempt!.result!.outputId);
+  const seed = join(root, 'git-seed'), bare = join(root, 'git-remote.git'); await mkdir(seed);
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  git(seed, 'init'); git(seed, 'checkout', '-b', 'main'); git(seed, 'config', 'user.name', 'Fixture'); git(seed, 'config', 'user.email', 'fixture@example.test');
+  await writeFile(join(seed, 'base.txt'), 'base\n'); git(seed, 'add', '.'); git(seed, 'commit', '-m', 'base');
+  git(root, 'init', '--bare', bare); git(seed, 'remote', 'add', 'origin', bare); git(seed, 'push', 'origin', 'main'); git(bare, 'symbolic-ref', 'HEAD', 'refs/heads/main');
+  const [gitReq] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Git delivery fixture', status: 'approved', createdBy: f.owner.context.actor.id }).returning();
+  const [gitRepo] = await db.insert(repositories).values({ displayName: 'Git runner fixture', provider: 'github', host: 'github.com', namespace: 'fixture', name: 'git-runner', canonicalKey: `fixture-${gitReq!.id}`, httpsCloneUrl: pathToFileURL(bare).href, defaultBranch: 'main', authPolicy: { allowedTransports: ['https'], preferredTransport: 'https', allowedOperations: ['read', 'push'], allowNativeDefault: true }, createdBy: f.owner.context.actor.id }).returning();
+  await db.insert(requirementRepositories).values({ requirementId: gitReq!.id, repositoryId: gitRepo!.id, workingBranch: 'main' });
+  const [gitTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: gitReq!.id, title: 'Git task', createdBy: f.owner.context.actor.id }).returning();
+  const actualFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const target = String(input);
+    if (!target.startsWith('https://api.github.com/repos/fixture/git-runner/')) return actualFetch(input, init);
+    const endpoint = target.split('/').at(-1)!;
+    if (target.includes('/compare/')) { const [base, head] = endpoint.split('...'); const ancestor = git(bare, 'merge-base', base!, head!); return new Response(JSON.stringify({ status: ancestor === base ? 'ahead' : 'diverged', base_commit: { sha: base }, merge_base_commit: { sha: ancestor } }), { status: 200 }); }
+    return new Response(JSON.stringify({ name: 'main', commit: { sha: git(bare, 'rev-parse', 'refs/heads/main') } }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const gitExecutor: ThinExecutor = { ...executor, async execute(input) { const manifest = JSON.parse(await (await import('node:fs/promises')).readFile(join(input.cwd, 'repository-manifest.json'), 'utf8')); await writeFile(join(input.cwd, manifest.repositories[0].relativePath, 'worker.txt'), 'delivered\n'); await writeFile(join(input.cwd, 'result.md'), 'Git delivery verified\n'); return { ok: true, reason: 'Fixture Git work', quotaBlocked: false }; } };
+    const gitRun = await runThinOnce({ ...opts, requirementId: gitReq!.id, gitIdentity: { name: 'Fixture', email: 'fixture@example.test' }, executor: gitExecutor, config: { ...config, nodeId: 'git-fixture' } });
+    assert.equal(gitRun.taskId, gitTask!.id); assert.equal(gitRun.state, 'completed', gitRun.reason);
+    const [stored] = await db.select().from(thinGitDeliveries).where(eq(thinGitDeliveries.attemptId, gitRun.attemptId!));
+    assert.equal(stored?.state, 'confirmed'); assert.equal(git(bare, 'rev-parse', 'refs/heads/main'), stored?.proposedHead); assert.equal(git(bare, 'show', `${stored!.proposedHead}:worker.txt`), 'delivered');
+  } finally { globalThis.fetch = actualFetch; }
   const [networkTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Network interruption', createdBy: f.owner.context.actor.id }).returning();
   const interrupted = await runThinOnce({ ...opts, config: { ...config, nodeId: 'other-node' }, executor: { ...executor, async execute(input) { await writeFile(join(input.cwd, 'result.md'), 'Local work\n'); server.close(); server.closeAllConnections(); return { ok: true, reason: 'Fixture', quotaBlocked: false } } } });
   assert.equal(interrupted.taskId, networkTask!.id);
