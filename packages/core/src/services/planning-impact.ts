@@ -1,8 +1,9 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { executionControls, executionDelegations, executionSlices, requirementClaims, requirementDependencies, requirementRepositories, requirements, taskDependencies, taskClaims, tasks, tiAgentRuns, workflowInputs, workflowOutputs, type Database } from '@task-weaver/db';
+import { executionControls, executionDelegations, executionSlices, requirementClaims, requirementDependencies, requirementRepositories, requirements, taskDependencies, taskClaims, tasks, tiAgentRuns, tiSandboxWorkspaces, workflowInputs, workflowOutputs, type Database } from '@task-weaver/db';
 import { isExecutionPlanChange } from './planning-impact-policy';
 import { appendDurableEvent, emitDurable } from './durable-events';
 import { randomUUID } from 'node:crypto';
+import { parkRevokedTiAttempts } from './execution-revocation';
 
 /** Runs under the resource-service identity lock, before the mutation changes its old relationships. */
 export async function planningImpact(db: Database, operation: string, call: any[]): Promise<string[]> {
@@ -125,7 +126,9 @@ export async function invalidatePlanningExecutions(db: Database, ids: string[], 
     const outputs = await db.select({ id: workflowOutputs.id }).from(workflowOutputs).where(eq(workflowOutputs.requirementId, id)).limit(1);
     if (done.length || outputs.length) await db.update(requirements).set({ evidenceNeedsReview: true }).where(eq(requirements.id, id));
     const affectedTasks = db.select({ id: tasks.id }).from(tasks).where(eq(tasks.requirementId, id));
-    await db.update(tiAgentRuns).set({ status: 'cancelled', completedAt: new Date(), leaseExpiresAt: new Date() }).where(and(inArray(tiAgentRuns.taskId, affectedTasks), inArray(tiAgentRuns.status, ['queued', 'running', 'in_review'])));
+    const cancelledRuns = await db.update(tiAgentRuns).set({ status: 'cancelled', completedAt: new Date(), leaseExpiresAt: new Date() }).where(and(inArray(tiAgentRuns.taskId, affectedTasks), inArray(tiAgentRuns.status, ['queued', 'running', 'in_review']))).returning({ id: tiAgentRuns.id, authorization: tiAgentRuns.authorization });
+    await parkRevokedTiAttempts(db, cancelledRuns);
+    if (cancelledRuns.length) await db.update(tiSandboxWorkspaces).set({ state: 'cleanup_pending', cancelRequestedAt: new Date(), cleanupRequestedAt: new Date(), nextCleanupAt: new Date(), updatedAt: new Date() }).where(and(inArray(tiSandboxWorkspaces.runId, cancelledRuns.map(run => run.id)), sql`${tiSandboxWorkspaces.state} <> 'deleted'`));
     await db.update(executionDelegations).set({ revokedAt: new Date() }).where(and(eq(executionDelegations.requirementId, id), isNull(executionDelegations.revokedAt)));
     const claim = previousClaims.find(claim => claim.requirementId === id) ?? await db.query.requirementClaims.findFirst({ where: eq(requirementClaims.requirementId, id) });
     if (!claim?.daemonId) continue;
