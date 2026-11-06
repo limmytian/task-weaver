@@ -292,6 +292,7 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   const accepted = await worker.acquire(db, input(randomUUID()));
   assert.equal(accepted.task!.id, acceptance!.id);
   const acceptedFence = { attemptId: accepted.attempt!.id, workerId: accepted.attempt!.workerId, token: accepted.token! };
+  await assert.rejects(worker.result(db, { ...acceptedFence, resultKey: randomUUID(), outcome: 'done', summary: 'Missing branch snapshot', outputId: randomUUID(), acceptanceDecision: 'accept' }), /snapshot of every linked repository/);
   const snapshotInput = { ...acceptedFence, repositoryId: gitRepository!.id, expectedHead: 'b'.repeat(40) };
   await assert.rejects(verifier.snapshotAcceptanceRepository(db, { ...snapshotInput, expectedHead: 'c'.repeat(40) }), /does not match/);
   const snapshotRace = createThinWorkerService(workerContext, { forgeFetch: async (url, init) => {
