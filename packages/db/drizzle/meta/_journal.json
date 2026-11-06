@@ -701,6 +701,13 @@
       "when": 1793761564114,
       "tag": "0099_thin_git_deliveries",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1793761564115,
+      "tag": "0100_thin_slice_write_fence",
+      "breakpoints": true
     }
   ]
 }

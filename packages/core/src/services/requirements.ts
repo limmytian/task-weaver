@@ -813,6 +813,8 @@ export async function createExecutionSlice(
   compact = false,
 ) {
   const requirement = await getRequirementOrThrow(db, requirementId);
+  const [project] = await db.select({ workerMode: projects.workerMode }).from(projects).where(eq(projects.id, requirement.projectId));
+  if (project?.workerMode === "thin") throw new ValidationError("Execution slices are historical in thin worker projects");
   const orderIndex = input.orderIndex ?? await nextExecutionSliceOrder(db, requirementId);
 
   const [slice] = await db
@@ -867,6 +869,8 @@ export async function updateExecutionSlice(
   compact = false,
 ) {
   const existing = await getExecutionSlice(db, sliceId, compact);
+  const [project] = await db.select({ workerMode: projects.workerMode }).from(projects).where(eq(projects.id, existing.requirement.projectId));
+  if (project?.workerMode === "thin") throw new ValidationError("Execution slices are historical in thin worker projects");
   const { taskIds, leaseGeneration, daemonId, runId, ...fields } = input;
 
   if ((input.status && !["todo", "cancelled"].includes(input.status)) || leaseGeneration !== undefined || daemonId !== undefined) {
