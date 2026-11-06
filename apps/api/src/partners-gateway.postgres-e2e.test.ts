@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { eq } from 'drizzle-orm';
 import { createDb, runMigrations, tiAgentModelConfigs, tiAgentPolicies, tiAgentRuns, workerAttempts } from '@task-weaver/db';
-import { apiKeyService, createResourceServices, createRequirementSchema } from '@task-weaver/core';
+import { apiKeyService, createResourceServices, createRequirementSchema, createThinWorkerService } from '@task-weaver/core';
 import { createPartnersGatewayClient } from '@task-weaver/partners-gateway';
 import { TiAgentGatewayWorker, createGatewayTwAuthority } from '@task-weaver/partners-gateway/worker';
 import { resourcePostgresFixture } from './resource-postgres-fixture';
@@ -78,6 +78,7 @@ test('Partners Gateway uses scoped worker attempts over HTTP and SSE', { skip: !
       const attempt = await db.query.workerAttempts.findFirst({ where: eq(workerAttempts.taskId, task.id) });
       assert.equal(attempt!.status, ['succeeded', 'polling'].includes(scenario) ? 'completed' : 'attention');
       assert.ok(stored!.eventLog?.length);
+      if (attempt!.status === 'attention') await createThinWorkerService(f.owner.context).resolve(db, { attemptId: attempt!.id, disposition: 'review', reason: 'Fixture gateway stopped and inspected' });
     });
   }
   await t.test('uncertain dispatch fails without automatically submitting a second job', async () => {
