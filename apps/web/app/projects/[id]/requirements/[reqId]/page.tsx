@@ -537,7 +537,8 @@ export default function RequirementDetailPage({
                 requirementId={reqId}
                 projectId={projectId}
                 tasks={requirement.tasks ?? []}
-                isCancelled={isCancelled}
+                isCancelled={isCancelled || project?.workerMode !== "legacy"}
+                historicalOnly={project?.workerMode === "thin"}
                 onTaskClick={setSelectedTaskId}
               />
 
@@ -613,12 +614,14 @@ function ExecutionSlicesPanel({
   projectId,
   tasks,
   isCancelled,
+  historicalOnly,
   onTaskClick,
 }: {
   requirementId: string;
   projectId: string;
   tasks: RequirementTaskSummary[];
   isCancelled: boolean;
+  historicalOnly: boolean;
   onTaskClick: (taskId: string) => void;
 }) {
   const [creating, setCreating] = useState(false);
@@ -726,6 +729,7 @@ function ExecutionSlicesPanel({
 
   const handleCreateSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isCancelled) return;
     const nextTitle = createTitle.trim();
     if (!nextTitle) return;
     createSlice.mutate({
@@ -744,6 +748,7 @@ function ExecutionSlicesPanel({
 
   const handleSliceTaskDragEnd = (event: DragEndEvent) => {
     setActiveSliceTask(null);
+    if (isCancelled) return;
     const targetSliceId = event.over ? parseSliceDropId(String(event.over.id)) : undefined;
     if (targetSliceId === undefined) return;
 
@@ -757,16 +762,18 @@ function ExecutionSlicesPanel({
     });
   };
 
+  if (historicalOnly && !isLoading && !slices?.length) return null;
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="flex items-center gap-2 text-sm font-medium">
             <Layers className="h-4 w-4" />
-            Execution Slices
+            {historicalOnly ? "Historical Execution Slices" : "Execution Slices"}
           </h2>
           <p className="text-xs text-muted-foreground">
-            {(slices ?? []).length} slice{(slices ?? []).length !== 1 ? "s" : ""}, {assignedTaskIds.size}/{tasks.length} tasks assigned.
+            {historicalOnly ? "Read-only history. Task workers use task dependencies for scheduling." : `${(slices ?? []).length} slice${(slices ?? []).length !== 1 ? "s" : ""}, ${assignedTaskIds.size}/${tasks.length} tasks assigned.`}
           </p>
         </div>
         {!isCancelled && (
@@ -782,7 +789,7 @@ function ExecutionSlicesPanel({
         )}
       </div>
 
-      {creating && (
+      {creating && !isCancelled && (
         <form className="space-y-3 rounded-lg border bg-muted/20 p-3" onSubmit={handleCreateSubmit}>
           <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px]">
             <Input
