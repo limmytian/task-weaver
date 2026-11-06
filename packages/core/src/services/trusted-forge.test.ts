@@ -123,3 +123,15 @@ test('trusted ancestry rejects a divergent proposed commit', async () => {
   await verifyTrustedGitAncestry(repo, base, head, { connection, fetch: async () => Response.json({ sha: head, parents: [{ sha: base }] }) });
   await assert.rejects(verifyTrustedGitAncestry(repo, base, head, { connection, fetch: async () => Response.json({ sha: head, parents: [] }) }), /could not be verified/);
 });
+
+test('branch snapshots require exact server-reported branch and complete object ID', async () => {
+  const { readTrustedBranchHead } = await import('./trusted-forge');
+  const branch = 'requirement/example', commit = 'a'.repeat(40);
+  const snapshot = await readTrustedBranchHead(repository, branch, { fetch: async url => {
+    assert.ok(String(url).endsWith('/branches/requirement%2Fexample'));
+    return Response.json({ name: branch, commit: { sha: commit } });
+  } });
+  assert.equal(snapshot.branch, branch); assert.equal(snapshot.commit, commit);
+  await assert.rejects(readTrustedBranchHead(repository, branch, { fetch: async () => Response.json({ name: 'other', commit: { sha: commit } }) }), /incomplete/);
+  await assert.rejects(readTrustedBranchHead(repository, branch, { fetch: async () => Response.json({ name: branch, commit: { sha: 'a'.repeat(41) } }) }), /incomplete/);
+});
