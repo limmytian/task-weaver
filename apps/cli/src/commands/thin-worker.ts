@@ -46,7 +46,8 @@ export function registerThinWorker(program: Command) {
       if (!config.apiKey || !config.nodeId) throw new Error('Thin worker requires an API key and node identity')
       const workerId = randomUUID(), presence = { projectId: options.project, workerId, nodeId: config.nodeId }
       const credential = { apiUrl: config.apiUrl, apiKey: config.apiKey }
-      const reportPresence = () => request('POST', '/api/v1/thin-workers/presence', presence, { credential, signal: AbortSignal.timeout(10000) })
+      let activity: { activity: 'checking' | 'idle' | 'cooldown' | 'attention'; reason?: string; retryAt?: string | null } = { activity: 'checking' }
+      const reportPresence = () => request('POST', '/api/v1/thin-workers/presence', { ...presence, ...activity }, { credential, signal: AbortSignal.timeout(10000) })
       await reportPresence()
       let reporting: Promise<unknown> | undefined
       const presenceTimer = setInterval(() => {
@@ -55,8 +56,12 @@ export function registerThinWorker(program: Command) {
       const wake = options.once ? undefined : startThinWake({ apiUrl: config.apiUrl, apiKey: config.apiKey, projectId: options.project })
       try {
         do {
+          activity = { activity: 'checking' }
           const outcome = await runThinOnce({ config, projectId: options.project, model: options.model, effort: options.think, timeoutMs: timeout * 60000, signal: controller.signal, workerId })
           printJson(outcome)
+          activity = outcome.state === 'cooldown' || outcome.state === 'attention' ? { activity: outcome.state, reason: outcome.reason, retryAt: outcome.retryAt } : { activity: 'idle' }
+          await reporting
+          await reportPresence().catch(() => { console.warn('Worker presence update failed; current attempt lease is managed separately') })
           if (options.once && ['attention', 'cooldown'].includes(outcome.state)) process.exitCode = 1
           if (options.once || controller.signal.aborted) break
           const requested = outcome.state === 'cooldown' && outcome.retryAt ? Date.parse(outcome.retryAt) - Date.now() : outcome.state === 'cooldown' ? 15 * 60000 : poll * 1000

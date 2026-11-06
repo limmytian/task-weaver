@@ -65,7 +65,10 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
         await requireResource(tx, authority, 'project', input.projectId, 'execution.run');
         const project = await lockProject(tx, input.projectId);
         if (project.workerMode !== 'thin') throw new ValidationError('Thin worker mode is not enabled');
-        const [row] = await tx.insert(thinWorkers).values({ id: input.workerId, projectId: input.projectId, actorId: authority.actor.id, credentialId: context.credential.id, nodeId: input.nodeId }).onConflictDoUpdate({ target: thinWorkers.id, set: { heartbeatAt: sql`clock_timestamp()`, stoppedAt: null }, setWhere: and(eq(thinWorkers.projectId, input.projectId), eq(thinWorkers.actorId, authority.actor.id), eq(thinWorkers.credentialId, context.credential.id), eq(thinWorkers.nodeId, input.nodeId)) }).returning();
+        const activity = input.activity ?? 'unknown';
+        const activityReason = input.reason ? safeText(input.reason, 1000) : null;
+        const retryAt = input.retryAt ? new Date(input.retryAt) : null;
+        const [row] = await tx.insert(thinWorkers).values({ id: input.workerId, projectId: input.projectId, actorId: authority.actor.id, credentialId: context.credential.id, nodeId: input.nodeId, activity, activityReason, retryAt }).onConflictDoUpdate({ target: thinWorkers.id, set: { heartbeatAt: sql`clock_timestamp()`, stoppedAt: null, activity, activityReason, retryAt }, setWhere: and(eq(thinWorkers.projectId, input.projectId), eq(thinWorkers.actorId, authority.actor.id), eq(thinWorkers.credentialId, context.credential.id), eq(thinWorkers.nodeId, input.nodeId)) }).returning();
         if (!row) throw new ConflictError('Worker identity belongs to another registration', 0);
         return { workerId: row.id, nodeId: row.nodeId, heartbeatAt: row.heartbeatAt };
       });
@@ -85,7 +88,7 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
       return transact(db, async (tx, authority) => {
         await requireResource(tx, authority, 'project', projectId);
         const rows = await tx.select().from(thinWorkers).where(eq(thinWorkers.projectId, projectId)).orderBy(sql`${thinWorkers.heartbeatAt} DESC`).limit(100);
-        return rows.map(row => ({ workerId: row.id, nodeId: row.nodeId, heartbeatAt: row.heartbeatAt, status: !row.stoppedAt && Date.now() - row.heartbeatAt.getTime() <= 90000 ? 'online' : 'offline' }));
+        return rows.map(row => ({ workerId: row.id, nodeId: row.nodeId, heartbeatAt: row.heartbeatAt, activity: row.activity, reason: row.activityReason, retryAt: row.retryAt, status: !row.stoppedAt && Date.now() - row.heartbeatAt.getTime() <= 90000 ? 'online' : 'offline' }));
       });
     },
     async list(db: Database, projectId: string) {

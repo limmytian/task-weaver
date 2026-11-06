@@ -60,6 +60,11 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   const presence = { projectId: f.project.id, workerId: presenceId, nodeId: 'presence-fixture' };
   await worker.presence(db, presence);
   assert.equal((await worker.listWorkers(db, f.project.id))[0]!.status, 'online');
+  await worker.presence(db, { ...presence, activity: 'cooldown', reason: `Quota exhausted tw_${'a'.repeat(64)}`, retryAt: '2030-01-01T00:00:00.000Z' });
+  const cooling = (await worker.listWorkers(db, f.project.id))[0]!;
+  assert.equal(cooling.activity, 'cooldown');
+  assert.match(cooling.reason!, /\[redacted\]/);
+  assert.equal(cooling.retryAt!.toISOString(), '2030-01-01T00:00:00.000Z');
   const otherKey = await issue(agent.id);
   const otherWorker = createThinWorkerService(await context(otherKey.rawKey));
   await assert.rejects(otherWorker.presence(db, presence));
