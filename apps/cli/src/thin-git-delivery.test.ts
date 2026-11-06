@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { commitThinWorkspace } from './thin-git-delivery.js'
+import { commitThinWorkspace, integrateThinTarget } from './thin-git-delivery.js'
 
 test('task commits preserve the baseline and refuse lost authority', async t => {
   const cwd = await mkdtemp(join(tmpdir(), 'tw-git-delivery-'))
@@ -27,4 +27,45 @@ test('task commits preserve the baseline and refuse lost authority', async t => 
   assert.equal(git('rev-parse', 'HEAD^'), baseline)
   assert.match(git('log', '-1', '--format=%B'), /Signed-off-by: Fixture <fixture@example.test>/)
   await assert.rejects(commitThinWorkspace({ cwd, baseline, message: 'Stale', assertAuthority: async () => {} }), /baseline/)
+})
+
+test('parallel task integrates the latest target and preserves real conflicts', async t => {
+  const cwd = await mkdtemp(join(tmpdir(), 'tw-git-integrate-'))
+  t.after(() => rm(cwd, { recursive: true, force: true }))
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/usr/bin/false' }
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  git('init')
+  git('config', 'user.name', 'Fixture')
+  git('config', 'user.email', 'fixture@example.test')
+  await writeFile(join(cwd, 'base.txt'), 'base\n')
+  git('add', '.')
+  git('commit', '-m', 'base')
+  const baseline = git('rev-parse', 'HEAD')
+  git('switch', '-c', 'task')
+  await writeFile(join(cwd, 'task.txt'), 'task\n')
+  git('add', '.')
+  git('commit', '-m', 'task')
+  const taskCommit = git('rev-parse', 'HEAD')
+  git('switch', '-c', 'target', baseline)
+  await writeFile(join(cwd, 'target.txt'), 'target\n')
+  git('add', '.')
+  git('commit', '-m', 'target')
+  const targetCommit = git('rev-parse', 'HEAD')
+  git('switch', 'task')
+  const integrated = await integrateThinTarget({ cwd, taskCommit, targetCommit, assertAuthority: async () => {} })
+  assert.equal(git('rev-parse', 'HEAD'), integrated.commit)
+  assert.equal(git('merge-base', '--is-ancestor', targetCommit, integrated.commit), '')
+  git('switch', '-c', 'conflict-task', baseline)
+  await writeFile(join(cwd, 'base.txt'), 'task side\n')
+  git('add', '.')
+  git('commit', '-m', 'task conflict')
+  const conflictTask = git('rev-parse', 'HEAD')
+  git('switch', '-c', 'conflict-target', baseline)
+  await writeFile(join(cwd, 'base.txt'), 'target side\n')
+  git('add', '.')
+  git('commit', '-m', 'target conflict')
+  const conflictTarget = git('rev-parse', 'HEAD')
+  git('switch', 'conflict-task')
+  await assert.rejects(integrateThinTarget({ cwd, taskCommit: conflictTask, targetCommit: conflictTarget, assertAuthority: async () => {} }), /conflict resolution/)
+  assert.match(git('status', '--porcelain'), /UU base.txt/)
 })
