@@ -2,7 +2,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { createHash, randomBytes } from 'node:crypto';
 import { activityLog, documentFileVersions, documents, executionControls, planDrafts, projects, requirementClaims, requirementRepositories, repositories, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinGitDeliveries, thinWorkers, workerAttempts, workerPlanReceipts, workflowOutputs, type Database } from '@task-weaver/db';
-import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
+import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { lockIdentityLifecycle } from './auth-security';
 import { resourceAuthority, requireResource } from './resource-authorization';
 import { attachmentStorage } from './attachment-storage';
@@ -61,6 +61,39 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
     return inputs;
   };
   return {
+    async reconcileGitDelivery(db: Database, raw: z.input<typeof workerGitReconcileSchema>) {
+      const input = workerGitReconcileSchema.parse(raw);
+      const inspect = (before?: { delivery: typeof thinGitDeliveries.$inferSelect; repository: typeof repositories.$inferSelect; attemptId: string }) => transact(db, async (tx, authority) => {
+        if (authority.actor.type !== 'human') throw new AuthorizationError();
+        const [existing] = await tx.select().from(thinGitDeliveries).where(eq(thinGitDeliveries.id, input.deliveryId));
+        if (!existing) throw new NotFoundError('Delivery not found');
+        await requireResource(tx, authority, 'project', existing.projectId, 'project.manage');
+        const project = await lockProject(tx, existing.projectId);
+        if (project.workerMode !== 'thin') throw new ValidationError('Thin worker mode is not enabled');
+        const [initialAttempt] = await tx.select().from(workerAttempts).where(eq(workerAttempts.id, existing.attemptId));
+        if (!initialAttempt) throw new NotFoundError('Attempt not found');
+        await tx.select().from(requirements).where(eq(requirements.id, initialAttempt.requirementId)).for('update');
+        await tx.select().from(tasks).where(eq(tasks.id, initialAttempt.taskId)).for('update');
+        const [attempt] = await tx.select({ id: workerAttempts.id, live: sql<boolean>`${workerAttempts.status} = 'running' AND ${workerAttempts.expiresAt} > clock_timestamp()` }).from(workerAttempts).where(eq(workerAttempts.id, existing.attemptId)).for('update');
+        const [delivery] = await tx.select().from(thinGitDeliveries).where(eq(thinGitDeliveries.id, existing.id)).for('update');
+        if (!attempt || attempt.live || !delivery || !['pushing', 'uncertain', 'confirmed'].includes(delivery.state)) throw new ConflictError('Only an expired or finished submitted delivery can be reconciled', 0);
+        const [repository] = await tx.select().from(repositories).where(and(eq(repositories.id, delivery.repositoryId), repositoryPredicate(authority))).for('share');
+        const [link] = await tx.select().from(requirementRepositories).where(and(eq(requirementRepositories.requirementId, initialAttempt.requirementId), eq(requirementRepositories.repositoryId, delivery.repositoryId))).for('share');
+        if (!repository || repository.status !== 'active' || link?.workingBranch !== delivery.targetBranch) throw new ConflictError('Repository or target changed', 0);
+        if (before && (attempt.id !== before.attemptId || delivery.repositoryId !== before.delivery.repositoryId || delivery.targetBranch !== before.delivery.targetBranch || delivery.expectedHead !== before.delivery.expectedHead || delivery.proposedHead !== before.delivery.proposedHead || gitRepositoryIdentity(repository) !== gitRepositoryIdentity(before.repository))) throw new ConflictError('Delivery evidence changed', 0);
+        if (before && delivery.state !== 'confirmed') {
+          const [updated] = await tx.update(thinGitDeliveries).set({ state: 'confirmed', updatedAt: sql`clock_timestamp()` }).where(eq(thinGitDeliveries.id, delivery.id)).returning();
+          await tx.insert(activityLog).values({ entityType: 'task', entityId: initialAttempt.taskId, action: 'worker_git_delivery_reconciled', actorId: authority.actor.id, actorType: authority.actor.type, metadata: { deliveryId: delivery.id, attemptId: attempt.id, reason: safeText(input.reason, 2000) } });
+          return { delivery: updated!, repository, attemptId: attempt.id };
+        }
+        return { delivery, repository, attemptId: attempt.id };
+      });
+      const before = await inspect();
+      if (before.delivery.state === 'confirmed') return before.delivery;
+      await verifyTrustedGitAncestry(before.repository, before.delivery.expectedHead, before.delivery.proposedHead, { fetch: options.forgeFetch });
+      await readTrustedDirectMerge(before.repository, before.delivery.targetBranch, before.delivery.proposedHead, { fetch: options.forgeFetch });
+      return (await inspect(before)).delivery;
+    },
     async abandonPreparedGitDelivery(db: Database, raw: z.input<typeof workerGitAbandonPreparedSchema>) {
       const input = workerGitAbandonPreparedSchema.parse(raw);
       return transact(db, async (tx, authority) => {
