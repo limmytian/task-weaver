@@ -9,6 +9,7 @@ import { ExecutorSignalCollector, queryCodexQuota } from './executor-availabilit
 import { runCommand } from './async-command.js'
 import { buildAiEnvironment } from './repository-credentials.js'
 import { normalizeRequirementRepositoryEntries, provisionThinWorkspace, verifyThinWorkspaceBaselines } from './repository-workspace.js'
+import { deliverThinGitRepository } from './thin-git-orchestrator.js'
 import { readThinCooldown, writeThinCooldown } from './thin-worker-cooldown.js'
 import { applyThinDeliveries, captureThinPatches, packageThinArtifacts, publishThinArtifact } from './thin-workspace-artifacts.js'
 import { workerAcceptanceDecisionSchema, workerPlanSchema } from '@task-weaver/contracts'
@@ -62,7 +63,7 @@ export function codexThinExecutor(): ThinExecutor {
 
 export type ThinWorkerPhase = 'preflight' | 'acquiring' | 'preparing' | 'executing' | 'publishing'
 
-export async function runThinOnce(options: { config: Config; projectId: string; requirementId?: string; model: string; effort: string; timeoutMs: number; executor?: ThinExecutor; signal?: AbortSignal; workerId?: string; heartbeatIntervalMs?: number; onPhase?: (phase: ThinWorkerPhase) => Promise<void> }): Promise<ThinOnceOutcome> {
+export async function runThinOnce(options: { config: Config; projectId: string; requirementId?: string; model: string; effort: string; timeoutMs: number; executor?: ThinExecutor; signal?: AbortSignal; workerId?: string; heartbeatIntervalMs?: number; gitIdentity?: { name: string; email: string }; onPhase?: (phase: ThinWorkerPhase) => Promise<void> }): Promise<ThinOnceOutcome> {
   if (!options.config.apiKey || !options.config.nodeId) throw new Error('Thin worker requires an API key and node identity')
   const credential = { apiUrl: options.config.apiUrl, apiKey: options.config.apiKey }
   const workerId = options.workerId ?? randomUUID()
@@ -167,7 +168,7 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
           await request('POST', '/api/v1/thin-workers/plan', submission, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })
         }
       }
-      await verifyThinWorkspaceBaselines({ config: options.config, workspace, entries, assertAuthority: heartbeat, signal: controller.signal })
+      if (!options.gitIdentity || coordinator || acceptance) await verifyThinWorkspaceBaselines({ config: options.config, workspace, entries, assertAuthority: heartbeat, signal: controller.signal })
       const patches = await captureThinPatches(workspace, heartbeat)
       const reportPath = join(workspace.rootPath, 'result.md')
       const reportExists = await stat(reportPath).then(value => value.isFile()).catch(() => false)
@@ -175,6 +176,17 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
       if ((coordinator || acceptance) && !reportExists) return finish('Coordinator or acceptance task exited without its required report')
       if (!patches.length && !reportExists) return finish('Executor exited without a task artifact')
       const packagePath = await packageThinArtifacts(workspace, patches, heartbeat, reportExists ? reportPath : undefined)
+      if (options.gitIdentity && !coordinator && !acceptance) {
+        for (const patch of patches) {
+          const delivery = await deliverThinGitRepository({ config: options.config, workspace, entries, repositoryId: patch.repositoryId, fence, identity: options.gitIdentity, message: `Complete task ${task.id}`, assertAuthority: heartbeat, signal: controller.signal,
+            resolveConflict: async cwd => {
+              const resolution = await executor.execute({ prompt: 'Resolve the current Git merge conflicts in this task worktree. Preserve both task and requirement changes, stage all resolved files, and do not commit, push, access credentials, or perform external side effects.', cwd, environment, model: options.model, effort: options.effort, signal: controller.signal, timeoutMs: options.timeoutMs })
+              if (!resolution.ok || controller.signal.aborted) throw new Error('Merge conflict resolution failed; inspect the preserved workspace')
+            },
+          })
+          if (delivery.state === 'uncertain') return finish('Git push outcome is uncertain; inspect the delivery before retrying')
+        }
+      }
       const output = await publishThinArtifact({ ...credential, projectId: options.projectId, ...fence, path: packagePath, assertAuthority: heartbeat, signal: controller.signal })
       try {
         await request('POST', '/api/v1/thin-workers/result', { ...fence, resultKey: randomUUID(), outcome: decision?.decision === 'changes_requested' ? 'attention' : 'done', summary: decision?.summary ?? 'Task artifact submitted for review', outputId: output.outputId, ...(decision ? { acceptanceDecision: decision.decision } : {}) }, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })

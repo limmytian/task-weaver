@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import test from 'node:test'
+import { runThinOnce } from './thin-worker.js'
 import { deliverThinGitRepository } from './thin-git-orchestrator.js'
 import { prepareThinPushSandbox } from './thin-git-delivery.js'
 import { applyThinDeliveries, captureThinPatches, packageThinArtifacts } from './thin-workspace-artifacts.js'
@@ -141,8 +142,14 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
       req.on('end', () => {
         calls.push(req.url ?? '')
         res.setHeader('content-type', 'application/json')
-        const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-        res.end(JSON.stringify(req.url?.endsWith('/prepare') ? { id: attemptIds[0] } : req.url?.endsWith('/transition') ? { shouldPush: body.event === 'start_push' && allowPush } : { state: 'confirmed' }))
+        const path = req.url ?? ''
+        const raw = Buffer.concat(chunks).toString('utf8')
+        const body = path.includes('/attachments') || !raw ? {} : JSON.parse(raw)
+        const response = path.endsWith('/acquire') ? { attempt: { id: '00000000-0000-4000-8000-000000000014', workerId: body.workerId, requirementId, taskId: taskIds[0], planRevision: 2 }, task: { id: taskIds[0], title: 'Worker Git fixture', description: null, requirementId, tags: [] }, token: 'fixture' }
+          : path.endsWith('/repositories') ? [repository] : req.method === 'GET' && path.includes('/requirements/') ? { id: requirementId, title: 'Fixture', description: null }
+          : path.endsWith('/attachments') || path.endsWith('/output') ? { id: attemptIds[1] }
+          : path.endsWith('/prepare') ? { id: attemptIds[0] } : path.endsWith('/transition') ? { shouldPush: body.event === 'start_push' && allowPush } : { state: 'confirmed' }
+        res.end(JSON.stringify(response))
       })
     })
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -171,6 +178,16 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
       await assert.rejects(deliverThinGitRepository({ config: { ...options(0).config, apiUrl: `http://127.0.0.1:${address.port}`, apiKey: 'fixture' }, workspace: deniedWorkspace, entries: [repository], repositoryId: repository.repository.id, fence: { attemptId: deniedAttempt, workerId: attemptIds[0]!, token: 'fixture' }, identity: { name: 'Fixture', email: 'fixture@example.test' }, message: 'Denied fixture', assertAuthority: async () => {}, resolveConflict: async () => {} }), /not newly granted/)
       assert.equal(git(['rev-parse', 'refs/heads/main'], join(root, 'thin.git')), delivered.commit)
       assert.deepEqual(calls.map(path => path.split('/').at(-1)), ['prepare', 'transition', 'confirm', 'prepare', 'transition'])
+      allowPush = true
+      const outcome = await runThinOnce({ config: { ...options(0).config, apiUrl: `http://127.0.0.1:${address.port}`, apiKey: 'fixture' }, projectId, requirementId, model: 'fixture', effort: 'low', timeoutMs: 10000, gitIdentity: { name: 'Fixture', email: 'fixture@example.test' }, executor: {
+        async preflight() { return { blocked: false, reason: 'fixture', retryAt: null } },
+        async execute(input) { const manifest = JSON.parse(await readFile(join(input.cwd, 'repository-manifest.json'), 'utf8')); await writeFile(join(input.cwd, manifest.repositories[0].relativePath, 'worker.txt'), 'worker delivery\n'); await writeFile(join(input.cwd, 'result.md'), 'Worker evidence\n'); return { ok: true, reason: 'fixture', quotaBlocked: false } },
+      } })
+      assert.equal(outcome.state, 'completed')
+      const workerTip = git(['rev-parse', 'refs/heads/main'], join(root, 'thin.git'))
+      assert.notEqual(workerTip, delivered.commit)
+      assert.equal(git(['show', `${workerTip}:worker.txt`], join(root, 'thin.git')), 'worker delivery')
+
 
     } finally { await new Promise<void>(resolve => server.close(() => resolve())) }
 

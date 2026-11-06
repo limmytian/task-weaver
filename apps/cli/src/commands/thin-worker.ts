@@ -45,11 +45,14 @@ export function registerThinWorker(program: Command) {
     .requiredOption('--model <model>', 'Codex model')
     .option('--think <effort>', 'Codex reasoning effort', 'low')
     .option('--once', 'process at most one task')
+    .option('--git-name <name>', 'enable task Git delivery with this signoff name')
+    .option('--git-email <email>', 'signoff email for task Git delivery')
     .option('--poll-seconds <seconds>', 'idle polling interval', '30')
     .option('--timeout-minutes <minutes>', 'maximum executor duration', '60')
     .action(async options => {
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(options.project)) throw new Error('A project UUID is required')
       if (options.requirement && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(options.requirement)) throw new Error('A requirement UUID is required')
+      if (Boolean(options.gitName) !== Boolean(options.gitEmail)) throw new Error('Git delivery requires both --git-name and --git-email')
       if (!['minimal', 'low', 'medium', 'high', 'xhigh'].includes(options.think)) throw new Error('Invalid Codex reasoning effort')
       const poll = Number(options.pollSeconds), timeout = Number(options.timeoutMinutes)
       if (!Number.isFinite(poll) || poll < 5 || poll > 3600 || !Number.isFinite(timeout) || timeout < 1 || timeout > 1440) throw new Error('Invalid worker polling or timeout interval')
@@ -71,7 +74,7 @@ export function registerThinWorker(program: Command) {
       try {
         do {
           activity = { activity: 'checking' }
-          const outcome = await runThinOnce({ config, projectId: options.project, requirementId: options.requirement, model: options.model, effort: options.think, timeoutMs: timeout * 60000, signal: controller.signal, workerId, onPhase: async phase => { activity = { activity: phase }; await reporting; await reportPresence().catch(() => { console.warn('Worker phase update failed; current attempt lease is managed separately') }) } })
+          const outcome = await runThinOnce({ config, projectId: options.project, requirementId: options.requirement, model: options.model, effort: options.think, timeoutMs: timeout * 60000, signal: controller.signal, workerId, ...(options.gitName && options.gitEmail ? { gitIdentity: { name: options.gitName, email: options.gitEmail } } : {}), onPhase: async phase => { activity = { activity: phase }; await reporting; await reportPresence().catch(() => { console.warn('Worker phase update failed; current attempt lease is managed separately') }) } })
           printJson(outcome)
           activity = outcome.state === 'cooldown' || outcome.state === 'attention' ? { activity: outcome.state, reason: outcome.reason, retryAt: outcome.retryAt } : { activity: 'idle' }
           await reporting
