@@ -37,11 +37,13 @@ test('once worker runs a bounded deterministic executor and parks empty results'
   await db.insert(taskDependencies).values(children.map(child => ({ taskId: accept!.id, dependsOnTaskId: child.id, type: 'blocks' as const })));
   const config = { apiUrl, apiKey: key.rawKey, nodeId: 'fixture-node' };
   const executor: ThinExecutor = { async preflight() { return { blocked: false, reason: 'Fixture', retryAt: null } }, async execute(input) { assert.equal(input.environment.TW_API_KEY, undefined); assert.ok(!Object.values(input.environment).includes(key.rawKey)); await new Promise(resolve => setTimeout(resolve, 300)); await writeFile(join(input.cwd, 'result.md'), 'Deterministic evidence\n'); return { ok: true, reason: 'Fixture', quotaBlocked: false } } };
-  const opts = { config, projectId: f.project.id, model: 'fixture', effort: 'low', timeoutMs: 10000, heartbeatIntervalMs: 100, executor };
+  const phases: string[] = [];
+  const opts = { config, projectId: f.project.id, model: 'fixture', effort: 'low', timeoutMs: 10000, heartbeatIntervalMs: 100, executor, onPhase: async (phase: string) => { phases.push(phase) } };
   const runs = await Promise.all([runThinOnce(opts), runThinOnce(opts)]);
   assert.deepEqual(new Set(runs.map(run => run.taskId)), new Set(children.map(child => child.id)));
   assert.ok(runs.every(run => run.state === 'completed'));
   assert.ok(runs.every(run => run.usage === 'unknown'));
+  assert.deepEqual(new Set(phases), new Set(['preflight', 'acquiring', 'preparing', 'executing', 'publishing']));
   for (const run of runs) {
     const attempt = await db.query.workerAttempts.findFirst({ where: eq(workerAttempts.id, run.attemptId!) });
     assert.ok(attempt!.heartbeatAt.getTime() > attempt!.createdAt.getTime());

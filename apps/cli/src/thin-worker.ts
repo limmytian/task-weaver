@@ -60,7 +60,9 @@ export function codexThinExecutor(): ThinExecutor {
   }
 }
 
-export async function runThinOnce(options: { config: Config; projectId: string; requirementId?: string; model: string; effort: string; timeoutMs: number; executor?: ThinExecutor; signal?: AbortSignal; workerId?: string; heartbeatIntervalMs?: number }): Promise<ThinOnceOutcome> {
+export type ThinWorkerPhase = 'preflight' | 'acquiring' | 'preparing' | 'executing' | 'publishing'
+
+export async function runThinOnce(options: { config: Config; projectId: string; requirementId?: string; model: string; effort: string; timeoutMs: number; executor?: ThinExecutor; signal?: AbortSignal; workerId?: string; heartbeatIntervalMs?: number; onPhase?: (phase: ThinWorkerPhase) => Promise<void> }): Promise<ThinOnceOutcome> {
   if (!options.config.apiKey || !options.config.nodeId) throw new Error('Thin worker requires an API key and node identity')
   const credential = { apiUrl: options.config.apiUrl, apiKey: options.config.apiKey }
   const workerId = options.workerId ?? randomUUID()
@@ -74,12 +76,14 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
   let timer: ReturnType<typeof setInterval> | undefined
   let inFlight: Promise<void> | undefined
   try {
+    await options.onPhase?.('preflight')
     const codexHome = environment.CODEX_HOME ?? ''
     const cooldown = await readThinCooldown(options.config.nodeId, codexHome)
     if (cooldown) return { state: 'cooldown', reason: 'Executor is cooling down', retryAt: cooldown, usage: 'unknown' }
     const preflight = await executor.preflight(environment)
     const usage = preflight.usage ?? 'unknown'
     if (preflight.blocked) return { state: 'cooldown', reason: preflight.reason, retryAt: await writeThinCooldown(options.config.nodeId, codexHome, preflight.retryAt), usage }
+    await options.onPhase?.('acquiring')
     const lane = await request<ThinLane>('POST', '/api/v1/thin-workers/acquire', { projectId: options.projectId, ...(options.requirementId ? { requirementId: options.requirementId } : {}), workerId, nodeId: options.config.nodeId, executor: 'codex', model: options.model, durationSeconds: 120 }, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })
     if (!lane.attempt || !lane.task || !lane.token) return { state: 'empty', usage }
     const attempt = lane.attempt, task = lane.task, fence = { attemptId: attempt.id, workerId, token: lane.token }
@@ -98,6 +102,7 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
       return { state: quotaBlocked ? 'cooldown' : 'attention', taskId: task.id, attemptId: attempt.id, reason: handoff, workspacePath, retryAt, usage }
     }
     try {
+      await options.onPhase?.('preparing')
       await heartbeat()
       const requirement = await request<{ id: string; title: string; description: string | null }>('GET', `/api/v1/requirements/${attempt.requirementId}`, undefined, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })
       const rawEntries = await request<unknown[]>('GET', `/api/v1/requirements/${attempt.requirementId}/repositories`, undefined, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })
@@ -143,8 +148,10 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
       const planInstructions = coordinator ? `\nThis is a coordinator task. Write plan.json at the workspace root using this shape: {"projectId":"${options.projectId}","requirements":[{"key":"current","existingId":"${attempt.requirementId}","tasks":[{"key":"implementation","title":"...","description":"..."},{"key":"acceptance","title":"...","tags":["worker:acceptance"],"dependsOn":["implementation"]}]}]}. Include one acceptance task that directly blocks on every other new task. Only create new tasks in this requirement; do not include documents, assignments, existing tasks or slices. Record contracts and acceptance criteria in the task descriptions and result.md.` : ''
       const acceptanceInstructions = acceptance ? '\nThis is an acceptance task. Review the verified dependency artifacts under inputs/ and the staged integration workspace. Run appropriate checks and explain the evidence and any unresolved findings in result.md. Write decision.json at the workspace root as {"decision":"accept" or "changes_requested","summary":"..."}. Use changes_requested whenever findings remain or evidence is insufficient.' : ''
       const prompt = `You are executing one bounded Task Weaver task. Work only in this isolated workspace. Do not use TW credentials, push, merge, commit, or perform external side effects. Leave repository changes uncommitted and write a concise result.md at the workspace root describing changes, verification and limitations. Do not claim completion without evidence.\nRequirement: ${requirement.title}\n${requirement.description ?? ''}\nTask: ${task.title}\n${task.description ?? ''}\nWorkspace: ${workspace.rootPath}\nRepository manifest: ${workspace.manifestPath}${planInstructions}${acceptanceInstructions}`
+      await options.onPhase?.('executing')
       const execution = await executor.execute({ prompt, cwd: workspace.rootPath, environment, model: options.model, effort: options.effort, signal: controller.signal, timeoutMs: options.timeoutMs })
       if (!execution.ok || controller.signal.aborted) return finish(execution.reason, execution.quotaBlocked)
+      await options.onPhase?.('publishing')
       await heartbeat()
       if (coordinator) {
         const plan = await readBoundedJson(join(workspace.rootPath, 'plan.json'), 1024 * 1024)

@@ -42,6 +42,7 @@ export function ThinWorkerStatusContent({ projectId, workers, attempts }: {
               <span>{worker.nodeId}</span>
               <span className="text-muted-foreground">Last heartbeat: {time(worker.heartbeatAt)}</span>
               <span>{worker.status === "online" ? "Activity" : "Last reported activity"}: {worker.activity === "checking" ? "checking or executing" : worker.activity}</span>
+              <span className="text-muted-foreground">Reported since: {time(worker.activityChangedAt)}</span>
               {worker.reason && <span className="break-words">{worker.reason}</span>}
               {worker.retryAt && <span>Retry after: {time(worker.retryAt)}</span>}
             </div>

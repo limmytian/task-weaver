@@ -2,7 +2,7 @@ import { Command } from 'commander'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { loadConfig } from '../config.js'
-import { runThinOnce } from '../thin-worker.js'
+import { runThinOnce, type ThinWorkerPhase } from '../thin-worker.js'
 import { printJson } from '../output.js'
 import { get, post, request } from '../client.js'
 import { startThinWake } from '../thin-worker-wake.js'
@@ -48,7 +48,7 @@ export function registerThinWorker(program: Command) {
       if (!config.apiKey || !config.nodeId) throw new Error('Thin worker requires an API key and node identity')
       const workerId = randomUUID(), presence = { projectId: options.project, workerId, nodeId: config.nodeId }
       const credential = { apiUrl: config.apiUrl, apiKey: config.apiKey }
-      let activity: { activity: 'checking' | 'idle' | 'cooldown' | 'attention'; reason?: string; retryAt?: string | null } = { activity: 'checking' }
+      let activity: { activity: 'checking' | 'idle' | 'cooldown' | 'attention' | ThinWorkerPhase; reason?: string; retryAt?: string | null } = { activity: 'checking' }
       const reportPresence = () => request('POST', '/api/v1/thin-workers/presence', { ...presence, ...activity }, { credential, signal: AbortSignal.timeout(10000) })
       await reportPresence()
       let reporting: Promise<unknown> | undefined
@@ -59,7 +59,7 @@ export function registerThinWorker(program: Command) {
       try {
         do {
           activity = { activity: 'checking' }
-          const outcome = await runThinOnce({ config, projectId: options.project, requirementId: options.requirement, model: options.model, effort: options.think, timeoutMs: timeout * 60000, signal: controller.signal, workerId })
+          const outcome = await runThinOnce({ config, projectId: options.project, requirementId: options.requirement, model: options.model, effort: options.think, timeoutMs: timeout * 60000, signal: controller.signal, workerId, onPhase: async phase => { activity = { activity: phase }; await reporting; await reportPresence().catch(() => { console.warn('Worker phase update failed; current attempt lease is managed separately') }) } })
           printJson(outcome)
           activity = outcome.state === 'cooldown' || outcome.state === 'attention' ? { activity: outcome.state, reason: outcome.reason, retryAt: outcome.retryAt } : { activity: 'idle' }
           await reporting

@@ -7,7 +7,7 @@ import { ThinWorkerStatusContent } from '../components/thin-worker-status';
 test('worker status preserves offline handoff and treats output as text', () => {
   const html = renderToStaticMarkup(React.createElement(ThinWorkerStatusContent, {
     projectId: 'project-fixture',
-    workers: { isLoading: false, data: [{ workerId: 'worker', nodeId: 'node-b', status: 'offline', heartbeatAt: new Date('2026-01-01T00:00:00Z'), activity: 'cooldown', reason: 'Quota exhausted', retryAt: null }] },
+    workers: { isLoading: false, data: [{ workerId: 'worker', nodeId: 'node-b', status: 'offline', heartbeatAt: new Date('2026-01-01T00:00:00Z'), activityChangedAt: new Date('2026-01-01T00:00:00Z'), activity: 'cooldown', reason: 'Quota exhausted', retryAt: null }] },
     attempts: { isLoading: false, data: [{ id: 'attempt', taskId: 'task-id', requirementId: 'requirement-id', nodeId: 'node-b', effectiveStatus: 'expired', heartbeatAt: new Date('2026-01-01T00:00:00Z'), expiresAt: new Date('2026-01-01T00:02:00Z'), result: { summary: '<script>bad()</script>', outputId: 'output-id' } }] as never },
   }));
   assert.match(html, /Last reported activity/);
