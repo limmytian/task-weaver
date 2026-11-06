@@ -136,6 +136,8 @@ test('once worker runs a bounded deterministic executor and parks empty results'
   const [gitRepo] = await db.insert(repositories).values({ displayName: 'Git runner fixture', provider: 'github', host: 'github.com', namespace: 'fixture', name: 'git-runner', canonicalKey: `fixture-${gitReq!.id}`, httpsCloneUrl: pathToFileURL(bare).href, defaultBranch: 'main', authPolicy: { allowedTransports: ['https'], preferredTransport: 'https', allowedOperations: ['read', 'push'], allowNativeDefault: true }, createdBy: f.owner.context.actor.id }).returning();
   await db.insert(requirementRepositories).values({ requirementId: gitReq!.id, repositoryId: gitRepo!.id, workingBranch: 'main' });
   const [gitTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: gitReq!.id, title: 'Git task', createdBy: f.owner.context.actor.id }).returning();
+  const [gitAcceptance] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: gitReq!.id, title: 'Git acceptance', tags: ['worker:acceptance'], createdBy: f.owner.context.actor.id }).returning();
+  await db.insert(taskDependencies).values({ taskId: gitAcceptance!.id, dependsOnTaskId: gitTask!.id, type: 'blocks' });
   const actualFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const target = String(input);
@@ -150,6 +152,16 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     assert.equal(gitRun.taskId, gitTask!.id); assert.equal(gitRun.state, 'completed', gitRun.reason);
     const [stored] = await db.select().from(thinGitDeliveries).where(eq(thinGitDeliveries.attemptId, gitRun.attemptId!));
     assert.equal(stored?.state, 'confirmed'); assert.equal(git(bare, 'rev-parse', 'refs/heads/main'), stored?.proposedHead); assert.equal(git(bare, 'show', `${stored!.proposedHead}:worker.txt`), 'delivered');
+    const gitReviewer: ThinExecutor = { ...executor, async execute(input) {
+      const fs = await import('node:fs/promises'); const manifest = JSON.parse(await fs.readFile(join(input.cwd, 'repository-manifest.json'), 'utf8'));
+      assert.equal(await fs.readFile(join(input.cwd, manifest.repositories[0].relativePath, 'worker.txt'), 'utf8'), 'delivered\n');
+      await writeFile(join(input.cwd, 'result.md'), 'Reviewed the delivered branch and evidence.\n');
+      await writeFile(join(input.cwd, 'decision.json'), JSON.stringify({ decision: 'accept', summary: 'Git delivery reviewed' }));
+      return { ok: true, reason: 'Fixture Git acceptance', quotaBlocked: false };
+    } };
+    const gitReviewed = await runThinOnce({ ...opts, requirementId: gitReq!.id, executor: gitReviewer, config: { ...config, nodeId: 'git-review-fixture' } });
+    assert.equal(gitReviewed.taskId, gitAcceptance!.id); assert.equal(gitReviewed.state, 'completed', gitReviewed.reason);
+
   } finally { globalThis.fetch = actualFetch; }
   const [networkTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Network interruption', createdBy: f.owner.context.actor.id }).returning();
   const interrupted = await runThinOnce({ ...opts, config: { ...config, nodeId: 'other-node' }, executor: { ...executor, async execute(input) { await writeFile(join(input.cwd, 'result.md'), 'Local work\n'); server.close(); server.closeAllConnections(); return { ok: true, reason: 'Fixture', quotaBlocked: false } } } });
