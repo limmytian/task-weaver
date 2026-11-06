@@ -368,6 +368,8 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         const [attempt] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.id, input.attemptId), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`)).for('update');
         if (project.workerMode !== 'thin' || !attempt || attempt.actorId !== authority.actor.id || attempt.credentialId !== context.credential.id || attempt.workerId !== input.workerId || attempt.tokenHash !== digest(input.token)) throw new AuthorizationError();
         if (!requirement || !task || task.status !== 'in_progress' || !task.tags?.includes('worker:integration') || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Integration attempt or plan changed', requirement?.planRevision ?? 0);
+        const [unfinished] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.requirementId, requirement.id), sql`${tasks.id} <> ${task.id}`, sql`${tasks.status} NOT IN ('done', 'cancelled')`)).limit(1);
+        if (unfinished) throw new ConflictError('Requirement still has unfinished tasks', requirement.planRevision);
         const dependencies = await tx.select().from(taskDependencies).where(and(eq(taskDependencies.taskId, task.id), eq(taskDependencies.type, 'blocks')));
         const candidates: Array<typeof workerAttempts.$inferSelect> = [];
         for (const dependency of dependencies) {
