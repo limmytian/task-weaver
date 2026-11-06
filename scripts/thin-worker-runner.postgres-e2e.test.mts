@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 import { createRequire } from 'node:module';
 import { createDb, runMigrations, requirements, requirementRepositories, repositories, tasks, taskDependencies, thinGitDeliveries, workerAcceptanceSnapshots, workerAttempts } from '../packages/db/src/index';
+import { createThinWorkerService } from '../packages/core/src/services/thin-worker';
 import { resourcePostgresFixture } from '../apps/api/src/resource-postgres-fixture';
 import { runThinOnce, type ThinExecutor } from '../apps/cli/src/thin-worker';
 const apiRequire = createRequire(new URL('../apps/api/package.json', import.meta.url));
@@ -207,6 +208,15 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     assert.equal((await readIntegration()).status, 409, 'integration must wait for all requirement tasks');
     await db.update(tasks).set({ status: 'cancelled' }).where(eq(tasks.id, unfinished!.id));
     assert.equal((await readIntegration()).status, 200);
+    const integrationService = createThinWorkerService(await f.auth.resolve(new Headers({ authorization: `Bearer ${key.rawKey}` })));
+    const prepareVersion = { ...integrationFence, operationKey: crypto.randomUUID(), repositoryId: gitRepo!.id, expectedHead: 'a'.repeat(40), proposedHead: 'b'.repeat(40) };
+    const versionDelivery = await integrationService.prepareIntegrationDelivery(db, prepareVersion);
+    assert.equal(versionDelivery.purpose, 'integration'); assert.equal(versionDelivery.acceptanceAttemptId, gitReviewed.attemptId); assert.equal(versionDelivery.acceptedCommit, acceptedSnapshot!.commit); assert.equal(versionDelivery.targetBranch, 'release');
+    assert.equal((await integrationService.prepareIntegrationDelivery(db, prepareVersion)).id, versionDelivery.id);
+    await assert.rejects(integrationService.prepareIntegrationDelivery(db, { ...prepareVersion, proposedHead: 'c'.repeat(40) }), /already used/);
+    await assert.rejects(integrationService.transitionGitDelivery(db, { ...integrationFence, deliveryId: versionDelivery.id, event: 'start_push' }), /not yet available/);
+    assert.equal((await integrationService.transitionGitDelivery(db, { ...integrationFence, deliveryId: versionDelivery.id, event: 'definitely_not_started' })).delivery.state, 'abandoned');
+
 
 
     const premature = await fetch(`${apiUrl}/api/v1/thin-workers/result`, { method: 'POST', headers: { authorization: `Bearer ${key.rawKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ attemptId: lane.attempt.id, workerId: integrationWorker, token: lane.token, resultKey: crypto.randomUUID(), outcome: 'done', summary: 'Premature integration', outputId: crypto.randomUUID() }) });

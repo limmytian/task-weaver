@@ -2,7 +2,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { createHash, randomBytes } from 'node:crypto';
 import { activityLog, documentFileVersions, documents, executionControls, planDrafts, projects, requirementClaims, requirementRepositories, repositories, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinGitDeliveries, thinWorkers, workerAttempts, workerPlanReceipts, workerAcceptanceSnapshots, workflowOutputs, type Database } from '@task-weaver/db';
-import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
+import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerIntegrationPrepareSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { lockIdentityLifecycle } from './auth-security';
 import { resourceAuthority, requireResource } from './resource-authorization';
 import { attachmentStorage } from './attachment-storage';
@@ -191,6 +191,7 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         if (!attempt || !requirement || !task || task.status !== 'in_progress' || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Attempt or plan is no longer current', requirement?.planRevision ?? 0);
         const [delivery] = await tx.select().from(thinGitDeliveries).where(and(eq(thinGitDeliveries.id, input.deliveryId), eq(thinGitDeliveries.attemptId, attempt.id))).for('update');
         if (!delivery) throw new NotFoundError('Delivery not found');
+        if (delivery.purpose === 'integration' && input.event === 'start_push') throw new ValidationError('Version branch push authorization is not yet available');
         // A replayed start response cannot authorize another external push: the first response may have been lost after the caller proceeded.
         if ((input.event === 'start_push' && delivery.state === 'pushing') || (input.event === 'response_lost' && delivery.state === 'uncertain')) return { delivery, shouldPush: false };
         let state: ReturnType<typeof advanceGitDelivery>;
@@ -198,6 +199,41 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         catch { throw new ConflictError('Delivery state changed', requirement.planRevision); }
         const [updated] = await tx.update(thinGitDeliveries).set({ state, updatedAt: sql`clock_timestamp()` }).where(eq(thinGitDeliveries.id, delivery.id)).returning();
         return { delivery: updated!, shouldPush: input.event === 'start_push' };
+      });
+    },
+    async prepareIntegrationDelivery(db: Database, raw: z.input<typeof workerIntegrationPrepareSchema>) {
+      const input = workerIntegrationPrepareSchema.parse(raw);
+      const verified = await createThinWorkerService(context, options).integrationInputs(db, { attemptId: input.attemptId, workerId: input.workerId, token: input.token });
+      const source = verified.sources.find(item => item.repositoryId === input.repositoryId);
+      if (!source) throw new ValidationError('Repository is not part of accepted integration');
+      return transact(db, async (tx, authority) => {
+        if (authority.actor.type !== 'agent' || context.credential.kind !== 'api_key') throw new AuthorizationError();
+        const [existing] = await tx.select().from(workerAttempts).where(eq(workerAttempts.id, input.attemptId));
+        if (!existing) throw new NotFoundError('Attempt not found');
+        await requireResource(tx, authority, 'task', existing.taskId, 'execution.run');
+        await requireResource(tx, authority, 'task', existing.taskId, 'resource.write');
+        const project = await lockProject(tx, existing.projectId);
+        const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, existing.requirementId)).for('update');
+        const [task] = await tx.select().from(tasks).where(eq(tasks.id, existing.taskId)).for('update');
+        const [attempt] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.id, input.attemptId), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`)).for('update');
+        if (project.workerMode !== 'thin' || !attempt || attempt.actorId !== authority.actor.id || attempt.credentialId !== context.credential.id || attempt.workerId !== input.workerId || attempt.tokenHash !== digest(input.token)) throw new AuthorizationError();
+        if (!requirement || !task || task.status !== 'in_progress' || !task.tags?.includes('worker:integration') || requirement.planRevision !== attempt.planRevision || requirement.planRevision !== verified.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Integration attempt or plan changed', requirement?.planRevision ?? 0);
+        const [unfinished] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.requirementId, requirement.id), sql`${tasks.id} <> ${task.id}`, sql`${tasks.status} NOT IN ('done', 'cancelled')`)).limit(1);
+        const [dependency] = await tx.select().from(taskDependencies).where(and(eq(taskDependencies.taskId, task.id), eq(taskDependencies.dependsOnTaskId, verified.acceptanceTaskId), eq(taskDependencies.type, 'blocks'))).for('share');
+        const [accepted] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.id, verified.acceptanceAttemptId), eq(workerAttempts.status, 'completed'), eq(workerAttempts.planRevision, requirement.planRevision))).for('share');
+        const [snapshot] = await tx.select().from(workerAcceptanceSnapshots).where(and(eq(workerAcceptanceSnapshots.attemptId, verified.acceptanceAttemptId), eq(workerAcceptanceSnapshots.repositoryId, input.repositoryId))).for('share');
+        const [repository] = await tx.select().from(repositories).where(and(eq(repositories.id, input.repositoryId), repositoryPredicate(authority))).for('share');
+        const [link] = await tx.select().from(requirementRepositories).where(and(eq(requirementRepositories.requirementId, requirement.id), eq(requirementRepositories.repositoryId, input.repositoryId))).for('share');
+        if (unfinished || !dependency || !accepted || accepted.result?.acceptanceDecision !== 'accept' || accepted.result.outcome !== 'done' || !snapshot || !repository || repository.status !== 'active' || snapshot.commit !== source.sourceCommit || snapshot.branch !== source.sourceBranch || snapshot.repositoryIdentity !== gitRepositoryIdentity(repository) || link?.workingBranch !== source.sourceBranch || link.baseBranch !== source.targetBranch) throw new ConflictError('Accepted integration inputs changed', requirement.planRevision);
+        const [prior] = await tx.select().from(thinGitDeliveries).where(and(eq(thinGitDeliveries.projectId, project.id), eq(thinGitDeliveries.operationKey, input.operationKey)));
+        if (prior) {
+          if (prior.purpose !== 'integration' || prior.attemptId !== attempt.id || prior.repositoryId !== input.repositoryId || prior.targetBranch !== source.targetBranch || prior.expectedHead !== input.expectedHead || prior.proposedHead !== input.proposedHead || prior.acceptedCommit !== source.sourceCommit || prior.acceptanceAttemptId !== verified.acceptanceAttemptId) throw new ConflictError('Delivery operation key was already used', requirement.planRevision);
+          return prior;
+        }
+        const [active] = await tx.select().from(thinGitDeliveries).where(and(eq(thinGitDeliveries.repositoryId, input.repositoryId), eq(thinGitDeliveries.targetBranch, source.targetBranch), sql`${thinGitDeliveries.state} IN ('prepared', 'pushing', 'uncertain')`));
+        if (active) throw new ConflictError('Branch delivery is occupied or requires inspection', requirement.planRevision);
+        const [delivery] = await tx.insert(thinGitDeliveries).values({ projectId: project.id, repositoryId: input.repositoryId, attemptId: attempt.id, operationKey: input.operationKey, targetBranch: source.targetBranch, expectedHead: input.expectedHead, proposedHead: input.proposedHead, purpose: 'integration', acceptanceAttemptId: verified.acceptanceAttemptId, acceptedCommit: source.sourceCommit, sourceBranch: source.sourceBranch, state: 'prepared' }).returning();
+        return delivery!;
       });
     },
     async prepareGitDelivery(db: Database, raw: z.input<typeof workerGitPrepareSchema>) {
