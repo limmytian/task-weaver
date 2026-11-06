@@ -615,9 +615,9 @@ tw task comment $TASK_ID "Blocked: needs database migration from task $OTHER_ID 
 tw task comment $TASK_ID "Done: endpoint live, tests passing, doc linked"
 ```
 
-### Requirement-Level Partitioning
+### Requirement-Level Partitioning (Legacy)
 
-For larger teams, partition work at the requirement level:
+Legacy daemon lanes partition work at the requirement level. For task workers, use task dependencies and attempt leases instead. In legacy workflows:
 - Each agent "owns" one or more requirements
 - Only create/modify tasks under your assigned requirements
 - Cross-requirement work requires coordination via comments
