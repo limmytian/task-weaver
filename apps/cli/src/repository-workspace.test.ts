@@ -155,6 +155,14 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
       const delivered = await deliverThinGitRepository({ config: { ...options(0).config, apiUrl: `http://127.0.0.1:${address.port}`, apiKey: 'fixture' }, workspace: deliveryWorkspace, entries: [repository], repositoryId: repository.repository.id, fence: { attemptId: deliveryAttempt, workerId: attemptIds[0]!, token: 'fixture' }, identity: { name: 'Fixture', email: 'fixture@example.test' }, message: 'Deliver fixture', assertAuthority: async () => {}, resolveConflict: async () => { throw new Error('Unexpected conflict') } })
       assert.equal(delivered.state, 'confirmed')
       assert.equal(git(['rev-parse', 'refs/heads/main'], join(root, 'thin.git')), delivered.commit)
+      const acceptAttempt = '00000000-0000-4000-8000-000000000012'
+      const acceptWorkspace = await provisionThinWorkspace({ ...options(0), attemptId: acceptAttempt })
+      const acceptance = { workspace: acceptWorkspace, projectId, requirementId, taskId: taskIds[0]!, attemptId: acceptAttempt, planRevision: 2, packages: [packagePath], integrated: { [packagePath]: { attemptId: attemptIds[0]!, deliveries: [{ repositoryId: repository.repository.id, commit: delivered.commit }] } }, assertAuthority: async () => {}, assertBaseline: () => verifyThinWorkspaceBaselines({ ...baselineOptions, workspace: acceptWorkspace }) }
+      assert.deepEqual(await applyThinDeliveries(acceptance), [], 'confirmed commits already on the branch must not be applied twice')
+      assert.equal(await readFile(join(acceptWorkspace.repositories[0]!.worktreePath, 'delivery.txt'), 'utf8'), 'task delivery\n')
+      const missingAttempt = '00000000-0000-4000-8000-000000000013'
+      const missingWorkspace = await provisionThinWorkspace({ ...options(0), attemptId: missingAttempt })
+      await assert.rejects(applyThinDeliveries({ ...acceptance, workspace: missingWorkspace, attemptId: missingAttempt, integrated: { [packagePath]: { attemptId: attemptIds[0]!, deliveries: [{ repositoryId: repository.repository.id, commit: 'a'.repeat(40) }] } }, assertBaseline: () => verifyThinWorkspaceBaselines({ ...baselineOptions, workspace: missingWorkspace }) }), /missing from the integration branch/)
       assert.deepEqual(calls.map(path => path.split('/').at(-1)), ['prepare', 'transition', 'confirm'])
       allowPush = false
       const deniedAttempt = '00000000-0000-4000-8000-000000000011'
