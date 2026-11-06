@@ -69,3 +69,31 @@ export async function integrateThinTarget(options: {
   await options.assertAuthority()
   return { commit: result.stdout.trim() }
 }
+
+/** Submit only a normal fast-forward push. A transport failure after authorization is always uncertain. */
+export async function pushThinDelivery(options: {
+  targetBranch: string
+  expectedHead: string
+  proposedHead: string
+  git: (args: string[]) => Promise<{ ok: boolean; status: number | null; stdout: string; stderr: string }>
+  authorizePush: () => Promise<boolean>
+  markUncertain: () => Promise<void>
+}) {
+  if (!commitId.test(options.expectedHead) || !commitId.test(options.proposedHead) || !options.targetBranch || options.targetBranch.length > 255) throw new Error('Invalid push parameters')
+  const valid = await options.git(['check-ref-format', '--branch', options.targetBranch])
+  if (!valid.ok) throw new Error('Invalid target branch')
+  const head = await options.git(['rev-parse', '--verify', 'HEAD'])
+  if (!head.ok || head.stdout.trim() !== options.proposedHead) throw new Error('Proposed commit is not checked out')
+  const ancestry = await options.git(['merge-base', '--is-ancestor', options.expectedHead, options.proposedHead])
+  if (!ancestry.ok) throw new Error('Proposed commit does not contain the expected target')
+  const ref = `refs/heads/${options.targetBranch}`
+  const remote = await options.git(['ls-remote', '--exit-code', 'origin', ref])
+  if (!remote.ok || remote.stdout.trim() !== `${options.expectedHead}\t${ref}`) throw new Error('Target branch advanced; integrate its latest commit')
+  if (!await options.authorizePush()) throw new Error('Push authorization was not newly granted')
+  try {
+    const push = await options.git(['push', '--porcelain', 'origin', `${options.proposedHead}:${ref}`])
+    if (push.ok) return { state: 'submitted' as const }
+  } catch { /* The remote may already have accepted the update. */ }
+  await options.markUncertain()
+  return { state: 'uncertain' as const }
+}
