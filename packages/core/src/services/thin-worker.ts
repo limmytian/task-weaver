@@ -2,7 +2,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { createHash, randomBytes } from 'node:crypto';
 import { activityLog, documentFileVersions, documents, executionControls, planDrafts, projects, requirementClaims, requirementRepositories, repositories, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinGitDeliveries, thinWorkers, workerAttempts, workerPlanReceipts, workflowOutputs, type Database } from '@task-weaver/db';
-import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
+import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { lockIdentityLifecycle } from './auth-security';
 import { resourceAuthority, requireResource } from './resource-authorization';
 import { attachmentStorage } from './attachment-storage';
@@ -61,6 +61,27 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
     return inputs;
   };
   return {
+    async abandonPreparedGitDelivery(db: Database, raw: z.input<typeof workerGitAbandonPreparedSchema>) {
+      const input = workerGitAbandonPreparedSchema.parse(raw);
+      return transact(db, async (tx, authority) => {
+        if (authority.actor.type !== 'human') throw new AuthorizationError();
+        const [existing] = await tx.select().from(thinGitDeliveries).where(eq(thinGitDeliveries.id, input.deliveryId));
+        if (!existing) throw new NotFoundError('Delivery not found');
+        await requireResource(tx, authority, 'project', existing.projectId, 'project.manage');
+        const project = await lockProject(tx, existing.projectId);
+        if (project.workerMode !== 'thin') throw new ValidationError('Thin worker mode is not enabled');
+        const [initialAttempt] = await tx.select().from(workerAttempts).where(eq(workerAttempts.id, existing.attemptId));
+        if (!initialAttempt) throw new NotFoundError('Attempt not found');
+        await tx.select().from(requirements).where(eq(requirements.id, initialAttempt.requirementId)).for('update');
+        await tx.select().from(tasks).where(eq(tasks.id, initialAttempt.taskId)).for('update');
+        const [attempt] = await tx.select({ id: workerAttempts.id, live: sql<boolean>`${workerAttempts.status} = 'running' AND ${workerAttempts.expiresAt} > clock_timestamp()` }).from(workerAttempts).where(eq(workerAttempts.id, existing.attemptId)).for('update');
+        const [delivery] = await tx.select().from(thinGitDeliveries).where(eq(thinGitDeliveries.id, existing.id)).for('update');
+        if (!attempt || attempt.live || !delivery || delivery.state !== 'prepared') throw new ConflictError('Only a stopped attempt with an unstarted push can release this delivery', 0);
+        const [updated] = await tx.update(thinGitDeliveries).set({ state: 'abandoned', updatedAt: sql`clock_timestamp()` }).where(eq(thinGitDeliveries.id, delivery.id)).returning();
+        await tx.insert(activityLog).values({ entityType: 'task', entityId: initialAttempt.taskId, action: 'worker_git_preparation_abandoned', actorId: authority.actor.id, actorType: authority.actor.type, metadata: { deliveryId: delivery.id, attemptId: attempt.id, reason: safeText(input.reason, 2000) } });
+        return updated!;
+      });
+    },
     async confirmGitDelivery(db: Database, raw: z.input<typeof workerGitConfirmSchema>) {
       const input = workerGitConfirmSchema.parse(raw);
       const inspect = () => transact(db, async (tx, authority) => {
