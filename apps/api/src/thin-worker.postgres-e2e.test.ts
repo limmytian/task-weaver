@@ -130,6 +130,11 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   assert.equal((await worker.prepareGitDelivery(db, prepare)).id, prepared.id, 'same operation safely replays');
   await assert.rejects(worker.prepareGitDelivery(db, { ...prepare, proposedHead: 'c'.repeat(40) }));
   await assert.rejects(worker.prepareGitDelivery(db, { ...prepare, operationKey: randomUUID() }));
+  const transition = { attemptId: prepare.attemptId, workerId: prepare.workerId, token: prepare.token, deliveryId: prepared.id };
+  assert.equal((await worker.transitionGitDelivery(db, { ...transition, event: 'start_push' })).state, 'pushing');
+  assert.equal((await worker.transitionGitDelivery(db, { ...transition, event: 'start_push' })).state, 'pushing');
+  assert.equal((await worker.transitionGitDelivery(db, { ...transition, event: 'response_lost' })).state, 'uncertain');
+  await assert.rejects(worker.transitionGitDelivery(db, { ...transition, event: 'start_push' }));
   assert.equal('tokenHash' in winner.attempt!, false);
   const listing = await f.app.request(`/api/v1/thin-workers/attempts?projectId=${f.project.id}`, { headers: new Headers({ authorization: `Bearer ${workerKey.rawKey}` }) });
   assert.equal(listing.status, 200, await listing.clone().text());
