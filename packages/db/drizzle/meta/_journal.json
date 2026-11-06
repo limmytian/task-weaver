@@ -715,6 +715,13 @@
       "when": 1793761564116,
       "tag": "0101_worker_acceptance_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1793761564117,
+      "tag": "0102_git_integration_provenance",
+      "breakpoints": true
     }
   ]
 }

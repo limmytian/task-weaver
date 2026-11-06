@@ -159,6 +159,8 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   assert.equal(winner.task!.id, first!.id);
   const [gitRepository] = await db.insert(repositories).values({ displayName: 'Delivery fixture', provider: 'github', host: 'github.com', namespace: 'test', name: randomUUID(), canonicalKey: randomUUID(), createdBy: f.owner.context.actor.id }).returning();
   const delivery = { projectId: f.project.id, repositoryId: gitRepository!.id, attemptId: winner.attempt!.id, operationKey: randomUUID(), targetBranch: 'requirement/fixture', expectedHead: 'a'.repeat(40), proposedHead: 'b'.repeat(40), state: 'prepared' as const };
+  await assert.rejects(db.insert(thinGitDeliveries).values({ ...delivery, operationKey: randomUUID(), targetBranch: 'release/fixture', purpose: 'integration' }));
+  await assert.rejects(db.insert(thinGitDeliveries).values({ ...delivery, operationKey: randomUUID(), targetBranch: 'release/fixture', purpose: 'task', acceptedCommit: 'a'.repeat(40) }));
   const [slot] = await db.insert(thinGitDeliveries).values(delivery).returning();
   await assert.rejects(db.insert(thinGitDeliveries).values({ ...delivery, operationKey: randomUUID() }));
   await db.update(thinGitDeliveries).set({ state: 'uncertain' }).where(eq(thinGitDeliveries.id, slot!.id));
