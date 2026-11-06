@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { ApiError, ApiTransportError, request } from './client.js'
 import type { Config } from './config.js'
 import { ExecutorSignalCollector, queryCodexQuota } from './executor-availability.js'
+import { ThinSandboxDiagnostic } from './thin-sandbox-diagnostic.js'
 import { runCommand } from './async-command.js'
 import { buildAiEnvironment } from './repository-credentials.js'
 import { normalizeRequirementRepositoryEntries, provisionThinWorkspace, verifyThinWorkspaceBaselines } from './repository-workspace.js'
@@ -21,7 +22,7 @@ interface ThinLane { attempt: ThinAttempt | null; task: ThinTask | null; token?:
 export type ThinOnceOutcome = { state: 'empty' | 'completed' | 'attention' | 'cooldown'; taskId?: string; attemptId?: string; reason?: string; workspacePath?: string; retryAt?: string | null; usage?: 'known' | 'unknown' }
 export interface ThinExecutor {
   preflight(environment: NodeJS.ProcessEnv): Promise<{ blocked: boolean; reason: string; retryAt: string | null; usage?: 'known' | 'unknown' }>
-  execute(input: { prompt: string; cwd: string; environment: NodeJS.ProcessEnv; model: string; effort: string; signal: AbortSignal; timeoutMs: number }): Promise<{ ok: boolean; reason: string; quotaBlocked: boolean }>
+  execute(input: { prompt: string; cwd: string; environment: NodeJS.ProcessEnv; model: string; effort: string; signal: AbortSignal; timeoutMs: number }): Promise<{ ok: boolean; reason: string; quotaBlocked: boolean; diagnostic?: string | null }>
 }
 
 async function readBoundedJson(path: string, limit: number) {
@@ -53,11 +54,12 @@ export function codexThinExecutor(): ThinExecutor {
     async execute(input) {
       const controller = new AbortController()
       const collector = new ExecutorSignalCollector('codex', 'thin-worker', () => controller.abort(new Error('Executor resources unavailable')))
+      const diagnostic = new ThinSandboxDiagnostic()
       const signal = AbortSignal.any([input.signal, controller.signal])
       const args = ['exec', '--sandbox', 'workspace-write', '--skip-git-repo-check', '--json', '--color', 'never', '-C', input.cwd, '--model', input.model, '-c', `model_reasoning_effort="${input.effort}"`, input.prompt]
-      const result = await runCommand('codex', args, { cwd: input.cwd, env: input.environment, signal, timeoutMs: input.timeoutMs, maxOutputBytes: 0, onStdout: chunk => collector.push('stdout', chunk), onStderr: chunk => collector.push('stderr', chunk) })
+      const result = await runCommand('codex', args, { cwd: input.cwd, env: input.environment, signal, timeoutMs: input.timeoutMs, maxOutputBytes: 0, onStdout: chunk => { collector.push('stdout', chunk); diagnostic.push(chunk) }, onStderr: chunk => collector.push('stderr', chunk) })
       const observation = collector.finish()
-      return { ok: result.ok && !observation, reason: observation?.reason ?? (result.timedOut ? 'Executor timed out' : input.signal.aborted ? 'Execution authority or connection ended' : result.ok ? 'Executor completed' : 'Executor exited without a usable result'), quotaBlocked: observation?.state === 'cooling_down' || observation?.state === 'action_required' }
+      return { ok: result.ok && !observation, reason: observation?.reason ?? (result.timedOut ? 'Executor timed out' : input.signal.aborted ? 'Execution authority or connection ended' : result.ok ? 'Executor completed' : 'Executor exited without a usable result'), quotaBlocked: observation?.state === 'cooling_down' || observation?.state === 'action_required', diagnostic: diagnostic.finish() }
     },
   }
 }
@@ -203,9 +205,9 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
       if (!coordinator && !acceptance && patches.length && !options.gitIdentity) return finish('Git delivery requires a signoff name and email; configure --git-name and --git-email')
       const reportPath = join(workspace.rootPath, 'result.md')
       const reportExists = await stat(reportPath).then(value => value.isFile()).catch(() => false)
+      if ((coordinator || acceptance) && !reportExists) return finish(execution.diagnostic ?? 'Coordinator or acceptance task exited without its required report')
       const decision = acceptance ? workerAcceptanceDecisionSchema.parse(await readBoundedJson(join(workspace.rootPath, 'decision.json'), 16384)) : null
-      if ((coordinator || acceptance) && !reportExists) return finish('Coordinator or acceptance task exited without its required report')
-      if (!patches.length && !reportExists) return finish('Executor exited without a task artifact')
+      if (!patches.length && !reportExists) return finish(execution.diagnostic ?? 'Executor exited without a task artifact')
       const packagePath = await packageThinArtifacts(workspace, patches, heartbeat, reportExists ? reportPath : undefined)
       if (options.gitIdentity && !coordinator && !acceptance) {
         for (const patch of patches) {
