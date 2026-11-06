@@ -146,7 +146,7 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     if (!target.startsWith('https://api.github.com/repos/fixture/git-runner/')) return actualFetch(input, init);
     const endpoint = target.split('/').at(-1)!;
     if (target.includes('/compare/')) { const [base, head] = endpoint.split('...'); const ancestor = git(bare, 'merge-base', base!, head!); return new Response(JSON.stringify({ status: ancestor === base ? 'ahead' : 'diverged', base_commit: { sha: base }, merge_base_commit: { sha: ancestor } }), { status: 200 }); }
-    return new Response(JSON.stringify({ name: 'main', commit: { sha: git(bare, 'rev-parse', 'refs/heads/main') } }), { status: 200 });
+    const branch = decodeURIComponent(endpoint); return new Response(JSON.stringify({ name: branch, commit: { sha: git(bare, 'rev-parse', `refs/heads/${branch}`) } }), { status: 200 });
   }) as typeof fetch;
   try {
     const gitExecutor: ThinExecutor = { ...executor, async execute(input) { const manifest = JSON.parse(await (await import('node:fs/promises')).readFile(join(input.cwd, 'repository-manifest.json'), 'utf8')); await writeFile(join(input.cwd, manifest.repositories[0].relativePath, input.prompt.includes('Git task B') ? 'worker-b.txt' : 'worker.txt'), 'delivered\n'); await writeFile(join(input.cwd, 'result.md'), 'Git delivery verified\n'); return { ok: true, reason: 'Fixture Git work', quotaBlocked: false }; } };
@@ -217,7 +217,9 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     await assert.rejects(integrationService.prepareIntegrationDelivery(db, { ...prepareVersion, proposedHead: 'c'.repeat(40) }), /already used/);
     await assert.rejects(integrationService.transitionGitDelivery(db, { ...integrationFence, deliveryId: versionDelivery.id, event: 'start_push' }), /not yet available/);
     assert.equal((await integrationService.transitionGitDelivery(db, { ...integrationFence, deliveryId: versionDelivery.id, event: 'definitely_not_started' })).delivery.state, 'abandoned');
-    const nextVersion = await integrationService.prepareIntegrationDelivery(db, { ...prepareVersion, operationKey: crypto.randomUUID() });
+    const targetBefore = git(bare, 'rev-parse', `${reviewedTip}^`);
+    git(bare, 'update-ref', 'refs/heads/release', targetBefore);
+    const nextVersion = await integrationService.prepareIntegrationDelivery(db, { ...prepareVersion, operationKey: crypto.randomUUID(), expectedHead: targetBefore, proposedHead: reviewedTip });
     git(bare, 'update-ref', 'refs/heads/main', git(bare, 'rev-parse', `${reviewedTip}^`));
     await assert.rejects(integrationService.authorizeIntegrationPush(db, { ...integrationFence, deliveryId: nextVersion.id }), /changed after acceptance/);
     git(bare, 'update-ref', 'refs/heads/main', reviewedTip);
@@ -225,6 +227,12 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     assert.equal(authorization.shouldPush, true);
     assert.equal((await integrationService.authorizeIntegrationPush(db, { ...integrationFence, deliveryId: nextVersion.id })).shouldPush, false);
     assert.equal((await integrationService.transitionGitDelivery(db, { ...integrationFence, deliveryId: nextVersion.id, event: 'response_lost' })).delivery.state, 'uncertain');
+    git(bare, 'update-ref', 'refs/heads/release', reviewedTip);
+    git(bare, 'update-ref', 'refs/heads/main', targetBefore);
+    await assert.rejects(integrationService.confirmGitDelivery(db, { ...integrationFence, deliveryId: nextVersion.id }), /changed after acceptance/);
+    git(bare, 'update-ref', 'refs/heads/main', reviewedTip);
+    assert.equal((await integrationService.confirmGitDelivery(db, { ...integrationFence, deliveryId: nextVersion.id })).state, 'confirmed');
+
 
 
 
