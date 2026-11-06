@@ -355,6 +355,10 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
           throw new ConflictError('Attempt already has a different result', 0);
         }
         if (!requirement || !task || task.status !== 'in_progress' || task.requirementId !== requirement.id || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Task or plan changed', requirement?.planRevision ?? 0);
+        if (input.outcome === 'done') {
+          const [unresolvedDelivery] = await tx.select({ id: thinGitDeliveries.id }).from(thinGitDeliveries).where(and(eq(thinGitDeliveries.attemptId, attempt.id), sql`${thinGitDeliveries.state} IN ('prepared', 'pushing', 'uncertain')`)).limit(1);
+          if (unresolvedDelivery) throw new ConflictError('Git delivery must be resolved before task completion', requirement.planRevision);
+        }
         const [blocked] = await tx.execute(sql`SELECT 1 AS blocked WHERE EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks b ON b.id = d.depends_on_task_id WHERE d.task_id = ${task.id} AND d.type = 'blocks' AND b.status <> 'done') OR EXISTS (SELECT 1 FROM requirement_dependencies d JOIN requirements b ON b.id = d.depends_on_requirement_id WHERE d.requirement_id = ${requirement.id} AND d.type = 'blocks' AND b.status NOT IN ('done', 'cancelled'))`) as unknown as Array<{ blocked: number }>;
         if (blocked) throw new ConflictError('Task dependencies changed', requirement.planRevision);
         if (input.outcome === 'done' && task.tags?.includes('worker:acceptance')) {
@@ -396,6 +400,10 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
         const [task] = await tx.select().from(tasks).where(eq(tasks.id, existing.taskId)).for('update');
         const [attempt] = await tx.select().from(workerAttempts).where(eq(workerAttempts.id, input.attemptId)).for('update');
         if (!task || !attempt || !['in_progress', 'in_review'].includes(task.status)) throw new ConflictError('Task changed; inspect it before resolving the attempt', 0);
+        if (input.disposition === 'retry') {
+          const [unresolvedDelivery] = await tx.select({ id: thinGitDeliveries.id }).from(thinGitDeliveries).where(and(eq(thinGitDeliveries.attemptId, attempt.id), sql`${thinGitDeliveries.state} IN ('prepared', 'pushing', 'uncertain')`)).limit(1);
+          if (unresolvedDelivery) throw new ConflictError('Resolve the Git delivery outcome before retrying', 0);
+        }
         const [resolved] = await tx.update(workerAttempts).set({ status: 'resolved', completedAt: sql`COALESCE(${workerAttempts.completedAt}, clock_timestamp())` }).where(and(eq(workerAttempts.id, attempt.id), sql`(${workerAttempts.status} = 'attention' OR (${workerAttempts.status} = 'running' AND ${workerAttempts.expiresAt} <= clock_timestamp()))`)).returning();
         if (!resolved) throw new ConflictError('Attempt is still live or already resolved', 0);
         const nextStatus = input.disposition === 'retry' ? 'todo' : 'in_review';
