@@ -217,6 +217,15 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     await assert.rejects(integrationService.prepareIntegrationDelivery(db, { ...prepareVersion, proposedHead: 'c'.repeat(40) }), /already used/);
     await assert.rejects(integrationService.transitionGitDelivery(db, { ...integrationFence, deliveryId: versionDelivery.id, event: 'start_push' }), /not yet available/);
     assert.equal((await integrationService.transitionGitDelivery(db, { ...integrationFence, deliveryId: versionDelivery.id, event: 'definitely_not_started' })).delivery.state, 'abandoned');
+    const nextVersion = await integrationService.prepareIntegrationDelivery(db, { ...prepareVersion, operationKey: crypto.randomUUID() });
+    git(bare, 'update-ref', 'refs/heads/main', git(bare, 'rev-parse', `${reviewedTip}^`));
+    await assert.rejects(integrationService.authorizeIntegrationPush(db, { ...integrationFence, deliveryId: nextVersion.id }), /changed after acceptance/);
+    git(bare, 'update-ref', 'refs/heads/main', reviewedTip);
+    const authorization = await integrationService.authorizeIntegrationPush(db, { ...integrationFence, deliveryId: nextVersion.id });
+    assert.equal(authorization.shouldPush, true);
+    assert.equal((await integrationService.authorizeIntegrationPush(db, { ...integrationFence, deliveryId: nextVersion.id })).shouldPush, false);
+    assert.equal((await integrationService.transitionGitDelivery(db, { ...integrationFence, deliveryId: nextVersion.id, event: 'response_lost' })).delivery.state, 'uncertain');
+
 
 
 
