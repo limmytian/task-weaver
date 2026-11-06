@@ -8,6 +8,7 @@ import { resourceAuthority, requireResource } from './resource-authorization';
 import { attachmentStorage } from './attachment-storage';
 import { emit } from '@task-weaver/realtime';
 import { createResourceServices } from './resource-services';
+import { reconcileCompletedRequirement } from './requirements';
 import { createPlanDraft, validatePlanDraft, applyPlanDraft } from './plans';
 import { advanceGitDelivery } from './thin-git-delivery-policy';
 import { repositoryPredicate } from './repository-authorization';
@@ -728,6 +729,7 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         const nextStatus = input.outcome === 'done' ? 'done' : 'in_review';
         const [updated] = await tx.update(tasks).set({ status: nextStatus, completedAt: nextStatus === 'done' ? sql`clock_timestamp()` : null, version: sql`${tasks.version} + 1`, updatedAt: sql`clock_timestamp()` }).where(eq(tasks.id, task.id)).returning();
         await tx.insert(taskStatusLog).values({ taskId: task.id, fromStatus: 'in_progress', toStatus: nextStatus, changedBy: authority.actor.id, changedByType: authority.actor.type, reason: result.summary });
+        if (nextStatus === 'done' && task.tags?.includes('worker:integration')) await reconcileCompletedRequirement(tx, requirement.id, { id: authority.actor.id, type: authority.actor.type });
         return { attempt: publicAttempt(completed), task: updated };
       });
       if (result.task?.projectId) emit({ type: 'task_updated', projectId: result.task.projectId, taskId: result.task.id });
