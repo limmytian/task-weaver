@@ -190,6 +190,8 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     const inputResponse = await fetch(`${apiUrl}/api/v1/thin-workers/integration/inputs`, { method: 'POST', headers: { authorization: `Bearer ${key.rawKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ attemptId: lane.attempt.id, workerId: integrationWorker, token: lane.token }) });
     assert.equal(inputResponse.status, 200, await inputResponse.clone().text()); const integrationInputs = await inputResponse.json() as any;
     assert.equal(integrationInputs.acceptanceAttemptId, gitReviewed.attemptId); assert.equal(integrationInputs.sources[0].sourceCommit, acceptedSnapshot!.commit); assert.equal(integrationInputs.sources[0].targetBranch, 'release');
+    const premature = await fetch(`${apiUrl}/api/v1/thin-workers/result`, { method: 'POST', headers: { authorization: `Bearer ${key.rawKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ attemptId: lane.attempt.id, workerId: integrationWorker, token: lane.token, resultKey: crypto.randomUUID(), outcome: 'done', summary: 'Premature integration', outputId: crypto.randomUUID() }) });
+    assert.equal(premature.status, 409); assert.match((await premature.json() as any).error, /confirmed version delivery/);
     const integrationFence = { attemptId: lane.attempt.id, workerId: integrationWorker, token: lane.token };
     const readIntegration = () => fetch(`${apiUrl}/api/v1/thin-workers/integration/inputs`, { method: 'POST', headers: { authorization: `Bearer ${key.rawKey}`, 'content-type': 'application/json' }, body: JSON.stringify(integrationFence) });
     await db.update(requirementRepositories).set({ baseBranch: 'main' }).where(eq(requirementRepositories.repositoryId, gitRepo!.id));
@@ -238,14 +240,36 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     await db.update(workerAttempts).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(workerAttempts.id, lane.attempt.id));
     const ownerService = createThinWorkerService(await f.auth.resolve(new Headers({ authorization: `Bearer ${owner.rawKey}` })));
     assert.equal((await ownerService.reconcileGitDelivery(db, { deliveryId: recoveryVersion.id, reason: 'Checked remote version branch after lost response' })).state, 'confirmed');
+    await ownerService.resolve(db, { attemptId: lane.attempt.id, disposition: 'retry', retrySafe: true, reason: 'Verified remote version delivery before retry' });
+    git(bare, 'update-ref', 'refs/heads/release', targetBefore);
+    const versionCheckout = join(root, 'version-concurrent'); git(root, 'clone', bare, versionCheckout); git(versionCheckout, 'checkout', '-b', 'release', 'origin/release');
+    git(versionCheckout, 'config', 'user.name', 'Version fixture'); git(versionCheckout, 'config', 'user.email', 'version@example.test');
+    await writeFile(join(versionCheckout, 'version-only.txt'), 'version work\n'); await writeFile(join(versionCheckout, 'base.txt'), 'concurrent version change\n'); git(versionCheckout, 'add', '.'); git(versionCheckout, 'commit', '-m', 'Concurrent version work');
+    const concurrentVersion = git(versionCheckout, 'rev-parse', 'HEAD'); git(versionCheckout, 'push', 'origin', 'release');
+    let versionResolutions = 0;
+    const versionExecutor: ThinExecutor = { ...executor, async execute(input) {
+      assert.match(input.prompt, /Resolve the current Git merge conflicts/); versionResolutions++;
+      await writeFile(join(input.cwd, 'base.txt'), 'resolved version and requirement\n'); git(input.cwd, 'add', 'base.txt');
+      return { ok: true, reason: 'Version conflict resolved', quotaBlocked: false };
+    } };
+    const integrated = await runThinOnce({ ...opts, requirementId: gitReq!.id, gitIdentity: { name: 'Fixture', email: 'fixture@example.test' }, executor: versionExecutor, config: { ...config, nodeId: 'version-retry-fixture' } });
+    assert.equal(versionResolutions, 1);
+    assert.equal(integrated.taskId, integration!.id); assert.equal(integrated.state, 'completed', integrated.reason);
+    const versionTip = git(bare, 'rev-parse', 'refs/heads/release');
+    git(bare, 'merge-base', '--is-ancestor', acceptedSnapshot!.commit, versionTip);
+    git(bare, 'merge-base', '--is-ancestor', concurrentVersion, versionTip);
+    assert.equal(git(bare, 'show', `${versionTip}:version-only.txt`), 'version work');
+    assert.equal(git(bare, 'show', `${versionTip}:base.txt`), 'resolved version and requirement');
+    const versionRows = await db.select().from(thinGitDeliveries).where(eq(thinGitDeliveries.attemptId, integrated.attemptId!));
+    assert.ok(versionRows.some(row => row.purpose === 'integration' && row.state === 'confirmed' && row.acceptedCommit === acceptedSnapshot!.commit));
 
 
 
 
 
 
-    const premature = await fetch(`${apiUrl}/api/v1/thin-workers/result`, { method: 'POST', headers: { authorization: `Bearer ${key.rawKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ attemptId: lane.attempt.id, workerId: integrationWorker, token: lane.token, resultKey: crypto.randomUUID(), outcome: 'done', summary: 'Premature integration', outputId: crypto.randomUUID() }) });
-    assert.equal(premature.status, 400); assert.match((await premature.json() as any).error, /not yet available/);
+
+
 
 
 

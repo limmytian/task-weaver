@@ -258,6 +258,8 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         if (delivery.state === 'pushing') return { delivery, shouldPush: false };
         if (delivery.state !== 'prepared') throw new ConflictError('Integration delivery state changed', requirement.planRevision);
         const [updated] = await tx.update(thinGitDeliveries).set({ state: 'pushing', updatedAt: sql`clock_timestamp()` }).where(eq(thinGitDeliveries.id, delivery.id)).returning();
+        const [live] = await tx.select({ id: workerAttempts.id }).from(workerAttempts).where(and(eq(workerAttempts.id, attempt.id), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`));
+        if (!live) throw new ConflictError('Integration attempt expired before push authorization', requirement.planRevision);
         return { delivery: updated!, shouldPush: true };
       });
     },
@@ -293,6 +295,8 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         const [active] = await tx.select().from(thinGitDeliveries).where(and(eq(thinGitDeliveries.repositoryId, input.repositoryId), eq(thinGitDeliveries.targetBranch, source.targetBranch), sql`${thinGitDeliveries.state} IN ('prepared', 'pushing', 'uncertain')`));
         if (active) throw new ConflictError('Branch delivery is occupied or requires inspection', requirement.planRevision);
         const [delivery] = await tx.insert(thinGitDeliveries).values({ projectId: project.id, repositoryId: input.repositoryId, attemptId: attempt.id, operationKey: input.operationKey, targetBranch: source.targetBranch, expectedHead: input.expectedHead, proposedHead: input.proposedHead, purpose: 'integration', acceptanceAttemptId: verified.acceptanceAttemptId, acceptedCommit: source.sourceCommit, sourceBranch: source.sourceBranch, state: 'prepared' }).returning();
+        const [live] = await tx.select({ id: workerAttempts.id }).from(workerAttempts).where(and(eq(workerAttempts.id, attempt.id), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`));
+        if (!live) throw new ConflictError('Integration attempt expired before preparation', requirement.planRevision);
         return delivery!;
       });
     },
@@ -639,6 +643,10 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
     },
     async result(db: Database, raw: z.input<typeof workerResultSchema>) {
       const input = workerResultSchema.parse(raw);
+      const [preAttempt] = await db.select().from(workerAttempts).where(eq(workerAttempts.id, input.attemptId));
+      const [preTask] = preAttempt ? await db.select().from(tasks).where(eq(tasks.id, preAttempt.taskId)) : [];
+      const integration = input.outcome === 'done' && preAttempt?.status === 'running' && preTask?.tags?.includes('worker:integration')
+        ? await createThinWorkerService(context, options).integrationInputs(db, { attemptId: input.attemptId, workerId: input.workerId, token: input.token }) : null;
       const result = await transact(db, async (tx, authority) => {
         if (authority.actor.type !== 'agent' || context.credential.kind !== 'api_key') throw new AuthorizationError();
         const [existing] = await tx.select().from(workerAttempts).where(eq(workerAttempts.id, input.attemptId));
@@ -656,7 +664,25 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
           throw new ConflictError('Attempt already has a different result', 0);
         }
         if (!requirement || !task || task.status !== 'in_progress' || task.requirementId !== requirement.id || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Task or plan changed', requirement?.planRevision ?? 0);
-        if (input.outcome === 'done' && task.tags?.includes('worker:integration')) throw new ValidationError('Version branch delivery is not yet available');
+        if (input.outcome === 'done' && task.tags?.includes('worker:integration')) {
+          if (!integration || integration.planRevision !== requirement.planRevision) throw new ConflictError('Integration evidence is unavailable', requirement.planRevision);
+          const [unfinished] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.requirementId, requirement.id), sql`${tasks.id} <> ${task.id}`, sql`${tasks.status} NOT IN ('done', 'cancelled')`)).limit(1);
+          const [accepted] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.id, integration.acceptanceAttemptId), eq(workerAttempts.status, 'completed'), eq(workerAttempts.planRevision, requirement.planRevision))).for('share');
+          const [dependency] = await tx.select().from(taskDependencies).where(and(eq(taskDependencies.taskId, task.id), eq(taskDependencies.dependsOnTaskId, integration.acceptanceTaskId), eq(taskDependencies.type, 'blocks'))).for('share');
+          if (unfinished || !accepted || accepted.taskId !== integration.acceptanceTaskId || accepted.result?.acceptanceDecision !== 'accept' || accepted.result.outcome !== 'done' || !dependency) throw new ConflictError('Accepted integration inputs changed', requirement.planRevision);
+          const links = await tx.select().from(requirementRepositories).where(eq(requirementRepositories.requirementId, requirement.id)).for('share');
+          const snapshots = await tx.select().from(workerAcceptanceSnapshots).where(eq(workerAcceptanceSnapshots.attemptId, accepted.id)).for('share');
+          for (const source of integration.sources) {
+            const [repository] = await tx.select().from(repositories).where(and(eq(repositories.id, source.repositoryId), repositoryPredicate(authority))).for('share');
+            const snapshot = snapshots.find(item => item.repositoryId === source.repositoryId);
+            if (!repository || repository.status !== 'active' || !snapshot || snapshot.commit !== source.sourceCommit || snapshot.branch !== source.sourceBranch || snapshot.repositoryIdentity !== gitRepositoryIdentity(repository)) throw new ConflictError('Accepted repository snapshot changed', requirement.planRevision);
+          }
+          const deliveries = await tx.select().from(thinGitDeliveries).where(and(eq(thinGitDeliveries.attemptId, attempt.id), eq(thinGitDeliveries.purpose, 'integration'), eq(thinGitDeliveries.state, 'confirmed'))).for('share');
+          if (links.length !== integration.sources.length || links.some(link => {
+            const source = integration.sources.find(item => item.repositoryId === link.repositoryId);
+            return !source || link.workingBranch !== source.sourceBranch || link.baseBranch !== source.targetBranch || !deliveries.some(delivery => delivery.repositoryId === source.repositoryId && delivery.targetBranch === source.targetBranch && delivery.sourceBranch === source.sourceBranch && delivery.acceptedCommit === source.sourceCommit && delivery.acceptanceAttemptId === integration.acceptanceAttemptId);
+          })) throw new ConflictError('Every accepted repository requires a confirmed version delivery', requirement.planRevision);
+        }
         if (input.outcome === 'done') {
           const [unresolvedDelivery] = await tx.select({ id: thinGitDeliveries.id }).from(thinGitDeliveries).where(and(eq(thinGitDeliveries.attemptId, attempt.id), sql`${thinGitDeliveries.state} IN ('prepared', 'pushing', 'uncertain')`)).limit(1);
           if (unresolvedDelivery) throw new ConflictError('Git delivery must be resolved before task completion', requirement.planRevision);

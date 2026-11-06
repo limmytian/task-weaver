@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { ConflictError, ValidationError, authenticationFailure, createAuthorizedEventStream, createThinWorkerService, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerModeSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerReleaseSchema, workerResolveSchema, workerResultSchema } from '@task-weaver/core';
+import { ConflictError, ValidationError, authenticationFailure, createAuthorizedEventStream, createThinWorkerService, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerIntegrationPrepareSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerModeSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerReleaseSchema, workerResolveSchema, workerResultSchema } from '@task-weaver/core';
 import { z } from 'zod';
 import type { Env } from '../middleware/actor.js';
 
@@ -49,6 +49,16 @@ routes.get('/git/deliveries', async c => {
   const project = z.string().uuid().safeParse(c.req.query('projectId'));
   if (!project.success) return c.json({ error: 'Invalid project' }, 400);
   return c.json(await createThinWorkerService(c.get('identity')).listGitDeliveries(c.get('db'), project.data));
+});
+routes.post('/integration/prepare', async c => {
+  const input = workerIntegrationPrepareSchema.safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: 'Invalid integration delivery preparation' }, 400);
+  return c.json(await createThinWorkerService(c.get('identity')).prepareIntegrationDelivery(c.get('db'), input.data));
+});
+routes.post('/integration/authorize', async c => {
+  const input = workerGitConfirmSchema.safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: 'Invalid integration push authorization' }, 400);
+  return c.json(await createThinWorkerService(c.get('identity')).authorizeIntegrationPush(c.get('db'), input.data));
 });
 routes.post('/integration/inputs', async c => {
   const input = workerFenceSchema.safeParse(await c.req.json().catch(() => null));

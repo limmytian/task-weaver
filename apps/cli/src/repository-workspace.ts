@@ -877,3 +877,24 @@ export function createThinPushRunner(options: {
     git: (args: string[]) => runTrustedGitCommand('git', [...config, '-c', 'core.hooksPath=/dev/null', '--git-dir', options.gitDir, ...args], options.gitDir, environment, options.signal),
   }
 }
+
+/** Fetch a configured version target into the shared object store without changing the attempt worktree. */
+export async function fetchThinVersionTarget(options: {
+  config: Config
+  workspace: CompositeWorkspace
+  entries: RequirementRepositoryEntry[]
+  repositoryId: string
+  sourceBranch: string
+  targetBranch: string
+  assertAuthority: () => Promise<void>
+  signal?: AbortSignal
+}) {
+  const repository = options.workspace.repositories.find(item => item.repositoryId === options.repositoryId)
+  const entry = options.entries.find(item => item.repository.id === options.repositoryId && item.link.id === repository?.linkId)
+  if (!repository || !entry || entry.link.workingBranch !== options.sourceBranch || entry.link.baseBranch !== options.targetBranch || options.sourceBranch === options.targetBranch || repository.baseBranch !== options.sourceBranch) throw new Error('Version integration branch configuration changed')
+  return fetchThinIntegrationTarget({
+    ...options,
+    workspace: { ...options.workspace, repositories: options.workspace.repositories.map(item => item.repositoryId === options.repositoryId ? { ...item, baseBranch: options.targetBranch } : item) },
+    entries: options.entries.map(item => item.repository.id === options.repositoryId ? { ...item, link: { ...item.link, workingBranch: options.targetBranch } } : item),
+  })
+}
