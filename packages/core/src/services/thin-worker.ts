@@ -1,7 +1,7 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { createHash, randomBytes } from 'node:crypto';
-import { activityLog, documentFileVersions, documents, executionControls, planDrafts, projects, requirementClaims, requirementRepositories, repositories, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinGitDeliveries, thinWorkers, workerAttempts, workerPlanReceipts, workerAcceptanceSnapshots, workflowOutputs, type Database } from '@task-weaver/db';
+import { activityLog, documentFileVersions, documents, executionControls, executionDelegations, planDrafts, projects, requirementClaims, requirementRepositories, repositories, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinGitDeliveries, thinWorkers, tiAgentRuns, tiSandboxWorkspaces, workerAttempts, workerPlanReceipts, workerAcceptanceSnapshots, workflowOutputs, type Database } from '@task-weaver/db';
 import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerIntegrationPrepareSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { lockIdentityLifecycle } from './auth-security';
 import { resourceAuthority, requireResource } from './resource-authorization';
@@ -422,6 +422,7 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
             AND NOT EXISTS (SELECT 1 FROM requirement_claims rc WHERE rc.requirement_id = r.id)
             AND NOT EXISTS (SELECT 1 FROM task_claims tc WHERE tc.task_id = t.id)
             AND NOT EXISTS (SELECT 1 FROM worker_attempts wa WHERE wa.task_id = t.id AND wa.status IN ('running', 'attention'))
+            AND NOT EXISTS (SELECT 1 FROM ti_agent_runs tr WHERE tr.task_id = t.id AND tr.status IN ('queued', 'running', 'in_review'))
           ORDER BY CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, t.created_at, t.id
           LIMIT 1 FOR UPDATE OF r, t
         `) as unknown as Array<{ task_id: string; requirement_id: string }>;
@@ -437,7 +438,8 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
           EXISTS (SELECT 1 FROM execution_controls ec WHERE ec.id = (SELECT latest.id FROM execution_controls latest WHERE latest.requirement_id = ${candidate.requirement_id} ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) AND ec.phase <> 'resumed') OR
           EXISTS (SELECT 1 FROM requirement_claims rc WHERE rc.requirement_id = ${candidate.requirement_id}) OR
           EXISTS (SELECT 1 FROM task_claims tc WHERE tc.task_id = ${candidate.task_id}) OR
-          EXISTS (SELECT 1 FROM worker_attempts wa WHERE wa.task_id = ${candidate.task_id} AND wa.status IN ('running', 'attention'))`) as unknown as Array<{ changed: number }>;
+          EXISTS (SELECT 1 FROM worker_attempts wa WHERE wa.task_id = ${candidate.task_id} AND wa.status IN ('running', 'attention')) OR
+          EXISTS (SELECT 1 FROM ti_agent_runs tr WHERE tr.task_id = ${candidate.task_id} AND tr.status IN ('queued', 'running', 'in_review'))`) as unknown as Array<{ changed: number }>;
         if (changed) return { attempt: null, task: null };
         const token = `twa_${randomBytes(32).toString('hex')}`;
         const [attempt] = await tx.insert(workerAttempts).values({ projectId: input.projectId, requirementId: candidate.requirement_id, taskId: candidate.task_id, actorId: authority.actor.id, credentialId: context.credential.id, workerId: input.workerId, nodeId: input.nodeId, tokenHash: digest(token), planRevision: requirement!.planRevision, expiresAt: sql`clock_timestamp() + ${input.durationSeconds} * interval '1 second'` }).returning();
@@ -762,6 +764,13 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         }
         const [resolved] = await tx.update(workerAttempts).set({ status: 'resolved', completedAt: sql`COALESCE(${workerAttempts.completedAt}, clock_timestamp())` }).where(and(eq(workerAttempts.id, attempt.id), sql`(${workerAttempts.status} = 'attention' OR (${workerAttempts.status} = 'running' AND ${workerAttempts.expiresAt} <= clock_timestamp()))`)).returning();
         if (!resolved) throw new ConflictError('Attempt is still live or already resolved', 0);
+        if (attempt.nodeId.startsWith('ti:')) {
+          const [run] = await tx.update(tiAgentRuns).set({ status: 'cancelled', leaseExpiresAt: new Date(), completedAt: new Date(), updatedAt: new Date(), errorMessage: 'Worker attempt resolved after inspection' }).where(and(eq(tiAgentRuns.taskId, task.id), sql`${tiAgentRuns.authorization}->>'attemptId' = ${attempt.id}`, sql`${tiAgentRuns.status} IN ('queued', 'running', 'in_review')`)).returning();
+          if (run) {
+            await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(eq(executionDelegations.tiRunId, run.id), sql`${executionDelegations.revokedAt} IS NULL`));
+            await tx.update(tiSandboxWorkspaces).set({ state: 'cleanup_pending', cancelRequestedAt: new Date(), cleanupRequestedAt: new Date(), nextCleanupAt: new Date(), updatedAt: new Date() }).where(and(eq(tiSandboxWorkspaces.runId, run.id), sql`${tiSandboxWorkspaces.state} <> 'deleted'`));
+          }
+        }
         const nextStatus = input.disposition === 'retry' ? 'todo' : 'in_review';
         const [updated] = await tx.update(tasks).set({ status: nextStatus, version: sql`${tasks.version} + 1`, updatedAt: sql`clock_timestamp()` }).where(eq(tasks.id, task.id)).returning();
         const reason = safeText(input.reason, 2000);
