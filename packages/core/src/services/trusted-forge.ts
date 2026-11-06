@@ -166,16 +166,25 @@ export async function verifyTrustedGitAncestry(repository: ForgeRepositoryIdenti
   throw new ValidationError('The proposed commit ancestry could not be verified');
 }
 
+/** Pin a branch head using only the server-configured forge connection. */
+export async function readTrustedBranchHead(repository: ForgeRepositoryIdentity, branchName: string, options: ForgeReadOptions = {}) {
+  const provider = repository.provider === 'github' || repository.host === 'github.com' ? 'github' : repository.provider;
+  if (provider !== 'github' && provider !== 'gitea') throw new ValidationError('Branch verification supports GitHub and Gitea repositories');
+  if (!branchName || branchName.length > 255) throw new ValidationError('Invalid configured branch');
+  const result = await trustedForgeRequest(repository, provider, `branches/${encodeURIComponent(branchName)}`, options);
+  const branch = z.object({ name: z.string(), commit: z.object({ sha: fullObjectId }) }).safeParse(result.data);
+  if (!branch.success || branch.data.name !== branchName) throw new ValidationError('Trusted forge returned incomplete target branch evidence');
+  return { provider, branch: branchName, commit: branch.data.commit.sha.toLowerCase(), source: result.source, observedAt: new Date() };
+}
+
 /** Verify a direct integration against the server-observed target branch. */
 export async function readTrustedDirectMerge(repository: ForgeRepositoryIdentity, baseBranch: string, commit: string, options: ForgeReadOptions = {}) {
   const provider = repository.provider === "github" || repository.host === "github.com" ? "github" : repository.provider;
   if (provider !== "github" && provider !== "gitea") throw new ValidationError("Direct integration verification supports GitHub and Gitea repositories");
   const deliveredCommit = sha.parse(commit).toLowerCase();
-  const branchResult = await trustedForgeRequest(repository, provider, `branches/${encodeURIComponent(baseBranch)}`, options);
-  const branch = z.object({ name: z.string(), commit: z.object({ sha }) }).safeParse(branchResult.data);
-  if (!branch.success || branch.data.name !== baseBranch) throw new ValidationError("Trusted forge returned incomplete target branch evidence");
-  const targetCommit = branch.data.commit.sha.toLowerCase();
-  let source = branchResult.source;
+  const branch = await readTrustedBranchHead(repository, baseBranch, options);
+  const targetCommit = branch.commit;
+  let source = branch.source;
   if (targetCommit !== deliveredCommit && provider === "github") {
     const comparison = await trustedForgeRequest(repository, provider, `compare/${deliveredCommit}...${targetCommit}`, options);
     const row = z.object({ status: z.enum(["ahead", "behind", "diverged", "identical"]), base_commit: z.object({ sha }), merge_base_commit: z.object({ sha }) }).safeParse(comparison.data);
