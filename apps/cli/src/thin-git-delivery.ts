@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { isAbsolute, join } from 'node:path'
 import { runCommand } from './async-command.js'
 import { buildAiEnvironment } from './repository-credentials.js'
 
@@ -112,4 +115,31 @@ export async function pushThinDelivery(options: {
   } catch { /* The remote may already have accepted the update. */ }
   await options.markUncertain()
   return { state: 'uncertain' as const }
+}
+
+/** Copy the proposed object into a worker-owned bare repository with no executor-controlled Git config. */
+export async function prepareThinPushSandbox(options: {
+  source: string
+  commit: string
+  assertAuthority: () => Promise<void>
+  signal?: AbortSignal
+}) {
+  if (!commitId.test(options.commit) || !isAbsolute(options.source)) throw new Error('Invalid proposed commit or workspace')
+  const root = await mkdtemp(join(tmpdir(), 'tw-thin-push-'))
+  const env = buildAiEnvironment(process.env)
+  const run = (args: string[]) => runCommand('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd: root, env, signal: options.signal })
+  try {
+    await options.assertAuthority()
+    const init = await run(['-c', 'init.templateDir=/dev/null', 'init', '--bare', '.'])
+    if (!init.ok) throw new Error('Unable to initialize isolated push repository')
+    const copy = await run(['fetch', '--no-tags', '--no-write-fetch-head', '--no-recurse-submodules', '--', options.source, options.commit])
+    if (!copy.ok) throw new Error('Unable to copy the proposed commit into the push repository')
+    const verify = await run(['cat-file', '-e', `${options.commit}^{commit}`])
+    if (!verify.ok) throw new Error('Proposed commit is unavailable in the push repository')
+    await options.assertAuthority()
+    return { gitDir: root, cleanup: () => rm(root, { recursive: true, force: true }) }
+  } catch (error) {
+    await rm(root, { recursive: true, force: true })
+    throw error
+  }
 }
