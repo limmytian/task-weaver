@@ -57,6 +57,10 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
       try { const verified = await attachmentStorage().getVerifiedObject(file.objectKey, { sha256: file.sha256, sizeBytes: file.sizeBytes }); verified.body.destroy(); }
       catch { throw new ConflictError('Acceptance dependency evidence cannot be verified', revision); }
       const deliveries = output.workerAttemptId ? await tx.select({ repositoryId: thinGitDeliveries.repositoryId, commit: thinGitDeliveries.proposedHead }).from(thinGitDeliveries).where(and(eq(thinGitDeliveries.attemptId, output.workerAttemptId), eq(thinGitDeliveries.state, 'confirmed'))) : [];
+      for (const delivery of deliveries) {
+        const [repository] = await tx.select({ id: repositories.id }).from(repositories).where(and(eq(repositories.id, delivery.repositoryId), repositoryPredicate(authority))).for('share');
+        if (!repository) throw new NotFoundError('Resource not found');
+      }
       inputs.push({ taskId: blocker.id, outputId: output.id, documentId: document.id, fileVersion: file.version, sha256: file.sha256, sizeBytes: file.sizeBytes, mimeType: file.mimeType, originalFilename: file.originalFilename, kind: output.workerAttemptId ? 'worker' : 'human', attemptId: output.workerAttemptId ?? null, gitDeliveries: deliveries });
     }
     return inputs;
