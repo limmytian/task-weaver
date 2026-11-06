@@ -211,6 +211,8 @@ test('once worker runs a bounded deterministic executor and parks empty results'
     await db.update(tasks).set({ status: 'done' }).where(eq(tasks.id, gitAcceptance!.id));
     const [unfinished] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: gitReq!.id, title: 'Unfinished requirement work', createdBy: f.owner.context.actor.id }).returning();
     assert.equal((await readIntegration()).status, 409, 'integration must wait for all requirement tasks');
+    await db.update(tasks).set({ status: 'done' }).where(eq(tasks.id, unfinished!.id));
+    assert.equal((await readIntegration()).status, 409, 'acceptance must cover completed work even without a declared edge');
     await db.update(tasks).set({ status: 'cancelled' }).where(eq(tasks.id, unfinished!.id));
     assert.equal((await readIntegration()).status, 200);
     const integrationService = createThinWorkerService(await f.auth.resolve(new Headers({ authorization: `Bearer ${key.rawKey}` })));
