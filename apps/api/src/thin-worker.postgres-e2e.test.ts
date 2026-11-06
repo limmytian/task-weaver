@@ -131,9 +131,11 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   await assert.rejects(worker.prepareGitDelivery(db, { ...prepare, proposedHead: 'c'.repeat(40) }));
   await assert.rejects(worker.prepareGitDelivery(db, { ...prepare, operationKey: randomUUID() }));
   const transition = { attemptId: prepare.attemptId, workerId: prepare.workerId, token: prepare.token, deliveryId: prepared.id };
-  assert.equal((await worker.transitionGitDelivery(db, { ...transition, event: 'start_push' })).state, 'pushing');
-  assert.equal((await worker.transitionGitDelivery(db, { ...transition, event: 'start_push' })).state, 'pushing');
-  assert.equal((await worker.transitionGitDelivery(db, { ...transition, event: 'response_lost' })).state, 'uncertain');
+  const started = await worker.transitionGitDelivery(db, { ...transition, event: 'start_push' });
+  assert.equal(started.delivery.state, 'pushing'); assert.equal(started.shouldPush, true);
+  const replayedStart = await worker.transitionGitDelivery(db, { ...transition, event: 'start_push' });
+  assert.equal(replayedStart.delivery.state, 'pushing'); assert.equal(replayedStart.shouldPush, false);
+  assert.equal((await worker.transitionGitDelivery(db, { ...transition, event: 'response_lost' })).delivery.state, 'uncertain');
   await assert.rejects(worker.transitionGitDelivery(db, { ...transition, event: 'start_push' }));
   await assert.rejects(worker.result(db, { attemptId: transition.attemptId, workerId: transition.workerId, token: transition.token, resultKey: randomUUID(), outcome: 'done', summary: 'Premature', outputId: randomUUID() }), /Git delivery must be resolved/);
   assert.equal('tokenHash' in winner.attempt!, false);
