@@ -217,7 +217,7 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   assert.equal((await worker.acquire(db, input(randomUUID()))).attempt, null);
   await assert.rejects(worker.result(db, { attemptId: winner.attempt!.id, token: winner.token!, workerId: winner.attempt!.workerId, resultKey: randomUUID(), outcome: 'attention', summary: 'Expired' }));
   const siblings = await db.insert(tasks).values(['Sibling A', 'Sibling B'].map(title => ({ projectId: f.project.id, requirementId: req!.id, title, createdBy: f.owner.context.actor.id }))).returning();
-  const [acceptance] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Acceptance', createdBy: f.owner.context.actor.id }).returning();
+  const [acceptance] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Acceptance', tags: ['worker:acceptance'], createdBy: f.owner.context.actor.id }).returning();
   await db.insert(taskDependencies).values(siblings.map(sibling => ({ taskId: acceptance!.id, dependsOnTaskId: sibling.id, type: 'blocks' as const })));
   const parallel = await Promise.all([randomUUID(), randomUUID()].map(id => worker.acquire(db, input(id))));
   assert.deepEqual(new Set(parallel.map(row => row.task?.id)), new Set(siblings.map(row => row.id)));
@@ -246,8 +246,15 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   const other = parallel[1]!;
   const otherOutput = await worker.registerOutput(db, { attemptId: other.attempt!.id, token: other.token!, workerId: other.attempt!.workerId, documentId: document.id, summary: 'Second fixture output' });
   await worker.result(db, { attemptId: other.attempt!.id, token: other.token!, workerId: other.attempt!.workerId, resultKey: randomUUID(), outcome: 'done', summary: 'Second fixture result', outputId: otherOutput.id });
+  await db.insert(thinGitDeliveries).values({ ...delivery, attemptId: run.attempt!.id, operationKey: randomUUID(), state: 'confirmed' });
   const accepted = await worker.acquire(db, input(randomUUID()));
   assert.equal(accepted.task!.id, acceptance!.id);
+  const acceptedFence = { attemptId: accepted.attempt!.id, workerId: accepted.attempt!.workerId, token: accepted.token! };
+  const acceptanceEvidence = await worker.inputs(db, acceptedFence);
+  assert.ok(acceptanceEvidence.inputs.some(item => item.attemptId === run.attempt!.id && item.gitDeliveries.some(git => git.repositoryId === gitRepository!.id)));
+  await db.update(repositories).set({ visibility: 'private', ownerId: f.outsider.context.actor.id, ownerType: 'human' }).where(eq(repositories.id, gitRepository!.id));
+  await assert.rejects(worker.inputs(db, acceptedFence), /Resource not found/);
+  await db.update(repositories).set({ visibility: 'instance', ownerId: null, ownerType: null }).where(eq(repositories.id, gitRepository!.id));
   const stale = accepted;
   const httpHeaders = new Headers({ authorization: `Bearer ${workerKey.rawKey}`, 'content-type': 'application/json' });
   const heartbeatRequest = { attemptId: stale.attempt!.id, workerId: stale.attempt!.workerId, token: stale.token!, durationSeconds: 120 };
