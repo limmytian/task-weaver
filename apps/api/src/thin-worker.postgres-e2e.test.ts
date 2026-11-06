@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
-import { apiKeys, createDb, runMigrations, requirements, requirementClaims, tasks, taskClaims, taskDependencies, workerAttempts, workflowOutputs } from '@task-weaver/db';
+import { apiKeys, createDb, executionControls, runMigrations, requirements, requirementClaims, tasks, taskClaims, taskDependencies, workerAttempts, workflowOutputs } from '@task-weaver/db';
 import { createResourceServices, createThinWorkerService } from '@task-weaver/core';
 import { emit } from '@task-weaver/realtime';
 import { resourcePostgresFixture } from './resource-postgres-fixture';
@@ -34,6 +34,9 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   const workerContext = await context(workerKey.rawKey);
   const worker = createThinWorkerService(workerContext);
   const [legacyReq] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Mode race', status: 'approved', createdBy: f.owner.context.actor.id }).returning();
+  const [parkedReq] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Parked historical plan', status: 'draft', createdBy: f.owner.context.actor.id }).returning();
+  await db.insert(tasks).values({ projectId: f.project.id, requirementId: parkedReq!.id, title: 'Preserved historical task', createdBy: f.owner.context.actor.id });
+  await db.insert(executionControls).values({ projectId: f.project.id, requirementId: parkedReq!.id, daemonId: randomUUID(), runId: randomUUID(), revision: 1, reason: 'Preserved blocked historical execution', phase: 'blocked', deadline: new Date() });
   const [legacyTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: legacyReq!.id, title: 'Legacy claim', createdBy: f.owner.context.actor.id }).returning();
   const raced = await Promise.allSettled([
     owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Fixture queue inspected' }),
@@ -89,6 +92,12 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   const workerIds = [randomUUID(), randomUUID()];
   const input = (workerId: string) => ({ projectId: f.project.id, workerId, nodeId: 'fixture-node', executor: 'codex' as const, model: 'gpt-6.1-terra', durationSeconds: 120 });
   assert.equal((await worker.acquire(db, { ...input(randomUUID()), requirementId: randomUUID() })).attempt, null, 'requirement scope must not consume another queue');
+  await db.update(requirements).set({ status: 'approved' }).where(eq(requirements.id, parkedReq!.id));
+  assert.equal((await worker.acquire(db, { ...input(randomUUID()), requirementId: parkedReq!.id })).attempt, null, 'a blocked historical execution must never be acquired');
+  await db.update(executionControls).set({ phase: 'manual' }).where(eq(executionControls.requirementId, parkedReq!.id));
+  assert.equal((await worker.acquire(db, { ...input(randomUUID()), requirementId: parkedReq!.id })).attempt, null, 'manual review must not be taken over automatically');
+  await db.update(executionControls).set({ phase: 'blocked' }).where(eq(executionControls.requirementId, parkedReq!.id));
+  await db.update(requirements).set({ status: 'draft' }).where(eq(requirements.id, parkedReq!.id));
   const streamController = new AbortController();
   const stream = await f.app.request(`/api/v1/thin-workers/events?projectId=${f.project.id}`, { headers: new Headers({ authorization: `Bearer ${workerKey.rawKey}` }), signal: streamController.signal });
   assert.equal(stream.status, 200);

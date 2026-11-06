@@ -110,7 +110,7 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
           EXISTS (SELECT 1 FROM ${requirementClaims} rc JOIN ${requirements} r ON r.id = rc.requirement_id WHERE r.project_id = ${input.projectId}) OR
           EXISTS (SELECT 1 FROM ${taskClaims} tc JOIN ${tasks} t ON t.id = tc.task_id WHERE t.project_id = ${input.projectId}) OR
           EXISTS (SELECT 1 FROM ${tasks} t WHERE t.project_id = ${input.projectId} AND t.status = 'in_progress') OR
-          EXISTS (SELECT 1 FROM ${executionControls} ec WHERE ec.project_id = ${input.projectId} AND ec.phase NOT IN ('resumed', 'manual')) OR
+          EXISTS (SELECT 1 FROM ${executionControls} ec JOIN ${requirements} r ON r.id = ec.requirement_id WHERE ec.project_id = ${input.projectId} AND ec.phase NOT IN ('resumed', 'manual') AND NOT (ec.phase = 'blocked' AND r.status = 'draft')) OR
           EXISTS (SELECT 1 FROM ${workerAttempts} wa WHERE wa.project_id = ${input.projectId} AND wa.status IN ('running', 'attention'))`) as unknown as Array<{ busy: number }>;
         if (busy) throw new ValidationError('Drain claims and resolve interrupted or uncertain work before changing worker mode');
         await tx.update(projects).set({ workerMode: input.mode }).where(eq(projects.id, input.projectId));
@@ -134,6 +134,7 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
             AND (t.assignee IS NULL OR (t.assignee_type = 'agent' AND t.assignee = ${authority.actor.id}))
             AND r.project_id = ${input.projectId} AND r.status IN ('approved', 'in_progress')
             AND (${input.requirementId ?? null}::uuid IS NULL OR r.id = ${input.requirementId ?? null}::uuid)
+            AND NOT EXISTS (SELECT 1 FROM execution_controls ec WHERE ec.id = (SELECT latest.id FROM execution_controls latest WHERE latest.requirement_id = r.id ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) AND ec.phase <> 'resumed')
             AND t.execution_slice_id IS NULL
             AND NOT EXISTS (SELECT 1 FROM execution_slices es WHERE es.requirement_id = r.id AND es.status NOT IN ('done', 'cancelled'))
             AND (t.requested_provider IS NULL OR t.requested_provider = 'codex')
@@ -158,6 +159,7 @@ export function createThinWorkerService(context: VerifiedRequestContext) {
           EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks b ON b.id = d.depends_on_task_id WHERE d.task_id = ${candidate.task_id} AND d.type = 'blocks' AND b.status <> 'done') OR
           EXISTS (SELECT 1 FROM requirement_dependencies d JOIN requirements b ON b.id = d.depends_on_requirement_id WHERE d.requirement_id = ${candidate.requirement_id} AND d.type = 'blocks' AND b.status NOT IN ('done', 'cancelled')) OR
           EXISTS (SELECT 1 FROM execution_slices es WHERE es.requirement_id = ${candidate.requirement_id} AND es.status NOT IN ('done', 'cancelled')) OR
+          EXISTS (SELECT 1 FROM execution_controls ec WHERE ec.id = (SELECT latest.id FROM execution_controls latest WHERE latest.requirement_id = ${candidate.requirement_id} ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) AND ec.phase <> 'resumed') OR
           EXISTS (SELECT 1 FROM requirement_claims rc WHERE rc.requirement_id = ${candidate.requirement_id}) OR
           EXISTS (SELECT 1 FROM task_claims tc WHERE tc.task_id = ${candidate.task_id}) OR
           EXISTS (SELECT 1 FROM worker_attempts wa WHERE wa.task_id = ${candidate.task_id} AND wa.status IN ('running', 'attention'))`) as unknown as Array<{ changed: number }>;
