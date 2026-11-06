@@ -200,7 +200,7 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     const provider = "real-model-acceptance", model = process.env.TW_TI_REAL_MODEL_NAME!;
     await db.update(tiAgentModelConfigs).set({ isDefaultAgent: false }).where(eq(tiAgentModelConfigs.ownerId, owner.actor.id));
     await db.insert(tiAgentModelConfigs).values({ ownerId: owner.actor.id, ownerType: "human", provider, model,
-      baseUrl: process.env.TW_TI_REAL_MODEL_URL, proxyMode: "direct", encryptedApiKey: process.env.TW_TI_REAL_MODEL_KEY
+      baseUrl: process.env.TW_TI_REAL_MODEL_URL, proxyMode: process.env.TW_TI_REAL_MODEL_PROXY ? "custom" : "direct", proxyUrl: process.env.TW_TI_REAL_MODEL_PROXY ?? null, encryptedApiKey: process.env.TW_TI_REAL_MODEL_KEY
         ? encryptChatKey(process.env.TW_TI_REAL_MODEL_KEY, chatKeyBinding({ ownerId: owner.actor.id, provider, model })) : null,
       enabled: true, isDefaultAgent: true, credentialStatus: "valid" });
     await db.update(tiAgentPolicies).set({ executionMode: "live", allowNetwork: true, runTimeoutSeconds: 150,

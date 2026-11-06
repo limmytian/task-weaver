@@ -107,7 +107,7 @@ try {
       ],
       {
         encoding: "utf8",
-        timeout: 180_000,
+        timeout: testFile === "scripts/ti-execution.postgres-e2e.test.ts" && process.env.TW_TI_REAL_MODEL_URL ? 420_000 : 180_000,
         maxBuffer: 4 * 1024 * 1024,
         env: {
           ...process.env,
