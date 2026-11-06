@@ -46,6 +46,16 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   }
   await db.update(tasks).set({ status: 'cancelled' }).where(eq(tasks.id, legacyTask!.id));
   await owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Fixture queue inspected' });
+  const [rollbackTask] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: legacyReq!.id, title: 'Rollback fixture', createdBy: f.owner.context.actor.id }).returning();
+  const legacyClaims = createResourceServices(workerContext).claimService;
+  await assert.rejects(legacyClaims.claimTask(db, rollbackTask!.id, { id: agent.id, type: 'agent' }, 2));
+  await owner.setMode(db, { projectId: f.project.id, mode: 'legacy', inspection: 'No active thin attempts; fixture inspected' });
+  await assert.rejects(worker.acquire(db, { projectId: f.project.id, workerId: randomUUID(), nodeId: 'rollback-fixture', executor: 'codex', model: 'gpt-6.1-terra', durationSeconds: 120 }));
+  await legacyClaims.claimTask(db, rollbackTask!.id, { id: agent.id, type: 'agent' }, 2);
+  await assert.rejects(owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Legacy claim still active' }));
+  await legacyClaims.releaseTask(db, rollbackTask!.id, { id: agent.id, type: 'agent' });
+  await db.update(tasks).set({ status: 'cancelled' }).where(eq(tasks.id, rollbackTask!.id));
+  await owner.setMode(db, { projectId: f.project.id, mode: 'thin', inspection: 'Legacy fixture drained and inspected' });
   const presenceId = randomUUID();
   const presence = { projectId: f.project.id, workerId: presenceId, nodeId: 'presence-fixture' };
   await worker.presence(db, presence);
