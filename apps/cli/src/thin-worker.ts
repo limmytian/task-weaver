@@ -104,6 +104,7 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
     }
     try {
       await options.onPhase?.('preparing')
+      if (task.tags?.includes('worker:integration')) return finish('Version branch integration is not yet available in this worker')
       await heartbeat()
       const requirement = await request<{ id: string; title: string; description: string | null }>('GET', `/api/v1/requirements/${attempt.requirementId}`, undefined, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })
       const rawEntries = await request<unknown[]>('GET', `/api/v1/requirements/${attempt.requirementId}/repositories`, undefined, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })
