@@ -135,6 +135,7 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   assert.equal((await worker.transitionGitDelivery(db, { ...transition, event: 'start_push' })).state, 'pushing');
   assert.equal((await worker.transitionGitDelivery(db, { ...transition, event: 'response_lost' })).state, 'uncertain');
   await assert.rejects(worker.transitionGitDelivery(db, { ...transition, event: 'start_push' }));
+  await assert.rejects(worker.result(db, { attemptId: transition.attemptId, workerId: transition.workerId, token: transition.token, resultKey: randomUUID(), outcome: 'done', summary: 'Premature', outputId: randomUUID() }), /Git delivery must be resolved/);
   assert.equal('tokenHash' in winner.attempt!, false);
   const listing = await f.app.request(`/api/v1/thin-workers/attempts?projectId=${f.project.id}`, { headers: new Headers({ authorization: `Bearer ${workerKey.rawKey}` }) });
   assert.equal(listing.status, 200, await listing.clone().text());
@@ -151,6 +152,8 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   await worker.heartbeat(db, { attemptId: winner.attempt!.id, token: winner.token!, workerId: winner.attempt!.workerId });
   await db.update(workerAttempts).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(workerAttempts.id, winner.attempt!.id));
   await assert.rejects(worker.heartbeat(db, { attemptId: winner.attempt!.id, token: winner.token!, workerId: winner.attempt!.workerId }));
+  await assert.rejects(worker.transitionGitDelivery(db, { ...transition, event: 'response_lost' }));
+  await assert.rejects(owner.resolve(db, { attemptId: winner.attempt!.id, disposition: 'retry', retrySafe: true, reason: 'Inspect unresolved push first' }), /Resolve the Git delivery/);
   assert.equal((await worker.acquire(db, input(randomUUID()))).attempt, null);
   const [blocked] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Blocked', createdBy: f.owner.context.actor.id }).returning();
   await db.insert(taskDependencies).values({ taskId: blocked!.id, dependsOnTaskId: first!.id, type: 'blocks' });
@@ -199,6 +202,7 @@ test('thin attempts serialize acquisition, retain expired work and respect live 
   assert.equal(conflict.status, 409);
   assert.equal((await conflict.json() as any).currentVersion, stale.attempt!.planRevision + 1);
   await assert.rejects(owner.resolve(db, { attemptId: winner.attempt!.id, disposition: 'retry', reason: 'External effects checked' }));
+  await db.update(thinGitDeliveries).set({ state: 'confirmed' }).where(eq(thinGitDeliveries.id, prepared.id));
   await owner.resolve(db, { attemptId: winner.attempt!.id, disposition: 'retry', retrySafe: true, reason: 'External effects checked' });
   const replacement = await worker.acquire(db, input(randomUUID()));
   assert.equal(replacement.task!.id, first!.id);
