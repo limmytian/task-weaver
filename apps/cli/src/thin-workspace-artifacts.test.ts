@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -46,4 +46,7 @@ test('artifact upload binds the verified attempt and refuses a lost lease', asyn
   await assert.rejects(publishThinArtifact({ ...options, assertAuthority: async () => { if (++checks === 2) throw new Error('Lease expired') } }), /Lease expired/)
   assert.equal(uploads, 2)
   assert.equal(bindings, 1)
+  await truncate(path, 50 * 1024 * 1024 + 1)
+  await assert.rejects(publishThinArtifact(options), /too large/)
+  assert.equal(uploads, 2)
 })

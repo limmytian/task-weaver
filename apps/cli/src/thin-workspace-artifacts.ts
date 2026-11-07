@@ -95,15 +95,22 @@ export async function publishThinArtifact(options: {
 }) {
   const { constants } = await import('node:fs')
   const { open } = await import('node:fs/promises')
-  const { Readable } = await import('node:stream')
   await options.assertAuthority()
   const file = await open(options.path, constants.O_RDONLY | constants.O_NOFOLLOW)
   let uploaded: Response
   try {
     const info = await file.stat()
     if (!info.isFile() || info.size > 50 * 1024 * 1024) throw new Error('Task artifact is unavailable or too large')
+    const body = Buffer.alloc(info.size)
+    let offset = 0
+    while (offset < body.length) {
+      const { bytesRead } = await file.read(body, offset, body.length - offset, offset)
+      if (!bytesRead) throw new Error('Task artifact changed while reading')
+      offset += bytesRead
+    }
+    if ((await file.stat()).size !== info.size) throw new Error('Task artifact changed while reading')
     const headers = new Headers({ authorization: `Bearer ${options.apiKey}`, 'content-type': 'application/octet-stream', 'content-length': String(info.size), 'x-tw-attachment-metadata': encodeURIComponent(JSON.stringify({ projectId: options.projectId, title: `Task attempt ${options.attemptId}`, originalFilename: 'task-delivery.json', mimeType: 'application/json' })) })
-    uploaded = await fetch(`${options.apiUrl}/api/v1/documents/attachments`, { method: 'POST', headers, body: Readable.toWeb(file.createReadStream({ autoClose: false })), duplex: 'half', redirect: 'error', signal: options.signal } as RequestInit)
+    uploaded = await fetch(`${options.apiUrl}/api/v1/documents/attachments`, { method: 'POST', headers, body, redirect: 'error', signal: options.signal })
   } finally { await file.close() }
   if (!uploaded.ok) throw new Error(`Task artifact upload failed (${uploaded.status})`)
   const document = await uploaded.json() as { id?: string }

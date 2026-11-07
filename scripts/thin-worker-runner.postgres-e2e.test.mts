@@ -152,10 +152,9 @@ test('once worker runs a bounded deterministic executor and parks empty results'
   }) as typeof fetch;
   try {
     const gitExecutor: ThinExecutor = { ...executor, async execute(input) { const manifest = JSON.parse(await (await import('node:fs/promises')).readFile(join(input.cwd, 'repository-manifest.json'), 'utf8')); await writeFile(join(input.cwd, manifest.repositories[0].relativePath, input.prompt.includes('Git task B') ? 'worker-b.txt' : 'worker.txt'), 'delivered\n'); await writeFile(join(input.cwd, 'result.md'), 'Git delivery verified\n'); return { ok: true, reason: 'Fixture Git work', quotaBlocked: false }; } };
-    const errors: string[] = [];
-    const gitRuns = await Promise.all(['git-fixture-a', 'git-fixture-b'].map(nodeId => runThinOnce({ ...opts, requirementId: gitReq!.id, gitIdentity: { name: 'Fixture', email: 'fixture@example.test' }, executor: gitExecutor, config: { ...config, nodeId }, onError: error => { errors.push(error instanceof Error ? (error.stack ?? error.message) : String(error)) } })));
+    const gitRuns = await Promise.all(['git-fixture-a', 'git-fixture-b'].map(nodeId => runThinOnce({ ...opts, requirementId: gitReq!.id, gitIdentity: { name: 'Fixture', email: 'fixture@example.test' }, executor: gitExecutor, config: { ...config, nodeId } })));
     assert.deepEqual(new Set(gitRuns.map(run => run.taskId)), new Set([gitTask!.id, gitTaskB!.id]));
-    assert.ok(gitRuns.every(run => run.state === 'completed'), JSON.stringify({ gitRuns, errors }));
+    assert.ok(gitRuns.every(run => run.state === 'completed'), JSON.stringify(gitRuns));
     const tip = git(bare, 'rev-parse', 'refs/heads/main');
     for (const run of gitRuns) { const rows = await db.select().from(thinGitDeliveries).where(eq(thinGitDeliveries.attemptId, run.attemptId!)); const stored = rows.find(row => row.state === 'confirmed'); assert.ok(stored, JSON.stringify(rows.map(row => row.state))); git(bare, 'merge-base', '--is-ancestor', stored.proposedHead, tip); }
     assert.equal(git(bare, 'show', `${tip}:worker.txt`), 'delivered'); assert.equal(git(bare, 'show', `${tip}:worker-b.txt`), 'delivered');
