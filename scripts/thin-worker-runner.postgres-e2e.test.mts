@@ -23,9 +23,11 @@ const url = process.env.TW_EXECUTION_RECOVERY_E2E_DATABASE_URL ?? process.env.TW
 test('once worker runs a bounded deterministic executor and parks empty results', { skip: !url, timeout: 120000 }, async t => {
   const parsed = new URL(url!); assert.equal(parsed.hostname, '127.0.0.1'); assert.ok(['/tw_execution_recovery_e2e', '/tw_auth_e2e'].includes(parsed.pathname));
   await runMigrations(url!); const db = createDb(url!); t.after(() => db.$client.end());
-  const root = await mkdtemp(join(tmpdir(), 'tw-thin-runner-')), oldHome = process.env.HOME, oldStorage = process.env.TW_ATTACHMENT_STORAGE_DIR, oldConfig = process.env.TW_CONFIG_DIR;
+  const root = await mkdtemp(join(tmpdir(), 'tw-thin-runner-')), oldHome = process.env.HOME, oldStorage = process.env.TW_ATTACHMENT_STORAGE_DIR, oldConfig = process.env.TW_CONFIG_DIR, oldGitGlobal = process.env.GIT_CONFIG_GLOBAL, oldGitSystem = process.env.GIT_CONFIG_SYSTEM;
   process.env.HOME = root; process.env.TW_CONFIG_DIR = join(root, 'cli'); process.env.TW_ATTACHMENT_STORAGE_DIR = join(root, 'storage');
-  t.after(async () => { for (const [key, value] of [['HOME', oldHome], ['TW_ATTACHMENT_STORAGE_DIR', oldStorage], ['TW_CONFIG_DIR', oldConfig]] as const) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } await rm(root, { recursive: true, force: true }); });
+  process.env.GIT_CONFIG_GLOBAL = join(root, 'gitconfig'); process.env.GIT_CONFIG_SYSTEM = '/dev/null';
+  await writeFile(process.env.GIT_CONFIG_GLOBAL, '[credential]\n\thelper = store --file /dev/null\n', { mode: 0o600 });
+  t.after(async () => { for (const [key, value] of [['HOME', oldHome], ['TW_ATTACHMENT_STORAGE_DIR', oldStorage], ['TW_CONFIG_DIR', oldConfig], ['GIT_CONFIG_GLOBAL', oldGitGlobal], ['GIT_CONFIG_SYSTEM', oldGitSystem]] as const) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } await rm(root, { recursive: true, force: true }); });
   const f = await resourcePostgresFixture(db, url!);
   const agent = await f.identity.createAgent(f.owner.headers, { displayName: 'Deterministic executor' });
   await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: 'maintainer', explicitPermissions: [] });
