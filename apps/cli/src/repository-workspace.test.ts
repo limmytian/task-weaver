@@ -184,11 +184,12 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
       allowPush = true
       occupied = 1
       const priorPrepareCount = calls.filter(path => path.endsWith('/prepare')).length
-      const outcome = await runThinOnce({ config: { ...options(0).config, apiUrl: `http://127.0.0.1:${address.port}`, apiKey: 'fixture' }, projectId, requirementId, model: 'fixture', effort: 'low', timeoutMs: 10000, gitIdentity: { name: 'Fixture', email: 'fixture@example.test' }, executor: {
+      const errors: string[] = []
+      const outcome = await runThinOnce({ config: { ...options(0).config, apiUrl: `http://127.0.0.1:${address.port}`, apiKey: 'fixture' }, projectId, requirementId, model: 'fixture', effort: 'low', timeoutMs: 10000, gitIdentity: { name: 'Fixture', email: 'fixture@example.test' }, onError: error => { errors.push(String(error)) }, executor: {
         async preflight() { return { blocked: false, reason: 'fixture', retryAt: null } },
         async execute(input) { const manifest = JSON.parse(await readFile(join(input.cwd, 'repository-manifest.json'), 'utf8')); await writeFile(join(input.cwd, manifest.repositories[0].relativePath, 'worker.txt'), 'worker delivery\n'); await writeFile(join(input.cwd, 'result.md'), 'Worker evidence\n'); return { ok: true, reason: 'fixture', quotaBlocked: false } },
       } })
-      assert.equal(outcome.state, 'completed')
+      assert.equal(outcome.state, 'completed', JSON.stringify({ outcome, errors }))
       assert.equal(calls.filter(path => path.endsWith('/prepare')).length - priorPrepareCount, 2, 'busy branch should be retried before push authorization')
       const workerTip = git(['rev-parse', 'refs/heads/main'], join(root, 'thin.git'))
       assert.notEqual(workerTip, delivered.commit)
