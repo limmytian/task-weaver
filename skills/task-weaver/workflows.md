@@ -96,7 +96,7 @@ tw req advance "$REQ_ID" --stage delivery --reason "Output reviewed" --revision 
 
 Local files are copied into `TW_ARTIFACT_ROOT` or `~/.task-weaver/artifacts` on the CLI node, hashed, and represented in Task Weaver by a relative path, node ID, size, and checksum. The bytes are not uploaded. Local-only outputs remain available only on their producing node. Declare downstream artifact dependencies with `tw req input add <consumer-requirement> <output-id>` and optionally `--task`. Scheduling enforces the producing node and verifies availability. Retire outputs explicitly with `tw req output retire`; retirement requires elapsed retention and completed consumers. Local deletion additionally requires `--delete-local`.
 
-`tw req advance` requires the current `workflowStateRevision` from `tw req get --json`; it also checks any active requirement claim. Check results can be supplied with `--checks-file` as a JSON array of `{ "name": "...", "status": "passed" }` entries. Acceptance required checks and human approval rules are enforced by the server.
+`tw req advance` requires the current `workflowStateRevision` from `tw req get --json`. Check results can be supplied with `--checks-file` as a JSON array of `{ "name": "...", "status": "passed" }` entries. Acceptance required checks and human approval rules are enforced by the server.
 
 For custom stage behavior, use a JSON definition with `delivery`, `acceptance`, and `integration` objects. See `requirementWorkflowSchema` in `packages/contracts/src/schemas/workflows.ts` for the complete validated shape. Automatic integration supports built-in Git methods and agent instructions for `custom`, `publish`, `attach`, or `archive`. These methods require nonempty instructions. Empty instructions with `none` perform no extra agent action.
 Set `worktreeMode` to `none` in a custom workflow when linked repositories are only context and no checkout is needed. `auto` creates a worktree only for Git delivery or integration; `isolated` explicitly requests one. Git actions require `auto` or `isolated`. Use `tw req workspace cleanup` after retention and dependent work complete; dirty worktrees are preserved.
@@ -490,85 +490,23 @@ Assess overall project health and identify risks proactively.
 Coordinate multiple AI agents (and humans) working on the same project without conflicts.
 
 
-### Core Protocol: Claim → Work → Release
+### Coordinating work
 
-Every agent must follow this cycle:
+Use task dependencies and Worker attempts to coordinate autonomous execution.
+A worker atomically acquires one eligible task, renews its lease, and submits
+its result. Interactive agents should coordinate with the owner, inspect the
+task and its dependencies, and record status and progress. Legacy task and
+requirement claim commands do not reserve new work in worker-only projects.
 
+```bash
+tw task list --project "$PROJECT_ID" --status todo --json
+tw worker presence --project "$PROJECT_ID"
+tw worker attempts --project "$PROJECT_ID"
 ```
-1. Scout    → tw task list + tw activity (see what's happening)
-2. Claim    → tw task claim <id>  (or batch via REST API)
-3. Start    → tw task status <id> in_progress
-4. Work     → periodic tw task claim <id> heartbeat for long tasks
-5. Complete → tw task status <id> done  (auto-releases claim)
-```
 
-### Step-by-Step
-
-1. **Check what's happening**
-   ```bash
-   tw task list --project $PROJECT_ID --status todo --json
-   tw activity --project $PROJECT_ID --limit 20 --json
-   # check active claims via REST
-   curl "$API_URL/api/v1/projects/$PROJECT_ID/claims" \
-     -H "Authorization: Bearer $API_KEY"
-   ```
-
-2. **Pick tasks**
-   - Choose tasks with status `todo` and no active claim
-   - Respect `blocks` dependencies — don't pick tasks whose blockers are incomplete
-
-3. **Claim tasks**
-   ```bash
-   tw task claim $TASK_ID --duration 30
-   tw task comment $TASK_ID "Claiming this task, starting now."
-   ```
-   For batch claiming (atomic, up to 20 tasks), use the REST API:
-   ```bash
-   curl -X POST "$API_URL/api/v1/tasks/batch-claim" \
-     -H "Authorization: Bearer $API_KEY" \
-     -d '{"taskIds": ["'$ID1'", "'$ID2'"]}'
-   ```
-
-4. **Work on the task**
-   ```bash
-   # extend lease for long tasks
-   tw task claim $TASK_ID --duration 30   # heartbeat
-
-   # use --expected-version on REST updates to prevent conflicts
-   curl -X PATCH "$API_URL/api/v1/tasks/$TASK_ID" \
-     -d '{"title": "...", "expectedVersion": 3}'
-   ```
-
-5. **Finish or hand off**
-   ```bash
-   # completing
-   tw task status $TASK_ID done --reason "Implementation complete"
-
-   # can't finish
-   tw task release $TASK_ID --reason "Blocked, needs design decision"
-   tw task comment $TASK_ID "Released: blocked by X. Next agent should..."
-   ```
-
-6. **Document your work**
-   ```bash
-   tw doc create --project $PROJECT_ID \
-     --title "Auth implementation notes" \
-     --content "# What was done\n..." --type other --json
-   # link to task via REST
-   curl -X POST "$API_URL/api/v1/documents/$DOC_ID/task-links" \
-     -H "Authorization: Bearer $API_KEY" \
-     -d '{"taskId": "'$TASK_ID'", "linkType": "output"}'
-   ```
-
-### Avoiding Common Conflicts
-
-| Scenario | Prevention | Recovery |
-|----------|-----------|----------|
-| Two agents edit same task | Use `expectedVersion` on REST updates | Re-read, merge changes, retry |
-| Two agents edit same document | Use `expectedVersion` on REST updates | Compare versions, merge manually |
-| Agent disappears mid-task | Claims auto-expire after lease | Another agent can claim after expiry |
-| Duplicate work | Check task list + activity before starting | One completes, other redirects |
-| Dependency deadlock | System blocks status if blockers incomplete | Use `--force` only if justified |
+Use `expectedVersion` for conflicting updates where supported. If an attempt
+expires or an external result is uncertain, inspect its effects before an
+explicit Worker resolution; expiration alone is not permission to retry.
 
 ### Communication via Comments
 

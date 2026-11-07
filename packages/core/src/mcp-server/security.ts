@@ -3,7 +3,7 @@ import { requireRepository } from "../services/repository-authorization";
 import { requireMcpServer, requireMcpToolTarget } from "../services/mcp-authorization";
 import { lockIdentityLifecycle } from "../services/auth-security";
 import { eq } from "drizzle-orm";
-import { type Database, projects, tasks, requirements, documents, executionSlices, skillPackages, memories, mcpTools } from "@task-weaver/db";
+import { type Database, projects, tasks, requirements, documents, skillPackages, memories, mcpTools } from "@task-weaver/db";
 import { AuthorizationError, mcpServerReadTools, type VerifiedRequestContext, type McpServerToolName } from "@task-weaver/contracts";
 import { resourceAuthority, requireResource, requireScope, personalResourceOwnerId, type ResourceKind, type ResourceScope } from "../services/resource-authorization";
 import { requireMcpApproval, recordMcpInvocationAudit, mcpPolicy, mcpScopeKey } from "../services/mcp-security";
@@ -54,9 +54,9 @@ async function target(db: Database, identity: VerifiedRequestContext, name: McpS
     const [record] = await db.select().from(skillPackages).where(eq(skillPackages.id, raw.packageId));
     revision = record;
   } else if (typeof raw.id === "string") {
-    const kind: ResourceKind = name.startsWith("tw_memories_") ? "memory" : name.startsWith("tw_projects_") ? "project" : name.startsWith("tw_requirements_") || name.startsWith("tw_requirement_") || name === "tw_document_requirement_links_add" || name === "tw_execution_slices_list" || name === "tw_execution_slices_create" ? "requirement" : name === "tw_execution_slices_update" ? "slice" : name === "tw_context_get" ? "skill" : name.startsWith("tw_documents_") || name.startsWith("tw_document_task") || name === "tw_document_history" || name === "tw_document_version" ? "document" : "task";
+    const kind: ResourceKind = name.startsWith("tw_memories_") ? "memory" : name.startsWith("tw_projects_") ? "project" : name.startsWith("tw_requirements_") || name.startsWith("tw_requirement_") || name === "tw_document_requirement_links_add" || name === "tw_execution_slices_list" ? "requirement" : name === "tw_context_get" ? "skill" : name.startsWith("tw_documents_") || name.startsWith("tw_document_task") || name === "tw_document_history" || name === "tw_document_version" ? "document" : "task";
     scope = await requireResource(db, authority, kind, raw.id, permission);
-    const table = kind === "memory" ? memories : kind === "project" ? projects : kind === "requirement" ? requirements : kind === "slice" ? executionSlices : (kind === "document" || kind === "skill") ? documents : tasks;
+    const table = kind === "memory" ? memories : kind === "project" ? projects : kind === "requirement" ? requirements : (kind === "document" || kind === "skill") ? documents : tasks;
     const [record] = await db.select().from(table).where(eq(table.id, raw.id));
     revision = record;
   } else if (typeof projectId === "string") {

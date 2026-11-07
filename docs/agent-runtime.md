@@ -3,7 +3,7 @@
 [简体中文](agent-runtime.zh-CN.md).
 
 Ti is Task Weaver's server-side agent for explicitly assigned tasks and scheduled
-work. It is separate from the local `tw daemon` requirement-lane executor. The
+work. It shares task-attempt scheduling with the local `tw worker`. The
 server-side runtime uses a bounded model/tool loop in Task Weaver and a configured
 Partners Streamable HTTP MCP backend for sandbox operations. Configuring a
 registered general-purpose MCP server alone does not configure this backend.

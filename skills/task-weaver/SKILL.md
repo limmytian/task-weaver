@@ -48,12 +48,12 @@ The CLI wraps the REST API. Both share the same data and authentication.
 
 ## Operating Modes
 
-Identify whether you are in an interactive session or a task worker. **Identify which one you are in before touching tasks**, because the claiming protocol differs.
+Identify whether you are in an interactive session or a task worker before touching tasks.
 
-| Mode | How you got here | Claiming protocol |
+| Mode | How you got here | Coordination |
 |------|------------------|-------------------|
-| **Interactive / collaborative** | A human (or another agent) is directing you; you pick what to work on | **You** claim → work → release (see [Task Locking](#task-locking-claiming)) |
-| **Task worker / executor** | A thin worker launched you for one task in an isolated workspace | The worker owns the task attempt and lease; do not claim, report, commit, or push independently |
+| **Interactive / collaborative** | A human (or another agent) is directing you; you pick what to work on | Coordinate with the owner, inspect status and dependencies, and record progress |
+| **Task worker / executor** | A worker launched you for one task in an isolated workspace | The worker owns the task attempt and lease; do not claim, report, commit, or push independently |
 
 **Task worker mode:** Follow the worker-provided prompt and work only in its isolated workspace. Leave changes and `result.md` for the worker; the worker renews the task lease, performs configured Git delivery, and publishes the outcome. Coordinator and acceptance tasks are ordinary tasks with additional output instructions.
 
@@ -137,13 +137,13 @@ Tasks can be project-scoped or personal-scoped. Project tasks belong to a projec
 | `expectedAt` | date | no | Nullable |
 | `completedAt` | timestamp | auto | Set on `done`, cleared on leave `done` |
 
-Sub-entities: **Comments** (taskId + content), **Notes** (taskId + content + pinned), **Dependencies** (taskId + dependsOnTaskId + type: `blocks` \| `related`), **Task Claims** (taskId + claimedBy + expiresAt — one active claim per task).
+Sub-entities: **Comments** (taskId + content), **Notes** (taskId + content + pinned), **Dependencies** (taskId + dependsOnTaskId + type: `blocks` \| `related`).
 
 **Concurrency**: Tasks have a `version` field (auto-incremented on every update). Pass `expectedVersion` when updating to enable optimistic concurrency control — returns 409 Conflict on mismatch.
 
-### Requirement Claims
+### Worker attempts
 
-Requirement claims support explicit human coordination. Task workers acquire individual tasks using fenced attempt leases.
+Workers acquire individual tasks using fenced attempt leases. Historical task and requirement claims are retained for audit and do not schedule new work.
 
 ### Requirement Dependencies
 
@@ -162,7 +162,7 @@ Rules:
 - Dependencies must stay inside one project.
 - Self-dependencies and cycles are rejected.
 - A `blocks` dependency is unblocked when the upstream requirement is `done` or `cancelled`.
-- Task acquisition and direct requirement claims respect blocking dependencies.
+- Task acquisition respects blocking dependencies.
 
 ### Repository Catalog and Workspaces
 
@@ -418,9 +418,8 @@ tw doc link-task $DOC_ID $TASK_ID --type references
 tw doc link-req $DOC_ID $REQ_ID --type documents
 tw doc versions $DOC_ID
 
-# Inspect requirement claims
-tw req claims --project $PROJECT_ID --json
-tw req claim-status $REQ_ID --json
+# Inspect worker attempts
+tw worker attempts --project $PROJECT_ID
 
 # Search
 tw search "authentication" --project $PROJECT_ID
@@ -509,17 +508,14 @@ Determine what you need to do, then follow the appropriate workflow:
 
 For detailed step-by-step workflow guides, see [workflows.md](workflows.md).
 
-## Task Locking (Claiming)
+## Task coordination
 
-
-In **interactive/collaborative** mode, before starting work on any task you **MUST** lock (claim) it to prevent race conditions or duplicate execution by other agents:
-```bash
-tw task claim <task-id> --duration <minutes>
-```
-Choose an appropriate duration (e.g. `30` minutes) based on the task's complexity. If you need more time during execution, run the command again with a new duration to extend your lock. Once done, set the task status to `done` or `in_review` and release the lock:
-```bash
-tw task release <task-id>
-```
+Task workers acquire tasks atomically and renew their own leases. Follow the
+worker prompt and leave the outcome for the supervisor. Interactive agents
+coordinate with the owner, check task status and dependencies, and record
+progress; legacy claim commands do not reserve work in worker-only projects.
+Use `expectedVersion` on updates where available. An expired or uncertain
+worker attempt needs human inspection before an explicit retry.
 
 ## Discovering & Calling External MCP Tools
 
@@ -573,7 +569,7 @@ Use this when a task needs a capability the core `tw` commands don't cover (e.g.
 5. **Use verified identities** — check the stable credential subject with `tw auth whoami`
 6. **Read before write** — query current state before making changes
 7. **Verify after batch operations** — use `tw activity` to confirm changes
-8. **Claim before working** — in interactive/multi-agent mode, always `tw task claim` before starting work. **Exception:** a task worker owns the lease; follow its prompt (see [Operating Modes](#operating-modes))
+8. **Coordinate before working** — inspect status and dependencies; task workers own their leases (see [Operating Modes](#operating-modes))
 9. **Use `--json`** — pipe CLI output to parse task IDs and other fields programmatically
 10. **Keep repository credentials local** — store only non-secret endpoints and profile references in Task Weaver; never put tokens in URLs, prompts, comments, or documents
 
