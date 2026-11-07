@@ -1,8 +1,11 @@
 import { Hono } from "hono";
+import { Readable } from "node:stream";
 import { z } from "zod";
 import {
   createResourceServices,
   createGitEvidenceService,
+  createAttachmentService,
+  AuthorizationError,
   gitEvidenceComparisonSchema,
   gitEvidenceCommitSchema,
   createExecutionControlService,
@@ -143,6 +146,19 @@ requirements.get("/requirements/:id", async (c) => {
 
 requirements.get("/requirements/:id/workflow-outputs/:outputId/evidence", async c => {
   return c.json(await createResourceServices(c.get("identity")).requirementService.describeWorkflowEvidence(c.get("db"), c.req.param("id"), c.req.param("outputId")));
+});
+
+// A human can recover a historical local artifact without its former daemon.
+// The attachment service checks current write authority, size and stored SHA-256,
+// and records the promotion transaction in the audit log.
+requirements.post("/requirements/:id/workflow-outputs/:outputId/import", async c => {
+  const identity = c.get("identity");
+  if (identity.actor.type !== "human" || identity.credential.kind === "delegation") throw new AuthorizationError();
+  const requirementId = z.string().uuid().parse(c.req.param("id"));
+  const outputId = z.string().uuid().parse(c.req.param("outputId"));
+  if (!c.req.raw.body || c.req.header("content-type") !== "application/octet-stream") return c.json({ error: "An octet-stream body is required" }, 400);
+  const body = Readable.fromWeb(c.req.raw.body as import("node:stream/web").ReadableStream);
+  return c.json(await createAttachmentService(identity).promoteEvidence(c.get("db"), requirementId, outputId, body));
 });
 
 requirements.post("/requirements/:id/workflow-outputs/:outputId/git-comparison", async c => {
