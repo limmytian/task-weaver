@@ -54,7 +54,7 @@ server checks; they cannot redirect ownership. Search/count/history/download and
 nested graph responses are filtered before limits/expansion. SSE connections and
 webhook retries reauthorize live resource access, including credential revocation.
 
-Daemon task capabilities are bounded to the original lease, parent credential,
+Ti task capabilities are bounded to the original worker attempt, parent credential,
 phase, tasks and repositories, for at most 15 minutes. Only the original supervisor
 credential can renew without enlarging bounds. SLO/unconverted background workers
 and personal autonomous Ti remain closed. See `docs/authenticated-access.md` in
@@ -277,7 +277,6 @@ POST /api/v1/projects/:projectId/tasks
   "assigneeType": "human",
   "tags": ["frontend", "auth"],
   "requirementId": "uuid-of-requirement",
-  "executionSliceId": "uuid-of-slice",
   "expectedAt": "2026-03-15"
 }
 ```
@@ -286,7 +285,7 @@ POST /api/v1/projects/:projectId/tasks
 |-------|------|----------|-------|
 | `title` | string | yes | 1–500 chars |
 | `requirementId` | UUID | **yes** | Parent requirement |
-| `executionSliceId` | UUID | no | Optional slice under the same requirement |
+| `executionSliceId` | UUID | no | Historical association; new tasks cannot set it |
 | `description` | string | no | |
 | `status` | enum | no | Default: `todo` |
 | `priority` | enum | no | Default: `medium` |
@@ -504,149 +503,12 @@ PATCH /api/v1/tasks/batch
 
 ---
 
-### Task Claims (Multi-Agent Coordination)
+### Task execution coordination
 
-#### Claim Task
-
-```
-POST /api/v1/tasks/:id/claim
-```
-
-```json
-{ "durationMinutes": 30 }
-```
-
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| `durationMinutes` | integer | no | 1–1440, default 30 |
-
-Response: `201` — claim object. `409` if already claimed by another agent.
-
-#### Release Task
-
-```
-POST /api/v1/tasks/:id/release
-```
-
-```json
-{ "reason": "Handing off to another agent" }
-```
-
-Only the claim holder can release. Auto-released when task moves to `done`/`cancelled`.
-
-#### Heartbeat Claim
-
-```
-POST /api/v1/tasks/:id/heartbeat
-```
-
-```json
-{ "extendMinutes": 30 }
-```
-
-Extends the claim lease. Call periodically for long-running tasks.
-
-#### Get Task Claim
-
-```
-GET /api/v1/tasks/:id/claim
-```
-
-Returns current claim or `{ "claimed": false }`.
-
-#### List Active Claims
-
-```
-GET /api/v1/claims?projectId=uuid&claimedBy=agent-id
-```
-
-Returns all active (non-expired) claims. Expired claims are auto-cleaned.
-
-#### Batch Claim Tasks
-
-```
-POST /api/v1/claims/batch
-```
-
-```json
-{ "taskIds": ["uuid1", "uuid2", "uuid3"], "durationMinutes": 30 }
-```
-
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| `taskIds` | uuid[] | yes | 1–20 task IDs |
-| `durationMinutes` | integer | no | 1–1440, default 30, applied to all |
-
-**Atomic**: all tasks are claimed in a single transaction — no partial claims. If any tasks cannot be claimed, returns `409` listing ALL problematic tasks with reasons (not found / already done / held by another agent).
-
----
-
-### Requirement Claims
-
-Requirement claims support explicit interactive coordination. Task workers acquire individual task attempts and do not use requirement lanes.
-
-#### Claim Requirement
-
-```
-POST /api/v1/requirements/:id/claim
-```
-
-```json
-{
-  "durationMinutes": 30,
-  "daemonId": "uuid",
-  "workerIndex": 0
-}
-```
-
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| `durationMinutes` | integer | no | 1–1440, default 30 |
-| `daemonId` | UUID | no | Owning daemon id |
-| `workerIndex` | string \| number | no | Worker index inside the daemon process |
-
-Response: `201` — requirement claim object. `409` if another holder has an active claim.
-
-#### Release Requirement
-
-```
-POST /api/v1/requirements/:id/release
-```
-
-```json
-{ "reason": "daemon worker exited" }
-```
-
-Only the claim holder can release. Requirements moving to `done`, `cancelled`, or `archived` auto-release active requirement claims.
-
-#### Heartbeat Requirement Claim
-
-```
-POST /api/v1/requirements/:id/heartbeat
-```
-
-```json
-{ "extendMinutes": 2 }
-```
-
-Extends an active requirement claim.
-
-#### Get Requirement Claim
-
-```
-GET /api/v1/requirements/:id/claim
-```
-
-Returns current claim or `{ "claimed": false }`.
-
-#### List Requirement Claims
-
-```
-GET /api/v1/requirement-claims?projectId=uuid&claimedBy=actor-id
-```
-
-Returns all active (non-expired) requirement lane claims. Expired claims are
-auto-cleaned.
+Task workers use fenced attempts under `/api/v1/thin-workers`; see the worker
+section below. Legacy task and requirement claims remain historical data and
+are not used to acquire work in worker-only projects. Inspect interrupted
+attempts and external effects before explicitly resolving a retry.
 
 ## Requirements
 
@@ -736,7 +598,7 @@ GET  /api/v1/requirements/:id/workflow-cleanup
 
 Output registration accepts `type` (`comment`, `attachment`, `url`, `local`, `git_branch`, `git_pr`), optional `taskId`, `executionSliceId`, `requirementRepositoryId`, and `summary`. Comment and attachment outputs require a platform `referenceId`; URL outputs require `url`; local outputs require `nodeId`, normalized `relativePath`, `sizeBytes`, and `sha256`. Git outputs require a requirement repository link. The server validates ownership. Additional output types may coexist; advancing delivery requires evidence for the selected primary method.
 
-Stage advancement requires `stage` (`delivery`, `acceptance`, `integration`), `decision` (`complete`, `changes_requested`, `failed`, `retry`), `reason`, and `expectedRevision` from `workflowStateRevision`. Acceptance may include `checks` as name/status entries. Daemon callers include their `daemonId` and `leaseGeneration`. A conflicting revision returns `409`; manual stages require a human actor. Existing requirements with `workflow: null` retain the legacy Git flow.
+Stage advancement requires `stage` (`delivery`, `acceptance`, `integration`), `decision` (`complete`, `changes_requested`, `failed`, `retry`), `reason`, and `expectedRevision` from `workflowStateRevision`. Acceptance may include `checks` as name/status entries. A conflicting revision returns `409`; manual stages require a human actor. Existing requirements with `workflow: null` retain the legacy Git flow.
 
 ### Historical execution slices
 
@@ -793,7 +655,7 @@ POST /api/v1/requirements/:id/dependencies
 }
 ```
 
-Dependencies must stay inside the same project; self-dependencies and cycles are rejected. `blocks` dependencies gate daemon requirement-lane scheduling until the upstream requirement is `done` or `cancelled`; `related` links are informational.
+Dependencies must stay inside the same project; self-dependencies and cycles are rejected. `blocks` dependencies gate worker task acquisition until the upstream requirement is `done` or `cancelled`; `related` links are informational.
 
 CLI:
 
@@ -2204,8 +2066,9 @@ This is separate from the outbound `/api/v1/mcp/*` Registry. See the
 
 ## Execution control and recovery
 
-See [the normative execution recovery contract](../../docs/live-planning-recovery.md#interfaces-and-compatibility) for durable control listing/acknowledgment/resume, run-authority verification, synchronization records, explicit evidence revalidation and human recovery decisions. Daemon mutation fences include `runId` in addition to `daemonId` and `leaseGeneration`; lane heartbeat alone never restores an invalidated run. Delegated Git fetch/verify is available only through the local supervisor broker at `POST /api/v1/execution/git`, with `{ "operation": "fetch" | "verify", "repositoryId": "<uuid>" }`. This local endpoint is not an unrestricted server Git executor.
-
+Task workers use fenced attempts. Inspect interrupted work and external effects
+before using `tw worker resolve`; expiration alone does not establish that a
+remote process stopped. See [the task worker guide](../../docs/task-worker.md).
 
 ## Capability diagnostics
 

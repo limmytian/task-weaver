@@ -85,7 +85,7 @@ kubectl -n task-weaver create configmap task-weaver-mcp \
 
 ## 协作与限制
 
-先列出项目、搜索上下文，再创建需求和任务，认领任务、添加评论、更新状态并释放认领。
+先列出项目、搜索上下文，再创建需求和任务、添加评论并更新状态。任务 Worker 自行领取并续租。
 项目任务必须关联同一项目下的需求；个人任务或个人文档创建使用 `scope=personal`。
 列表返回精简分页结果，详情不会展开全部历史；搜索默认最多 20 条，总上限 50 条，
 返回 hasMore、匹配实体类型和文档搜索降级信息，不提供页数保证。
@@ -132,14 +132,14 @@ Inspector 使用临时 0600 配置并在结束后删除。Web 使用的详情接
 
 ## 规划与上下文
 
-规划与上下文工具支持技能发现、执行切片、原子计划和有界上下文；实际清单按实时授权过滤。
+规划与上下文工具支持技能发现、历史切片查询、原子计划和有界上下文；实际清单按实时授权过滤。
 API 必须在工具清单中提供对应能力，stdio 还需匹配的 CLI；最低版本边界见[升级说明](ce-upgrades.md)。
 
 | 工具 | 用途 |
 | --- | --- |
 | `tw_context_bootstrap`、`tw_context_search`、`tw_context_get` | 获取使用规范、检索技能摘要、读取单个技能 |
 | `tw_skill_packages_list`、`tw_skill_packages_get`、`tw_skill_package_files`、`tw_skill_package_read` | 查询活动技能包、文件元数据和有界文本 |
-| `tw_execution_slices_list`、`tw_execution_slices_create`、`tw_execution_slices_update` | 规划执行阶段、更新交接摘要 |
+| `tw_execution_slices_list` | 查询保留的历史切片摘要 |
 | `tw_plan_validate`、`tw_plan_apply` | 无写入预览与原子应用计划 |
 | `tw_tasks_context`、`tw_requirements_context` | 按需聚合任务或需求背景 |
 
@@ -160,15 +160,12 @@ API 必须在工具清单中提供对应能力，stdio 还需匹配的 CLI；最
 去重范围，换 key 或凭据重试前应核对现有状态。重放仍校验当前权限；重放被拒不代表
 原写入失败。业务写入和记录同事务提交，非法计划整体回滚；预览不是状态预留。
 
-计划限制为最多 10 个需求、20 篇文档、每需求 20 个切片与 50 个任务、合计 100 个任务，
+计划限制为最多 10 个需求、20 篇文档、每需求 50 个任务、合计 100 个任务，
 每数组最多 100 项、最多 2000 个图容器，同时遵守公共请求大小和超时限制。
 仅支持同项目已有对象引用，拒绝嵌套工作流、分支、执行器、身份控制、评论笔记和
 `contentFile` 本地路径。新任务从 `todo` 开始，新需求从 `draft` 或 `approved` 开始。
 
-切片创建使用 `{id: requirementId, input: {...}}`；更新使用
-`{id: sliceId, expectedUpdatedAt, patch: {...}}`，时间戳须使用读取到的精确 ISO 值。
-遵守需求租约、任务归属和阶段顺序，不接管 daemon 执行通道。列表支持 `page/pageSize`，
-不展开任务历史。`allowParallel` 表达有意并行的规划，不绕过其他约束。
+历史切片仅供查询；新工作使用任务依赖，不再创建或修改切片。
 
 聚合上下文参数为 `id`、`sections`、`limit`（1–20）、`offset` 和 `maxBytes`
 （2048–65536，默认 32768）。分区包括 `parent/tasks/slices/dependencies/documents/claim/activity`，

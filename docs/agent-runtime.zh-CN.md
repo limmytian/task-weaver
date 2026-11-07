@@ -3,7 +3,7 @@
 [English](agent-runtime.md).
 
 Ti 是 Task Weaver 中处理明确分配的任务和定时工作的服务端 Agent，与本地
-`tw daemon` 的需求通道执行器不同。服务端在 Task Weaver 内运行有界模型／工具循环，
+`tw worker` 共用任务执行记录。服务端在 Task Weaver 内运行有界模型／工具循环，
 并通过配置的 Partners Streamable HTTP MCP 后端执行沙箱操作。仅注册普通 MCP 服务
 不会配置该沙箱后端。
 

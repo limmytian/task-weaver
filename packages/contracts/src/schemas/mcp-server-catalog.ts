@@ -1,13 +1,13 @@
 import { eventCursorSchema } from "./durable-events";
 import { repositoryReadinessInputSchema } from "./repositories";
 import { mcpRegistrySearchSchema, mcpRegistryToolSchema, mcpRegistryCallSchema, mcpRegistryReadinessSchema } from "./mcp-bridge";
-import { mcpRetrievalScopeSchema, mcpPackageFilesSchema, mcpPackageReadSchema, mcpSliceCreateSchema, mcpSliceUpdateSchema, mcpPlanValidateSchema, mcpPlanApplySchema, mcpAggregateContextSchema, mcpDependencyGraphSchema, mcpDocumentHistorySchema, mcpDocumentVersionSchema, mcpRepositoryListSchema, mcpScheduleListSchema, mcpUsageSummarySchema } from "./mcp-server-planning";
+import { mcpRetrievalScopeSchema, mcpPackageFilesSchema, mcpPackageReadSchema, mcpPlanValidateSchema, mcpPlanApplySchema, mcpAggregateContextSchema, mcpDependencyGraphSchema, mcpDocumentHistorySchema, mcpDocumentVersionSchema, mcpRepositoryListSchema, mcpScheduleListSchema, mcpUsageSummarySchema } from "./mcp-server-planning";
 import { z } from "zod";
 import { resolveSkillCapabilitiesSchema, runSkillCapabilitySchema } from "./capabilities";
 import { mcpMemorySearchSchema, mcpMemoryGetSchema, mcpMemoryRecordSchema, mcpMemoryUpdateSchema, mcpMemoryForgetSchema, mcpMemoryPreviewSchema } from "./mcp-memory";
 import { listProjectsSchema } from "./projects";
 import { createRequirementSchema, updateRequirementSchema, listRequirementsSchema, createRequirementDependencySchema, linkDocumentToRequirementSchema } from "./requirements";
-import { createTaskSchema, createPersonalTaskSchema, updateTaskSchema, updateTaskStatusSchema, claimTaskSchema, releaseTaskSchema, createTaskCommentSchema, createTaskDependencySchema } from "./tasks";
+import { createTaskSchema, createPersonalTaskSchema, updateTaskSchema, updateTaskStatusSchema, createTaskCommentSchema, createTaskDependencySchema } from "./tasks";
 import { createDocumentSchema, updateDocumentSchema, listDocumentsSchema, linkDocumentToTaskSchema } from "./documents";
 import { mcpServerPageSchema, mcpServerReadTools, type McpServerToolName } from "./mcp-server";
 
@@ -15,7 +15,7 @@ const id = z.string().uuid();
 const byId = z.object({ id }).strict();
 const page = mcpServerPageSchema.shape;
 const taskFields = createPersonalTaskSchema.omit({ personalOwnerId: true, personalOwnerType: true, requestedProvider: true, requestedModel: true, branchName: true }).strict();
-const taskCreate = taskFields.extend({ scope: z.enum(["project", "personal"]).default("project"), projectId: id.optional(), requirementId: id.optional(), executionSliceId: id.optional() }).strict();
+const taskCreate = taskFields.extend({ scope: z.enum(["project", "personal"]).default("project"), projectId: id.optional(), requirementId: id.optional() }).strict();
 const taskList = z.object({ ...page, scope: z.enum(["project", "personal"]).default("project"), projectId: id.optional(), requirementId: id.optional(), status: updateTaskStatusSchema.shape.status.optional(), query: z.string().trim().min(1).max(500).optional(), assignee: z.string().optional() }).strict();
 const search = z.object({ query: z.string().trim().min(1).max(500), projectId: id.optional(), scope: z.enum(["project", "personal"]).default("project"), entity: z.enum(["all", "task", "requirement", "document"]).default("all"), mode: z.enum(["keyword", "fulltext", "semantic", "hybrid"]).default("keyword"), limit: z.number().int().min(1).max(50).default(20), includeGlobal: z.boolean().default(true) }).strict();
 
@@ -54,9 +54,6 @@ export const mcpServerCatalog = [
   tool("tw_tasks_create", "Create a project task under a requirement or a personal task.", taskCreate),
   tool("tw_tasks_update", "Update task fields; supply expectedVersion to detect concurrent changes.", z.object({ id, patch: updateTaskSchema.omit({ requestedProvider: true, requestedModel: true, branchName: true }).strict() }).strict()),
   tool("tw_tasks_status", "Change task status with dependency and workflow guards; cannot force completion.", updateTaskStatusSchema.omit({ force: true, leaseGeneration: true, daemonId: true }).extend({ id }).strict()),
-  tool("tw_tasks_claim", "Claim a task for the verified credential owner.", claimTaskSchema.extend({ id }).strict()),
-  tool("tw_tasks_heartbeat", "Renew the verified owner's task claim.", z.object({ id, extendMinutes: z.number().int().min(1).max(1440).default(30) }).strict()),
-  tool("tw_tasks_release", "Release the verified owner's task claim.", releaseTaskSchema.extend({ id }).strict()),
   tool("tw_task_comments_list", "Read a bounded page of task comments.", byId.extend(page).strict()),
   tool("tw_task_comments_add", "Append a comment attributed to the verified owner.", createTaskCommentSchema.extend({ id }).strict()),
   tool("tw_task_dependencies_list", "Read a bounded page of upstream task dependency links.", byId.extend(page).strict()),
@@ -85,8 +82,6 @@ export const mcpServerCatalog = [
   tool("tw_skill_package_files", "List a bounded page of package file metadata.", mcpPackageFilesSchema),
   tool("tw_skill_package_read", "Read one bounded readable package text file by relative path.", mcpPackageReadSchema),
   tool("tw_execution_slices_list", "List a bounded page of requirement slice summaries.", byId.extend(page).strict()),
-  tool("tw_execution_slices_create", "Create a requirement slice with guarded task assignment.", z.object({ id, input: mcpSliceCreateSchema }).strict()),
-  tool("tw_execution_slices_update", "Update a slice using expectedUpdatedAt for concurrent change detection.", z.object({ id, expectedUpdatedAt: z.string().datetime(), patch: mcpSliceUpdateSchema }).strict()),
   tool("tw_plan_validate", "Validate and preview a project plan without writes; checks write authority.", mcpPlanValidateSchema),
   tool("tw_plan_stage", "Save a draft plan for review in the Web interface; does not create or schedule tasks.", mcpPlanValidateSchema),
   tool("tw_plan_apply", "Atomically apply a bounded project plan; retry with the same key and identical plan.", mcpPlanApplySchema),
