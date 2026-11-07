@@ -11,6 +11,7 @@ test('provider errors are classified without treating discussion, tool errors, e
   for(const [code,failure] of [['rate_limit_error','rate_limited'],['insufficient_quota','quota_exhausted'],['billing_error','billing_blocked'],['invalid_api_key','auth_required']])
     assert.equal(classifyExecutorLine('claude',JSON.stringify({type:'error',error:{type:code}}),'stdout')?.failure,failure)
   assert.equal(classifyExecutorLine('codex',JSON.stringify({type:'turn.failed',error:{message:"You've hit your usage limit. Try again later."}}),'stdout')?.failure,'quota_exhausted')
+  assert.equal(classifyExecutorLine('codex',JSON.stringify({type:'turn.failed',error:{codex_error_info:'usage_limit_exceeded'}}),'stdout')?.failure,'quota_exhausted')
 })
 test('fragmented output is bounded, streams isolated, and diagnostics sanitized',()=>{
   const collector=new ExecutorSignalCollector('codex','local')

@@ -55,6 +55,13 @@ export function buildAiEnvironment(source: NodeJS.ProcessEnv, additions: NodeJS.
   for (const [key, value] of Object.entries(source)) {
     if (value === undefined) continue
     if (AI_ENVIRONMENT_KEYS.has(key) || key.startsWith('LC_')) result[key] = value
+    if (/^(?:HTTPS?_PROXY|ALL_PROXY)$/i.test(key)) {
+      try {
+        const proxy = new URL(value)
+        if (['http:', 'https:', 'socks5:', 'socks5h:'].includes(proxy.protocol) && !proxy.username && !proxy.password && !proxy.search && !proxy.hash) result[key] = value
+      } catch { /* Ignore malformed or credential-bearing proxy settings. */ }
+    }
+    if (/^NO_PROXY$/i.test(key) && value.length <= 4096 && !/[\x00-\x1f@]/.test(value)) result[key] = value
   }
   for (const [key, value] of Object.entries(additions)) {
     if (key === 'TW_API_KEY' && value && !/^twb_[0-9a-f]{64}$/.test(value)) throw new Error('AI access requires a local task broker handle')
@@ -228,7 +235,7 @@ export function resolveRepositoryCredential(
 
 export function redactSensitiveOutput(value: string): string {
   return value
-    .replace(/\b(?:tw|twd|twb)_[0-9a-f]{64}\b/gi, '[redacted]')
+    .replace(/\b(?:tw|twd|twb|twa)_[0-9a-f]{64}\b/gi, '[redacted]')
     .replace(/:\/\/[^/@\s]+:[^/@\s]+@/g, '://[redacted]@')
     .replace(/([?&](?:access_?token|api_?key|password|secret|token)=)[^&\s]+/gi, '$1[redacted]')
     .replace(/\b(?:ghp|glpat|github_pat)_[A-Za-z0-9_-]+\b/g, '[redacted]')

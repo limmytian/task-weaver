@@ -25,7 +25,7 @@ execution review/merge. An administrator does not inherit private/project conten
 Children receive task-bounded delegation (at most 15 minutes), not supervisor
 credentials. Renewal cannot widen bounds; revoked/expired capabilities require a
 fresh authorized exchange. Keep credentials out of documents and CLI arguments.
-Source development does not authorize starting a daemon or publishing/deploying.
+Source development does not authorize publishing or deployment.
 
 ## Project Onboarding
 
@@ -94,16 +94,16 @@ tw req get "$REQ_ID" --json
 tw req advance "$REQ_ID" --stage delivery --reason "Output reviewed" --revision 0
 ```
 
-Local files are copied into `TW_ARTIFACT_ROOT` or `~/.task-weaver/artifacts` on the CLI node, hashed, and represented in Task Weaver by a relative path, node ID, size, and checksum. The bytes are not uploaded. Daemons that take subsequent work must advertise the same stable node ID. Declare downstream artifact dependencies with `tw req input add <consumer-requirement> <output-id>` and optionally `--task` or `--slice`. Scheduling enforces the producing node and verifies availability. Retire outputs explicitly with `tw req output retire`; retirement requires elapsed retention and completed consumers. Local deletion additionally requires `--delete-local`.
+Local files are copied into `TW_ARTIFACT_ROOT` or `~/.task-weaver/artifacts` on the CLI node, hashed, and represented in Task Weaver by a relative path, node ID, size, and checksum. The bytes are not uploaded. Local-only outputs remain available only on their producing node. Declare downstream artifact dependencies with `tw req input add <consumer-requirement> <output-id>` and optionally `--task`. Scheduling enforces the producing node and verifies availability. Retire outputs explicitly with `tw req output retire`; retirement requires elapsed retention and completed consumers. Local deletion additionally requires `--delete-local`.
 
-`tw req advance` requires the current `workflowStateRevision` from `tw req get --json`; it also uses the active claim lease when a daemon owns the lane. Check results can be supplied with `--checks-file` as a JSON array of `{ "name": "...", "status": "passed" }` entries. Acceptance required checks and human approval rules are enforced by the server.
+`tw req advance` requires the current `workflowStateRevision` from `tw req get --json`. Check results can be supplied with `--checks-file` as a JSON array of `{ "name": "...", "status": "passed" }` entries. Acceptance required checks and human approval rules are enforced by the server.
 
 For custom stage behavior, use a JSON definition with `delivery`, `acceptance`, and `integration` objects. See `requirementWorkflowSchema` in `packages/contracts/src/schemas/workflows.ts` for the complete validated shape. Automatic integration supports built-in Git methods and agent instructions for `custom`, `publish`, `attach`, or `archive`. These methods require nonempty instructions. Empty instructions with `none` perform no extra agent action.
 Set `worktreeMode` to `none` in a custom workflow when linked repositories are only context and no checkout is needed. `auto` creates a worktree only for Git delivery or integration; `isolated` explicitly requests one. Git actions require `auto` or `isolated`. Use `tw req workspace cleanup` after retention and dependent work complete; dirty worktrees are preserved.
 
 ## Multi-Repository Requirement Workspace
 
-Define a reusable catalog and attach the exact repository set before a Requirement slice starts.
+Define a reusable catalog and attach the exact repository set before worker tasks start.
 
 ### Read
 
@@ -114,7 +114,7 @@ Define a reusable catalog and attach the exact repository set before a Requireme
    tw task repo list $TASK_ID --json
    ```
 2. Treat an empty Task scope as unspecified: the Task can use the entire Requirement workspace.
-3. Check local readiness on the daemon node without requesting or printing a credential:
+3. Check local readiness on the worker node without requesting or printing a credential:
    ```bash
    tw repo credential readiness $REPOSITORY_ID --operation read --json
    tw repo credential readiness $REPOSITORY_ID --operation push --json
@@ -125,7 +125,7 @@ Define a reusable catalog and attach the exact repository set before a Requireme
 - Reuse a canonical catalog entry across unrelated Projects when it is the same repository.
 - Link every repository needed by the Requirement. Add Task links only when a smaller focus hint helps the agent.
 - To use a catalog repository from a Task that is not yet in the Requirement workspace, make the expansion explicit with `--add-to-requirement`.
-- Add repositories between slices, not during an active slice. Each lane receives a frozen manifest.
+- Review repository scope before a task starts; each attempt receives a frozen manifest.
 - Keep credentials out of endpoints, Task comments, Requirement descriptions, documents, and prompts.
 
 ### Write
@@ -489,122 +489,24 @@ Assess overall project health and identify risks proactively.
 
 Coordinate multiple AI agents (and humans) working on the same project without conflicts.
 
-> **Daemon/executor mode:** this workflow is for **interactive/self-directed** agents that pick and claim their own work. If you were spawned by `tw daemon`, the daemon already claimed a requirement lane and selected an initial task — **skip the Claim and Release steps** below; process the provided requirement roadmap and set task/requirement statuses. See `SKILL.md` § Operating Modes.
 
-### Core Protocol: Claim → Work → Release
+### Coordinating work
 
-Every agent must follow this cycle:
-
-```
-1. Scout    → tw task list + tw activity (see what's happening)
-2. Claim    → tw task claim <id>  (or batch via REST API)
-3. Start    → tw task status <id> in_progress
-4. Work     → periodic tw task claim <id> heartbeat for long tasks
-5. Complete → tw task status <id> done  (auto-releases claim)
-```
-
-### Step-by-Step
-
-1. **Check what's happening**
-   ```bash
-   tw task list --project $PROJECT_ID --status todo --json
-   tw activity --project $PROJECT_ID --limit 20 --json
-   # check active claims via REST
-   curl "$API_URL/api/v1/projects/$PROJECT_ID/claims" \
-     -H "Authorization: Bearer $API_KEY"
-   ```
-
-2. **Pick tasks**
-   - Choose tasks with status `todo` and no active claim
-   - Respect `blocks` dependencies — don't pick tasks whose blockers are incomplete
-
-3. **Claim tasks**
-   ```bash
-   tw task claim $TASK_ID --duration 30
-   tw task comment $TASK_ID "Claiming this task, starting now."
-   ```
-   For batch claiming (atomic, up to 20 tasks), use the REST API:
-   ```bash
-   curl -X POST "$API_URL/api/v1/tasks/batch-claim" \
-     -H "Authorization: Bearer $API_KEY" \
-     -d '{"taskIds": ["'$ID1'", "'$ID2'"]}'
-   ```
-
-4. **Work on the task**
-   ```bash
-   # extend lease for long tasks
-   tw task claim $TASK_ID --duration 30   # heartbeat
-
-   # use --expected-version on REST updates to prevent conflicts
-   curl -X PATCH "$API_URL/api/v1/tasks/$TASK_ID" \
-     -d '{"title": "...", "expectedVersion": 3}'
-   ```
-
-5. **Finish or hand off**
-   ```bash
-   # completing
-   tw task status $TASK_ID done --reason "Implementation complete"
-
-   # can't finish
-   tw task release $TASK_ID --reason "Blocked, needs design decision"
-   tw task comment $TASK_ID "Released: blocked by X. Next agent should..."
-   ```
-
-6. **Document your work**
-   ```bash
-   tw doc create --project $PROJECT_ID \
-     --title "Auth implementation notes" \
-     --content "# What was done\n..." --type other --json
-   # link to task via REST
-   curl -X POST "$API_URL/api/v1/documents/$DOC_ID/task-links" \
-     -H "Authorization: Bearer $API_KEY" \
-     -d '{"taskId": "'$TASK_ID'", "linkType": "output"}'
-   ```
-
-### Avoiding Common Conflicts
-
-| Scenario | Prevention | Recovery |
-|----------|-----------|----------|
-| Two agents edit same task | Use `expectedVersion` on REST updates | Re-read, merge changes, retry |
-| Two agents edit same document | Use `expectedVersion` on REST updates | Compare versions, merge manually |
-| Agent disappears mid-task | Claims auto-expire after lease | Another agent can claim after expiry |
-| Duplicate work | Check task list + activity before starting | One completes, other redirects |
-| Dependency deadlock | System blocks status if blockers incomplete | Use `--force` only if justified |
-
-### Daemon Requirement-Lane Protocol
-
-Daemon workers use a different coordination unit from interactive agents:
-
-```
-1. Daemon worker applies for a requirement lane
-2. Server creates/renews a requirement_claims lease
-3. Server selects the first executable task and marks it in_progress
-4. Daemon prepares the requirement branch worktree
-5. Spawned agent processes the requirement task roadmap sequentially
-6. When all requirement tasks are terminal, daemon follows the resolved delivery stage. Git branch/PR actions run only when configured. Legacy requirements with a null workflow keep the earlier Git finalization path.
-7. A review daemon can move approved branches to `ready_to_merge`; a merge daemon then consumes `ready_to_merge` and marks successful merges `done`
-8. Daemon heartbeats and releases the requirement claim
-```
-
-If you are the spawned agent:
-
-- Do not run `tw task claim`, `tw task release`, or requirement claim/release calls.
-- Work only in the daemon-provided worktree.
-- Start with the initial active task, then continue with remaining unblocked tasks in the same requirement.
-- Mark tasks `done` as you complete them.
-- Use task `in_review` when human judgment is needed.
-- Do not commit, push, create a PR, or mark the requirement `done`.
-- Leave file changes in the daemon-provided worktree. The daemon handles final branch publication and moves the requirement to `in_review` when all tasks are terminal.
-
-Humans can inspect active daemon lanes on the Web Daemons page. It shows daemon workers, current requirement, active task, branch/worktree, task roadmap, and stale lease indicators.
-
-For debugging lane ownership from the CLI:
+Use task dependencies and Worker attempts to coordinate autonomous execution.
+A worker atomically acquires one eligible task, renews its lease, and submits
+its result. Interactive agents should coordinate with the owner, inspect the
+task and its dependencies, and record status and progress. Legacy task and
+requirement claim commands do not reserve new work in worker-only projects.
 
 ```bash
-tw req claims --project $PROJECT_ID --json
-tw req claim-status $REQ_ID --json
-tw req release $REQ_ID --reason "manual cleanup"
+tw task list --project "$PROJECT_ID" --status todo --json
+tw worker presence --project "$PROJECT_ID"
+tw worker attempts --project "$PROJECT_ID"
 ```
+
+Use `expectedVersion` for conflicting updates where supported. If an attempt
+expires or an external result is uncertain, inspect its effects before an
+explicit Worker resolution; expiration alone is not permission to retry.
 
 ### Communication via Comments
 
@@ -615,13 +517,47 @@ tw task comment $TASK_ID "Blocked: needs database migration from task $OTHER_ID 
 tw task comment $TASK_ID "Done: endpoint live, tests passing, doc linked"
 ```
 
-### Requirement-Level Partitioning
+### Consuming durable events
 
-For larger teams, partition work at the requirement level:
-- Each agent "owns" one or more requirements
-- Only create/modify tasks under your assigned requirements
-- Cross-requirement work requires coordination via comments
+A separately authorized parent or external agent can use `tw events cursor --project <id> --consumer <name>` to read its checkpoint, then `tw events list --project <id> --cursor <sequence>` to replay events. Process each returned batch before calling `tw events ack --project <id> --consumer <name> --cursor <returned-cursor>`. The cursor also advances across events the caller cannot access. `tw events watch --project <id> --consumer <name>` polls from the checkpoint and does not acknowledge automatically; acknowledge only after processing. Restarting may redeliver unacknowledged events. An expired cursor requires resynchronization from authoritative state; do not silently skip lost history. MCP clients can use `tw_events_cursor`, `tw_events_list`, and `tw_events_ack`. Each operation checks current access. Check before consequential steps and after reconnecting; push and mid-run interruption are not guaranteed. Keep parent credentials out of worker processes and never treat notification as permission to bypass an execution fence.
 
-This reduces contention and makes parallel work natural.
 
-For human integration without a PR, use `tw req repo sync-direct` to verify the delivered commit against the configured target branch, then complete the normal requirement/workflow controls. See [human delivery reconciliation](../../docs/manual-pr-reconciliation.md).
+### Task worker operation
+
+Use a project enabled for thin-worker mode and a scoped agent credential. Code tasks use an isolated attempt worktree and require a configured requirement working branch, repository read and push credentials, a trusted server-side forge connection, and a signoff identity:
+
+```bash
+tw worker start --project "$PROJECT_ID" --model "$MODEL" --think low \
+  --git-name "$GIT_NAME" --git-email "$GIT_EMAIL"
+```
+
+Codex uses its `workspace-write` sandbox. A Kubernetes runtime must support the
+nested sandbox operations that Codex uses; a successful basic bubblewrap probe
+alone does not establish that network namespace creation works. For a gVisor
+runtime that cannot create the nested network namespace, an operator may opt
+in to network access for a dedicated Codex profile at
+`$TW_CODEX_HOME/config.toml`:
+
+```toml
+[sandbox_workspace_write]
+network_access = true
+```
+
+This retains the workspace-write filesystem policy but permits commands inside
+the executor to access the network. It is not equivalent to the default
+network-isolated sandbox. Use it only where that access is acceptable and apply
+the deployment's network and credential isolation separately. A Pod network
+policy, when enforced, applies to the Worker as well as its executor; it does
+not distinguish them. Do not assume that removing credentials from environment
+variables prevents the executor from reading files accessible to its user.
+Keep the service account unmounted and use a dedicated, non-privileged Pod;
+do not give it host mounts or additional capabilities to make a probe pass.
+The Worker does not enable this profile setting automatically. If the executor
+reports a possible sandbox initialization failure, inspect its session and
+runtime before assessing whether a retry is safe.
+
+For a requirement with linked repositories, configure each repository's requirement working branch and distinct version target branch. A coordinator plan contains implementation tasks, one `worker:acceptance` task depending on every implementation task, and one `worker:integration` task depending on acceptance. The acceptance worker fixes server-verified requirement branch snapshots. The integration worker merges those accepted commits into the configured version branches, resolves conflicts through its executor, and records confirmed delivery before completing. If a requirement branch changes after acceptance, run acceptance again. For requirements without linked repositories, retain the acceptance task and artifact delivery without an integration task.
+
+Add `--once` to handle at most one task, or `--requirement "$REQ_ID"` to restrict the queue. The worker pulls eligible tasks, renews the task attempt, and uses notifications as wakeups with polling fallback. It prepares a task-local commit, integrates the latest requirement branch, resolves conflicts through the executor, and submits a normal fast-forward push under a server-side delivery slot. Non-code work can deliver an artifact without Git signoff settings.
+
+For an interrupted or uncertain delivery, a project manager with repository access can inspect `tw worker attempts --project "$PROJECT_ID"` and `tw worker git-deliveries --project "$PROJECT_ID"`. Use `tw worker git-reconcile "$DELIVERY_ID" --reason "..."` only to verify that the trusted forge contains the submitted commit. `tw worker git-abandon-prepared "$DELIVERY_ID" --reason "..."` releases only an unstarted preparation whose attempt has ended or expired. Neither command asserts that an external process stopped. An uncertain push retains its branch slot until its outcome is verified. Review the attempt and workspace before `tw worker resolve` permits a retry.

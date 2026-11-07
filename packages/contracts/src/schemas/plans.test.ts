@@ -23,7 +23,6 @@ test("plan schema accepts a complete requirement planning batch", () => {
         priority: "high",
         modelTier: "strong",
         documents: [{ document: "auth-design", type: "documents" }],
-        slices: [{ key: "schema", title: "Schema", tasks: ["auth-db"] }],
         tasks: [
           {
             key: "auth-db",
@@ -39,8 +38,15 @@ test("plan schema accepts a complete requirement planning batch", () => {
   if (result.success) {
     assert.equal(result.data.requirements[0]?.tasks[0]?.status, "todo");
     assert.equal(result.data.requirements[0]?.tasks[0]?.priority, "medium");
-    assert.equal(result.data.requirements[0]?.slices[0]?.tasks[0], "auth-db");
+    assert.deepEqual(result.data.requirements[0]?.slices, []);
   }
+});
+
+test("plans reject new execution slices", () => {
+  const result = planSchema.safeParse({ projectId, requirements: [{ key: "r", title: "R", slices: [{ key: "s", title: "S" }] }] });
+  assert.equal(result.success, false);
+  const assignment = planSchema.safeParse({ projectId, requirements: [{ key: "r", title: "R", tasks: [{ key: "t", title: "T", slice: "historical" }] }] });
+  assert.equal(assignment.success, false);
 });
 
 test("plan schema requires creation fields for new entities", () => {

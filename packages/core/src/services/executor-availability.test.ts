@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import type { ExecutorObservation } from "@task-weaver/contracts";
+import { executorObservationBlocks, type ExecutorObservation } from "@task-weaver/contracts";
 import { availabilityRecheckAt, effectiveAvailability } from "./executor-availability";
 
 const now = new Date("2026-10-08T12:00:00Z");
@@ -26,4 +26,18 @@ test("a stale query loses allowance certainty without mutating persisted interru
   assert.equal(effectiveAvailability(blocked, now.getTime()).state, "cooling_down");
   assert.equal(effectiveAvailability(blocked, now.getTime() + 60_000).state, "unknown");
   assert.equal(blocked.state, "cooling_down");
+});
+
+
+test("Codex acquisition requires a fresh verified observation", () => {
+  const available: ExecutorObservation = { ...blocked, state: "available", failure: null,
+    windows: [{ bucket: "codex", window: "secondary", usedPercent: 20, remainingPercent: 80, durationMinutes: 10080, resetAt: null }] };
+  assert.equal(executorObservationBlocks(blocked, now.getTime()), true);
+  assert.equal(executorObservationBlocks(available, now.getTime()), false);
+  assert.equal(executorObservationBlocks(available, now.getTime() + 60_000), true);
+  assert.equal(executorObservationBlocks({ ...available, state: "unknown", source: "unsupported" }, now.getTime()), true);
+  assert.equal(executorObservationBlocks({ ...available, state: "unknown", source: "manual_resume" }, now.getTime()), true);
+  assert.equal(executorObservationBlocks({ ...available, windows: [] }, now.getTime()), true);
+  assert.equal(executorObservationBlocks({ ...available, tool: "claude", state: "unknown" }, now.getTime()), false);
+  assert.equal(executorObservationBlocks({ ...available, authenticationMode: "api_key", state: "unknown" }, now.getTime()), false);
 });

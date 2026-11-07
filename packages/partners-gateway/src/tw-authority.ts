@@ -17,7 +17,7 @@ export function createGatewayTwAuthority(db: Database, config: PartnersGatewayCo
   }
   function sanitize(value: any): any {
     if (typeof value === 'string') {
-      let text = value.replace(/(?:tw|twd|twb)_[0-9a-f]{64}/g, '[REDACTED]');
+      let text = value.replace(/(?:tw|twd|twb|twa)_[0-9a-f]{64}/g, '[REDACTED]');
       for (const secret of [getKey(), config.serviceToken, ...[...capabilities.values()].map(item => item.token)]) if (secret) text = text.split(secret).join('[REDACTED]');
       return text;
     }

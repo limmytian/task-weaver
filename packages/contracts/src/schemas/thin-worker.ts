@@ -1,0 +1,21 @@
+import { z } from 'zod';
+import { stagedPlanSchema } from './plans';
+
+export const workerModeSchema = z.object({ projectId: z.string().uuid(), mode: z.enum(['legacy', 'thin']), inspection: z.string().trim().min(10).max(2000) }).strict();
+export const workerAcquireSchema = z.object({ projectId: z.string().uuid(), requirementId: z.string().uuid().optional(), workerId: z.string().uuid(), nodeId: z.string().regex(/^[a-zA-Z0-9._-]{1,120}$/), executor: z.literal('codex'), model: z.string().trim().min(1).max(200), durationSeconds: z.number().int().min(30).max(900).default(120) }).strict();
+export const workerPresenceSchema = z.object({ projectId: z.string().uuid(), workerId: z.string().uuid(), nodeId: z.string().regex(/^[a-zA-Z0-9._-]{1,120}$/), activity: z.enum(['unknown', 'checking', 'preflight', 'acquiring', 'preparing', 'executing', 'publishing', 'idle', 'cooldown', 'attention']).optional(), reason: z.string().trim().max(1000).optional(), retryAt: z.string().datetime({ offset: true }).nullable().optional() }).strict();
+export const workerFenceSchema = z.object({ attemptId: z.string().uuid(), workerId: z.string().uuid(), token: z.string().regex(/^twa_[0-9a-f]{64}$/) }).strict();
+export const workerAcceptanceSnapshotSchema = workerFenceSchema.extend({ repositoryId: z.string().uuid(), expectedHead: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/) }).strict();
+export const workerIntegrationPrepareSchema = workerFenceSchema.extend({ operationKey: z.string().uuid(), repositoryId: z.string().uuid(), expectedHead: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/), proposedHead: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/) }).strict();
+export const workerGitPrepareSchema = workerFenceSchema.extend({ operationKey: z.string().uuid(), repositoryId: z.string().uuid(), targetBranch: z.string().min(1).max(255), expectedHead: z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/), proposedHead: z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/) }).strict();
+export const workerGitReconcileSchema = z.object({ deliveryId: z.string().uuid(), reason: z.string().trim().min(10).max(2000) }).strict();
+export const workerGitAbandonPreparedSchema = z.object({ deliveryId: z.string().uuid(), reason: z.string().trim().min(10).max(2000) }).strict();
+export const workerGitConfirmSchema = workerFenceSchema.extend({ deliveryId: z.string().uuid() }).strict();
+export const workerGitTransitionSchema = workerFenceSchema.extend({ deliveryId: z.string().uuid(), event: z.enum(['start_push', 'response_lost', 'definitely_not_started']) }).strict();
+export const workerHeartbeatSchema = workerFenceSchema.extend({ durationSeconds: z.number().int().min(30).max(900).default(120) }).strict();
+export const workerOutputSchema = workerFenceSchema.extend({ documentId: z.string().uuid(), summary: z.string().trim().min(1).max(1000) }).strict();
+export const workerPlanSchema = workerFenceSchema.extend({ operationKey: z.string().uuid(), expectedRevision: z.number().int().nonnegative(), plan: stagedPlanSchema }).strict();
+export const workerAcceptanceDecisionSchema = z.object({ decision: z.enum(['accept', 'changes_requested']), summary: z.string().trim().min(1).max(2000) }).strict();
+export const workerReleaseSchema = workerFenceSchema.extend({ resultKey: z.string().uuid(), reason: z.string().trim().min(1).max(4000) }).strict();
+export const workerResolveSchema = z.object({ attemptId: z.string().uuid(), disposition: z.enum(['retry', 'review']), reason: z.string().trim().min(10).max(2000), retrySafe: z.boolean().default(false) }).strict().refine(value => value.disposition !== 'retry' || value.retrySafe, 'Explicit retry safety assessment is required');
+export const workerResultSchema = workerFenceSchema.extend({ resultKey: z.string().uuid(), outcome: z.enum(['done', 'attention']), summary: z.string().trim().min(1).max(4000), outputId: z.string().uuid().optional(), acceptanceDecision: z.enum(['accept', 'changes_requested']).optional() }).strict().refine(value => value.outcome !== 'done' || value.outputId, 'A verified output is required').refine(value => value.acceptanceDecision !== 'changes_requested' || value.outcome === 'attention', 'Requested changes require review');

@@ -1,5 +1,3 @@
-import { createEvidenceRoutes } from './routes/evidence.js';
-import { createWorkerConsoleRoutes } from './routes/worker-console.js';
 import { Hono } from "hono";
 import type { Database } from "@task-weaver/db";
 import {
@@ -26,7 +24,7 @@ import activityRoutes from "./routes/activity.js";
 import apiKeyRoutes from "./routes/api-keys.js";
 import assistantRoutes from "./routes/assistant.js";
 import contextRoutes from "./routes/context.js";
-import daemonRoutes from "./routes/daemons.js";
+import thinWorkerRoutes from "./routes/thin-workers.js";
 import documentRoutes from "./routes/documents.js";
 import embeddingRoutes from "./routes/embeddings.js";
 import graphqlRoutes from "./graphql/index.js";
@@ -45,6 +43,8 @@ import searchRoutes from "./routes/search.js";
 import taskRoutes from "./routes/tasks.js";
 import versionRoutes from "./routes/version.js";
 import inboundRoutes from "./routes/inbound-events.js";
+import reassessmentRoutes from "./routes/reassessment.js";
+import durableEventRoutes from "./routes/durable-events.js";
 import webhookRoutes from "./routes/webhooks.js";
 import { mcpPool } from "./mcp-pool.js";
 import { createPartnersGatewayRuntime } from "@task-weaver/partners-gateway/runtime";
@@ -117,15 +117,11 @@ const consoleLogger: ApplicationLogger = {
 };
 
 function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
-  const consoleRuntime = createWorkerConsoleRoutes(env);
-  const evidenceRuntime = createEvidenceRoutes(env.TW_EVIDENCE_READ_ENABLED === 'true');
   let webhookQueue = Promise.resolve();
   let pendingWebhooks = 0;
   let webhookBackground: Promise<void> | undefined;
   return {
     apiRoutes: [
-      { id: "worker-console", method: "POST", path: "/api/v1/worker-console", route: consoleRuntime.router },
-      { id: "evidence", method: "POST", path: "/api/v1/evidence", route: evidenceRuntime.router },
       {
         id: "agent-usage",
         method: "GET",
@@ -208,6 +204,9 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
         mountPath: "/api/v1",
         route: scheduleRoutes,
       },
+      { id: "reassessment", method: "GET", path: "/api/v1/reassessment", route: reassessmentRoutes },
+      { id: "durable-events", method: "GET", path: "/api/v1/events", route: durableEventRoutes },
+      { id: "thin-workers", method: "GET", path: "/api/v1/thin-workers", route: thinWorkerRoutes },
       { id: "verified-inbound-events", method: "GET", path: "/api/v1/inbound", route: inboundRoutes },
       { id: "ti-agent", method: "GET", path: "/api/v1/ti", route: tiRoutes },
       {
@@ -222,12 +221,6 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
         method: "POST",
         path: "/api/v1/graphql",
         route: graphqlRoutes,
-      },
-      {
-        id: "daemons",
-        method: "GET",
-        path: "/api/v1/daemons",
-        route: daemonRoutes,
       },
       {
         id: "observability",
@@ -257,8 +250,6 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
       },
     ],
     workers: [
-      { id: "worker-console", start() {}, async stop() { consoleRuntime.close(); } },
-      { id: "evidence", start() {}, async stop() { evidenceRuntime.close(); } },
       {
         id: "durable-webhook-delivery",
         start(context: ApiRuntimeContext) {

@@ -140,9 +140,9 @@ tw project list --json
 ```
 
 Share the [Task Weaver skill](skills/task-weaver/SKILL.md) with your agent for the
-data model, task claiming, and common workflows. It follows the Agent Skills
+data model, task coordination, and common workflows. It follows the Agent Skills
 format and can be copied into a local agent's skills directory. For autonomous
-execution, follow the [daemon pipeline guide](docs/daemon-pipeline-runbook.md).
+execution, follow the [task worker guide](docs/task-worker.md).
 
 ### Container installation and upgrades
 
@@ -213,7 +213,7 @@ for installation, version pinning and the release workflow.
 - [Install, upgrade, and recovery](docs/ce-upgrades.md)
 - [REST API reference](skills/task-weaver/rest-api-reference.md)
 - [Agent workflows](skills/task-weaver/workflows.md)
-- [Daemon pipeline runbook](docs/daemon-pipeline-runbook.md)
+- [Task worker guide](docs/task-worker.md)
 - [Contributing](CONTRIBUTING.md), [governance](GOVERNANCE.md), and [support](SUPPORT.md)
 - [Security reporting](SECURITY.md) and [code of conduct](CODE_OF_CONDUCT.md)
 

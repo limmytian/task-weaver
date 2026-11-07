@@ -30,7 +30,7 @@ export async function reportExecutorObservation(db: Database, daemonId: string, 
   if (duplicate.length) return current;
   // Unsupported checks cannot clear a confirmed block; a successful newer process can verify recovery.
   const prior = current?.observation as ExecutorObservation | undefined;
-  const confirmedRecovery = observation.state === "available" && ((observation.source === "status_query" && observation.windows.length > 0) || observation.source === "execution_success");
+  const confirmedRecovery = observation.state === "available" && ((observation.source === "status_query" && observation.windows.length > 0) || (observation.tool !== "codex" && observation.source === "execution_success"));
   const next = prior && executorObservationBlocks(prior) && !confirmedRecovery && observation.state === "unknown"
     ? { ...prior, eventId: observation.eventId, observedAt: prior.observedAt, staleAt: prior.staleAt } : observation;
   if (current && (current.profileId !== next.profileId || current.poolId !== next.poolId)) throw new ValidationError("Executor profile binding is immutable; register a new daemon identity for a different profile");
@@ -83,6 +83,8 @@ export async function listExecutorAvailabilityHistory(db: Database, daemonId: st
 export async function availableDaemonCapabilities(db: Database, daemonId: string, capabilities: string[]) {
   const profiles = await listExecutorProfiles(db, daemonId);
   const blocked = new Set(profiles.filter(p => p.blocked).map(p => p.tool));
+  // A new or reconnected daemon must establish Codex availability before claiming.
+  if (!profiles.some(p => p.tool === "codex")) blocked.add("codex");
   return capabilities.filter(tool => !blocked.has(tool.replace(/^executor:/, "")));
 }
 
@@ -110,7 +112,7 @@ export async function requestExecutorResume(db: Database, daemonId: string, tool
   const observation = { ...(row.observation as ExecutorObservation), eventId: randomUUID(), source: "manual_resume" as const,
     state: "unknown" as const, failure: null, confidence: "unknown" as const, observedAt: now.toISOString(), staleAt: new Date(now.getTime()+60_000).toISOString(),
     reason: "Operator authorized a bounded retry after correcting executor resources. Availability remains unverified.", windows: [], resetAt: null };
-  await db.update(executorAvailability).set({ observation, observedAt: now, nextCheckAt: new Date(now.getTime()+60_000), version: row.version+1 }).where(predicate);
+  await db.update(executorAvailability).set({ observation, observedAt: now, nextCheckAt: tool === "codex" ? now : new Date(now.getTime()+60_000), version: row.version+1 }).where(predicate);
   await db.insert(executorAvailabilityEvents).values({ daemonId, tool, profileId: row.profileId, eventId: observation.eventId, state: "unknown", reason: observation.reason, observedAt: now });
   await db.insert(activityLog).values({ entityType: "daemon", entityId: daemonId, actorId: actor.id, actorType: actor.type, action: "executor.retry_authorized", metadata: { tool, reason: input.reason.slice(0,500) } });
   return { requested: true, state: "unknown" };

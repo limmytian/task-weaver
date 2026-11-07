@@ -31,13 +31,8 @@ if (!/AI environment excludes Git and provider credentials/.test(credentialTests
   failures.push("AI credential-isolation canary test is missing.");
 }
 
-const daemonTests = read("apps/cli/src/daemon-e2e.test.ts");
-if (!/preserves one successful repository when another delivery remote becomes unavailable/.test(daemonTests)) {
-  failures.push("Independent multi-repository delivery coverage is missing.");
-}
-
 const workspaceTests = read("apps/cli/src/repository-workspace.test.ts");
-for (const marker of ["preserve slice state", "accept added repositories", "isolate concurrent requirements"]) {
+for (const marker of ["thin workspaces isolate parallel attempts", "confirmed commits already on the branch must not be applied twice", "busy branch should be retried before push authorization"]) {
   if (!workspaceTests.includes(marker)) failures.push(`Composite workspace coverage is missing: ${marker}.`);
 }
 

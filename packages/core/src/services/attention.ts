@@ -6,6 +6,7 @@ import { lockIdentityLifecycle } from "./auth-security";
 import { canAccessResource, projectPredicate, requireResource, resourceAuthority, taskResourcePredicate } from "./resource-authorization";
 import { visibleTiRuns } from "./metadata-authorization";
 import { metadataReadScope } from "./metadata-read-scope";
+import { inspectEventCursorIncidents } from "./durable-events";
 import { repositoryPredicate } from "./repository-authorization";
 
 export const attentionDescriptions: Record<AttentionCategory, { reason: string; nextAction: string }> = {
@@ -22,6 +23,19 @@ export function attentionCategory(facts: { recovery: boolean; failure: boolean; 
 
 export function createAttentionService(context: VerifiedRequestContext) {
   return {
+    async incidents(db: Database, projectId?: string) {
+      const projectRows = await db.transaction(async tx => {
+        await lockIdentityLifecycle(tx);
+        const authority = await resourceAuthority(tx as unknown as Database, context);
+        if (authority.bounds || authority.actor.type !== "human") throw new AuthorizationError();
+        const ids = authority.grants.flatMap(g => g.scope === "project" && g.permissions.includes("project.manage") ? [g.projectId] : []);
+        if (projectId && !ids.includes(projectId)) return [];
+        if (!ids.length) return [];
+        return tx.select({ id: projects.id, name: projects.name }).from(projects).where(and(inArray(projects.id, projectId ? [projectId] : ids), eq(projects.status, "active")));
+      });
+      const results = await Promise.all(projectRows.map(async project => ({ project, incidents: await inspectEventCursorIncidents(db, { projectId: project.id }, context) })));
+      return results.flatMap(({ project, incidents }) => incidents.filter(incident => !incident.resolvedAt).map(incident => ({ ...incident, projectName: project.name })));
+    },
     async list(db: Database, raw: unknown) {
       const input = attentionQuerySchema.parse(raw);
       return db.transaction(async transaction => {

@@ -1,12 +1,12 @@
 import { and, asc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
-import { tiAgentRuns, tasks, requirementClaims, executionDelegations, documentTaskLinks, documentRequirementLinks, requirementRepositories, taskRepositories, tiSandboxWorkspaces, activityLog, type Database } from '@task-weaver/db';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { tiAgentRuns, tasks, taskStatusLog, projects, requirements, workerAttempts, requirementClaims, executionDelegations, documentTaskLinks, documentRequirementLinks, requirementRepositories, taskRepositories, tiSandboxWorkspaces, activityLog, type Database } from '@task-weaver/db';
 import { AuthorizationError, AuthenticationError, NotFoundError, ValidationError, type VerifiedRequestContext, type AuthorizationGrant, createTiAgentRunSchema, acquireTiAgentRunSchema, tiWorkerFenceSchema, tiHeartbeatSchema, tiProgressSchema, tiRetrySchema, completeTiAgentRunSchema, cancelTiAgentRunSchema } from '@task-weaver/contracts';
 import { getLiveRequestAuthority } from './api-keys';
 import { loadActivePrincipal, loadPrincipalGrants, intersectGrants, grantsAreCovered } from './auth-principals';
 import { lockIdentityLifecycle } from './auth-security';
 import { requireResource, requireScope, projectPredicate } from './resource-authorization';
 import { requireRepository } from './repository-authorization';
-import { claimRequirement } from './claims';
 import * as implementation from './ti-agent';
 import { reportTiUsage } from './agent-usage';
 import { reportTiAgentUsageSchema } from '@task-weaver/contracts';
@@ -15,7 +15,7 @@ import { insertCapability, liveExecutionAuthority } from './execution-delegation
 
 const operations = new Set(['createRun', 'acquireRun', 'heartbeatRunLease', 'updateRunProgress', 'scheduleRunRetry', 'completeRun']);
 export const isTiExecutionOperation = (name: string) => operations.has(name);
-const safeText = (value: string) => value.replace(/(?:tw|twd|twb)_[0-9a-f]{64}/g, '[REDACTED]');
+const safeText = (value: string) => value.replace(/(?:tw|twd|twb|twa)_[0-9a-f]{64}/g, '[REDACTED]');
 function redact(value: any): any {
   if (typeof value === 'string') return safeText(value);
   if (Array.isArray(value)) return value.map(redact);
@@ -59,6 +59,7 @@ export function createTiExecutionService(context: VerifiedRequestContext) {
           await tx.update(tiSandboxWorkspaces).set({ state: 'cleanup_pending', cancelRequestedAt: now, cleanupRequestedAt: now, nextCleanupAt: now, updatedAt: now })
             .where(and(eq(tiSandboxWorkspaces.runId, id), eq(tiSandboxWorkspaces.ownerId, binding.ownerId), sql`${tiSandboxWorkspaces.state} <> 'deleted'`));
           if (binding.claimId) await tx.delete(requirementClaims).where(and(eq(requirementClaims.id, binding.claimId), eq(requirementClaims.generation, binding.leaseGeneration ?? 0)));
+          if (binding.attemptId) await tx.update(workerAttempts).set({ status: 'attention', completedAt: now, result: { outcome: 'attention', summary: 'Ti run cancelled; inspect the executor before resolving' } }).where(and(eq(workerAttempts.id, binding.attemptId), eq(workerAttempts.status, 'running')));
           await tx.insert(activityLog).values({ entityType: 'ti_agent_run', entityId: id, action: 'cancelled', actorId: actor.id, actorType: actor.type });
           return redact(cancelled);
         }
@@ -74,9 +75,19 @@ export function createTiExecutionService(context: VerifiedRequestContext) {
           await requireResource(tx, authority, 'task', input.taskId, 'resource.write');
           const task = await tx.query.tasks.findFirst({ where: eq(tasks.id, input.taskId) });
           if (!task || task.scope !== 'project' || !task.projectId || !task.requirementId) throw new AuthorizationError();
-          await assertTiTaskReady(tx, task);
+          // Serialize enqueue with ordinary worker acquisition in the same order.
+          await tx.select({ id: projects.id }).from(projects).where(eq(projects.id, task.projectId)).for('update');
+          await tx.select({ id: requirements.id }).from(requirements).where(eq(requirements.id, task.requirementId)).for('update');
+          const [lockedTask] = await tx.select().from(tasks).where(eq(tasks.id, task.id)).for('update');
+          if (!lockedTask || lockedTask.projectId !== task.projectId || lockedTask.requirementId !== task.requirementId) throw new AuthorizationError();
+          if (lockedTask.status === 'in_progress') throw new ValidationError('Task is already in progress');
+          await assertTiTaskReady(tx, lockedTask);
+          const [attempt] = await tx.select({ id: workerAttempts.id }).from(workerAttempts).where(and(eq(workerAttempts.taskId, task.id), inArray(workerAttempts.status, ['running', 'attention']))).limit(1);
+          if (attempt) throw new ValidationError('Task has an unresolved worker attempt');
+          const [activeRun] = await tx.select({ id: tiAgentRuns.id }).from(tiAgentRuns).where(and(eq(tiAgentRuns.taskId, task.id), inArray(tiAgentRuns.status, ['queued', 'running', 'in_review']))).limit(1);
+          if (activeRun) throw new ValidationError('Task already has an active Ti run');
           const executor = await loadActivePrincipal(tx, input.assignedAgentId);
-          if (executor.type !== 'agent' || input.assignedAgentType !== 'agent' || task.assignee !== executor.id || task.assigneeType !== 'agent') throw new AuthorizationError();
+          if (executor.type !== 'agent' || input.assignedAgentType !== 'agent' || lockedTask.assignee !== executor.id || lockedTask.assigneeType !== 'agent') throw new AuthorizationError();
           const executorAuthority = { actor: executor, grants: await loadPrincipalGrants(tx, executor.id) };
           await requireResource(tx, executorAuthority, 'task', task.id, 'execution.run');
           await requireResource(tx, executorAuthority, 'task', task.id, 'resource.write');
@@ -90,7 +101,7 @@ export function createTiExecutionService(context: VerifiedRequestContext) {
           // Only the model owner chooses provider configuration; the recorded initiator remains unchanged.
           const run = await implementation.createRun(tx, input, actor, ownerActor);
           const authorization = tiRunAuthorizationSchema.parse({ initiatorActorId: actor.id, initiatorCredentialId: context.credential.id, initiatorCredentialKind: context.credential.kind,
-            initiatorGrants: authority.grants, modelConfigId: model.config.id, modelVersion: model.config.updatedAt.toISOString(), policyId: policy.id, policyVersion: policy.updatedAt.toISOString(), ownerId, executorActorId: executor.id, executorCredentialId: null, claimId: null, attemptExpiresAt: null, leaseGeneration: null, workerId: null });
+            initiatorGrants: authority.grants, modelConfigId: model.config.id, modelVersion: model.config.updatedAt.toISOString(), policyId: policy.id, policyVersion: policy.updatedAt.toISOString(), ownerId, executorActorId: executor.id, executorCredentialId: null, claimId: null, attemptId: null, attemptExpiresAt: null, leaseGeneration: null, workerId: null });
           const [updated] = await tx.update(tiAgentRuns).set({ authorization, createdBy: actor.id }).where(eq(tiAgentRuns.id, run.id)).returning();
           return redact(updated);
         }
@@ -101,7 +112,7 @@ export function createTiExecutionService(context: VerifiedRequestContext) {
           const candidates = await tx.select({ run: tiAgentRuns }).from(tiAgentRuns).innerJoin(tasks, eq(tasks.id, tiAgentRuns.taskId)).where(and(
             sql`${tiAgentRuns.authorization} IS NOT NULL`, eq(tiAgentRuns.assignedAgentId, authority.actor.id), eq(tiAgentRuns.assignedAgentType, 'agent'),
             projectPredicate(authority, 'execution.run', tasks.projectId), projectPredicate(authority, 'resource.write', tasks.projectId),
-            or(and(eq(tiAgentRuns.status, 'queued'), or(isNull(tiAgentRuns.nextAttemptAt), lte(tiAgentRuns.nextAttemptAt, new Date()))), and(inArray(tiAgentRuns.status, ['running', 'in_review']), lte(tiAgentRuns.leaseExpiresAt, new Date()))),
+            and(eq(tiAgentRuns.status, 'queued'), or(isNull(tiAgentRuns.nextAttemptAt), lte(tiAgentRuns.nextAttemptAt, new Date()))),
           )).orderBy(asc(tiAgentRuns.createdAt)).limit(100);
           for (const { run } of candidates) {
             let live;
@@ -109,17 +120,36 @@ export function createTiExecutionService(context: VerifiedRequestContext) {
               if (error instanceof AuthenticationError || error instanceof AuthorizationError || error instanceof ValidationError || error instanceof NotFoundError) continue;
               throw error;
             }
-            const existing = await tx.query.requirementClaims.findFirst({ where: eq(requirementClaims.requirementId, live.task.requirementId!) });
-            if (existing && existing.expiresAt > new Date()) continue;
-            const running = await tx.select({ id: tiAgentRuns.id }).from(tiAgentRuns).where(and(eq(tiAgentRuns.assignedAgentId, actor.id), inArray(tiAgentRuns.status, ['running', 'in_review']), sql`${tiAgentRuns.leaseExpiresAt} > now()`));
-            if (running.length >= live.policy.maxConcurrentRuns) return null;
+            await tx.select({ id: projects.id }).from(projects).where(eq(projects.id, live.task.projectId!)).for('update');
+            const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, live.task.requirementId!)).for('update');
+            const [task] = await tx.select().from(tasks).where(eq(tasks.id, live.task.id)).for('update');
+            if (!requirement || !['approved', 'in_progress'].includes(requirement.status) || !task || task.projectId !== requirement.projectId || task.requirementId !== requirement.id || !['todo', 'in_review'].includes(task.status)) continue;
+            await assertTiTaskReady(tx, task);
+            const [blocked] = await tx.execute(sql`SELECT 1 AS blocked WHERE
+              EXISTS (SELECT 1 FROM worker_attempts wa WHERE wa.task_id = ${task.id} AND wa.status IN ('running', 'attention')) OR
+              EXISTS (SELECT 1 FROM task_claims tc WHERE tc.task_id = ${task.id}) OR
+              EXISTS (SELECT 1 FROM requirement_claims rc WHERE rc.requirement_id = ${requirement.id}) OR
+              EXISTS (SELECT 1 FROM requirement_dependencies d JOIN requirements b ON b.id = d.depends_on_requirement_id WHERE d.requirement_id = ${requirement.id} AND d.type = 'blocks' AND b.status NOT IN ('done', 'cancelled')) OR
+              EXISTS (SELECT 1 FROM execution_controls ec WHERE ec.id = (SELECT latest.id FROM execution_controls latest WHERE latest.requirement_id = ${requirement.id} ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) AND ec.phase <> 'resumed')`) as unknown as Array<{ blocked: number }>;
+            if (blocked) continue;
+            await requireResource(tx, authority, 'task', task.id, 'execution.run');
+            await requireResource(tx, authority, 'task', task.id, 'resource.write');
+            // An expired or failed attempt still consumes capacity until its effects are inspected.
+            const unresolved = await tx.select({ id: workerAttempts.id }).from(workerAttempts).where(and(eq(workerAttempts.actorId, actor.id), inArray(workerAttempts.status, ['running', 'attention']), sql`${workerAttempts.nodeId} LIKE 'ti:%'`));
+            if (unresolved.length >= live.policy.maxConcurrentRuns) return null;
             const [usage] = await tx.select({ daily: sql<number>`count(*) FILTER (WHERE ${tiAgentRuns.startedAt} >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')`, monthly: sql<number>`count(*) FILTER (WHERE ${tiAgentRuns.startedAt} >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')` }).from(tiAgentRuns).where(eq(tiAgentRuns.assignedAgentId, actor.id));
             if ((live.policy.dailyRunLimit > 0 && Number(usage?.daily) >= live.policy.dailyRunLimit) || (live.policy.monthlyRunLimit > 0 && Number(usage?.monthly) >= live.policy.monthlyRunLimit)) return null;
-            const claim = await claimRequirement(tx, live.task.requirementId!, actor, input.durationMinutes, { workerIndex: `ti:${run.id}:${input.workerId}` });
-            const authorization = { ...live.binding, executorCredentialId: context.credential.id, claimId: claim.id, attemptExpiresAt: new Date(Date.now() + live.policy.runTimeoutSeconds * 1_000).toISOString(), leaseGeneration: claim.generation, workerId: input.workerId };
-            const deadline = new Date(Math.min(Date.parse(authorization.attemptExpiresAt), claim.expiresAt.getTime(), context.credential.expiresAt ? Date.parse(context.credential.expiresAt) : Infinity));
+            const generation = (live.binding.leaseGeneration ?? 0) + 1;
+            const attemptExpiresAt = new Date(Date.now() + live.policy.runTimeoutSeconds * 1_000).toISOString();
+            const deadline = new Date(Math.min(Date.parse(attemptExpiresAt), Date.now() + input.durationMinutes * 60_000, context.credential.expiresAt ? Date.parse(context.credential.expiresAt) : Infinity));
+            const [attempt] = await tx.insert(workerAttempts).values({ projectId: task.projectId!, requirementId: requirement.id, taskId: task.id, actorId: actor.id, credentialId: context.credential.id, workerId: randomUUID(), nodeId: `ti:${run.id}:${input.workerId}`, tokenHash: createHash('sha256').update(randomBytes(32)).digest('hex'), planRevision: requirement.planRevision, expiresAt: deadline }).returning();
+            if (task.status !== 'in_progress') {
+              await tx.update(tasks).set({ status: 'in_progress', version: sql`${tasks.version} + 1`, updatedAt: new Date() }).where(eq(tasks.id, task.id));
+              await tx.insert(taskStatusLog).values({ taskId: task.id, fromStatus: task.status, toStatus: 'in_progress', changedBy: actor.id, changedByType: actor.type, reason: 'Acquired by Ti worker' });
+            }
+            const authorization = { ...live.binding, executorCredentialId: context.credential.id, claimId: null, attemptId: attempt!.id, attemptExpiresAt, leaseGeneration: generation, workerId: input.workerId };
             const [updated] = await tx.update(tiAgentRuns).set({ authorization, status: 'running', leaseOwnerId: input.workerId, leaseOwnerType: 'agent', leaseExpiresAt: deadline, nextAttemptAt: null, startedAt: run.startedAt ?? new Date(), updatedAt: new Date() }).where(eq(tiAgentRuns.id, run.id)).returning();
-            return { ...redact(updated), leaseGeneration: claim.generation };
+            return { ...redact(updated), leaseGeneration: generation };
           }
           return null;
         }
@@ -131,24 +161,28 @@ export function createTiExecutionService(context: VerifiedRequestContext) {
         if (name === 'reportUsage') {
           const usage = reportTiAgentUsageSchema.parse(input);
           if (usage.attempt !== live.run.retryCount) throw new AuthorizationError();
-          return reportTiUsage(tx, id, usage, actor, { runId: live.claim!.id, generation: live.claim!.generation, workerId: live.binding.workerId! });
+          return reportTiUsage(tx, id, usage, actor, { runId: live.attempt!.id, generation: live.binding.leaseGeneration!, workerId: live.binding.workerId! });
         }
         if (name === 'assertRun') return { ...redact(live.run), leaseGeneration: live.binding.leaseGeneration };
         if (name === 'heartbeatRunLease') {
           if (!Number.isInteger(input.durationMinutes) || input.durationMinutes < 1 || input.durationMinutes > 15) throw new ValidationError('Invalid Ti lease duration');
           const deadline = new Date(Math.min(Date.parse(live.binding.attemptExpiresAt!), Date.now() + input.durationMinutes * 60_000, context.credential.expiresAt ? Date.parse(context.credential.expiresAt) : Infinity));
-          await tx.update(requirementClaims).set({ heartbeatAt: new Date(), expiresAt: deadline }).where(eq(requirementClaims.id, live.claim!.id));
+          await tx.update(workerAttempts).set({ heartbeatAt: new Date(), expiresAt: deadline }).where(and(eq(workerAttempts.id, live.attempt!.id), eq(workerAttempts.status, 'running')));
           const [updated] = await tx.update(tiAgentRuns).set({ leaseExpiresAt: deadline, updatedAt: new Date() }).where(eq(tiAgentRuns.id, id)).returning();
           return { ...redact(updated), leaseGeneration: live.binding.leaseGeneration };
         }
         let result;
         if (name === 'updateRunProgress') result = await implementation.updateRunProgress(tx, id, input, actor);
-        else if (name === 'scheduleRunRetry') result = await implementation.scheduleRunRetry(tx, id, input, actor);
+        else if (name === 'scheduleRunRetry') throw new ValidationError('Automatic Ti retry is unavailable; inspect and resolve the attempt before retrying');
         else if (name === 'completeRun') result = await implementation.completeRun(tx, id, input, actor);
         else throw new AuthorizationError();
         if (result && name !== 'updateRunProgress') {
           await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(eq(executionDelegations.tiRunId, id), isNull(executionDelegations.revokedAt)));
-          await tx.delete(requirementClaims).where(eq(requirementClaims.id, live.claim!.id));
+          await tx.update(workerAttempts).set({ status: input.status === 'succeeded' ? 'completed' : 'attention', completedAt: new Date(), result: { outcome: input.status, summary: input.errorMessage ?? input.outputSummary ?? '' } }).where(and(eq(workerAttempts.id, live.attempt!.id), eq(workerAttempts.status, 'running')));
+          if (name === 'completeRun' && input.status === 'succeeded' && live.task.status === 'in_progress') {
+            await tx.update(tasks).set({ status: 'in_review', version: sql`${tasks.version} + 1`, updatedAt: new Date() }).where(eq(tasks.id, live.task.id));
+            await tx.insert(taskStatusLog).values({ taskId: live.task.id, fromStatus: 'in_progress', toStatus: 'in_review', changedBy: actor.id, changedByType: actor.type, reason: 'Ti execution completed' });
+          }
         }
         return redact(result);
       });
@@ -177,7 +211,7 @@ export function createTiExecutionService(context: VerifiedRequestContext) {
         if (!grantsAreCovered(grants, intersectGrants(live.executor!.grants, live.initiator.grants))) throw new AuthorizationError();
         await tx.update(executionDelegations).set({ revokedAt: new Date() }).where(and(eq(executionDelegations.tiRunId, id), isNull(executionDelegations.revokedAt)));
         return insertCapability(tx, { parentCredentialId: context.credential.id, actorId: live.binding.executorActorId, initiatorActorId: live.binding.initiatorActorId,
-          projectId: live.task.projectId!, requirementId: live.task.requirementId!, tiRunId: id, daemonId: null, runId: live.claim!.id, workerIndex: live.claim!.workerIndex!, leaseGeneration: String(input.leaseGeneration),
+          projectId: live.task.projectId!, requirementId: live.task.requirementId!, tiRunId: id, daemonId: null, runId: live.attempt!.id, workerIndex: `ti:${id}:${live.binding.workerId}`, leaseGeneration: String(input.leaseGeneration),
           purpose: 'automation', taskIds, documentIds, sliceIds: live.task.executionSliceId ? [live.task.executionSliceId] : [], repositoryIds, grants }, live.run.leaseExpiresAt!);
       });
     },

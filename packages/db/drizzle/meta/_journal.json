@@ -596,6 +596,146 @@
       "when": 1793761564099,
       "tag": "0084_delivery_git_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1793761564100,
+      "tag": "0085_durable_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1793761564101,
+      "tag": "0086_event_consumer_principals",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1793761564102,
+      "tag": "0087_event_consumer_leases",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1793761564103,
+      "tag": "0088_event_cursor_incidents",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1793761564104,
+      "tag": "0089_reassessment_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1793761564105,
+      "tag": "0090_interrupted_reassessment",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1793761564106,
+      "tag": "0091_managed_child_observations",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1793761564107,
+      "tag": "0092_worker_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1793761564108,
+      "tag": "0093_worker_attempts",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1793761564109,
+      "tag": "0094_thin_worker_presence",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1793761564110,
+      "tag": "0095_worker_plan_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1793761564111,
+      "tag": "0096_thin_worker_activity",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1793761564112,
+      "tag": "0097_legacy_claim_mode_fence",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1793761564113,
+      "tag": "0098_thin_worker_phase_time",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1793761564114,
+      "tag": "0099_thin_git_deliveries",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1793761564115,
+      "tag": "0100_thin_slice_write_fence",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1793761564116,
+      "tag": "0101_worker_acceptance_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1793761564117,
+      "tag": "0102_git_integration_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1793761564118,
+      "tag": "0103_worker_only_cutover",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1793761564119,
+      "tag": "0104_ti_worker_attempt_cutover",
+      "breakpoints": true
     }
   ]
 }

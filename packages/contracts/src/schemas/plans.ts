@@ -108,7 +108,7 @@ export const planTaskSchema = z.object({
   tags: z.array(z.string()).optional(),
   branchName: z.string().optional(),
   expectedAt: z.coerce.date<Date>().optional(),
-  slice: refSchema.optional(),
+  slice: refSchema.optional().refine(value => value === undefined, "Execution slices are retired; use task dependencies"),
   dependsOn: z.array(planTaskDependencySchema).default([]),
   dependencies: z.array(planTaskDependencySchema).default([]),
   documents: z.array(planDocumentRefSchema).default([]),
@@ -147,7 +147,7 @@ export const planRequirementSchema = z.object({
   dependsOn: z.array(planRequirementDependencySchema).default([]),
   dependencies: z.array(planRequirementDependencySchema).default([]),
   documents: z.array(planDocumentRefSchema).default([]),
-  slices: z.array(planSliceSchema).default([]),
+  slices: z.array(planSliceSchema).max(0, "Execution slices are retired; use task dependencies").default([]),
   tasks: z.array(planTaskSchema).default([]),
 }).superRefine((data, ctx) => {
   if (data.workflow && data.workflowPreset) ctx.addIssue({ code: "custom", path: ["workflow"], message: "Specify either a workflow or a workflow preset" });

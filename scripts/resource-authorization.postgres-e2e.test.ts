@@ -232,12 +232,9 @@ test("ordinary resources enforce live authorization consistently across transpor
     const services = createResourceServices(await runtime.verify(new Headers({ authorization: `Bearer ${key.rawKey}` })));
     await assert.rejects(services.taskService.updateTask(db, task.id, { requirementId: otherRequirement.id }, owner.actor), NotFoundError);
   });
-  await t.test("claims require permission and retain holder and execution fences", async () => {
+  await t.test("retired claims remain inaccessible in worker-only projects", async () => {
     await assert.rejects(viewer.service.claimService.claimTask(db, task.id, viewer.actor), AuthorizationError);
-    const claim = await member.service.claimService.claimTask(db, task.id, member.actor);
-    assert.equal(claim.claimedBy, member.actor.id);
-    await assert.rejects(owner.service.claimService.releaseTask(db, task.id, owner.actor), ValidationError);
-    await member.service.claimService.releaseTask(db, task.id, member.actor);
+    await assert.rejects(member.service.claimService.claimTask(db, task.id, member.actor), ValidationError);
     await assert.rejects(member.service.claimService.claimRequirement(db, requirement.id, member.actor), AuthorizationError);
     assert.deepEqual(await outsider.service.claimService.listActiveClaims(db), []);
   });

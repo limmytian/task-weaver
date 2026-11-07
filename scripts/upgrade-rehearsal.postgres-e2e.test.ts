@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { createApiApplication } from "../apps/api/src/application";
 const require = createRequire(new URL("../apps/api/package.json", import.meta.url));
-const { createDb, runMigrations, projects, requirements, tasks, documents, daemons, requirementClaims, tiAgentRuns, tiAgentModelConfigs, tiAgentPolicies, authActors, projectMemberships, apiKeys, authSessions } = require("@task-weaver/db");
+const { createDb, runMigrations, projects, requirements, tasks, documents, daemons, requirementClaims, workerAttempts, tiAgentRuns, tiAgentModelConfigs, tiAgentPolicies, authActors, projectMemberships, apiKeys, authSessions } = require("@task-weaver/db");
 const { createAuthenticationRuntime, createResourceServices, inspectOwnershipMigration, applyOwnershipMigration, createTiExecutionService } = require("@task-weaver/core");
 const { eq, sql } = require("drizzle-orm");
 const { migrate } = require("drizzle-orm/postgres-js/migrator");
@@ -68,6 +68,12 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
   const backup = execFileSync("docker", ["exec", container, "pg_dump", "-U", "fixture", "-d", "tw_auth_e2e", "--clean", "--if-exists"], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
   assert.ok(backup.includes("Sanitized legacy A"));
   await t.test("schema upgrade repeats without manufacturing actors or memberships", async () => {
+    await assert.rejects(runMigrations(databaseUrl!), /Drain legacy daemon activity/);
+    // Explicitly drain the synthetic legacy processes before the cutover.
+    await db.execute(sql`UPDATE task_weaver.daemons SET status = 'offline', active_task_ids = ARRAY[]::uuid[]`);
+    await db.execute(sql`UPDATE task_weaver.requirement_claims SET expires_at = now() - interval '1 second'`);
+    await assert.rejects(runMigrations(databaseUrl!), /Inspect and resolve outstanding Ti runs/);
+    await db.execute(sql`UPDATE task_weaver.ti_agent_runs SET status = 'cancelled', lease_expires_at = now()`);
     await runMigrations(databaseUrl!);
     await runMigrations(databaseUrl!);
     assert.equal((await db.select().from(authActors)).length, 0);
@@ -122,7 +128,6 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
   }
   let executor: any;
   let lane: any;
-  let child: any;
   await t.test("mandatory authentication, explicit replacement keys and migrated data preserve isolation", async () => {
     assert.equal((await call("projects", new Headers(), undefined, "GET")).status, 401);
     assert.equal((await call("projects", new Headers({ authorization: `Bearer ${legacyToken}`, "x-actor-id": owner.actor.id }), undefined, "GET")).status, 401);
@@ -149,61 +154,26 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
     const context = await runtime.verify(headers);
     executor = { headers, context, actor: { id: agent.id, type: "agent" }, issued, service: createResourceServices(context) };
   });
-  await t.test("active and inactive legacy daemons require fresh registration and explicit resume", async () => {
+  await t.test("legacy endpoints remain retired and worker attempts respect fresh authorization", async () => {
     for (const daemon of [active, inactive]) {
-      const registration = await call("daemons/register", executor.headers, { id: daemon.id, name: "Recovered fixture", role: "executor", processStartedAt: new Date().toISOString(), nodeId: "upgrade-fixture", capabilities: ["codex", "live-plan-v1", "tw-v0.3.3-development"], workerCapacity: 4 });
-      assert.equal(registration.status, 201, JSON.stringify(registration.body));
-      assert.equal((await call(`daemons/${daemon.id}/status`, executor.headers, { status: "idle", activeTaskIds: [] })).status, 200);
-      const paused = await call(`daemons/${daemon.id}/apply-requirement`, executor.headers, { projectId: project.id, workerIndex: 0 });
-      assert.equal(paused.body.requirement, null);
-      assert.equal((await call(`daemons/${daemon.id}/control`, owner.headers, { action: "resume", reason: "Explicit disposable recovery" })).status, 200);
+      assert.equal((await call('daemons/register', executor.headers, { id: daemon.id })).status, 404);
+      assert.equal((await call(`daemons/${daemon.id}/apply-requirement`, executor.headers, {})).status, 404);
     }
-    const result = await call(`daemons/${active.id}/apply-requirement`, executor.headers, { projectId: project.id, workerIndex: 0 });
-    assert.equal(result.status, 200, JSON.stringify(result.body));
-    assert.equal(result.body.requirement.id, requirement.id);
-    assert.ok(result.body.leaseGeneration > 5);
-    lane = result.body;
-    const oldProgress = await call(`daemons/${active.id}/progress`, executor.headers, { eventId: randomUUID(), runId: randomUUID(), workerIndex: 0, requirementId: requirement.id, currentTaskId: task.id, phase: "executing", workspaceState: "clean", source: "daemon", leaseGeneration: 5, details: {} });
-    assert.notEqual(oldProgress.status, 200);
-    const issued = await call(`daemons/${active.id}/delegations`, executor.headers, { requirementId: requirement.id, runId: lane.runId, workerIndex: 0, leaseGeneration: lane.leaseGeneration, taskId: task.id });
-    assert.equal(issued.status, 201, JSON.stringify(issued.body));
-    child = issued.body;
-    assert.equal((await createResourceServices(await runtime.verify(new Headers({ authorization: `Bearer ${child.token}` }))).taskService.getTask(db, task.id)).id, task.id);
-  });
-  await t.test("expired recovered leases invalidate children and reacquire with a new fence", async () => {
-    await db.update(requirementClaims).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(requirementClaims.requirementId, requirement.id));
-    await assert.rejects(runtime.verify(new Headers({ authorization: `Bearer ${child.token}` })));
-    const blocked = await call(`daemons/${active.id}/apply-requirement`, executor.headers, { projectId: project.id, workerIndex: 0 });
-    assert.equal(blocked.body.requirement, null, "Interrupted in-progress work is not silently resumed");
-    const controls = await call(`daemons/${active.id}/execution-controls`, executor.headers, undefined, "GET");
-    const control = controls.body.items.find((row: any) => row.runId === lane.runId);
-    assert.ok(control, "Expired execution must have a durable stop/reassessment record");
-    for (const phase of ["received", "stopping", "stopped", "reconciling"]) {
-      const acknowledged = await call(`daemons/${active.id}/execution-controls/${control.id}/ack`, executor.headers, { phase, revision: control.revision, workspace: { nodeId: "upgrade-fixture", state: "clean", summary: "Explicit disposable stop and local inspection" } });
-      assert.equal(acknowledged.status, 200, JSON.stringify(acknowledged.body));
-    }
-    const result = await call(`daemons/${active.id}/execution-controls/${control.id}/resume`, executor.headers, { workerIndex: 0 });
-    assert.equal(result.status, 200, JSON.stringify(result.body));
-    assert.equal(result.body.requirement.id, requirement.id);
-    assert.ok(result.body.leaseGeneration > lane.leaseGeneration);
-    await assert.rejects(executor.service.claimService.releaseRequirement(db, requirement.id, executor.actor, "Old fence", active.id, lane.leaseGeneration));
+    const fresh = await owner.service.requirementService.createRequirement(db, { projectId: project.id, title: 'Recovered worker task', status: 'approved' }, owner.actor);
+    const freshTask = await owner.service.taskService.createTask(db, { projectId: project.id, requirementId: fresh.id, title: 'Inspect recovered task' }, owner.actor);
+    const workerId = randomUUID();
+    const acquired = await call('thin-workers/acquire', executor.headers, { projectId: project.id, requirementId: fresh.id, workerId, nodeId: 'upgrade-fixture', executor: 'codex', model: 'fixture', durationSeconds: 120 });
+    assert.equal(acquired.status, 200, JSON.stringify(acquired.body));
+    assert.equal(acquired.body.task.id, freshTask.id);
+    lane = acquired.body;
+    await db.update(workerAttempts).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(workerAttempts.id, lane.attempt.id));
+    const stale = await call('thin-workers/heartbeat', executor.headers, { attemptId: lane.attempt.id, workerId, token: lane.token, durationSeconds: 120 });
+    assert.notEqual(stale.status, 200);
+    const blocked = await call('thin-workers/acquire', executor.headers, { projectId: project.id, requirementId: fresh.id, workerId: randomUUID(), nodeId: 'upgrade-fixture', executor: 'codex', model: 'fixture', durationSeconds: 120 });
+    assert.equal(blocked.body.attempt, null);
+    const resolved = await call('thin-workers/resolve', owner.headers, { attemptId: lane.attempt.id, disposition: 'retry', retrySafe: true, reason: 'Executor stopped and workspace inspected' });
+    assert.equal(resolved.status, 200, JSON.stringify(resolved.body));
     assert.equal((await applyOwnershipMigration(db, manifest, before.fingerprint)).replayed, true);
-    assert.equal((await db.select().from(requirementClaims).where(eq(requirementClaims.requirementId, requirement.id)))[0].generation, result.body.leaseGeneration);
-  });
-  await t.test("workspace recovery preserves dirty diffs and quarantines conflicted or missing state", async () => {
-    for (const [index, workspaceState] of ["dirty", "conflicted", "missing"].entries()) {
-      const req = await owner.service.requirementService.createRequirement(db, { projectId: project.id, title: `${workspaceState} recovery`, status: "approved" }, owner.actor);
-      const work = await owner.service.taskService.createTask(db, { projectId: project.id, requirementId: req.id, title: "Pending diff" }, owner.actor);
-      const workerIndex = index + 1;
-      const claim = await executor.service.claimService.claimRequirement(db, req.id, executor.actor, 2, { daemonId: active.id, workerIndex });
-      await executor.service.taskService.updateTaskStatus(db, work.id, "in_progress", executor.actor, "Disposable interrupted work", false, { daemonId: active.id, runId: claim.id, leaseGeneration: claim.generation });
-      const result = await call(`daemons/${active.id}/reconcile`, executor.headers, { runId: claim.id, workerIndex, requirementId: req.id, leaseGeneration: claim.generation, reason: "Explicit disposable workspace recovery", workspaceState, pendingDiffSummary: "Synthetic unreviewed changes" });
-      assert.equal(result.status, 200, JSON.stringify(result.body));
-      assert.equal(result.body.recoveryDisposition, workspaceState === "dirty" ? "resume" : "quarantine");
-      assert.equal(result.body.progress.pendingDiffSummary, "Synthetic unreviewed changes");
-      assert.equal((await owner.service.taskService.getTask(db, work.id)).status, workspaceState === "dirty" ? "todo" : "in_review");
-      await executor.service.claimService.releaseRequirement(db, req.id, executor.actor, "Recovery recorded without execution", active.id, claim.generation);
-    }
   });
   await t.test("Ti requires new policy authorization, current task capability and fresh executor fence", async () => {
     assert.equal((await db.select().from(tiAgentRuns))[0].status, "cancelled");
@@ -229,7 +199,7 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
   });
   await t.test("revocation survives recovery and no old identity resumes from headers", async () => {
     await runtime.identity.revokeKey(owner.headers, agent.id, executor.issued.id);
-    assert.equal((await call(`daemons/${active.id}/heartbeat`, executor.headers)).status, 401);
+    assert.equal((await call(`thin-workers/acquire`, executor.headers, {})).status, 401);
     await db.update(authSessions).set({ createdAt: new Date(Date.now() - 60000), expiresAt: new Date(Date.now() - 1000) }).where(eq(authSessions.id, stranger.context.credential.id));
     await assert.rejects(runtime.verify(stranger.headers));
     await runtime.authentication.logout(owner.headers);
@@ -246,6 +216,11 @@ test("sanitized exact-0.3.2 upgrade and constrained recovery rehearsal", { skip:
     assert.equal((await db.select({ id: requirements.id }).from(requirements)).length, 1);
     assert.equal((await db.select({ id: documents.id }).from(documents)).length, 2);
     assert.equal((await db.select({ actorId: daemons.actorId }).from(daemons).where(eq(daemons.id, active.id)))[0].actorId, "tw-cli");
+    await assert.rejects(runMigrations(databaseUrl!), /Drain legacy daemon activity/);
+    await db.execute(sql`UPDATE task_weaver.daemons SET status = 'offline', active_task_ids = ARRAY[]::uuid[]`);
+    await db.execute(sql`UPDATE task_weaver.requirement_claims SET expires_at = now() - interval '1 second'`);
+    await assert.rejects(runMigrations(databaseUrl!), /Inspect and resolve outstanding Ti runs/);
+    await db.execute(sql`UPDATE task_weaver.ti_agent_runs SET status = 'cancelled', lease_expires_at = now()`);
     await runMigrations(databaseUrl!);
     assert.equal((await db.select().from(authActors)).length, 0);
     assert.equal((await db.select().from(projectMemberships)).length, 0);

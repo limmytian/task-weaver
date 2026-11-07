@@ -34,6 +34,7 @@ test("executor availability is durable, ordered, isolated, authorized and budget
   const daemon=await register(a),sibling=await register(a),outsider=await register(b);
   let tick=Date.now()-10000;
   const observation=(tool:"codex"|"claude",state:ExecutorObservation["state"],poolId:string|null="shared"):ExecutorObservation=>({eventId:randomUUID(),tool,profileId:"fixture-profile",poolId,toolVersion:"fixture",authenticationMode:"subscription",state,failure:state==="cooling_down"?"quota_exhausted":null,source:state==="available"?"status_query":"structured_error",confidence:"high",observedAt:new Date(tick+=100).toISOString(),staleAt:new Date(Date.now()+60000).toISOString(),resetAt:null,retryAfterSeconds:null,reason:"Sanitized fixture observation",windows:state==="available"?[{bucket:"codex",window:"primary",usedPercent:10,remainingPercent:90,durationMinutes:300,resetAt:null}]:[]});
+  assert.deepEqual(await availableDaemonCapabilities(db,daemon,["codex","executor:codex"]), []);
   await a.service.reportExecutorObservation(db,sibling,observation("codex","unknown"));
   const blocked=observation("codex","cooling_down");await a.service.reportExecutorObservation(db,daemon,blocked);
   assert.equal((await a.service.listExecutorProfiles(db,sibling))[0]!.observation.state,"cooling_down");
@@ -59,6 +60,15 @@ test("executor availability is durable, ordered, isolated, authorized and budget
   await a.service.reportExecutorObservation(db,daemon,{...observation("claude","available",null),authenticationMode:"api_key"});
   assert.equal((await matchAvailableExecutor(db,daemon,["codex","claude"],[],project.id)).eligible,false);
   assert.equal((await matchAvailableExecutor(db,daemon,["codex","claude"],["executor:codex"],project.id)).eligible,false);
+  const fresh = observation("codex","available");
+  await a.service.reportExecutorObservation(db,daemon,fresh);
+  assert.equal((await matchAvailableExecutor(db,daemon,["codex","executor:codex"],[],project.id)).eligible,true);
+  const expired = { ...observation("codex","available"), staleAt: new Date(tick + 1).toISOString() };
+  await a.service.reportExecutorObservation(db,daemon,expired);
+  assert.equal((await matchAvailableExecutor(db,daemon,["codex","executor:codex"],[],project.id)).eligible,false);
+  await a.service.reportExecutorObservation(db,daemon,{...observation("codex","unknown"),source:"unsupported"});
+  assert.equal((await matchAvailableExecutor(db,daemon,["codex","executor:codex"],[],project.id)).eligible,false);
+  await a.service.reportExecutorObservation(db,daemon,observation("codex","cooling_down"));
   const managerContext=await auth.resolve(headers),manager=createResourceServices(managerContext).daemonService;
   const row=(await manager.listExecutorProfiles(db,daemon)).find(p=>p.tool==="codex")!;
   await assert.rejects(manager.requestExecutorResume(db,daemon,"codex",{expectedVersion:row.version-1,reason:"Fixture correction"},{id:login.account.actorId,type:"human"}),ConflictError);

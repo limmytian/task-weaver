@@ -42,14 +42,6 @@ function summarizeTask(row: Record<string, unknown>): Record<string, unknown> {
 
 
 
-function leaseFenceFromEnvironment() {
-  const leaseGeneration = Number(process.env.TW_REQUIREMENT_LEASE_GENERATION)
-  const daemonId = process.env.TW_DAEMON_ID
-  return Number.isInteger(leaseGeneration) && leaseGeneration > 0 && daemonId
-    ? { leaseGeneration, daemonId, runId: process.env.TW_DAEMON_RUN_ID }
-    : {}
-}
-
 export function registerTasks(program: Command): void {
   const task = program.command('task').description('manage tasks')
 
@@ -142,7 +134,6 @@ export function registerTasks(program: Command): void {
     .option('--personal', 'create a personal task for the current actor')
     .requiredOption('--title <title>', 'task title')
     .option('--description <desc>', 'task description')
-    .option('--slice <id>', 'execution slice ID')
     .option('--priority <priority>', 'low|medium|high|urgent (default: medium)')
     .option('--assignee <id>', 'assignee ID')
     .option('--assignee-type <type>', 'human|agent')
@@ -158,7 +149,6 @@ export function registerTasks(program: Command): void {
       }
       const body = {
         requirementId: opts.req,
-        executionSliceId: opts.slice,
         title: opts.title,
         description: opts.description,
         priority: opts.priority,
@@ -181,8 +171,6 @@ export function registerTasks(program: Command): void {
     .description('update task fields')
     .option('--title <title>', 'new title')
     .option('--description <desc>', 'new description')
-    .option('--slice <id>', 'execution slice ID')
-    .option('--clear-slice', 'remove task from its execution slice')
     .option('--assignee <id>', 'new assignee')
     .option('--assignee-type <type>', 'human|agent')
     .option('--priority <priority>', 'new priority')
@@ -198,8 +186,6 @@ export function registerTasks(program: Command): void {
       if (opts.reason !== undefined) body.reason = opts.reason
       if (opts.title) body.title = opts.title
       if (opts.description) body.description = opts.description
-      if (opts.slice) body.executionSliceId = opts.slice
-      if (opts.clearSlice) body.executionSliceId = null
       if (opts.assignee) body.assignee = opts.assignee
       if (opts.assigneeType) body.assigneeType = opts.assigneeType
       if (opts.priority) body.priority = opts.priority
@@ -224,7 +210,6 @@ export function registerTasks(program: Command): void {
         status,
         reason: opts.reason,
         force: opts.force,
-        ...leaseFenceFromEnvironment(),
       })
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)

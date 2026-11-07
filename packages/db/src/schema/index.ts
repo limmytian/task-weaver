@@ -42,3 +42,13 @@ export * from "./inbound-events";
 export * from "./execution-controls";
 
 export * from "./plan-drafts";
+
+export * from "./durable-events";
+export * from "./reassessment-grants";
+
+export * from "./managed-child-observations";
+export * from "./worker-attempts";
+export * from "./thin-workers";
+export * from "./worker-plan-receipts";
+export * from "./thin-git-deliveries";
+export * from "./worker-acceptance-snapshots";

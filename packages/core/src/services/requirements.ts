@@ -134,13 +134,9 @@ export async function describeWorkflowEvidence(db: Database, requirementId: stri
     return { ...base, availability: output.availability === "retired" ? "retired" as const : "available" as const, kind: "attachment" as const, documentId: file.documentId, fileVersionId: file.id, fileVersion: file.version, mimeType: file.mimeType, originalFilename: file.originalFilename, sizeBytes: file.sizeBytes, sha256: file.sha256 };
   }
   if (output.type === "local" && output.nodeId && output.sizeBytes !== null && Number.isSafeInteger(output.sizeBytes) && output.sizeBytes >= 0 && output.sha256 && /^[a-f0-9]{64}$/.test(output.sha256)) {
-    const online = await db.query.daemons.findMany({ where: and(eq(daemons.nodeId, output.nodeId), eq(daemons.actorId, output.createdBy), ne(daemons.status, "offline"), sql`${daemons.lastHeartbeatAt} > now() - interval '90 seconds'`) });
     const availability = output.availability !== "available" ? output.availability
       : output.sizeBytes > evidenceLimits.verifiedArtifactBytes ? "too_large" as const
-      : !output.nodePublicKey || output.createdByType !== "agent" ? "unsupported" as const
-      : !online.length ? "offline" as const
-      : !online.some(daemon => daemon.capabilities?.includes("evidence-read-v1")) ? "unsupported" as const
-      : "available" as const;
+      : "unsupported" as const;
     return { ...base, kind: "local" as const, availability, nodeId: output.nodeId, sizeBytes: output.sizeBytes, sha256: output.sha256, ...evidenceAttachmentMetadata(output.relativePath) };
   }
   if (output.type === "attachment" && output.referenceId && output.attachmentFileVersionId) {
@@ -195,6 +191,12 @@ export async function retireWorkflowOutput(db: Database, requirementId: string, 
 }
 
 export async function addWorkflowInput(db: Database, requirementId: string, input: AddWorkflowInputInput, actor: Actor) {
+  return db.transaction(tx => addWorkflowInputInTransaction(tx as unknown as Database, requirementId, input, actor));
+}
+
+async function addWorkflowInputInTransaction(db: Database, requirementId: string, input: AddWorkflowInputInput, actor: Actor) {
+  // Serialize input registration with transactional input resolution.
+  await db.select({ id: requirements.id }).from(requirements).where(eq(requirements.id, requirementId)).for("update");
   const requirement = await getRequirementOrThrow(db, requirementId);
   if (!requirement.workflow) throw new ValidationError("Workflow inputs require a configured workflow");
   await assertRequirementLease(db, requirementId, actor, input);
@@ -807,6 +809,8 @@ export async function createExecutionSlice(
   compact = false,
 ) {
   const requirement = await getRequirementOrThrow(db, requirementId);
+  const [project] = await db.select({ workerMode: projects.workerMode }).from(projects).where(eq(projects.id, requirement.projectId));
+  if (project?.workerMode === "thin") throw new ValidationError("Execution slices are historical in thin worker projects");
   const orderIndex = input.orderIndex ?? await nextExecutionSliceOrder(db, requirementId);
 
   const [slice] = await db
@@ -861,6 +865,8 @@ export async function updateExecutionSlice(
   compact = false,
 ) {
   const existing = await getExecutionSlice(db, sliceId, compact);
+  const [project] = await db.select({ workerMode: projects.workerMode }).from(projects).where(eq(projects.id, existing.requirement.projectId));
+  if (project?.workerMode === "thin") throw new ValidationError("Execution slices are historical in thin worker projects");
   const { taskIds, leaseGeneration, daemonId, runId, ...fields } = input;
 
   if ((input.status && !["todo", "cancelled"].includes(input.status)) || leaseGeneration !== undefined || daemonId !== undefined) {
@@ -908,6 +914,8 @@ export async function updateExecutionSlice(
 
 export async function deleteExecutionSlice(db: Database, sliceId: string, actor: Actor) {
   const existing = await getExecutionSlice(db, sliceId);
+  const [project] = await db.select({ workerMode: projects.workerMode }).from(projects).where(eq(projects.id, existing.requirement.projectId)).for("update");
+  if (project?.workerMode === "thin") throw new ValidationError("Execution slices are historical in thin worker projects");
 
   await db
     .update(tasks)

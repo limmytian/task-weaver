@@ -21,6 +21,8 @@ export interface AsyncCommandOptions {
   onStdout?: (chunk: Buffer) => void
   onStderr?: (chunk: Buffer) => void
   onSpawn?: (pid?: number) => void
+  /** Called only for an exit event from the spawned direct child. */
+  onExit?: (status: number | null, signal: NodeJS.Signals | null) => void
 }
 
 export interface AsyncCommandResult {
@@ -168,6 +170,10 @@ export async function runCommand(
 
     child.on('error', (error: NodeJS.ErrnoException) => {
       spawnError = error
+    })
+
+    child.once('exit', (status, signal) => {
+      try { options.onExit?.(status, signal) } catch { /* Observers cannot interrupt execution. */ }
     })
 
     child.on('close', (status, signal) => {

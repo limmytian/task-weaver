@@ -1,7 +1,9 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { executionControls, executionDelegations, executionSlices, requirementClaims, requirementDependencies, requirementRepositories, requirements, taskDependencies, taskClaims, tasks, tiAgentRuns, workflowInputs, workflowOutputs, type Database } from '@task-weaver/db';
+import { executionControls, executionDelegations, executionSlices, requirementClaims, requirementDependencies, requirementRepositories, requirements, taskDependencies, taskClaims, tasks, tiAgentRuns, tiSandboxWorkspaces, workflowInputs, workflowOutputs, type Database } from '@task-weaver/db';
 import { isExecutionPlanChange } from './planning-impact-policy';
-import { emitDurable } from './durable-events';
+import { appendDurableEvent, emitDurable } from './durable-events';
+import { randomUUID } from 'node:crypto';
+import { parkRevokedTiAttempts } from './execution-revocation';
 
 /** Runs under the resource-service identity lock, before the mutation changes its old relationships. */
 export async function planningImpact(db: Database, operation: string, call: any[]): Promise<string[]> {
@@ -77,16 +79,56 @@ export async function planningImpact(db: Database, operation: string, call: any[
   return [...affected];
 }
 
+/** Capture only non-content metadata. Text, identities and cross-resource references are
+ * deliberately omitted: event readers may have narrower access than the editor. */
+export async function planningChangeSnapshot(db: Database, operation: string, call: any[]) {
+  const fields: Record<string, string[]> = {
+    updateTask: ['title', 'description', 'requirementId', 'executionSliceId', 'assignee', 'assigneeType', 'branchName', 'tags', 'requestedProvider', 'requestedModel'],
+    updateRequirement: ['title', 'description', 'branchName', 'workflow', 'workflowPreset', 'tags', 'status'],
+    updateTaskStatus: ['status'],
+  };
+  const allowed = fields[operation];
+  if (!allowed) return undefined;
+  const row = operation === 'updateRequirement' ? await db.query.requirements.findFirst({ where: eq(requirements.id, call[1]) })
+    : await db.query.tasks.findFirst({ where: eq(tasks.id, call[1]) });
+  if (!row) return undefined;
+  const input = operation === 'updateTaskStatus' ? { status: call[2] } : (call[2] ?? {});
+  const changedFields = allowed.filter(key => key in input && JSON.stringify(input[key]) !== JSON.stringify((row as any)[key]));
+  return { changedFields, status: 'status' in row ? row.status : undefined, requirementId: operation === 'updateRequirement' ? call[1] : 'requirementId' in row ? row.requirementId : undefined };
+}
+
 /** Called after a successful mutation, in its transaction. Notification delivery is not the fence. */
-export async function invalidatePlanningExecutions(db: Database, ids: string[], reason: string, previousClaims: Array<typeof requirementClaims.$inferSelect> = []) {
+export async function invalidatePlanningExecutions(db: Database, ids: string[], reason: string, previousClaims: Array<typeof requirementClaims.$inferSelect> = [], changedTaskId?: string, change?: { changedFields: string[]; status?: string; requirementId?: string | null }, afterStatus?: string) {
   for (const id of [...new Set(ids)].sort()) {
     const [requirement] = await db.update(requirements).set({ planRevision: sql`${requirements.planRevision} + 1` }).where(eq(requirements.id, id)).returning();
     if (!requirement) continue;
+    // Each revision gets an immutable event in the same transaction. Do not collapse
+    // records: consumers can aggregate consecutive revisions without losing history.
+    const changedTask = changedTaskId ? await db.query.tasks.findFirst({ where: and(eq(tasks.id, changedTaskId), eq(tasks.requirementId, id)) }) : undefined;
+    const scope = changedTask ? { requirementId: id, taskId: changedTask.id } : { requirementId: id };
+    // A downstream consumer may not be allowed to inspect the changed source.
+    const localChange = change?.requirementId === id && (!['updateTask', 'updateTaskStatus'].includes(reason) || changedTask) ? change : undefined;
+    await appendDurableEvent(db as unknown as Parameters<typeof appendDurableEvent>[0], {
+      id: randomUUID(), projectId: requirement.projectId, type: 'plan.changed', version: 1, scope,
+      occurredAt: new Date(), payload: {
+        oldRevision: requirement.planRevision - 1, newRevision: requirement.planRevision,
+        cause: reason,
+        affectedTasks: changedTask ? { status: 'partial', ids: [changedTask.id] } : { status: 'unavailable' },
+        subjectTask: changedTask ? { status: 'available', id: changedTask.id } : { status: 'unavailable' },
+        changedFields: localChange ? { status: 'available', fields: localChange.changedFields } : { status: 'unavailable' },
+        contentValues: { status: 'unavailable' },
+        before: localChange?.changedFields.includes('status') && localChange.status ? { status: 'available', values: { status: localChange.status } } : { status: 'unavailable' },
+        after: localChange?.changedFields.includes('status') && afterStatus ? { status: 'available', values: { status: afterStatus } } : { status: 'unavailable' },
+        links: { requirement: `/api/v1/requirements/${id}`, inputs: `/api/v1/requirements/${id}/workflow-inputs`, evidence: `/api/v1/requirements/${id}/workflow-outputs` },
+      },
+    });
     const done = await db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.requirementId, id), eq(tasks.status, 'done'))).limit(1);
     const outputs = await db.select({ id: workflowOutputs.id }).from(workflowOutputs).where(eq(workflowOutputs.requirementId, id)).limit(1);
     if (done.length || outputs.length) await db.update(requirements).set({ evidenceNeedsReview: true }).where(eq(requirements.id, id));
     const affectedTasks = db.select({ id: tasks.id }).from(tasks).where(eq(tasks.requirementId, id));
-    await db.update(tiAgentRuns).set({ status: 'cancelled', completedAt: new Date(), leaseExpiresAt: new Date() }).where(and(inArray(tiAgentRuns.taskId, affectedTasks), inArray(tiAgentRuns.status, ['queued', 'running', 'in_review'])));
+    const cancelledRuns = await db.update(tiAgentRuns).set({ status: 'cancelled', completedAt: new Date(), leaseExpiresAt: new Date() }).where(and(inArray(tiAgentRuns.taskId, affectedTasks), inArray(tiAgentRuns.status, ['queued', 'running', 'in_review']))).returning({ id: tiAgentRuns.id, authorization: tiAgentRuns.authorization });
+    await parkRevokedTiAttempts(db, cancelledRuns);
+    if (cancelledRuns.length) await db.update(tiSandboxWorkspaces).set({ state: 'cleanup_pending', cancelRequestedAt: new Date(), cleanupRequestedAt: new Date(), nextCleanupAt: new Date(), updatedAt: new Date() }).where(and(inArray(tiSandboxWorkspaces.runId, cancelledRuns.map(run => run.id)), sql`${tiSandboxWorkspaces.state} <> 'deleted'`));
     await db.update(executionDelegations).set({ revokedAt: new Date() }).where(and(eq(executionDelegations.requirementId, id), isNull(executionDelegations.revokedAt)));
     const claim = previousClaims.find(claim => claim.requirementId === id) ?? await db.query.requirementClaims.findFirst({ where: eq(requirementClaims.requirementId, id) });
     if (!claim?.daemonId) continue;

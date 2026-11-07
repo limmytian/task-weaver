@@ -61,16 +61,12 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   assert.equal((await success("tw_requirements_get", { id: requirement.id })).tasks, undefined);
   assert.equal((await success("tw_tasks_get", { id: task.id })).comments, undefined);
   assert.equal((await success("tw_tasks_list", { projectId: f.project.id })).meta.total, 1);
-  await success("tw_tasks_claim", { id: task.id });
   const agent = await f.identity.createAgent(f.owner.headers, { displayName: "Competing MCP participant" });
   await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: "member", explicitPermissions: [] });
   const agentKey = await f.identity.issueKey(f.owner.headers, agent.id, { name: "Competing MCP key", expiresAt: null, grants: [{ scope: "project", projectId: f.project.id, permissions: ["resource.read", "resource.write"] }] });
-  assert.equal((await call("tw_tasks_claim", { id: task.id }, agentKey.rawKey)).error?.code, "claim_conflict");
-  await success("tw_tasks_heartbeat", { id: task.id, extendMinutes: 10 });
   await success("tw_task_comments_add", { id: task.id, content: "MCP progress" });
   const comments = await success("tw_task_comments_list", { id: task.id, pageSize: 1 });
   assert.equal(comments.meta.total, 1); assert.equal(comments.items[0].authorId, f.owner.context.actor.id);
-  await success("tw_tasks_release", { id: task.id, reason: "Fixture handoff" });
   const update = await success("tw_tasks_update", { id: task.id, patch: { title: "Updated task", expectedVersion: task.version } });
   assert.ok(update.version > task.version);
   assert.equal((await call("tw_tasks_update", { id: task.id, patch: { title: "Stale", expectedVersion: task.version } })).error?.code, "version_conflict");
@@ -79,24 +75,15 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const blocker = await success("tw_tasks_create", { projectId: f.project.id, requirementId: requirement.id, title: "Blocker" });
   const dep = await success("tw_task_dependencies_add", { id: task.id, dependsOnTaskId: blocker.id });
   assert.equal((await success("tw_task_dependencies_list", { id: task.id })).meta.total, 1);
-  await success("tw_tasks_claim", { id: blocker.id });
   const collaborationGraph = await success("tw_dependencies_graph", { kind: "task", id: task.id });
   assert.equal(collaborationGraph.nodes.length, 2);
   assert.equal(collaborationGraph.edges[0].source, task.id);
   assert.equal(collaborationGraph.edges[0].target, blocker.id);
-  assert.equal(collaborationGraph.claims[0].entityId, blocker.id);
-  assert.equal(collaborationGraph.claims[0].claimedByType, "human");
   const boundedGraph = await success("tw_dependencies_graph", { kind: "task", id: blocker.id, maxNodes: 1, maxBytes: 2048 });
   assert.equal(boundedGraph.nodes.length, 1);
   assert.equal(boundedGraph.meta.truncated, true);
   assert.ok(Buffer.byteLength(JSON.stringify(boundedGraph)) <= 2048);
   assert.equal((await call("tw_dependencies_graph", { kind: "task", id: task.id }, outsiderKey.rawKey)).ok, false);
-  await success("tw_tasks_release", { id: blocker.id });
-  assert.equal((await call("tw_tasks_claim", { id: blocker.id }, agentKey.rawKey)).ok, true);
-  const agentGraph = await success("tw_dependencies_graph", { kind: "task", id: task.id });
-  assert.equal(agentGraph.claims[0].claimedBy, agent.id);
-  assert.equal(agentGraph.claims[0].claimedByType, "agent");
-  assert.equal((await call("tw_tasks_release", { id: blocker.id }, agentKey.rawKey)).ok, true);
   await createResourceServices(f.owner.context).taskService.addTaskNote(db, task.id, "Bounded collaboration note", true, f.owner.context.actor);
   const collaboration = await success("tw_tasks_context", { id: task.id, sections: ["comments", "notes", "claim"] });
   assert.equal(collaboration.sections.comments.items[0].authorType, "human");
@@ -239,8 +226,8 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   assert.equal((await local.callTool({ name: "tw_tasks_get", arguments: { id: task.id } })).isError, undefined);
   assert.equal((await local.callTool({ name: "tw_tasks_status", arguments: { id: task.id, status: "done" } })).isError, true);
   // 0.3.11 planning and context use the same authenticated executor on both transports.
-  const skill = await success("tw_documents_create", { projectId: f.project.id, title: "MCP planning guidance", content: "Use ordered slices and preserve claims.", docType: "skill" });
-  assert.equal((await success("tw_context_get", { id: skill.id })).content, "Use ordered slices and preserve claims.");
+  const skill = await success("tw_documents_create", { projectId: f.project.id, title: "MCP planning guidance", content: "Use task dependencies and preserve evidence.", docType: "skill" });
+  assert.equal((await success("tw_context_get", { id: skill.id })).content, "Use task dependencies and preserve evidence.");
   assert((await success("tw_context_search", { projectId: f.project.id, intent: "planning" })).items.some((row: any) => row.id === skill.id));
   assert.equal((await call("tw_context_get", { id: skill.id }, outsiderKey.rawKey)).ok, false);
   assert.equal((await call("tw_context_get", { id: doc.id })).ok, false);
@@ -282,7 +269,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const optionalResolution = await success("tw_skill_packages_resolve", { packageId: optionalRoot.id });
   assert.equal(optionalResolution.nodes.length, 1);
   assert.equal(optionalResolution.unavailable.length, 1);
-  const plan = { projectId: f.project.id, documents: [{ key: "design", title: "Planning design", content: "Stage plan" }], requirements: [{ key: "planned", title: "Planned MCP requirement", status: "approved", documents: ["design"], slices: [{ key: "one", title: "First" }, { key: "two", title: "Second" }, { key: "three", title: "Third" }], tasks: [{ key: "first", title: "First task", slice: "one" }, { key: "second", title: "Second task", slice: "two", dependsOn: ["first"] }, { key: "third", title: "Third task", slice: "three", dependsOn: ["second"] }] }] };
+  const plan = { projectId: f.project.id, documents: [{ key: "design", title: "Planning design", content: "Stage plan" }], requirements: [{ key: "planned", title: "Planned MCP requirement", status: "approved", documents: ["design"], tasks: [{ key: "first", title: "First task" }, { key: "second", title: "Second task", dependsOn: ["first"] }, { key: "third", title: "Third task", dependsOn: ["second"] }] }] };
   const staged = await success("tw_plan_stage", { plan: { projectId: f.project.id, requirements: [{ key: "draft", title: "MCP staged requirement" }] } });
   assert.equal(staged.projectId, f.project.id);
   assert.equal(staged.webPath, `/projects/${f.project.id}/plans/${staged.draftId}`);
@@ -297,16 +284,14 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   assert.equal((await call("tw_plan_apply", { plan: { ...plan, documents: [{ key: "design", title: "Changed", content: "Changed" }] }, idempotencyKey })).error?.code, "conflict");
   const plannedRequirement = firstApply.refs.requirements[0].id;
   const slices = await success("tw_execution_slices_list", { id: plannedRequirement, pageSize: 2 });
-  assert.equal(slices.items.length, 2); assert.equal(slices.meta.nextPage, 2);
-  const firstSlice = slices.items[0];
-  const changedSlice = await success("tw_execution_slices_update", { id: firstSlice.id, expectedUpdatedAt: firstSlice.updatedAt, patch: { resultSummary: "First handoff" } });
-  assert.notEqual(changedSlice.updatedAt, firstSlice.updatedAt);
-  assert.equal((await call("tw_execution_slices_update", { id: firstSlice.id, expectedUpdatedAt: firstSlice.updatedAt, patch: { resultSummary: "Stale" } })).error?.code, "version_conflict");
-  assert.equal((await call("tw_execution_slices_create", { id: plannedRequirement, input: { title: "Foreign task", taskIds: [task.id] } })).ok, false);
-  const sliceServices = createResourceServices(f.owner.context);
-  await sliceServices.claimService.claimRequirement(db, plannedRequirement, { id: f.owner.context.actor.id, type: "human" }, 5);
-  assert.equal((await call("tw_execution_slices_create", { id: plannedRequirement, input: { title: "Wrong lease holder" } }, agentKey.rawKey)).ok, false);
-  await sliceServices.claimService.releaseRequirement(db, plannedRequirement, { id: f.owner.context.actor.id, type: "human" });
+  assert.equal(slices.items.length, 0);
+  for (const name of ["tw_execution_slices_create", "tw_execution_slices_update", "tw_tasks_claim", "tw_tasks_heartbeat", "tw_tasks_release"]) {
+    assert.equal(mcpServerCatalog.some(tool => tool.name === name), false);
+    for (const rawKey of [key.rawKey, agentKey.rawKey]) {
+      const retired = await f.app.request(`http://127.0.0.1:3001/api/v1/mcp-server/tools/${name}`, { method: "POST", headers: headers(rawKey), body: "{}" });
+      assert.equal(retired.status, 400);
+    }
+  }
   assert.equal((await call("tw_tasks_status", { id: firstApply.refs.tasks[1].id, status: "in_progress" })).ok, false);
   const context = await success("tw_requirements_context", { id: plannedRequirement, sections: ["tasks", "slices", "documents", "dependencies"], limit: 1, maxBytes: 2048 });
   assert(Buffer.byteLength(JSON.stringify(context), "utf8") <= 2048);
@@ -320,7 +305,8 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   const remoteContext = await remote.callTool({ name: "tw_requirements_context", arguments: { id: plannedRequirement } });
   assert.equal(remoteContext.isError, undefined);
   const invalid = { projectId: f.project.id, requirements: [{ key: "invalid", title: "Rollback plan", slices: [{ key: "bad-slice", title: "Bad" }], tasks: [{ key: "bad-task", title: "Bad", slice: "missing-slice" }] }] };
-  assert.equal((await call("tw_plan_apply", { plan: invalid, idempotencyKey: randomUUID() })).ok, false);
+  const invalidResponse = await f.app.request('http://127.0.0.1:3001/api/v1/mcp-server/tools/tw_plan_apply', { method: 'POST', headers: headers(), body: JSON.stringify({ plan: invalid, idempotencyKey: randomUUID() }) });
+  assert.equal(invalidResponse.status, 400);
   const afterInvalid = await success("tw_requirements_list", { projectId: f.project.id, query: "Rollback plan" });
   assert.equal(afterInvalid.meta.total, 0);
   const depsPage1 = await success("tw_requirements_context", { id: plannedRequirement, sections: ["tasks"], limit: 1 });
@@ -337,7 +323,7 @@ test("MCP transports use live scoped authority and preserve collaboration guards
   await writeLocal.connect(new StdioClientTransport({ command: process.execPath, args: ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url)), "mcp", "serve"], env: { ...env, TW_CONFIG_DIR: directory, TW_API_URL: `http://${host}`, TW_API_KEY: key.rawKey }, stderr: "pipe" }));
   t.after(() => writeLocal.close());
   for (const [transportName, client] of [["HTTP", remote], ["stdio", writeLocal]] as const) {
-    const input = { projectId: f.project.id, requirements: [{ key: "transport", title: `${transportName} planning`, status: "approved", slices: [{ key: "start", title: "Start" }, { key: "finish", title: "Finish" }], tasks: [{ key: "transport-task", title: "Transport task", slice: "start" }] }] };
+    const input = { projectId: f.project.id, requirements: [{ key: "transport", title: `${transportName} planning`, status: "approved", tasks: [{ key: "transport-task", title: "Transport task" }] }] };
     const invoke = async (name: string, arguments_: Record<string, unknown>) => { const result = await client.callTool({ name, arguments: arguments_ }); assert.notEqual(result.isError, true, JSON.stringify(result)); return (result.structuredContent as any).data; };
     assert.deepEqual((await invoke("tw_skill_packages_resolve", { packageId: resolvedPackage.id, version: "2.0" })).nodes, resolved.nodes);
     assert.equal((await invoke("tw_context_get", { id: skill.id, expectedVersion: skill.version })).version, skill.version);
@@ -345,10 +331,6 @@ test("MCP transports use live scoped authority and preserve collaboration guards
     assert.equal((await invoke("tw_context_search", { projectId: f.project.id, intent: "planning" })).items.length > 0, true);
     assert.equal((await invoke("tw_plan_validate", { plan: input })).dryRun, true);
     const applied = await invoke("tw_plan_apply", { plan: input, idempotencyKey: randomUUID() });
-    const createdSlice = await invoke("tw_execution_slices_create", { id: applied.refs.requirements[0].id, input: { title: "Additional stage" } });
-    assert(createdSlice.id);
-    const stage = (await invoke("tw_execution_slices_list", { id: applied.refs.requirements[0].id })).items[0];
-    assert.equal((await invoke("tw_execution_slices_update", { id: stage.id, expectedUpdatedAt: stage.updatedAt, patch: { resultSummary: "Transport handoff" } })).resultSummary, "Transport handoff");
     assert.equal((await invoke("tw_tasks_context", { id: applied.refs.tasks[0].id })).entity.id, applied.refs.tasks[0].id);
     const memoryInput = { title: `${transportName} continuity memory`, content: "Preserve the verified handoff between sessions.", projectId: f.project.id, confirmed: true, idempotencyKey: randomUUID() };
     const [saved, replayed] = await Promise.all([invoke("tw_memories_record", memoryInput), invoke("tw_memories_record", memoryInput)]);
@@ -894,10 +876,8 @@ test("MCP transports use live scoped authority and preserve collaboration guards
       await invoke("tw_search", { projectId: f.project.id, query: "MCP" });
       const req = await invoke("tw_requirements_create", { projectId: f.project.id, title: `Inspector ${transportName}`, status: "approved" });
       const item = await invoke("tw_tasks_create", { projectId: f.project.id, requirementId: req.id, title: "Inspector collaboration" });
-      await invoke("tw_tasks_claim", { id: item.id });
       await invoke("tw_task_comments_add", { id: item.id, content: "Inspector progress evidence" });
       await invoke("tw_tasks_status", { id: item.id, status: "in_progress" });
-      await invoke("tw_tasks_release", { id: item.id });
       const visible = await f.app.request(`/api/v1/tasks/${item.id}`, { headers: f.owner.headers });
       assert.equal(visible.status, 200);
       const record = await visible.json() as { status: string; comments: unknown[] };

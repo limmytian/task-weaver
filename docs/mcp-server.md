@@ -20,8 +20,8 @@ bootstrap includes the same object as `capabilityBootstrap`.
 An external agent does not need local Task Weaver skill files. Connect with its
 own scoped key, inspect `tools/list`, then call `tw_context_bootstrap`. CLI agents
 can use `tw context bootstrap --json`; the REST response exposes the same
-`capabilityBootstrap` object. The daemon reads that object through its own worker
-broker, so supervisor-only capabilities are not advertised to the child.
+`capabilityBootstrap` object. Ti uses a task-bounded execution delegation; local task workers do not pass their
+supervisor key to the model process.
 
 Use the current task and project to search a few relevant summaries, then read
 selected exact skill/package versions and memory sources. Instruction permission,
@@ -35,7 +35,7 @@ review. Before finishing, verify the actual artifact and report concise asset
 references and outcomes; self-reported use is not verified tool evidence. Save
 useful memories only under current write authority and explicit source review and
 confirmation. See [worker capability access](worker-capability-access.md) for the
-bounded daemon modes and [capability contracts](capabilities.md) for exact budgets.
+current task-worker and Ti boundaries and [capability contracts](capabilities.md) for exact budgets.
 
 ## Credentials
 
@@ -160,8 +160,8 @@ read the selected record without expanding its entire history. Search returns
 up to 50 combined matches (20 by default), `hasMore`, matched entity types and
 document search fallback metadata. Search has no page-count guarantee.
 
-A typical collaboration is: read context, create a requirement and task, claim
-the task, append a progress comment, update status, then release the claim.
+A typical collaboration is: read context, create a requirement and task, append
+a progress comment and update status. Task workers acquire their own fenced attempts.
 Project tasks require a requirement under the same project. Set `scope=personal`
 for personal tasks or document creation; no fabricated project is needed.
 Use task/document `expectedVersion` when updating fields to detect competing
@@ -169,7 +169,7 @@ edits. Status calls preserve existing dependency/workflow checks but do not
 provide expectedVersion protection. `cancelled` remains terminal.
 
 All calls enforce live key grants, ownership, both ends of relationships,
-claim ownership, requirement membership and workflow completion rules. Task
+requirement membership and workflow completion rules. Task
 completion does not accept or integrate a requirement. The MCP catalog has no
 shell executor, arbitrary REST proxy, daemon controls, Registry management,
 account administration or release/deployment tools. Attachment file transfer,
@@ -221,7 +221,7 @@ Verified client matrix on 2026-10-18 (Node.js 24.17.0):
 | Client | Transport | Evidence |
 | --- | --- | --- |
 | Official TypeScript SDK 1.31.0 | stdio subprocess and HTTP | Discovery, authenticated reads, read-only rejection and live revocation |
-| MCP Inspector 2.11.0 CLI | stdio and HTTP with explicit Bearer header | Project/search/create/claim/comment/status/release workflow on disposable data |
+| MCP Inspector 2.11.0 CLI | stdio and HTTP with explicit Bearer header | Project/search/create/comment/status workflow on disposable data |
 
 To repeat Inspector acceptance, install that version outside the product
 workspace and set `TW_MCP_INSPECTOR_BIN` to its launcher JavaScript entry before
@@ -235,13 +235,13 @@ and OAuth-only clients are not implied by the generic examples above. See [中�
 
 ## Planning and context tools
 
-Planning/context tools support skill discovery, execution slices, atomic plans and bounded context. Each credential sees only its authorized subset; use live tool discovery for the current catalog:
+Planning/context tools support skill discovery, historical slice reads, atomic plans and bounded context. Each credential sees only its authorized subset; use live tool discovery for the current catalog:
 
 | Tools | Purpose |
 | --- | --- |
 | `tw_context_bootstrap`, `tw_context_search`, `tw_context_get` | Discover collaboration guidance and read individual skill documents |
 | `tw_skill_packages_list`, `tw_skill_packages_get`, `tw_skill_package_files`, `tw_skill_package_read` | Discover active packages and read safe metadata or bounded text |
-| `tw_execution_slices_list`, `tw_execution_slices_create`, `tw_execution_slices_update` | Plan ordered stages and persist handoff summaries |
+| `tw_execution_slices_list` | Read retained historical slice summaries |
 | `tw_plan_validate`, `tw_plan_apply` | Preview and atomically apply a structured project plan |
 | `tw_tasks_context`, `tw_requirements_context` | Retrieve selected, bounded collaboration context |
 
@@ -262,7 +262,7 @@ storage object keys, server paths and arbitrary manifests. Retrieved instruction
 are content for the client to assess, not authority to execute commands.
 
 A plan is a JSON object, with a project id and symbolic keys for requirements,
-tasks, slices and documents. For example, pass this object as `plan` to
+tasks and documents. For example, pass this object as `plan` to
 `tw_plan_validate`:
 
 ```json
@@ -272,10 +272,9 @@ tasks, slices and documents. For example, pass this object as `plan` to
   "requirements": [{
     "key": "feature", "title": "Feature", "status": "approved",
     "documents": ["design"],
-    "slices": [{ "key": "api", "title": "API" }, { "key": "clients", "title": "Clients" }],
     "tasks": [
-      { "key": "api-task", "title": "Implement API", "slice": "api" },
-      { "key": "client-task", "title": "Integrate clients", "slice": "clients", "dependsOn": ["api-task"] }
+      { "key": "api-task", "title": "Implement API" },
+      { "key": "client-task", "title": "Integrate clients", "dependsOn": ["api-task"] }
     ]
   }]
 }
@@ -291,7 +290,7 @@ with a different key or credential. Replays recheck live access to referenced
 and returned resources. A denied replay does not mean the original write failed.
 
 Plan writes and the receipt commit atomically. Invalid plans roll back. Limits
-include 10 requirements, 20 documents, 20 slices per requirement, 50 tasks per
+include 10 requirements, 20 documents, 50 tasks per
 requirement and 100 tasks total, at most 100 entries per array and 2000 graph
 containers, in addition to the common request deadline/size limits. Plans are
 project-only and may reference existing entities only in that same project.
@@ -300,13 +299,8 @@ Nested workflow/branch/executor/identity controls, comments/notes and filesystem
 start at `draft` or `approved`. Validate again when project state changes; preview
 is not a reservation or guarantee of later success.
 
-Slice creation accepts `{id: requirementId, input: {...}}`; update accepts
-`{id: sliceId, expectedUpdatedAt, patch: {...}}`. Use the exact current ISO
-`updatedAt`, including milliseconds. Both operations respect active requirement
-leases; daemon-owned lanes cannot be taken over through these tools. Task ids
-must belong to the same requirement. Slice lists return records without nested
-task histories and support `page`/`pageSize`. Sequential execution guards remain
-in force; `allowParallel` is an intentional planning choice, not a force bypass.
+Historical slices can be listed for audit. Slice creation and updates are retired;
+use task dependencies for new work.
 
 Context reads accept `id`, selected `sections`, `limit` (1–20), `offset`, and
 `maxBytes` (2048–65536, default 32768). Sections are `parent`, `tasks`, `slices`,

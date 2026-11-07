@@ -84,3 +84,13 @@ export { createTiSandboxCleanup } from "./ti-sandbox-cleanup";
 export { createInboundSourceService, acceptInboundEvent, processInboundEventOnce, InboundRateLimitError } from "./inbound-events";
 
 export { createExecutionControlService } from "./execution-controls";
+
+export { appendDurableEvent, replayDurableEvents, acknowledgeDurableEvents, getDurableEventCheckpoint, acquireDurableConsumerLease, renewDurableConsumerLease, acknowledgeDurableEventsFenced, recordEventCursorIncident, inspectEventCursorIncidents, resolveEventCursorIncident } from "./durable-events";
+export * from "./reassessment-grants";
+
+export * from "./reassessment-decisions";
+
+export * from "./interrupted-reassessment";
+
+export { createManagedChildObservationService } from "./managed-child-observations";
+export * from './thin-worker';

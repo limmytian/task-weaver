@@ -1,3 +1,4 @@
+import { replayDurableEvents, getDurableEventCheckpoint, acknowledgeDurableEvents } from "../services/durable-events";
 import { readOperationalContext } from "./operational-context";
 import { readDocumentHistory } from "./document-history";
 import { readDependencyGraph } from "./dependency-graph";
@@ -35,7 +36,7 @@ function paged(value: unknown) {
 export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequestContext, storage?: SkillPackageStorageAdapter, runtimeProfiles?: string, readOnly = false, registryPool?: McpPool): McpExecutor {
   const liveDb = db;
   const services = createResourceServices(identity);
-  const { projectService: projects, requirementService: requirements, taskService: tasks, documentService: documents, claimService: claims } = services;
+  const { projectService: projects, requirementService: requirements, taskService: tasks, documentService: documents } = services;
   const actor = { id: identity.actor.id, type: identity.actor.type };
   const owner = { personalOwnerId: personalResourceOwnerId(identity), personalOwnerType: "human" as const };
   return secureMcpExecutor(db, identity, async (name, raw, signal, db) => {
@@ -47,6 +48,9 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
     const id = raw.id as string;
     const page = { page: raw.page as number, pageSize: raw.pageSize as number };
     switch (name) {
+      case "tw_events_list": return replayDurableEvents(db, raw as unknown as Parameters<typeof replayDurableEvents>[1], identity);
+      case "tw_events_cursor": return getDurableEventCheckpoint(db, raw as unknown as Parameters<typeof getDurableEventCheckpoint>[1], identity);
+      case "tw_events_ack": return acknowledgeDurableEvents(db, raw as unknown as Parameters<typeof acknowledgeDurableEvents>[1], identity);
       case "tw_repositories_list": return readOperationalContext(db, identity, "repositories", raw);
       case "tw_repository_readiness": return readOperationalContext(db, identity, "readiness", raw);
       case "tw_schedules_list": return readOperationalContext(db, identity, "schedules", raw);
@@ -76,9 +80,7 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
       case "tw_plan_apply": return submitMcpPlan(db, identity, { plan: raw.plan, idempotencyKey: raw.idempotencyKey as string }, signal);
       case "tw_tasks_context": return readMcpContext(db, identity, "task", raw as unknown as Parameters<typeof readMcpContext>[3], signal);
       case "tw_requirements_context": return readMcpContext(db, identity, "requirement", raw as unknown as Parameters<typeof readMcpContext>[3], signal);
-      case "tw_execution_slices_list": return mcpSlices(db, identity, "list", raw);
-      case "tw_execution_slices_create": return mcpSlices(db, identity, "create", raw);
-      case "tw_execution_slices_update": return mcpSlices(db, identity, "update", raw);
+      case "tw_execution_slices_list": return mcpSlices(db, identity, raw);
       case "tw_context_bootstrap": {
         await services.contextService.getBootstrapContext(db);
         return readCapabilityBootstrap(visibleTools, runtimeProfiles);
@@ -107,9 +109,6 @@ export function createAuthorizedMcpExecutor(db: Database, identity: VerifiedRequ
       case "tw_tasks_create": return tasks.createTask(db, createTaskSchema.parse({ ...raw, ...(raw.scope === "personal" ? owner : {}) }), actor);
       case "tw_tasks_update": return tasks.updateTask(db, id, updateTaskSchema.parse(raw.patch), actor);
       case "tw_tasks_status": return tasks.updateTaskStatus(db, id, raw.status as "todo" | "in_progress" | "in_review" | "done" | "cancelled", actor, raw.reason as string | undefined);
-      case "tw_tasks_claim": return claims.claimTask(db, id, actor, raw.durationMinutes as number);
-      case "tw_tasks_heartbeat": return claims.heartbeatClaim(db, id, actor, raw.extendMinutes as number);
-      case "tw_tasks_release": return claims.releaseTask(db, id, actor, raw.reason as string | undefined);
       case "tw_task_comments_list": return tasks.listTaskCommentsPage(db, id, page);
       case "tw_task_comments_add": return tasks.addTaskComment(db, id, raw.content as string, actor);
       case "tw_task_dependencies_list": return tasks.listTaskDependenciesPage(db, id, page);
