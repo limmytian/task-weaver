@@ -27,3 +27,18 @@ test('poll failure and lost notification are recovered by the next authoritative
   assert.equal(stops, 1)
   monitor.close()
 })
+
+test('reports failed and overlapping refreshes so event replay can retry', async () => {
+  let resolveRead!: (rows: ExecutionControl[]) => void
+  let fail = false
+  const monitor = monitorExecutionControl({ runId: 'run', list: async () => {
+    if (fail) throw new Error('revoked')
+    return await new Promise<ExecutionControl[]>(resolve => { resolveRead = resolve })
+  }, acknowledge: async () => {}, stop: () => {}, intervalMs: 100000 })
+  assert.equal(await monitor.tick(), false)
+  resolveRead([])
+  await new Promise(resolve => setImmediate(resolve))
+  fail = true
+  assert.equal(await monitor.tick(), false)
+  monitor.close()
+})

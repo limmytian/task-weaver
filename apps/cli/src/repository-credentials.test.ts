@@ -24,6 +24,16 @@ test('AI environment excludes Git and provider credentials', () => {
   assert.equal(env.GIT_ASKPASS, '/usr/bin/false')
 })
 
+test('AI environment preserves only credential-free proxy configuration', () => {
+  const env = buildAiEnvironment({ HTTPS_PROXY: 'http://proxy.example:7890', http_proxy: 'http://user:secret@proxy.example:7890', ALL_PROXY: 'socks5h://proxy.example:1080', NO_PROXY: 'localhost,127.0.0.1', no_proxy: 'user@host', GITHUB_TOKEN: 'secret' })
+  assert.equal(env.HTTPS_PROXY, 'http://proxy.example:7890')
+  assert.equal(env.ALL_PROXY, 'socks5h://proxy.example:1080')
+  assert.equal(env.NO_PROXY, 'localhost,127.0.0.1')
+  assert.equal(env.http_proxy, undefined)
+  assert.equal(env.no_proxy, undefined)
+  assert.equal(env.GITHUB_TOKEN, undefined)
+})
+
 test('SSH readiness requires explicit consent, an agent, and verified host state', async () => {
   const root = await mkdtemp(join(tmpdir(), 'tw-repository-credential-'))
   const socket = join(root, 'agent.sock')

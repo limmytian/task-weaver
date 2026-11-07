@@ -77,8 +77,8 @@ try {
     [null, "scripts/webhook-authorization.postgres-e2e.test.ts"],
     [null, "scripts/daemon-authorization.postgres-e2e.test.ts"],
     [null, "scripts/ti-execution.postgres-e2e.test.ts"],
-    [null, "scripts/authenticated-pipeline.postgres-e2e.test.ts"],
-    [null, "scripts/execution-delegation.postgres-e2e.test.ts"],
+    [null, "scripts/thin-worker-runner.postgres-e2e.test.mts"],
+    // Ti capability boundaries are covered by ti-execution with the current worker authority.
     [null, "scripts/ownership-migration.postgres-e2e.test.ts"],
     [null, "scripts/upgrade-rehearsal.postgres-e2e.test.ts"],
   ]) {
@@ -107,7 +107,7 @@ try {
       ],
       {
         encoding: "utf8",
-        timeout: 180_000,
+        timeout: testFile === "scripts/ti-execution.postgres-e2e.test.ts" && process.env.TW_TI_REAL_MODEL_URL ? 420_000 : 180_000,
         maxBuffer: 4 * 1024 * 1024,
         env: {
           ...process.env,

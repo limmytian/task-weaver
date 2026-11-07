@@ -4,6 +4,7 @@ import { requirements, executionSlices } from "./requirements";
 import { tasks } from "./tasks";
 import { documents, documentFileVersions } from "./documents";
 import { requirementRepositories } from "./repositories";
+import { workerAttempts } from "./worker-attempts";
 
 export const workflowOutputs = pgTable("workflow_outputs", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -11,6 +12,7 @@ export const workflowOutputs = pgTable("workflow_outputs", {
   planRevision: integer("plan_revision").default(0).notNull(),
   workflowRevision: integer("workflow_revision").default(1).notNull(),
   taskId: uuid("task_id").references(() => tasks.id, { onDelete: "set null" }),
+  workerAttemptId: uuid("worker_attempt_id").references(() => workerAttempts.id, { onDelete: "restrict" }),
   executionSliceId: uuid("execution_slice_id").references(() => executionSlices.id, { onDelete: "set null" }),
   requirementRepositoryId: uuid("requirement_repository_id").references(() => requirementRepositories.id, { onDelete: "set null" }),
   type: text("type", { enum: ["comment", "attachment", "url", "local", "git_branch", "git_pr"] }).notNull(),

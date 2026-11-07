@@ -25,6 +25,21 @@ import type { RequirementStatus } from "@task-weaver/contracts";
 
 const DEFAULT_DURATION_MINUTES = 30;
 
+/** Serialize legacy acquisition with a project mode change or thin acquisition. */
+async function lockLegacyProjects(db: Database, taskIds: string[], requirementId?: string) {
+  if (!taskIds.length && !requirementId) return;
+  const taskIdsSql = taskIds.length ? sql.join(taskIds.map(id => sql`${id}::uuid`), sql`, `) : sql`NULL::uuid`;
+  const rows = await db.execute(sql`
+    SELECT p.id, p.worker_mode FROM projects p
+    WHERE p.id IN (SELECT project_id FROM tasks WHERE id IN (${taskIdsSql}))
+       OR p.id IN (SELECT project_id FROM requirements WHERE id = ${requirementId ?? null}::uuid)
+    ORDER BY p.id FOR UPDATE
+  `);
+  if ((rows as unknown as Array<{ worker_mode: string }>).some(row => row.worker_mode === 'thin')) {
+    throw new ValidationError('Legacy acquisition is disabled for this project');
+  }
+}
+
 export async function claimTask(
   db: Database,
   taskId: string,
@@ -35,6 +50,7 @@ export async function claimTask(
   const expiresAt = new Date(now.getTime() + durationMinutes * 60_000);
 
   const { claim, projectId } = await db.transaction(async (tx) => {
+    await lockLegacyProjects(tx as unknown as Database, [taskId]);
     // Lock the task row to serialize concurrent claims
     const rows = await tx.execute(
       sql`SELECT id, status, assignee, project_id FROM tasks WHERE id = ${taskId} FOR UPDATE`,
@@ -151,30 +167,24 @@ export async function heartbeatClaim(
   actor: Actor,
   extendMinutes: number = DEFAULT_DURATION_MINUTES,
 ) {
-  const existing = await db.query.taskClaims.findFirst({
-    where: eq(taskClaims.taskId, taskId),
-  });
-
-  if (!existing) {
-    throw new NotFoundError("No active claim found for this task");
-  }
-
-  if (existing.claimedBy !== actor.id) {
-    throw new ValidationError(
-      `Only the claim holder '${existing.claimedBy}' can send heartbeat`,
-    );
-  }
-
-  const now = new Date();
-  const newExpiry = new Date(now.getTime() + extendMinutes * 60_000);
-
+  // Test expiry in the update itself, so a delayed heartbeat cannot revive
+  // an expired lease. Attempt-specific fencing requires a separate protocol.
   const [updated] = await db
     .update(taskClaims)
-    .set({ heartbeatAt: now, expiresAt: newExpiry })
-    .where(eq(taskClaims.id, existing.id))
+    .set({
+      heartbeatAt: sql`clock_timestamp()`,
+      expiresAt: sql`clock_timestamp() + ${extendMinutes * 60_000} * interval '1 millisecond'`,
+    })
+    .where(and(
+      eq(taskClaims.taskId, taskId),
+      eq(taskClaims.claimedBy, actor.id),
+      eq(taskClaims.claimedByType, actor.type),
+      sql`${taskClaims.expiresAt} > clock_timestamp()`,
+    ))
     .returning();
 
-  return updated!;
+  if (!updated) throw new NotFoundError("No active claim found for this task");
+  return updated;
 }
 
 export async function getTaskClaim(db: Database, taskId: string) {
@@ -228,6 +238,7 @@ export async function claimRequirement(
   const expiresAt = new Date(now.getTime() + durationMinutes * 60_000);
 
   const { claim, projectId } = await db.transaction(async (tx) => {
+    await lockLegacyProjects(tx as unknown as Database, [], requirementId);
     const rows = await tx.execute(
       sql`SELECT id, status, project_id, lease_generation FROM requirements WHERE id = ${requirementId} FOR UPDATE`,
     );
@@ -545,6 +556,7 @@ export async function batchClaimTasks(
   const expiresAt = new Date(now.getTime() + durationMinutes * 60_000);
 
   const { claimed, projectIds } = await db.transaction(async (tx) => {
+    await lockLegacyProjects(tx as unknown as Database, taskIds);
     // Clean expired claims for requested tasks
     for (const taskId of taskIds) {
       await tx

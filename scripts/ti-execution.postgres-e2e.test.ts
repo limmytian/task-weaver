@@ -4,8 +4,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createApiApplication } from "../apps/api/src/application";
 import { createRequire } from "node:module";
 const apiRequire = createRequire(new URL("../apps/api/package.json", import.meta.url));
-const { createDb, runMigrations, authInstanceState, authRateLimits, tiAgentRuns, tiAgentModelConfigs, tiAgentPolicies, executionDelegations, requirementClaims, assistantConversations, assistantActions, memories, skillPackages, tiSandboxWorkspaces } = apiRequire("@task-weaver/db");
-const { createAuthenticationRuntime, createResourceServices, createTiExecutionService, apiKeyService, assistantService, createScheduleSchema } = apiRequire("@task-weaver/core");
+const { createDb, runMigrations, authInstanceState, authRateLimits, tiAgentRuns, tiAgentModelConfigs, tiAgentPolicies, executionDelegations, requirementClaims, requirements, workerAttempts, assistantConversations, assistantActions, memories, skillPackages, tiSandboxWorkspaces } = apiRequire("@task-weaver/db");
+const { createAuthenticationRuntime, createResourceServices, createTiExecutionService, createThinWorkerService, apiKeyService, assistantService, createScheduleSchema } = apiRequire("@task-weaver/core");
 const { eq, like } = apiRequire("drizzle-orm");
 const { createGatewayTwAuthority } = apiRequire("../../packages/partners-gateway/src/tw-authority.ts");
 const databaseUrl = process.env.TW_AUTH_E2E_DATABASE_URL;
@@ -63,7 +63,7 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     const context = await runtime.verify(headers);
     return { headers, context, issued, service: createResourceServices(context), actor: { id: context.actor.id, type: context.actor.type } };
   }
-  const executor = await key(agent.id, owner, project.id);
+  let executor = await key(agent.id, owner, project.id);
   const foreign = await key(otherAgent.id, outsider, other.id, ["resource.read", "resource.write", "execution.run"]);
   await db.insert(tiAgentModelConfigs).values({ ownerId: owner.actor.id, ownerType: "human", provider: "fixture", model: "safe", enabled: true, isDefaultAgent: true, credentialStatus: "valid" });
   await db.insert(tiAgentPolicies).values({ ownerId: owner.actor.id, ownerType: "human", enabled: true, executionMode: "dry_run" });
@@ -76,6 +76,23 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
   let acquired: any;
   let capability: any;
   const worker = { assignedAgentId: agent.id, workerId: "fixture-worker", durationMinutes: 15 };
+  await t.test("Ti enqueue and ordinary worker acquisition cannot take the same task", async () => {
+    const isolated = await owner.service.requirementService.createRequirement(db, { projectId: project.id, title: 'Concurrent work', status: 'approved' }, owner.actor);
+    const target = await owner.service.taskService.createTask(db, { projectId: project.id, requirementId: isolated.id, title: 'Contested task', assignee: agent.id, assigneeType: 'agent' }, owner.actor);
+    const [queued, taken] = await Promise.allSettled([
+      owner.service.tiAgentService.createRun(db, { taskId: target.id, assignedAgentId: agent.id, assignedAgentType: 'agent' }, owner.actor),
+      createThinWorkerService(executor.context).acquire(db, { projectId: project.id, requirementId: isolated.id, workerId: randomUUID(), nodeId: 'concurrency-test', executor: 'codex', model: 'fixture', durationSeconds: 120 }),
+    ]);
+    assert.equal(taken.status, 'fulfilled');
+    if (taken.status !== 'fulfilled') throw taken.reason;
+    const claimed = taken.value.attempt;
+    assert.notEqual(queued.status === 'fulfilled', Boolean(claimed));
+    if (queued.status === 'fulfilled') await createTiExecutionService(owner.context).invoke(db, 'cancelRun', [queued.value.id, {}]);
+    if (claimed) {
+      await createThinWorkerService(executor.context).result(db, { attemptId: claimed.id, token: taken.value.token!, workerId: claimed.workerId, resultKey: randomUUID(), outcome: 'attention', summary: 'Test worker stopped' });
+      await createThinWorkerService(owner.context).resolve(db, { attemptId: claimed.id, disposition: 'review', reason: 'Test worker stopped and inspected' });
+    }
+  });
   await t.test("queue records the real initiator without accepting owner overrides or implicit personal execution", async () => {
     await assert.rejects(() => foreign.service.tiAgentService.createRun(db, { taskId: task.id, assignedAgentId: agent.id, assignedAgentType: "agent" }, foreign.actor));
     await assert.rejects(() => owner.service.tiAgentService.resolveModel(db, { ownerId: outsider.actor.id, target: "agent" }, owner.actor));
@@ -135,6 +152,33 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     assert.ok(!JSON.stringify(result).includes(personalMemory.id));
     await assert.rejects(() => tools.operation("create_project", { name: "Escaped" }));
   });
+  await t.test("removing a linked document invalidates the child capability permanently", async () => {
+    const document = await owner.service.documentService.createDocument(db, { projectId: project.id, title: 'Delegated context', content: 'Bound context' }, owner.actor);
+    const link = await owner.service.documentService.linkDocumentToTask(db, document.id, task.id, 'references', owner.actor);
+    capability = await supervisor.issueDelegation(db, run.id, fence());
+    const original = capability.token;
+    let child = createResourceServices(await runtime.verify(new Headers({ authorization: `Bearer ${original}` })));
+    assert.equal((await child.documentService.getDocument(db, document.id)).id, document.id);
+    await owner.service.documentService.unlinkDocumentFromTask(db, link.id);
+    await assert.rejects(() => runtime.verify(new Headers({ authorization: `Bearer ${original}` })));
+    await owner.service.documentService.linkDocumentToTask(db, document.id, task.id, 'references', owner.actor);
+    await assert.rejects(() => runtime.verify(new Headers({ authorization: `Bearer ${original}` })));
+    capability = await supervisor.issueDelegation(db, run.id, fence());
+    child = createResourceServices(await runtime.verify(new Headers({ authorization: `Bearer ${capability.token}` })));
+    assert.equal((await child.documentService.getDocument(db, document.id)).id, document.id);
+  });
+  await t.test("all transports enforce the same delegated task boundary", async () => {
+    const headers = new Headers({ authorization: `Bearer ${capability.token}` });
+    const { createTRPCContextFactory } = await import('../apps/web/trpc/init');
+    const { appRouter } = await import('../apps/web/trpc/routers/_app');
+    const caller = appRouter.createCaller(await createTRPCContextFactory({ db, auth: runtime })({ req: new Request(`${config.trustedOrigins[0]}/api/trpc`, { headers, method: 'POST' }) }));
+    assert.equal((await caller.task.get({ id: task.id })).id, task.id);
+    await assert.rejects(caller.task.get({ id: sibling.id }));
+    const { authorizedRealtimeEvent, resourceAuthority } = apiRequire('@task-weaver/core');
+    const authority = await resourceAuthority(db, await runtime.verify(headers));
+    assert.ok(await authorizedRealtimeEvent(db, authority, { type: 'task_updated', taskId: task.id, projectId: project.id }));
+    assert.equal(await authorizedRealtimeEvent(db, authority, { type: 'task_updated', taskId: sibling.id, projectId: project.id }), null);
+  });
   await t.test("Ti usage shares the original executor key, attempt and lease fence", async () => {
     const input = { ...fence(), processId: randomUUID(), attempt: acquired.retryCount, startedAt: new Date().toISOString(), revision: 0, outcome: "running", endedAt: null, summary: { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, cacheSemantics: "unknown", provider: "fixture", model: "safe", completeness: "unknown" } };
     await assert.rejects(() => foreign.service.agentUsageService.reportTiUsage(db, run.id, input, foreign.actor));
@@ -156,7 +200,7 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     const provider = "real-model-acceptance", model = process.env.TW_TI_REAL_MODEL_NAME!;
     await db.update(tiAgentModelConfigs).set({ isDefaultAgent: false }).where(eq(tiAgentModelConfigs.ownerId, owner.actor.id));
     await db.insert(tiAgentModelConfigs).values({ ownerId: owner.actor.id, ownerType: "human", provider, model,
-      baseUrl: process.env.TW_TI_REAL_MODEL_URL, proxyMode: "direct", encryptedApiKey: process.env.TW_TI_REAL_MODEL_KEY
+      baseUrl: process.env.TW_TI_REAL_MODEL_URL, proxyMode: process.env.TW_TI_REAL_MODEL_PROXY ? "custom" : "direct", proxyUrl: process.env.TW_TI_REAL_MODEL_PROXY ?? null, encryptedApiKey: process.env.TW_TI_REAL_MODEL_KEY
         ? encryptChatKey(process.env.TW_TI_REAL_MODEL_KEY, chatKeyBinding({ ownerId: owner.actor.id, provider, model })) : null,
       enabled: true, isDefaultAgent: true, credentialStatus: "valid" });
     await db.update(tiAgentPolicies).set({ executionMode: "live", allowNetwork: true, runTimeoutSeconds: 150,
@@ -201,28 +245,32 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     assert.equal((await owner.service.taskService.getTaskDetail(db, occurrence.generatedTaskId)).comments.filter((comment: any) => comment.content === scheduleMarker).length, 1);
     await supervisor.invoke(db, "completeRun", [scheduledRun.id, { ...scheduledResult, ...scheduledFence }]);
   });
-  await t.test("expired Ti leases and retries exchange fresh fences without restoring old child authority", async () => {
+  await t.test("expired Ti attempts require inspection and cannot automatically retry", async () => {
     const queued = await owner.service.tiAgentService.createRun(db, { taskId: task.id, assignedAgentId: agent.id, assignedAgentType: "agent", maxRetries: 1 }, owner.actor);
     const first = await executor.service.tiAgentService.acquireRun(db, worker, executor.actor);
     assert.equal(first.id, queued.id);
     const firstFence = { workerId: worker.workerId, leaseGeneration: first.leaseGeneration };
     const old = await supervisor.issueDelegation(db, first.id, firstFence);
     await db.update(tiAgentRuns).set({ leaseExpiresAt: new Date(Date.now() - 1_000) }).where(eq(tiAgentRuns.id, first.id));
-    await db.update(requirementClaims).set({ expiresAt: new Date(Date.now() - 1_000) }).where(eq(requirementClaims.requirementId, requirement.id));
+    const stored = await db.query.tiAgentRuns.findFirst({ where: eq(tiAgentRuns.id, first.id) });
+    await db.update(workerAttempts).set({ expiresAt: new Date(Date.now() - 1_000) }).where(eq(workerAttempts.id, stored.authorization.attemptId));
     await assert.rejects(() => runtime.verify(new Headers({ authorization: `Bearer ${old.token}` })));
     await assert.rejects(() => supervisor.invoke(db, "heartbeatRunLease", [first.id, { ...firstFence, durationMinutes: 15 }]));
+    const otherTask = await owner.service.taskService.createTask(db, { projectId: project.id, requirementId: requirement.id, title: 'Waiting for executor capacity', assignee: agent.id, assigneeType: 'agent' }, owner.actor);
+    const otherRun = await owner.service.tiAgentService.createRun(db, { taskId: otherTask.id, assignedAgentId: agent.id, assignedAgentType: 'agent' }, owner.actor);
+    assert.equal(await executor.service.tiAgentService.acquireRun(db, worker, executor.actor), null);
+    await createTiExecutionService(owner.context).invoke(db, 'cancelRun', [otherRun.id, {}]);
+    await createThinWorkerService(owner.context).resolve(db, { attemptId: stored.authorization.attemptId, disposition: 'retry', retrySafe: true, reason: 'Executor stopped and effects inspected' });
+    assert.equal((await db.query.tiAgentRuns.findFirst({ where: eq(tiAgentRuns.id, first.id) })).status, 'cancelled');
+    const replacement = await owner.service.tiAgentService.createRun(db, { taskId: task.id, assignedAgentId: agent.id, assignedAgentType: 'agent', maxRetries: 1 }, owner.actor);
     const second = await executor.service.tiAgentService.acquireRun(db, worker, executor.actor);
-    assert.equal(second.id, first.id); assert.ok(second.leaseGeneration > first.leaseGeneration);
+    assert.equal(second.id, replacement.id);
     const secondFence = { workerId: worker.workerId, leaseGeneration: second.leaseGeneration };
     await assert.rejects(() => supervisor.invoke(db, "completeRun", [first.id, { ...firstFence, status: "succeeded" }]));
-    const child = await supervisor.issueDelegation(db, first.id, secondFence);
-    const retried = await supervisor.invoke(db, "scheduleRunRetry", [first.id, { ...secondFence, errorMessage: `Retry ${child.token}`, delayMs: 0 }]);
-    assert.equal(retried.status, "queued"); assert.equal(retried.retryCount, second.retryCount + 1);
-    assert.ok(!JSON.stringify(retried).includes(child.token));
+    const child = await supervisor.issueDelegation(db, second.id, secondFence);
+    await assert.rejects(() => supervisor.invoke(db, "scheduleRunRetry", [second.id, { ...secondFence, errorMessage: `Retry ${child.token}`, delayMs: 0 }]));
+    await supervisor.invoke(db, "completeRun", [second.id, { ...secondFence, status: "succeeded" }]);
     await assert.rejects(() => runtime.verify(new Headers({ authorization: `Bearer ${child.token}` })));
-    const third = await executor.service.tiAgentService.acquireRun(db, worker, executor.actor);
-    assert.equal(third.id, first.id); assert.ok(third.leaseGeneration > second.leaseGeneration);
-    await supervisor.invoke(db, "completeRun", [third.id, { workerId: worker.workerId, leaseGeneration: third.leaseGeneration, status: "succeeded" }]);
   });
   await t.test("authorized cancellation persists sandbox cleanup and revokes child capabilities", async () => {
     const queued = await create();
@@ -236,6 +284,36 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     assert.equal(result.status, "cancelled");
     assert.equal((await db.query.tiSandboxWorkspaces.findFirst({ where: eq(tiSandboxWorkspaces.id, workspace.id) })).state, "cleanup_pending");
     await assert.rejects(() => runtime.verify(new Headers({ authorization: `Bearer ${child.token}` })));
+    const stored = await db.query.tiAgentRuns.findFirst({ where: eq(tiAgentRuns.id, held.id) });
+    await createThinWorkerService(owner.context).resolve(db, { attemptId: stored.authorization.attemptId, disposition: 'retry', retrySafe: true, reason: 'Cancelled executor stopped and effects inspected' });
+  });
+  await t.test("a changed plan revokes Ti authority and requires inspection", async () => {
+    const queued = await create();
+    const held = await executor.service.tiAgentService.acquireRun(db, worker, executor.actor);
+    assert.equal(held.id, queued.id);
+    const fence = { workerId: worker.workerId, leaseGeneration: held.leaseGeneration };
+    const child = await supervisor.issueDelegation(db, held.id, fence);
+    const [current] = await db.select().from(requirements).where(eq(requirements.id, requirement.id));
+    await db.update(requirements).set({ planRevision: current.planRevision + 1 }).where(eq(requirements.id, requirement.id));
+    await assert.rejects(() => supervisor.invoke(db, 'heartbeatRunLease', [held.id, { ...fence, durationMinutes: 1 }]));
+    await assert.rejects(() => runtime.verify(new Headers({ authorization: `Bearer ${child.token}` })));
+    await createTiExecutionService(owner.context).invoke(db, 'cancelRun', [held.id, { reason: 'Plan changed during execution' }]);
+    const stored = await db.query.tiAgentRuns.findFirst({ where: eq(tiAgentRuns.id, held.id) });
+    await createThinWorkerService(owner.context).resolve(db, { attemptId: stored.authorization.attemptId, disposition: 'retry', retrySafe: true, reason: 'Executor stopped and plan change inspected' });
+  });
+  await t.test("editing a live plan parks its Ti attempt and requests sandbox cleanup", async () => {
+    const req = await owner.service.requirementService.createRequirement(db, { projectId: project.id, title: 'Live plan edit', status: 'approved' }, owner.actor);
+    const target = await owner.service.taskService.createTask(db, { projectId: project.id, requirementId: req.id, title: 'Plan target', assignee: agent.id, assigneeType: 'agent' }, owner.actor);
+    const queued = await owner.service.tiAgentService.createRun(db, { taskId: target.id, assignedAgentId: agent.id, assignedAgentType: 'agent' }, owner.actor);
+    const held = await executor.service.tiAgentService.acquireRun(db, worker, executor.actor);
+    assert.equal(held.id, queued.id);
+    const stored = await db.query.tiAgentRuns.findFirst({ where: eq(tiAgentRuns.id, held.id) });
+    const [workspace] = await db.insert(tiSandboxWorkspaces).values({ ownerId: owner.actor.id, ownerType: 'human', projectId: project.id, runId: held.id, attempt: held.leaseGeneration, bindingId: 'planning-fixture', tenantId: 'tenant', providerProjectId: 'project', sessionId: randomUUID(), state: 'active', expiresAt: new Date(Date.now() + 60_000) }).returning();
+    await owner.service.taskService.updateTask(db, target.id, { description: 'Change the active execution plan' }, owner.actor);
+    assert.equal((await db.query.tiAgentRuns.findFirst({ where: eq(tiAgentRuns.id, held.id) })).status, 'cancelled');
+    assert.equal((await db.query.workerAttempts.findFirst({ where: eq(workerAttempts.id, stored.authorization.attemptId) })).status, 'attention');
+    assert.equal((await db.query.tiSandboxWorkspaces.findFirst({ where: eq(tiSandboxWorkspaces.id, workspace.id) })).state, 'cleanup_pending');
+    await createThinWorkerService(owner.context).resolve(db, { attemptId: stored.authorization.attemptId, disposition: 'review', reason: 'Changed plan and stopped executor inspected' });
   });
   await t.test("assistant approval uses the real owner and current payload targets", async () => {
     await db.update(tiAgentPolicies).set({ assistantAutoEnabled: false, assistantAutoMode: "disabled", updatedAt: new Date() }).where(eq(tiAgentPolicies.ownerId, owner.actor.id));
@@ -304,6 +382,21 @@ test("Ti runs preserve initiator ceilings and fence separate executor capabiliti
     assert.equal((await post("runs/acquire", childHeaders, worker)).status, 403);
     assert.equal((await post(`runs/${lane.body.id}/complete`, foreign.headers, { ...input, status: "succeeded" })).status, 403);
     assert.equal((await post(`runs/${lane.body.id}/complete`, executor.headers, { ...input, status: "succeeded" })).status, 200);
+  });
+  await t.test("revoking the parent key invalidates an active Ti capability", async () => {
+    const queued = await create();
+    const held = await executor.service.tiAgentService.acquireRun(db, worker, executor.actor);
+    assert.equal(held.id, queued.id);
+    const fence = { workerId: worker.workerId, leaseGeneration: held.leaseGeneration };
+    const service = createTiExecutionService(executor.context);
+    const child = await service.issueDelegation(db, held.id, fence);
+    await apiKeyService.revokeScopedApiKey(db, owner.context, executor.issued.id);
+    await assert.rejects(() => runtime.verify(new Headers({ authorization: `Bearer ${child.token}` })));
+    await assert.rejects(() => service.invoke(db, 'heartbeatRunLease', [held.id, { ...fence, durationMinutes: 1 }]));
+    await createTiExecutionService(owner.context).invoke(db, 'cancelRun', [held.id, { reason: 'Revoked executor inspected' }]);
+    const stored = await db.query.tiAgentRuns.findFirst({ where: eq(tiAgentRuns.id, held.id) });
+    await createThinWorkerService(owner.context).resolve(db, { attemptId: stored.authorization.attemptId, disposition: 'retry', retrySafe: true, reason: 'Revoked executor stopped and inspected' });
+    executor = await key(agent.id, owner, project.id);
   });
   await t.test("membership removal cancels queued and live work permanently", async () => {
     run = await create();

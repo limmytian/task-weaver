@@ -2,7 +2,7 @@ import { preflightPlan } from "./plan-preflight";
 import { capabilityOperationEvidence } from "./capability-evidence";
 import { capabilityDigest } from "./capability-digest";
 import { requireExecutionSynchronization } from "./execution-synchronization";
-import { planningImpact, invalidatePlanningExecutions } from "./planning-impact";
+import { planningImpact, invalidatePlanningExecutions, planningChangeSnapshot } from "./planning-impact";
 import { withEventActor } from "./durable-events";
 import { synchronizeAuthorizedMcpTools } from "./mcp-sync";
 import { getArchivedResourceReadAuthority } from "./api-keys";
@@ -139,6 +139,14 @@ function bindServices(context?: VerifiedRequestContext) {
           const call = [...args];
           call[0] = txDb;
           await authorizeOperation(txDb, authority, group, name, call, context);
+          if (actor.type === "agent" && group === "task" && ["updateTask", "updateTaskStatus", "batchUpdateTasks"].includes(name)) {
+            const ids: string[] = name === "batchUpdateTasks" ? call[1].updates.map((update: { id: string }) => update.id) : [call[1]];
+            const projectRows = await tx.select({ id: projects.id, workerMode: projects.workerMode }).from(projects)
+              .innerJoin(tasks, eq(tasks.projectId, projects.id)).where(inArray(tasks.id, ids)).orderBy(projects.id).for("update", { of: projects });
+            if (projectRows.some(project => project.workerMode === "thin")) {
+              throw new ValidationError("Agent task updates require a fenced thin worker result in this project");
+            }
+          }
           if (group === "plan" && name === "applyPlan") call[3] = createResourceServices(context);
           if (group === "plan" && name === "validatePlanDraft") call[4] = createResourceServices(context);
           if (group === "plan" && name === "applyPlanDraft") call[6] = createResourceServices(context);
@@ -155,6 +163,7 @@ function bindServices(context?: VerifiedRequestContext) {
             await requireExecutionSynchronization(txDb, authority.bounds.requirementId, authority.bounds.runId);
           }
           const impact = name === "updateTaskStatus" && call[6]?.daemonId ? [] : await planningImpact(txDb, name, call);
+          const changeSnapshot = impact.length ? await planningChangeSnapshot(txDb, name, call) : undefined;
           const previousClaims = impact.length ? await tx.select().from(requirementClaims).where(inArray(requirementClaims.requirementId, impact)) : [];
           let result: any;
           if (name === "createProject") {
@@ -197,6 +206,10 @@ function bindServices(context?: VerifiedRequestContext) {
               result.push(status === undefined ? await taskImplementation.getTask(txDb, id) : await taskImplementation.updateTaskStatus(txDb, id, status, actor, reason));
             }
           } else {
+            if (group === "daemon" && name === "registerDaemon") {
+              if (context.credential.kind !== "api_key" || authority.bounds) throw new AuthorizationError();
+              call[3] = context.credential.id;
+            }
             result = await withEventActor(actor, () => implementation(...call));
             if (name === "recordMemory") {
               await requireResource(txDb, authority, "memory", result.id, "resource.write");
@@ -206,7 +219,9 @@ function bindServices(context?: VerifiedRequestContext) {
           if (group === "plan" && (name === "getPlanDraft" || name === "planDraftCapabilities")) {
             result = { ...result, canWrite: canAccessResource(authority, { projectId: call[1] }, "resource.write") };
           }
-          await invalidatePlanningExecutions(txDb, impact, name, previousClaims);
+          const changedTaskId = ["updateTask", "updateTaskStatus", "addTaskDependency", "addTaskRepository", "removeTaskRepository"].includes(name)
+            ? call[1] : name === "createTask" ? result?.id : undefined;
+          await invalidatePlanningExecutions(txDb, impact, name, previousClaims, changedTaskId, changeSnapshot, result?.status);
           if (group === "requirement" && result?.id && impact.includes(result.id)) {
             const currentPlan = await tx.query.requirements.findFirst({ where: eq(requirements.id, result.id) });
             if (currentPlan) result = { ...result, planRevision: currentPlan.planRevision, evidenceNeedsReview: currentPlan.evidenceNeedsReview };
@@ -313,7 +328,7 @@ async function checkMemoryEntity(db: Database, authority: ResourceAuthority, inp
 }
 
 function redactDelegatedInput(value: any): any {
-  if (typeof value === "string") return value.replace(/\b(?:tw|twd|twb)_[0-9a-f]{64}\b/gi, "[redacted]");
+  if (typeof value === "string") return value.replace(/\b(?:tw|twd|twb|twa)_[0-9a-f]{64}\b/gi, "[redacted]");
   if (Array.isArray(value)) return value.map(redactDelegatedInput);
   if (value && Object.getPrototypeOf(value) === Object.prototype) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactDelegatedInput(item)]));
   return value;
@@ -429,7 +444,7 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
       if (name.startsWith("add")) call[4] = visibility;
       return;
     }
-    if (name === "reconcileHumanRepositoryDelivery") {
+    if (["reconcileHumanRepositoryDelivery", "retryRequirementRepositoryDelivery"].includes(name)) {
       if (authority.actor.type !== "human" || authority.bounds) throw new AuthorizationError();
       const link = await db.query.requirementRepositories.findFirst({ where: eq(requirementRepositories.id, id) });
       if (!link) throw new NotFoundError("Resource not found");

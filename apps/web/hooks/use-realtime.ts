@@ -9,7 +9,7 @@ import { trpc } from "@/trpc/client";
 type ConnectionState = "connecting" | "live" | "reconnecting" | "stale";
 
 /**
- * Connect to the realtime stream and coalesce high-frequency daemon updates.
+ * Connect to the realtime stream and coalesce high-frequency worker updates.
  * The returned state lets operator surfaces distinguish live/stale data.
  */
 export function useRealtime() {
@@ -28,11 +28,8 @@ export function useRealtime() {
       if (refreshTimerRef.current) return;
       refreshTimerRef.current = setTimeout(() => {
         refreshTimerRef.current = null;
-        utils.daemon.list.invalidate();
-        utils.daemon.queues.invalidate();
-        utils.daemon.overview.invalidate();
-        utils.daemon.metrics.invalidate();
-        utils.daemon.timeline.invalidate();
+        utils.worker.thinWorkers.invalidate();
+        utils.worker.thinAttempts.invalidate();
       }, 100);
     };
 
@@ -126,10 +123,9 @@ export function useRealtime() {
       es.addEventListener("executor_availability_changed", (event: MessageEvent) => {
         const accepted = acceptEvent(event);
         if (!accepted) return;
-        utils.daemon.executorProfiles.invalidate();
         scheduleDaemonRefresh();
         const data = accepted.data as { kind?: string };
-        if (data.kind === "first_block" || data.kind === "all_blocked" || data.kind === "action_required") toast.warning("Executor resources require attention. Check Daemons for recovery details.");
+        if (data.kind === "first_block" || data.kind === "all_blocked" || data.kind === "action_required") toast.warning("Executor resources require attention. Check worker status for recovery details.");
         if (data.kind === "recovered") toast.success("Executor availability recovered.");
       });
       es.addEventListener("daemon_status_changed", (event: MessageEvent) => {

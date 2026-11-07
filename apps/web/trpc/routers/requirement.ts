@@ -15,8 +15,6 @@ import {
   requirementWorkspaceSchema,
   linkDocumentToRequirementSchema,
   createRequirementDependencySchema,
-  createExecutionSliceSchema,
-  updateExecutionSliceSchema,
   advanceWorkflowStageSchema,
   registerWorkflowOutputSchema,
   addWorkflowInputSchema,
@@ -145,22 +143,5 @@ export const requirementRouter = router({
       return createResourceServices(ctx.identity).requirementService.listExecutionSlices(ctx.db, input.requirementId);
     }),
 
-  createSlice: resourceProcedure
-    .input(z.object({ requirementId: z.string().uuid() }).merge(createExecutionSliceSchema))
-    .mutation(async ({ ctx, input }) => {
-      const { requirementId, ...data } = input;
-      return createResourceServices(ctx.identity).requirementService.createExecutionSlice(ctx.db, requirementId, data, ctx.actor);
-    }),
 
-  updateSlice: resourceProcedure
-    .input(z.object({ id: z.string().uuid(), data: updateExecutionSliceSchema }))
-    .mutation(async ({ ctx, input }) => {
-      return createResourceServices(ctx.identity).requirementService.updateExecutionSlice(ctx.db, input.id, input.data, ctx.actor);
-    }),
-
-  deleteSlice: resourceProcedure
-    .input(z.object({ id: z.string().uuid() }))
-    .mutation(async ({ ctx, input }) => {
-      return createResourceServices(ctx.identity).requirementService.deleteExecutionSlice(ctx.db, input.id, ctx.actor);
-    }),
 });

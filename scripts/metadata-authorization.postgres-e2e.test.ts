@@ -133,10 +133,7 @@ test("metadata authorization rejects cross-scope reads and forged attribution", 
     const run = await owner.service.reviewService.startReviewRun(db, requirement.id, input, owner.actor);
     assert.equal(run.executorActorId, outsider.actor.id);
     await assert.rejects(owner.service.reviewService.evaluateReviewRun(db, run.id, evaluateReviewRunSchema.parse({ mergerActorId: outsider.actor.id, mergerActorType: "human" }), owner.actor), AuthorizationError);
-    const [lease] = await db.insert(requirementClaims).values({ requirementId: requirement.id, claimedBy: outsider.actor.id, claimedByType: "human", expiresAt: new Date(Date.now() + 60_000) }).returning();
-    await assert.rejects(owner.service.reviewService.evaluateReviewRun(db, run.id, {}, owner.actor));
-    assert.equal((await owner.service.reviewService.getReviewRun(db, run.id)).status, "running");
-    await db.delete(requirementClaims).where(eq(requirementClaims.id, lease.id));
+    await assert.rejects(db.insert(requirementClaims).values({ requirementId: requirement.id, claimedBy: outsider.actor.id, claimedByType: "human", expiresAt: new Date(Date.now() + 60_000) }));
     await db.update(requirementRepositories).set({ headCommit: "changed-head" }).where(eq(requirementRepositories.id, link.id));
     await assert.rejects(owner.service.reviewService.evaluateReviewRun(db, run.id, {}, owner.actor));
     await db.update(requirementRepositories).set({ headCommit: run.headCommit }).where(eq(requirementRepositories.id, link.id));

@@ -195,3 +195,21 @@ They do not substitute for acceptance on separate machines with independent
 filesystems, actual network partitions and the owner's agent/Git providers.
 
 Linux supervisors inspect process identity and process groups through procfs, including boot identity and kernel start ticks, so minimal BusyBox hosts do not require procps. Procfs must be readable; an unreadable process record blocks termination confirmation rather than being treated as a stopped process. Other POSIX hosts use their native process inspection.
+
+Plan change events retain one durable record for each revision. Consumers may group
+consecutive records for presentation, but should retain each revision and resume
+from their acknowledged cursor. A `plan.changed` payload identifies the affected
+requirement, reports the cause and links to current inputs and evidence. A directly
+changed task is identified when it is still in the requirement; the task list is
+partial, since dependent tasks may also be affected. Changed field names and
+before/after status are included when safely available. Content values and other
+unavailable context are explicitly marked unavailable; consult the linked resources
+with current authorization. Downstream events do not expose source change details.
+Delivery may be repeated, and receiving an event does not establish that a process
+has stopped.
+
+### Bounded interrupted-execution assessment
+
+The core supports a separate `assess_interrupted_execution` grant operation. A human project manager scopes it to an agent and project, optionally a requirement, with an expiry and revocation. It authorizes an advisory assessment only. It does not authorize resumption, external effects, credential issuance, or evidence revalidation. The assessment transaction checks live agent access, grant scope, expiry and revocation, the current plan revision, and the specific control and its observed update time. It records the observed control phase, run, inputs, rationale, and disposition in the audit log.
+
+A decision can be accepted only when the recorded control phase is stopped, inputs are available and described, and external effects are known. Otherwise it escalates. A stopped control is a recorded observation, not proof that an external process has stopped. The agent is responsible for identifying uncertainty; an unknown external outcome requires human review. This core operation does not expose an execution recovery or daemon integration interface.

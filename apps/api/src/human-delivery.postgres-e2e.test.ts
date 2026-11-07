@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
-import { createDb, runMigrations, activityLog, requirements, reviewRuns } from "@task-weaver/db";
+import { createDb, runMigrations, activityLog, requirements, requirementRepositories, reviewRuns } from "@task-weaver/db";
 import { eq } from "drizzle-orm";
 import { resourcePostgresFixture } from "./resource-postgres-fixture";
 const databaseUrl = process.env.TW_HUMAN_DELIVERY_E2E_DATABASE_URL;
@@ -18,6 +18,19 @@ test("human PR reconciliation verifies server evidence, authority, leases, retri
     return { r, link };
   };
   const initial = await create();
+  const retryCase = await create();
+  await db.update(requirementRepositories).set({ deliveryStatus: "failed", failureCode: "remote_identity_mismatch", retryPhase: "execution", retryRole: "executor", retryPolicy: "manual" }).where(eq(requirementRepositories.id, retryCase.link.id));
+  const retry = (headers = f.owner.headers) => api(`/requirement-repositories/${retryCase.link.id}/retry`, "POST", { reason: "Verified repository origin" }, headers);
+  assert.equal((await retry(f.outsider.headers)).status, 404);
+  const limitedRetryKey = await f.identity.issueKey(f.owner.headers, f.owner.context.actor.id, { name: "Retry without project management", expiresAt: null, grants: [
+    { scope: "project", projectId: f.project.id, permissions: ["resource.read", "resource.write", "repository.manage"] },
+    { scope: "personal", actorId: f.owner.context.actor.id, permissions: ["resource.read"] },
+  ] });
+  assert.equal((await retry(new Headers({ authorization: `Bearer ${limitedRetryKey.rawKey}`, "content-type": "application/json" }))).status, 403);
+  assert.equal((await json(await retry())).link.deliveryStatus, "pending");
+  assert.equal((await retry()).status, 400);
+  const retryAudit = await db.query.activityLog.findMany({ where: eq(activityLog.entityId, retryCase.r.id) });
+  assert.equal(retryAudit.filter(a => a.action === "repository_delivery_retry_requested").length, 1);
   // A historical requirement retains its legacy completion guard.
   await db.update(requirements).set({ workflow: null, workflowSource: null }).where(eq(requirements.id, initial.r.id));
   let current = initial.link;

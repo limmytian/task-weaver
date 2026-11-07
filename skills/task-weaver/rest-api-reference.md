@@ -54,7 +54,7 @@ server checks; they cannot redirect ownership. Search/count/history/download and
 nested graph responses are filtered before limits/expansion. SSE connections and
 webhook retries reauthorize live resource access, including credential revocation.
 
-Daemon task capabilities are bounded to the original lease, parent credential,
+Ti task capabilities are bounded to the original worker attempt, parent credential,
 phase, tasks and repositories, for at most 15 minutes. Only the original supervisor
 credential can renew without enlarging bounds. SLO/unconverted background workers
 and personal autonomous Ti remain closed. See `docs/authenticated-access.md` in
@@ -277,7 +277,6 @@ POST /api/v1/projects/:projectId/tasks
   "assigneeType": "human",
   "tags": ["frontend", "auth"],
   "requirementId": "uuid-of-requirement",
-  "executionSliceId": "uuid-of-slice",
   "expectedAt": "2026-03-15"
 }
 ```
@@ -286,7 +285,7 @@ POST /api/v1/projects/:projectId/tasks
 |-------|------|----------|-------|
 | `title` | string | yes | 1–500 chars |
 | `requirementId` | UUID | **yes** | Parent requirement |
-| `executionSliceId` | UUID | no | Optional slice under the same requirement |
+| `executionSliceId` | UUID | no | Historical association; new tasks cannot set it |
 | `description` | string | no | |
 | `status` | enum | no | Default: `todo` |
 | `priority` | enum | no | Default: `medium` |
@@ -504,149 +503,12 @@ PATCH /api/v1/tasks/batch
 
 ---
 
-### Task Claims (Multi-Agent Coordination)
+### Task execution coordination
 
-#### Claim Task
-
-```
-POST /api/v1/tasks/:id/claim
-```
-
-```json
-{ "durationMinutes": 30 }
-```
-
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| `durationMinutes` | integer | no | 1–1440, default 30 |
-
-Response: `201` — claim object. `409` if already claimed by another agent.
-
-#### Release Task
-
-```
-POST /api/v1/tasks/:id/release
-```
-
-```json
-{ "reason": "Handing off to another agent" }
-```
-
-Only the claim holder can release. Auto-released when task moves to `done`/`cancelled`.
-
-#### Heartbeat Claim
-
-```
-POST /api/v1/tasks/:id/heartbeat
-```
-
-```json
-{ "extendMinutes": 30 }
-```
-
-Extends the claim lease. Call periodically for long-running tasks.
-
-#### Get Task Claim
-
-```
-GET /api/v1/tasks/:id/claim
-```
-
-Returns current claim or `{ "claimed": false }`.
-
-#### List Active Claims
-
-```
-GET /api/v1/claims?projectId=uuid&claimedBy=agent-id
-```
-
-Returns all active (non-expired) claims. Expired claims are auto-cleaned.
-
-#### Batch Claim Tasks
-
-```
-POST /api/v1/claims/batch
-```
-
-```json
-{ "taskIds": ["uuid1", "uuid2", "uuid3"], "durationMinutes": 30 }
-```
-
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| `taskIds` | uuid[] | yes | 1–20 task IDs |
-| `durationMinutes` | integer | no | 1–1440, default 30, applied to all |
-
-**Atomic**: all tasks are claimed in a single transaction — no partial claims. If any tasks cannot be claimed, returns `409` listing ALL problematic tasks with reasons (not found / already done / held by another agent).
-
----
-
-### Requirement Claims (Daemon Lanes)
-
-Requirement claims are distributed leases used by daemon workers. They are separate from task claims: interactive agents usually claim tasks, while daemon workers claim one requirement lane and process its task roadmap.
-
-#### Claim Requirement
-
-```
-POST /api/v1/requirements/:id/claim
-```
-
-```json
-{
-  "durationMinutes": 30,
-  "daemonId": "uuid",
-  "workerIndex": 0
-}
-```
-
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| `durationMinutes` | integer | no | 1–1440, default 30 |
-| `daemonId` | UUID | no | Owning daemon id |
-| `workerIndex` | string \| number | no | Worker index inside the daemon process |
-
-Response: `201` — requirement claim object. `409` if another holder has an active claim.
-
-#### Release Requirement
-
-```
-POST /api/v1/requirements/:id/release
-```
-
-```json
-{ "reason": "daemon worker exited" }
-```
-
-Only the claim holder can release. Requirements moving to `done`, `cancelled`, or `archived` auto-release active requirement claims.
-
-#### Heartbeat Requirement Claim
-
-```
-POST /api/v1/requirements/:id/heartbeat
-```
-
-```json
-{ "extendMinutes": 2 }
-```
-
-Extends the requirement lane lease. Daemon workers call this periodically while the spawned agent is running.
-
-#### Get Requirement Claim
-
-```
-GET /api/v1/requirements/:id/claim
-```
-
-Returns current claim or `{ "claimed": false }`.
-
-#### List Requirement Claims
-
-```
-GET /api/v1/requirement-claims?projectId=uuid&claimedBy=daemon-id
-```
-
-Returns all active (non-expired) requirement lane claims. Expired claims are
-auto-cleaned.
+Task workers use fenced attempts under `/api/v1/thin-workers`; see the worker
+section below. Legacy task and requirement claims remain historical data and
+are not used to acquire work in worker-only projects. Inspect interrupted
+attempts and external effects before explicitly resolving a retry.
 
 ## Requirements
 
@@ -715,7 +577,7 @@ Returns requirement with linked tasks and documents.
 PATCH /api/v1/requirements/:id
 ```
 
-All fields optional. `modelTier` controls daemon scheduling for this requirement lane and accepts `fast`, `standard`, or `strong`. `workflowPreset` or `workflow` can replace the resolved workflow only while the requirement is draft or approved and all tasks are unstarted.
+All fields optional. `modelTier` describes the requested model tier and accepts `fast`, `standard`, or `strong`. `workflowPreset` or `workflow` can replace the resolved workflow only while the requirement is draft or approved and all tasks are unstarted.
 
 Optional `reason` is trimmed, must contain 1–2000 characters, and is saved as `metadata.reason` on the update activity record. It is not an entity field and is not echoed in the updated entity. Omitting it preserves the existing update behavior.
 
@@ -732,73 +594,18 @@ POST /api/v1/requirements/:id/workflow-inputs
 POST /api/v1/requirements/:id/workflow-output-availability
 POST /api/v1/requirements/:id/workflow-output-retire
 GET  /api/v1/requirements/:id/workflow-cleanup
+POST /api/v1/requirements/:id/workflow-outputs/:outputId/import
 ```
 
-Output registration accepts `type` (`comment`, `attachment`, `url`, `local`, `git_branch`, `git_pr`), optional `taskId`, `executionSliceId`, `requirementRepositoryId`, and `summary`. Comment and attachment outputs require a platform `referenceId`; URL outputs require `url`; local outputs require `nodeId`, normalized `relativePath`, `sizeBytes`, and `sha256`. Git outputs require a requirement repository link. The server validates ownership. Additional output types may coexist; advancing delivery requires evidence for the selected primary method.
+Output registration accepts `type` (`comment`, `attachment`, `url`, `local`, `git_branch`, `git_pr`), optional `taskId`, `requirementRepositoryId`, and `summary`. Comment and attachment outputs require a platform `referenceId`; URL outputs require `url`; local outputs require `nodeId`, normalized `relativePath`, `sizeBytes`, and `sha256`. Git outputs require a requirement repository link. The server validates ownership. Additional output types may coexist; advancing delivery requires evidence for the selected primary method.
 
-Stage advancement requires `stage` (`delivery`, `acceptance`, `integration`), `decision` (`complete`, `changes_requested`, `failed`, `retry`), `reason`, and `expectedRevision` from `workflowStateRevision`. Acceptance may include `checks` as name/status entries. Daemon callers include their `daemonId` and `leaseGeneration`. A conflicting revision returns `409`; manual stages require a human actor. Existing requirements with `workflow: null` retain the legacy Git flow.
+Historical local evidence can be recovered without a daemon. A human with requirement write access can send the original file as an `application/octet-stream` body to the import endpoint, or run `tw req output import <requirement-id> <output-id>` on its original node. The server verifies the registered size and SHA-256 and records the promotion; the result is a shared attachment. File availability on an old node is not guaranteed.
 
-### Execution Slices
+Stage advancement requires `stage` (`delivery`, `acceptance`, `integration`), `decision` (`complete`, `changes_requested`, `failed`, `retry`), `reason`, and `expectedRevision` from `workflowStateRevision`. Acceptance may include `checks` as name/status entries. A conflicting revision returns `409`; manual stages require a human actor. Existing requirements with `workflow: null` retain the legacy Git flow.
 
-Execution slices split a requirement lane into ordered Codex spawn units. Daemons still claim the requirement lane, but if slices exist, `apply-requirement` returns the next executable slice and its tasks.
+### Historical execution slices
 
-#### List Slices
-
-```
-GET /api/v1/requirements/:id/slices
-```
-
-Returns `{ "items": [...] }` ordered by `orderIndex`.
-
-#### Create Slice
-
-```
-POST /api/v1/requirements/:id/slices
-```
-
-```json
-{
-  "title": "API routes",
-  "description": "Implement REST endpoints for the requirement",
-  "orderIndex": 1,
-  "modelTier": "strong",
-  "taskIds": ["uuid-task-1", "uuid-task-2"]
-}
-```
-
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| `title` | string | yes | 1–500 chars |
-| `description` | string | no | |
-| `orderIndex` | integer | no | Defaults to next order |
-| `modelTier` | enum | no | Defaults from requirement |
-| `taskIds` | UUID[] | no | Assign existing requirement tasks to the slice |
-
-#### Update Slice
-
-```
-PATCH /api/v1/execution-slices/:id
-```
-
-All fields optional: `title`, `description`, `orderIndex`, `modelTier`, `status`, `resultSummary`, `taskIds`.
-
-#### Delete Slice
-
-```
-DELETE /api/v1/execution-slices/:id
-```
-
-Deleting a slice unassigns its tasks rather than deleting the tasks.
-
-CLI:
-
-```bash
-tw req update <requirement-id> --model-tier strong
-tw req slice list <requirement-id>
-tw req slice create <requirement-id> --title "API routes" --model-tier strong --tasks <task-id-1,task-id-2>
-tw req slice update <slice-id> --status done --summary "API routes completed"
-tw req slice delete <slice-id>
-```
+`GET /api/v1/requirements/:id/slices` exposes retained historical records. New work uses task dependencies; slice creation and updates are retired.
 
 ### Delete (Cancel) Requirement
 
@@ -851,7 +658,7 @@ POST /api/v1/requirements/:id/dependencies
 }
 ```
 
-Dependencies must stay inside the same project; self-dependencies and cycles are rejected. `blocks` dependencies gate daemon requirement-lane scheduling until the upstream requirement is `done` or `cancelled`; `related` links are informational.
+Dependencies must stay inside the same project; self-dependencies and cycles are rejected. `blocks` dependencies gate worker task acquisition until the upstream requirement is `done` or `cancelled`; `related` links are informational.
 
 CLI:
 
@@ -1100,7 +907,7 @@ tw task repo add <task-id> <repository-id> --add-to-requirement
 
 ## Plans
 
-Plans let agents validate or atomically apply a batch of requirements, tasks, execution slices, dependencies, document links, and task comments from one structured payload.
+Plans let agents validate or atomically apply requirements, tasks, dependencies, document links, and task comments from one structured payload. New execution slices are rejected.
 
 ### Apply Plan
 
@@ -1129,9 +936,6 @@ POST /api/v1/plans/apply
         "priority": "high",
         "modelTier": "strong",
         "documents": [{ "document": "auth-design", "type": "documents" }],
-        "slices": [
-          { "key": "auth-schema", "title": "Schema", "orderIndex": 0, "tasks": ["auth-db"] }
-        ],
         "tasks": [
           {
             "key": "auth-db",
@@ -1164,7 +968,7 @@ Response: `200` for dry-run, `201` for apply.
   "summary": {
     "requirements": { "create": 1, "reuse": 0 },
     "tasks": { "create": 1, "reuse": 0 },
-    "slices": { "create": 1 },
+    "slices": { "create": 0 },
     "documents": { "create": 1, "reuse": 0 },
     "requirementDependencies": 0,
     "taskDependencies": 0,
@@ -1177,7 +981,7 @@ Response: `200` for dry-run, `201` for apply.
   "refs": {
     "requirements": [{ "key": "auth-api", "id": null, "existing": false, "title": "Auth API" }],
     "tasks": [{ "key": "auth-db", "id": null, "existing": false, "title": "Add auth tables" }],
-    "slices": [{ "key": "auth-schema", "id": null, "existing": false, "title": "Schema" }],
+    "slices": [],
     "documents": [{ "key": "auth-design", "id": null, "existing": false, "title": "Auth Design" }]
   },
   "warnings": []
@@ -2168,239 +1972,9 @@ POST /api/v1/review-runs/:id/evaluate
 
 Daemon-owned mutations include `daemonId` and `leaseGeneration`. A human decision requires a human actor. A manual override additionally requires policy authorization and, by default, an audit reason. Evaluation writes a task comment as a human-readable projection; the structured run remains authoritative.
 
-## Daemons
+## Task workers
 
-### List Online Daemons
-
-```
-GET /api/v1/daemons
-```
-
-Returns online/non-offline daemon rows enriched with `workerStates`. Each active worker state may include the current requirement, execution slice, selected model tier/model, active task, roadmap, requirement claim heartbeat/expiry, branch name, and worktree path.
-
-### Daemon Production SLOs
-
-```
-GET /api/v1/daemons/slo?windowHours=24
-```
-
-Returns the rolling acquisition latency, heartbeat gap, completion, retry recovery, stranded-lane, review duration, merge latency, and recovery-time objectives. Each metric includes its target, sample count, release-blocking policy, status (`pass`, `breach`, or `no_data`), and runbook anchor. The response also includes active warning/critical alerts and an aggregate `releaseStatus`. `windowHours` accepts 1–720 and defaults to 24.
-
-### Register Daemon
-
-```
-POST /api/v1/daemons/register
-```
-
-```json
-{
-  "id": "uuid",
-  "name": "daemon-hostname",
-  "capabilities": ["codex", "agy", "model-tier:fast", "model-tier:standard"]
-}
-```
-
-Returns the daemon row plus negotiated config (`polling` or `sse`, interval, backoff).
-
-### Daemon Heartbeat
-
-```
-POST /api/v1/daemons/:id/heartbeat
-```
-
-Updates daemon liveness. Requirement-lane claim heartbeats are separate and use `POST /api/v1/requirements/:id/heartbeat`.
-
-### Update Daemon Status
-
-```
-POST /api/v1/daemons/:id/status
-```
-
-```json
-{
-  "status": "busy",
-  "activeTaskIds": ["uuid"],
-  "activeWorkerStates": [
-    {
-      "index": 0,
-      "status": "running",
-      "requirementId": "uuid",
-      "requirementTitle": "User authentication",
-      "executionSliceId": "uuid",
-      "executionSliceTitle": "API routes",
-      "modelTier": "strong",
-      "model": "gpt-5.5",
-      "taskId": "uuid",
-      "taskTitle": "Implement login",
-      "branchName": "req/auth",
-      "worktreePath": "/Users/me/.task-weaver/worktrees/project/req-auth",
-      "startedAt": "2026-06-27T10:00:00.000Z",
-      "updatedAt": "2026-06-27T10:01:00.000Z"
-    }
-  ]
-}
-```
-
-`activeWorkerStates` powers the Web Daemons page.
-
-### Apply Requirement Lane
-
-```
-POST /api/v1/daemons/:id/apply-requirement
-```
-
-```json
-{
-  "projectId": "uuid",
-  "workerIndex": 0,
-  "modelTiers": ["fast", "standard", "strong"],
-  "includeDiagnostics": true
-}
-```
-
-Returns:
-
-```json
-{
-  "requirement": { "id": "uuid", "title": "..." },
-  "executionSlice": { "id": "uuid", "title": "API routes", "modelTier": "strong" },
-  "task": { "id": "uuid", "title": "..." },
-  "tasks": [{ "id": "uuid", "title": "...", "status": "in_progress" }],
-  "repositories": [
-    {
-      "link": { "id": "uuid", "baseBranch": "main", "workingBranch": "req/auth", "deliveryStatus": "pending" },
-      "repository": { "id": "uuid", "canonicalKey": "github.com/openai/task-weaver", "provider": "github" }
-    }
-  ],
-  "executorTool": "codex",
-  "eligibility": {
-    "candidateCount": 12,
-    "examinedCount": 12,
-    "runnableCount": 2,
-    "selectedCount": 1,
-    "truncated": false,
-    "skipCounts": {
-      "status": 1,
-      "dependency": 2,
-      "claim": 1,
-      "slice_order": 3,
-      "capability": 2,
-      "model_tier": 1,
-      "retry_time": 0,
-      "policy": 0
-    },
-    "samples": []
-  }
-}
-```
-
-The repository array is the frozen Requirement workspace for this lane. Eligibility diagnostics are bounded to 200 examined tasks and use normalized skip reasons. The daemon CLI requests diagnostics and only logs an idle summary when it changes. Set `includeDiagnostics` to `false` to omit them. If no work is available, the lane fields are empty and the response still includes diagnostics when requested.
-
-CLI daemon model mapping:
-
-```bash
-tw daemon start --tools codex \
-  --model fast:gpt-5.4-mini \
-  --model standard:gpt-5.5 \
-  --model strong:gpt-5.5 \
-  --think fast:low \
-  --think standard:medium \
-  --think strong:high \
-  --prompt-file ~/.config/tw/worker-extra.md
-```
-
-`--think <tier:effort>` maps Task Weaver model tiers to Codex `model_reasoning_effort` values. Supported efforts are `minimal`, `low`, `medium`, `high`, and `xhigh`. Non-Codex tools ignore this mapping.
-
-`--prompt <text>` and `--prompt-file <path>` append local-only extra instructions to each spawned worker prompt.
-
-CLI daemon review:
-
-```bash
-tw daemon review --project <project-id> --base main \
-  --check "pnpm typecheck" \
-  --check "pnpm test" \
-  --prompt-file ~/.config/tw/review-extra.md
-```
-
-### Apply Review Lane
-
-```
-POST /api/v1/daemons/:id/apply-review
-```
-
-```json
-{
-  "projectId": "uuid",
-  "workerIndex": 0
-}
-```
-
-Returns:
-
-```json
-{
-  "requirement": { "id": "uuid", "title": "...", "status": "in_review" },
-  "tasks": [{ "id": "uuid", "title": "...", "status": "done" }],
-  "executionSlice": { "id": "uuid", "title": "API routes" },
-  "repositories": [{ "link": { "id": "uuid" }, "repository": { "id": "uuid", "canonicalKey": "github.com/openai/task-weaver" } }]
-}
-```
-
-If no review work is available, returns `{ "requirement": null, "tasks": [], "executionSlice": null, "repositories": [] }`.
-
-The review daemon calls `apply-review` to claim one `in_review` requirement at a time, syncs the requirement branch with `origin/<base>`, runs configured checks and optional AI review, and moves passing branches to `ready_to_merge`. Conflicts, failed checks, or review findings create a new `todo` follow-up task and move the requirement back to `in_progress`.
-
-CLI daemon merge:
-
-```bash
-tw daemon merge --project <project-id> --base main
-```
-
-### Apply Merge Lane
-
-```
-POST /api/v1/daemons/:id/apply-merge
-```
-
-```json
-{
-  "projectId": "uuid",
-  "workerIndex": 0
-}
-```
-
-Returns:
-
-```json
-{
-  "requirement": { "id": "uuid", "title": "...", "status": "ready_to_merge" },
-  "tasks": [{ "id": "uuid", "title": "...", "status": "done" }],
-  "executionSlice": { "id": "uuid", "title": "API routes" },
-  "repositories": [{ "link": { "id": "uuid" }, "repository": { "id": "uuid", "canonicalKey": "github.com/openai/task-weaver" } }]
-}
-```
-
-If no merge work is available, returns `{ "requirement": null, "tasks": [], "executionSlice": null, "repositories": [] }`.
-
-The merge daemon calls `apply-merge` to claim one `ready_to_merge` requirement at a time, merges `origin/<requirement-branch>` into the base branch from a detached merge worktree, pushes `HEAD:<base>`, and marks the requirement `done`. Final merge conflicts create a new `todo` follow-up task and move the requirement back to `in_progress`; infrastructure failures such as fetch or push errors are recorded and left in `ready_to_merge` for retry.
-
-### Apply Task (Compatibility)
-
-```
-POST /api/v1/daemons/:id/apply-task
-```
-
-Legacy task-level daemon pickup. It now excludes tasks whose requirement already has an active requirement claim.
-
-### Daemon SSE Events
-
-```
-GET /api/v1/daemons/events
-```
-
-Enabled when `TW_DAEMON_MODE=sse`. Emits task and requirement events that should wake idle daemon workers.
-
----
+Task workers use `/api/v1/thin-workers` for task acquisition, lease renewal, presence, artifacts and fenced completion. Use `tw worker start` to run a worker and `tw worker attempts` to inspect attempts.
 
 ## Health Check
 
@@ -2495,8 +2069,9 @@ This is separate from the outbound `/api/v1/mcp/*` Registry. See the
 
 ## Execution control and recovery
 
-See [the normative execution recovery contract](../../docs/live-planning-recovery.md#interfaces-and-compatibility) for durable control listing/acknowledgment/resume, run-authority verification, synchronization records, explicit evidence revalidation and human recovery decisions. Daemon mutation fences include `runId` in addition to `daemonId` and `leaseGeneration`; lane heartbeat alone never restores an invalidated run. Delegated Git fetch/verify is available only through the local supervisor broker at `POST /api/v1/execution/git`, with `{ "operation": "fetch" | "verify", "repositoryId": "<uuid>" }`. This local endpoint is not an unrestricted server Git executor.
-
+Task workers use fenced attempts. Inspect interrupted work and external effects
+before using `tw worker resolve`; expiration alone does not establish that a
+remote process stopped. See [the task worker guide](../../docs/task-worker.md).
 
 ## Capability diagnostics
 
@@ -2520,3 +2095,13 @@ Discovery/retention coverage, usefulness and per-capability model/context cost
 remain unknown where not measured. API duration, when present, is one observation.
 Review actual artifacts and use the existing process-level Usage commands for
 measured counters. Zero visible references does not establish zero actual use.
+
+### Reassessment grants and decisions
+
+`POST /api/v1/reassessment/grants` creates a human-managed grant with `projectId`, nullable `requirementId`, `agentId`, `operations` (currently `["revalidate_evidence"]`), and an ISO `expiresAt`. `GET /api/v1/reassessment/grants?projectId=...` lists grants, and `POST /api/v1/reassessment/grants/{id}/revoke` takes `{ "projectId": "..." }`. These operations require a human with live project management access.
+
+`POST /api/v1/reassessment/decisions` accepts `grantId`, `projectId`, `requirementId`, `expectedRevision`, `decision` (`accept` or `escalate`), `evidence` (objects containing `outputId` and `rationale`), `rationale`, `inputsAvailable`, and `uncertainExternalEffects`. The authenticated agent must have live requirement access and a matching, unexpired, unrevoked grant. A stale revision is rejected. Missing or unavailable evidence and uncertain external effects produce escalation. `GET /api/v1/reassessment/decisions?requirementId=...` returns structured audit fields without evidence references or free text. Recording a decision does not resume execution or establish that an external process stopped.
+
+`POST /api/v1/reassessment/apply` accepts `projectId`, `requirementId`, `grantId`, and `decisionId` from the same authorized agent. It applies an accepted decision only while the plan, grant, authority, and complete recorded evidence remain current. It clears historical evidence review only; it does not recover or resume execution. Record a new decision or escalate if the evidence has changed.
+
+`POST /api/v1/reassessment/interrupted` records an advisory interrupted-execution assessment. Supply the grant, project and requirement IDs, `expectedRevision`, `controlId`, `expectedControlUpdatedAt`, `expectedRunId`, `expectedLeaseGeneration`, `decision`, `inputs` (typed `{ "type": "workflow_input", "inputId": "..." }` references), `uncertainExternalEffects`, and `rationale`. Optional `notes` are context only. The server resolves and authorizes the complete registered input set and records immutable file identities or unavailable markers. Missing, unknown, inaccessible, local-only or changed inputs, an unverified run generation, and uncertain effects escalate. A stale revision, generation, run or control observation is rejected. This assessment does not resume execution or prove that an external process stopped.

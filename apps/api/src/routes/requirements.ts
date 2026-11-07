@@ -1,8 +1,11 @@
 import { Hono } from "hono";
+import { Readable } from "node:stream";
 import { z } from "zod";
 import {
   createResourceServices,
   createGitEvidenceService,
+  createAttachmentService,
+  AuthorizationError,
   gitEvidenceComparisonSchema,
   gitEvidenceCommitSchema,
   createExecutionControlService,
@@ -13,8 +16,6 @@ import {
   listRequirementsSchema,
   linkDocumentToRequirementSchema,
   createRequirementDependencySchema,
-  createExecutionSliceSchema,
-  updateExecutionSliceSchema,
   batchCreateRequirementsSchema,
   claimRequirementSchema,
   heartbeatRequirementClaimSchema,
@@ -27,7 +28,6 @@ import {
   NotFoundError,
   ConflictError,
   ValidationError,
-  ExecutionSliceBlockedError,
 } from "@task-weaver/core";
 import type { Env } from "../middleware/actor.js";
 
@@ -146,6 +146,19 @@ requirements.get("/requirements/:id", async (c) => {
 
 requirements.get("/requirements/:id/workflow-outputs/:outputId/evidence", async c => {
   return c.json(await createResourceServices(c.get("identity")).requirementService.describeWorkflowEvidence(c.get("db"), c.req.param("id"), c.req.param("outputId")));
+});
+
+// A human can recover a historical local artifact without its former daemon.
+// The attachment service checks current write authority, size and stored SHA-256,
+// and records the promotion transaction in the audit log.
+requirements.post("/requirements/:id/workflow-outputs/:outputId/import", async c => {
+  const identity = c.get("identity");
+  if (identity.actor.type !== "human" || identity.credential.kind === "delegation") throw new AuthorizationError();
+  const requirementId = z.string().uuid().parse(c.req.param("id"));
+  const outputId = z.string().uuid().parse(c.req.param("outputId"));
+  if (!c.req.raw.body || c.req.header("content-type") !== "application/octet-stream") return c.json({ error: "An octet-stream body is required" }, 400);
+  const body = Readable.fromWeb(c.req.raw.body as import("node:stream/web").ReadableStream);
+  return c.json(await createAttachmentService(identity).promoteEvidence(c.get("db"), requirementId, outputId, body));
 });
 
 requirements.post("/requirements/:id/workflow-outputs/:outputId/git-comparison", async c => {
@@ -412,78 +425,6 @@ requirements.get("/requirements/:id/slices", async (c) => {
   try {
     const result = await createResourceServices(c.get("identity")).requirementService.listExecutionSlices(db, id);
     return c.json({ items: result });
-  } catch (err) {
-    if (err instanceof NotFoundError) {
-      return c.json({ error: "Resource not found" }, 404);
-    }
-    throw err;
-  }
-});
-
-// POST /requirements/:id/slices - Create an execution slice
-requirements.post("/requirements/:id/slices", async (c) => {
-  const db = c.get("db");
-  const actor = c.get("actor");
-  const id = c.req.param("id");
-  const body = await c.req.json();
-  const parsed = createExecutionSliceSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
-  }
-
-  try {
-    const slice = await createResourceServices(c.get("identity")).requirementService.createExecutionSlice(db, id, parsed.data, actor);
-    return c.json(slice, 201);
-  } catch (err) {
-    if (err instanceof NotFoundError) {
-      return c.json({ error: "Resource not found" }, 404);
-    }
-    if (err instanceof ValidationError) {
-      return c.json({ error: "Invalid request" }, 400);
-    }
-    throw err;
-  }
-});
-
-// PATCH /execution-slices/:id - Update an execution slice
-requirements.patch("/execution-slices/:id", async (c) => {
-  const db = c.get("db");
-  const actor = c.get("actor");
-  const id = c.req.param("id");
-  const body = await c.req.json();
-  const parsed = updateExecutionSliceSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
-  }
-
-  try {
-    const slice = await createResourceServices(c.get("identity")).requirementService.updateExecutionSlice(db, id, parsed.data, actor);
-    return c.json(slice);
-  } catch (err) {
-    if (err instanceof ExecutionSliceBlockedError) {
-      return c.json({ error: "An earlier execution slice must be completed or cancelled before this slice can advance." }, 400);
-    }
-    if (err instanceof NotFoundError) {
-      return c.json({ error: "Resource not found" }, 404);
-    }
-    if (err instanceof ValidationError) {
-      return c.json({ error: "Invalid request" }, 400);
-    }
-    throw err;
-  }
-});
-
-// DELETE /execution-slices/:id - Delete an execution slice
-requirements.delete("/execution-slices/:id", async (c) => {
-  const db = c.get("db");
-  const actor = c.get("actor");
-  const id = c.req.param("id");
-
-  try {
-    const deleted = await createResourceServices(c.get("identity")).requirementService.deleteExecutionSlice(db, id, actor);
-    return c.json(deleted);
   } catch (err) {
     if (err instanceof NotFoundError) {
       return c.json({ error: "Resource not found" }, 404);

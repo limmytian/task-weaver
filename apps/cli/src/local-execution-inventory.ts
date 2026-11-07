@@ -38,6 +38,7 @@ export function recordLocalExecution(record: Omit<LocalExecutionRecord, 'process
   const target = inventoryPath(record.requirementId)
   writeFileSync(`${target}.${process.pid}.tmp`, JSON.stringify({ ...record, processIdentity }), { mode: 0o600 })
   renameSync(`${target}.${process.pid}.tmp`, target)
+  return processIdentity
 }
 export async function clearLocalExecution(requirementId: string, runId: string) {
   const path = inventoryPath(requirementId)

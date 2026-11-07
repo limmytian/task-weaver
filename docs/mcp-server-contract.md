@@ -47,7 +47,6 @@ The `tw_` names below are fixed for both transports.
 | `tw_tasks_list`, `tw_tasks_get` | taskService; `/projects/:projectId/tasks`, `/personal/tasks`, `/tasks/:id` | Preserve listTasksSchema scope refinement; get by id |
 | `tw_tasks_create`, `tw_tasks_update` | taskService; project/personal creation routes and `/tasks/:id` | Preserve createTaskSchema membership refinement; personal owner derives from credentials; update uses expectedVersion |
 | `tw_tasks_status` | taskService.updateTaskStatus; `/tasks/:id/status` | id, status, optional reason; no force or daemon lease fields |
-| `tw_tasks_claim`, `tw_tasks_heartbeat`, `tw_tasks_release` | claimService; `/tasks/:id/claim`, `/heartbeat`, `/release` | Duration validated to 1–1440 minutes; optional release reason; holder identity derives from credentials |
 | `tw_task_comments_list`, `tw_task_comments_add` | taskService.getTaskDetail/addTaskComment; `/tasks/:id`, `/comments` | listTaskCommentsPage; bounded JSON tool adapter; add uses createTaskCommentSchema |
 | `tw_task_dependencies_list`, `tw_task_dependencies_add`, `tw_task_dependencies_remove` | taskService; `/tasks/:id`, `/dependencies[/:depId]` | listTaskDependenciesPage; bounded JSON tool adapter; add uses createTaskDependencySchema; removal includes parent id |
 | `tw_documents_list`, `tw_documents_get` | documentService; `/documents`, `/documents/:id` | Existing listDocumentsSchema; only authorized metadata and Markdown content; no attachment payloads |

@@ -144,7 +144,6 @@ export function registerRequirements(program: Command): void {
     .option('--sha256 <hash>', 'local output SHA-256 checksum')
     .option('--repository-link <id>', 'requirement repository link ID')
     .option('--task <id>', 'source task ID')
-    .option('--slice <id>', 'source execution slice ID')
     .option('--summary <text>', 'output summary')
     .option('--json', 'output raw JSON')
     .action(async (id, opts) => {
@@ -162,14 +161,13 @@ export function registerRequirements(program: Command): void {
         nodeId: local?.nodeId ?? opts.node, relativePath: local?.relativePath ?? opts.path,
         sizeBytes: local?.sizeBytes ?? (opts.size === undefined ? undefined : Number(opts.size)),
         sha256: local?.sha256 ?? opts.sha256, requirementRepositoryId: opts.repositoryLink,
-        taskId: opts.task, executionSliceId: opts.slice, summary: opts.summary,
+        taskId: opts.task, summary: opts.summary,
       })
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)
     })
 
   output.command('verify <requirement-id> <output-id>')
-    .option('--daemon-id <id>', 'registered daemon reporting availability')
     .option('--json', 'output raw JSON')
     .action(async (id, outputId, opts) => {
       const config = loadConfig()
@@ -177,9 +175,32 @@ export function registerRequirements(program: Command): void {
       const target = outputs.find((entry) => entry.id === outputId && entry.type === 'local')
       if (!target) throw new Error('Local output not found')
       const probe = await probeWorkflowArtifact(target, config.nodeId)
-      const data = await post(`/api/v1/requirements/${id}/workflow-output-availability`, { outputId, nodeId: config.nodeId, daemonId: opts.daemonId, ...probe })
+      const data = await post(`/api/v1/requirements/${id}/workflow-output-availability`, { outputId, nodeId: config.nodeId, ...probe })
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)
+    })
+
+  output.command('import <requirement-id> <output-id>')
+    .description('recover a verified historical local output as a shared attachment')
+    .option('--json', 'output raw JSON')
+    .action(async (id, outputId, opts) => {
+      const config = loadConfig()
+      if (!config.apiKey) throw new Error('A human API key is required')
+      const outputs = await get<LocalWorkflowOutput[]>(`/api/v1/requirements/${id}/workflow-outputs`)
+      const target = outputs.find(entry => entry.id === outputId && entry.type === 'local')
+      if (!target) throw new Error('Local output not found')
+      const probe = await probeWorkflowArtifact(target, config.nodeId)
+      if (probe.availability !== 'available') throw new Error(probe.reason)
+      const path = localWorkflowOutputPath(target.relativePath!)
+      const bytes = readFileSync(path)
+      if (bytes.length !== target.sizeBytes) throw new Error('Artifact changed while reading')
+      const response = await fetch(`${config.apiUrl}/api/v1/requirements/${id}/workflow-outputs/${outputId}/import`, {
+        method: 'POST', headers: { authorization: `Bearer ${config.apiKey}`, 'content-type': 'application/octet-stream' }, body: bytes, redirect: 'error',
+      })
+      if (!response.ok) throw new Error(`Evidence import failed (HTTP ${response.status})`)
+      const result = await response.json() as Record<string, unknown>
+      if (opts.json) return printJson(result)
+      printKv(result)
     })
 
   output.command('retire <requirement-id> <output-id>')
@@ -220,14 +241,13 @@ export function registerRequirements(program: Command): void {
     .action(async (id, opts) => {
       const data = await get<Record<string, unknown>[]>(`/api/v1/requirements/${id}/workflow-inputs`)
       if (opts.json) return printJson(data)
-      printTable(data, ['id', 'outputId', 'taskId', 'executionSliceId'])
+      printTable(data, ['id', 'outputId', 'taskId'])
     })
   input.command('add <requirement-id> <output-id>')
     .option('--task <id>', 'limit dependency to one task')
-    .option('--slice <id>', 'limit dependency to one execution slice')
     .option('--json', 'output raw JSON')
     .action(async (id, outputId, opts) => {
-      const data = await post(`/api/v1/requirements/${id}/workflow-inputs`, { outputId, taskId: opts.task, executionSliceId: opts.slice })
+      const data = await post(`/api/v1/requirements/${id}/workflow-inputs`, { outputId, taskId: opts.task })
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)
     })
@@ -239,7 +259,6 @@ export function registerRequirements(program: Command): void {
     .option('--decision <decision>', 'complete|changes_requested|failed|retry', 'complete')
     .option('--checks-file <path>', 'JSON array of acceptance checks')
     .option('--lease-generation <number>', 'requirement lease generation')
-    .option('--daemon-id <id>', 'daemon holding the requirement lease')
     .option('--json', 'output raw JSON')
     .action(async (id, opts) => {
       const data = await post(`/api/v1/requirements/${id}/workflow-advance`, {
@@ -247,7 +266,6 @@ export function registerRequirements(program: Command): void {
         expectedRevision: Number(opts.revision),
         checks: opts.checksFile ? JSON.parse(readFileSync(opts.checksFile, 'utf8')) : [],
         leaseGeneration: opts.leaseGeneration === undefined ? undefined : Number(opts.leaseGeneration),
-        daemonId: opts.daemonId,
       })
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)
@@ -338,14 +356,10 @@ export function registerRequirements(program: Command): void {
     .command('claim <id>')
     .description('claim a requirement lane for exclusive work')
     .option('--duration <minutes>', 'lease duration in minutes (default: 30)', '30')
-    .option('--daemon-id <id>', 'daemon ID metadata for the claim')
-    .option('--worker-index <index>', 'worker index metadata for the claim')
     .option('--json', 'output raw JSON')
     .action(async (id, opts) => {
       const data = await post(`/api/v1/requirements/${id}/claim`, {
         durationMinutes: Number(opts.duration),
-        daemonId: opts.daemonId,
-        workerIndex: opts.workerIndex,
       })
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)
@@ -443,83 +457,6 @@ export function registerRequirements(program: Command): void {
     .option('--json', 'output raw JSON')
     .action(async (id, depId, opts) => {
       const data = await del(`/api/v1/requirements/${id}/dependencies/${depId}`)
-      if (opts.json) return printJson(data)
-      printKv(data as Record<string, unknown>)
-    })
-
-  const slice = req.command('slice').description('manage requirement execution slices')
-
-  slice
-    .command('list <id>')
-    .description('list execution slices for a requirement')
-    .option('--json', 'output raw JSON')
-    .action(async (id, opts) => {
-      const data = await get<{ items: unknown[] }>(`/api/v1/requirements/${id}/slices`)
-      if (opts.json) return printJson(data)
-      printTable(data.items as Record<string, unknown>[], ['id', 'title', 'orderIndex', 'modelTier', 'status'])
-    })
-
-  slice
-    .command('create <id>')
-    .description('create an execution slice for a requirement')
-    .requiredOption('--title <title>', 'slice title')
-    .option('--description <desc>', 'slice description')
-    .option('--order <n>', 'slice order index')
-    .option('--allow-parallel', 'allow this slice to run before earlier slices are terminal')
-    .option('--model-tier <tier>', 'fast|standard|strong')
-    .option('--tasks <ids>', 'comma-separated task IDs to assign')
-    .option('--json', 'output raw JSON')
-    .action(async (id, opts) => {
-      const data = await post(`/api/v1/requirements/${id}/slices`, {
-        title: opts.title,
-        description: opts.description,
-        orderIndex: opts.order !== undefined ? Number(opts.order) : undefined,
-        allowParallel: Boolean(opts.allowParallel),
-        modelTier: opts.modelTier,
-        taskIds: opts.tasks ? String(opts.tasks).split(',').map((taskId) => taskId.trim()).filter(Boolean) : undefined,
-      })
-      if (opts.json) return printJson(data)
-      printKv(data as Record<string, unknown>)
-    })
-
-  slice
-    .command('update <sliceId>')
-    .description('update an execution slice')
-    .option('--title <title>', 'new title')
-    .option('--description <desc>', 'new description')
-    .option('--order <n>', 'slice order index')
-    .option('--allow-parallel', 'allow this slice to run before earlier slices are terminal')
-    .option('--sequential', 'require earlier slices to be terminal before this slice runs')
-    .option('--model-tier <tier>', 'fast|standard|strong')
-    .option('--status <status>', 'todo|in_progress|in_review|done|cancelled')
-    .option('--summary <text>', 'result summary')
-    .option('--tasks <ids>', 'comma-separated task IDs to assign')
-    .option('--json', 'output raw JSON')
-    .action(async (sliceId, opts) => {
-      if (opts.allowParallel && opts.sequential) {
-        throw new Error('Choose either --allow-parallel or --sequential')
-      }
-      const body: Record<string, unknown> = {}
-      if (opts.title) body.title = opts.title
-      if (opts.description !== undefined) body.description = opts.description
-      if (opts.order !== undefined) body.orderIndex = Number(opts.order)
-      if (opts.allowParallel) body.allowParallel = true
-      if (opts.sequential) body.allowParallel = false
-      if (opts.modelTier) body.modelTier = opts.modelTier
-      if (opts.status) body.status = opts.status
-      if (opts.summary !== undefined) body.resultSummary = opts.summary
-      if (opts.tasks) body.taskIds = String(opts.tasks).split(',').map((taskId) => taskId.trim()).filter(Boolean)
-      const data = await patch(`/api/v1/execution-slices/${sliceId}`, body)
-      if (opts.json) return printJson(data)
-      printKv(data as Record<string, unknown>)
-    })
-
-  slice
-    .command('delete <sliceId>')
-    .description('delete an execution slice')
-    .option('--json', 'output raw JSON')
-    .action(async (sliceId, opts) => {
-      const data = await del(`/api/v1/execution-slices/${sliceId}`)
       if (opts.json) return printJson(data)
       printKv(data as Record<string, unknown>)
     })

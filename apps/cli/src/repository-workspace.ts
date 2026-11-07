@@ -11,7 +11,7 @@ import {
   runTrustedGitCommand,
   type RepositoryDeliveryResult,
 } from './git-provider.js'
-import { throwIfCancelled } from './daemon-lifecycle.js'
+import { throwIfCancelled } from './cancellation.js'
 import { runCommand } from './async-command.js'
 import {
   redactTrustedOutput,
@@ -732,4 +732,169 @@ export async function cleanupRequirementWorktrees(config: Config, requirementId:
     }
   }
   return { removed, retained }
+}
+
+/** Each attempt gets a fresh branch and directory; existing worktrees are never moved or reset. */
+export async function provisionThinWorkspace(options: {
+  config: Config
+  projectId: string
+  requirementId: string
+  taskId: string
+  attemptId: string
+  planRevision: number
+  entries: RequirementRepositoryEntry[]
+  assertAuthority: () => Promise<void>
+  signal?: AbortSignal
+}): Promise<CompositeWorkspace> {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  for (const value of [options.projectId, options.requirementId, options.taskId, options.attemptId]) {
+    if (!uuid.test(value)) throw new Error('Invalid workspace identity')
+  }
+  await options.assertAuthority()
+  const parent = join(homedir(), '.task-weaver', 'task-workspaces', options.projectId, options.taskId)
+  await mkdir(parent, { recursive: true, mode: 0o700 })
+  const rootPath = join(parent, options.attemptId)
+  await mkdir(rootPath, { mode: 0o700 })
+  const repositories: ProvisionedRepository[] = []
+  for (const { link, repository } of [...options.entries].sort((a, b) => a.repository.canonicalKey.localeCompare(b.repository.canonicalKey))) {
+    if (link.requirementId !== options.requirementId || link.repositoryId !== repository.id) throw new Error('Workspace repository scope mismatch')
+    if (!uuid.test(repository.id)) throw new Error('Invalid repository identity')
+    await withRepositoryWorkspaceLock({ config: options.config, repository, operation: 'task-attempt-workspace', signal: options.signal }, async () => {
+      await options.assertAuthority()
+      const credential = resolveRepositoryCredential(options.config, repository, 'read')
+      if (credential.state !== 'available') throw new Error(`Repository ${repository.canonicalKey} is not ready: ${credential.reasonCode}`)
+      const adapter = cancellableAdapter(repository.provider, options.signal, options.assertAuthority)
+      const remote = remoteFor(repository, credential.transport)
+      if (!remote) throw new Error(`Repository ${repository.canonicalKey} has no clone endpoint`)
+      const basePath = baseCheckoutPath(options.config, repository)
+      await mkdir(join(basePath, '..'), { recursive: true })
+      if (!existsSync(basePath)) {
+        const clone = await adapter.git(credential, ['clone', '--no-checkout', '--', remote, basePath], rootPath)
+        if (!clone.ok) throw new Error(`Repository clone failed for ${repository.canonicalKey}`)
+      } else if (await existingOrigin(adapter, credential, basePath) !== remote) {
+        throw new Error(`Repository remote identity mismatch for ${repository.canonicalKey}`)
+      }
+      const fetched = await adapter.git(credential, ['fetch', '--prune', 'origin'], basePath)
+      if (!fetched.ok) throw new Error(`Repository fetch failed for ${repository.canonicalKey}`)
+      const baseBranch = link.workingBranch ?? link.baseBranch ?? repository.defaultBranch ?? 'main'
+      const valid = await adapter.git(credential, ['check-ref-format', '--branch', baseBranch], basePath)
+      if (!valid.ok) throw new Error('Invalid workspace base branch')
+      const base = await adapter.git(credential, ['rev-parse', '--verify', `refs/remotes/origin/${baseBranch}^{commit}`], basePath)
+      if (!base.ok || !/^[a-f0-9]{40,64}$/i.test(base.stdout.trim())) throw new Error(`Workspace base branch is unavailable: ${baseBranch}`)
+      const baseCommit = base.stdout.trim()
+      const workingBranch = `tw/task/${options.taskId}/${options.attemptId}`
+      const relativePath = `${safeSegment(repository.name)}-${repository.id.slice(0, 8)}`
+      const worktreePath = join(rootPath, relativePath)
+      await options.assertAuthority()
+      const added = await adapter.git(credential, ['worktree', 'add', '-b', workingBranch, worktreePath, baseCommit], basePath)
+      if (!added.ok) throw new Error(`Task worktree creation failed for ${repository.canonicalKey}`)
+      await configureSecretFreeWorktree(adapter, credential, worktreePath)
+      repositories.push({ linkId: link.id, repositoryId: repository.id, displayName: repository.displayName, canonicalKey: repository.canonicalKey, provider: repository.provider, relativePath, basePath, worktreePath, baseBranch, workingBranch, headCommit: baseCommit })
+    })
+  }
+  await options.assertAuthority()
+  const manifestPath = join(rootPath, 'repository-manifest.json')
+  await writeFile(manifestPath, JSON.stringify({ version: 1, projectId: options.projectId, requirementId: options.requirementId, taskId: options.taskId, attemptId: options.attemptId, planRevision: options.planRevision, repositories: repositories.map(({ repositoryId, canonicalKey, relativePath, baseBranch, workingBranch, headCommit }) => ({ repositoryId, canonicalKey, relativePath, baseBranch, workingBranch, baseCommit: headCommit })) }, null, 2) + '\n', { mode: 0o600, flag: 'wx' })
+  return { rootPath, manifestPath, manifestVersion: 1, repositories }
+}
+
+/** Recheck the remote integration baseline under the repository workspace lock. */
+export async function verifyThinWorkspaceBaselines(options: {
+  config: Config
+  workspace: CompositeWorkspace
+  entries: RequirementRepositoryEntry[]
+  assertAuthority: () => Promise<void>
+  signal?: AbortSignal
+}) {
+  for (const repository of options.workspace.repositories) {
+    const entry = options.entries.find(value => value.repository.id === repository.repositoryId && value.link.id === repository.linkId)
+    if (!entry || !repository.headCommit) throw new Error('Workspace manifest no longer matches repository scope')
+    await withRepositoryWorkspaceLock({ config: options.config, repository: entry.repository, operation: 'task-baseline-check', signal: options.signal }, async () => {
+      await options.assertAuthority()
+      const credential = resolveRepositoryCredential(options.config, entry.repository, 'read')
+      if (credential.state !== 'available') throw new Error(`Repository ${entry.repository.canonicalKey} is not ready: ${credential.reasonCode}`)
+      const adapter = cancellableAdapter(entry.repository.provider, options.signal, options.assertAuthority)
+      const remote = remoteFor(entry.repository, credential.transport)
+      if (!remote || await existingOrigin(adapter, credential, repository.basePath) !== remote) throw new Error('Workspace remote identity changed')
+      const fetch = await adapter.git(credential, ['fetch', '--prune', 'origin'], repository.basePath)
+      if (!fetch.ok) throw new Error('Unable to fetch the current integration baseline')
+      const tip = await adapter.git(credential, ['rev-parse', '--verify', `refs/remotes/origin/${repository.baseBranch}^{commit}`], repository.basePath)
+      if (!tip.ok || tip.stdout.trim() !== repository.headCommit) throw new Error('Integration baseline changed; rebase and revalidate before integration')
+    })
+  }
+  await options.assertAuthority()
+}
+
+/** Fetch the current requirement branch without modifying the task worktree. */
+export async function fetchThinIntegrationTarget(options: {
+  config: Config
+  workspace: CompositeWorkspace
+  entries: RequirementRepositoryEntry[]
+  repositoryId: string
+  assertAuthority: () => Promise<void>
+  signal?: AbortSignal
+}) {
+  const repository = options.workspace.repositories.find(item => item.repositoryId === options.repositoryId)
+  const entry = options.entries.find(item => item.repository.id === options.repositoryId && item.link.id === repository?.linkId)
+  if (!repository || !entry || !repository.headCommit || !entry.link.workingBranch || entry.link.workingBranch !== repository.baseBranch) throw new Error('A configured requirement branch is required for Git delivery')
+  return withRepositoryWorkspaceLock({ config: options.config, repository: entry.repository, operation: 'task-integration-target', signal: options.signal }, async () => {
+    await options.assertAuthority()
+    const credential = resolveRepositoryCredential(options.config, entry.repository, 'read')
+    if (credential.state !== 'available') throw new Error(`Repository ${entry.repository.canonicalKey} is not ready: ${credential.reasonCode}`)
+    const adapter = cancellableAdapter(entry.repository.provider, options.signal, options.assertAuthority)
+    const remote = remoteFor(entry.repository, credential.transport)
+    if (!remote || await existingOrigin(adapter, credential, repository.basePath) !== remote) throw new Error('Workspace remote identity changed')
+    const valid = await adapter.git(credential, ['check-ref-format', '--branch', entry.link.workingBranch!], repository.basePath)
+    if (!valid.ok) throw new Error('Invalid requirement branch')
+    const fetched = await adapter.git(credential, ['fetch', '--prune', 'origin'], repository.basePath)
+    if (!fetched.ok) throw new Error('Unable to fetch the requirement branch')
+    const target = await adapter.git(credential, ['rev-parse', '--verify', `refs/remotes/origin/${entry.link.workingBranch}^{commit}`], repository.basePath)
+    if (!target.ok || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(target.stdout.trim())) throw new Error('Requirement branch is unavailable')
+    await options.assertAuthority()
+    return target.stdout.trim()
+  })
+}
+
+/** Bind a push to configured repository metadata and worker-owned bare Git configuration. */
+export function createThinPushRunner(options: {
+  config: Config
+  entry: RequirementRepositoryEntry
+  gitDir: string
+  signal?: AbortSignal
+}) {
+  const credential = resolveRepositoryCredential(options.config, options.entry.repository, 'push')
+  if (credential.state !== 'available' || !credential.trustedEnvironment) throw new Error(`Repository ${options.entry.repository.canonicalKey} is not ready for push: ${credential.reasonCode}`)
+  const remote = remoteFor(options.entry.repository, credential.transport)
+  if (!remote || !options.gitDir.startsWith('/') || remote.startsWith('-') || /[\x00-\x1f]/.test(remote)) throw new Error('Invalid trusted Git push destination')
+  const environment: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(credential.trustedEnvironment)) {
+    if (!key.startsWith('GIT_') || key === 'GIT_SSH_COMMAND') environment[key] = value
+  }
+  Object.assign(environment, { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/usr/bin/false', SSH_ASKPASS: '/usr/bin/false' })
+  const config = credential.trustedGitConfig ?? []
+  return {
+    remote,
+    git: (args: string[]) => runTrustedGitCommand('git', [...config, '-c', 'core.hooksPath=/dev/null', '--git-dir', options.gitDir, ...args], options.gitDir, environment, options.signal),
+  }
+}
+
+/** Fetch a configured version target into the shared object store without changing the attempt worktree. */
+export async function fetchThinVersionTarget(options: {
+  config: Config
+  workspace: CompositeWorkspace
+  entries: RequirementRepositoryEntry[]
+  repositoryId: string
+  sourceBranch: string
+  targetBranch: string
+  assertAuthority: () => Promise<void>
+  signal?: AbortSignal
+}) {
+  const repository = options.workspace.repositories.find(item => item.repositoryId === options.repositoryId)
+  const entry = options.entries.find(item => item.repository.id === options.repositoryId && item.link.id === repository?.linkId)
+  if (!repository || !entry || entry.link.workingBranch !== options.sourceBranch || entry.link.baseBranch !== options.targetBranch || options.sourceBranch === options.targetBranch || repository.baseBranch !== options.sourceBranch) throw new Error('Version integration branch configuration changed')
+  return fetchThinIntegrationTarget({
+    ...options,
+    workspace: { ...options.workspace, repositories: options.workspace.repositories.map(item => item.repositoryId === options.repositoryId ? { ...item, baseBranch: options.targetBranch } : item) },
+    entries: options.entries.map(item => item.repository.id === options.repositoryId ? { ...item, link: { ...item.link, workingBranch: options.targetBranch } } : item),
+  })
 }
