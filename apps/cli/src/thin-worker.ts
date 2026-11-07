@@ -66,7 +66,7 @@ export function codexThinExecutor(): ThinExecutor {
 
 export type ThinWorkerPhase = 'preflight' | 'acquiring' | 'preparing' | 'executing' | 'publishing'
 
-export async function runThinOnce(options: { config: Config; projectId: string; requirementId?: string; model: string; effort: string; timeoutMs: number; executor?: ThinExecutor; signal?: AbortSignal; workerId?: string; heartbeatIntervalMs?: number; gitIdentity?: { name: string; email: string }; onPhase?: (phase: ThinWorkerPhase) => Promise<void>; onError?: (error: unknown) => void }): Promise<ThinOnceOutcome> {
+export async function runThinOnce(options: { config: Config; projectId: string; requirementId?: string; model: string; effort: string; timeoutMs: number; executor?: ThinExecutor; signal?: AbortSignal; workerId?: string; heartbeatIntervalMs?: number; gitIdentity?: { name: string; email: string }; onPhase?: (phase: ThinWorkerPhase) => Promise<void> }): Promise<ThinOnceOutcome> {
   if (!options.config.apiKey || !options.config.nodeId) throw new Error('Thin worker requires an API key and node identity')
   const credential = { apiUrl: options.config.apiUrl, apiKey: options.config.apiKey }
   const workerId = options.workerId ?? randomUUID()
@@ -229,7 +229,6 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
       }
       return { state: decision?.decision === 'changes_requested' ? 'attention' : 'completed', taskId: task.id, attemptId: attempt.id, workspacePath, usage, ...(decision?.decision === 'changes_requested' ? { reason: 'Acceptance requested changes; inspect the recorded artifact' } : {}) }
     } catch (error) {
-      options.onError?.(error)
       const reason = controller.signal.aborted ? 'Attempt interrupted; inspect the preserved workspace and external effects'
         : error instanceof ApiTransportError ? 'TW connection interrupted; inspect the preserved workspace and attempt state'
         : error instanceof ApiError && [401, 403].includes(error.status) ? 'Worker authorization ended; inspect the attempt and credentials'
