@@ -151,7 +151,7 @@ test('once worker runs a bounded deterministic executor and parks empty results'
   try {
     const gitExecutor: ThinExecutor = { ...executor, async execute(input) { const manifest = JSON.parse(await (await import('node:fs/promises')).readFile(join(input.cwd, 'repository-manifest.json'), 'utf8')); await writeFile(join(input.cwd, manifest.repositories[0].relativePath, input.prompt.includes('Git task B') ? 'worker-b.txt' : 'worker.txt'), 'delivered\n'); await writeFile(join(input.cwd, 'result.md'), 'Git delivery verified\n'); return { ok: true, reason: 'Fixture Git work', quotaBlocked: false }; } };
     const errors: string[] = [];
-    const gitRuns = await Promise.all(['git-fixture-a', 'git-fixture-b'].map(nodeId => runThinOnce({ ...opts, requirementId: gitReq!.id, gitIdentity: { name: 'Fixture', email: 'fixture@example.test' }, executor: gitExecutor, config: { ...config, nodeId }, onError: error => { errors.push(String(error)) } })));
+    const gitRuns = await Promise.all(['git-fixture-a', 'git-fixture-b'].map(nodeId => runThinOnce({ ...opts, requirementId: gitReq!.id, gitIdentity: { name: 'Fixture', email: 'fixture@example.test' }, executor: gitExecutor, config: { ...config, nodeId }, onError: error => { errors.push(error instanceof Error ? (error.stack ?? error.message) : String(error)) } })));
     assert.deepEqual(new Set(gitRuns.map(run => run.taskId)), new Set([gitTask!.id, gitTaskB!.id]));
     assert.ok(gitRuns.every(run => run.state === 'completed'), JSON.stringify({ gitRuns, errors }));
     const tip = git(bare, 'rev-parse', 'refs/heads/main');

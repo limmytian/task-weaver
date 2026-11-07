@@ -185,7 +185,7 @@ test('thin workspaces isolate parallel attempts and preserve dirty work', { time
       occupied = 1
       const priorPrepareCount = calls.filter(path => path.endsWith('/prepare')).length
       const errors: string[] = []
-      const outcome = await runThinOnce({ config: { ...options(0).config, apiUrl: `http://127.0.0.1:${address.port}`, apiKey: 'fixture' }, projectId, requirementId, model: 'fixture', effort: 'low', timeoutMs: 10000, gitIdentity: { name: 'Fixture', email: 'fixture@example.test' }, onError: error => { errors.push(String(error)) }, executor: {
+      const outcome = await runThinOnce({ config: { ...options(0).config, apiUrl: `http://127.0.0.1:${address.port}`, apiKey: 'fixture' }, projectId, requirementId, model: 'fixture', effort: 'low', timeoutMs: 10000, gitIdentity: { name: 'Fixture', email: 'fixture@example.test' }, onError: error => { errors.push(error instanceof Error ? (error.stack ?? error.message) : String(error)) }, executor: {
         async preflight() { return { blocked: false, reason: 'fixture', retryAt: null } },
         async execute(input) { const manifest = JSON.parse(await readFile(join(input.cwd, 'repository-manifest.json'), 'utf8')); await writeFile(join(input.cwd, manifest.repositories[0].relativePath, 'worker.txt'), 'worker delivery\n'); await writeFile(join(input.cwd, 'result.md'), 'Worker evidence\n'); return { ok: true, reason: 'fixture', quotaBlocked: false } },
       } })
