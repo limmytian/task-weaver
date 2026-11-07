@@ -117,13 +117,11 @@ const checks = [
   },
   {
     file: "hooks/use-realtime.ts",
-    label: "Daemon realtime timeline invalidation",
+    label: "Worker realtime status invalidation",
     patterns: [
       /daemon_progress_updated/,
-      /utils\.daemon\.overview\.invalidate\(\)/,
-      /utils\.daemon\.metrics\.invalidate\(\)/,
-      /utils\.daemon\.timeline\.invalidate\(\)/,
-      /utils\.daemon\.queues\.invalidate\(\)/,
+      /utils\.worker\.thinWorkers\.invalidate\(\)/,
+      /utils\.worker\.thinAttempts\.invalidate\(\)/,
     ],
   },
   {
