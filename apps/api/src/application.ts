@@ -1,4 +1,3 @@
-import { createEvidenceRoutes } from './routes/evidence.js';
 import { Hono } from "hono";
 import type { Database } from "@task-weaver/db";
 import {
@@ -118,13 +117,11 @@ const consoleLogger: ApplicationLogger = {
 };
 
 function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
-  const evidenceRuntime = createEvidenceRoutes(env.TW_EVIDENCE_READ_ENABLED === 'true');
   let webhookQueue = Promise.resolve();
   let pendingWebhooks = 0;
   let webhookBackground: Promise<void> | undefined;
   return {
     apiRoutes: [
-      { id: "evidence", method: "POST", path: "/api/v1/evidence", route: evidenceRuntime.router },
       {
         id: "agent-usage",
         method: "GET",
@@ -253,7 +250,6 @@ function applicationServices(env: NodeJS.ProcessEnv): ApplicationServices {
       },
     ],
     workers: [
-      { id: "evidence", start() {}, async stop() { evidenceRuntime.close(); } },
       {
         id: "durable-webhook-delivery",
         start(context: ApiRuntimeContext) {

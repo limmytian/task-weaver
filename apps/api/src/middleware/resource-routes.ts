@@ -98,6 +98,7 @@ const ordinaryRoutes: Array<[string, RegExp]> = [
   ["GET", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/(?:workflow-outputs|workflow-inputs|workflow-cleanup)/?$")],
   ["GET", /^\/api\/v1\/requirements\/[0-9a-fA-F-]{36}\/workflow-outputs\/[0-9a-fA-F-]{36}\/(?:evidence|git-comparison\/file)\/?$/],
   ["POST", /^\/api\/v1\/requirements\/[0-9a-fA-F-]{36}\/workflow-outputs\/[0-9a-fA-F-]{36}\/git-comparison\/?$/],
+  ["POST", /^\/api\/v1\/requirements\/[0-9a-fA-F-]{36}\/workflow-outputs\/[0-9a-fA-F-]{36}\/import\/?$/],
   ["POST", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/(?:workflow-outputs|workflow-inputs|workflow-advance|workflow-output-availability|workflow-output-retire)/?$")],
   ["POST", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/claim/?$")],
   ["POST", new RegExp("^/api/v1/requirements/[0-9a-fA-F-]{36}/release/?$")],

@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { BASIC_WORKFLOW, requirementWorkflowSchema, evidencePreviewKind, type RequirementWorkflow } from "@task-weaver/contracts";
-import { readEvidencePreview } from "@/lib/evidence-preview-transfer";
 import { recordedReviewChecks, type ReviewCheckStatus } from "@/lib/review-checks";
 import { formatReviewDecision, type ReviewReference } from "@/lib/review-references";
 import { gitDiffLines } from "@/lib/git-diff-lines";
@@ -127,92 +126,17 @@ export function RequirementWorkflowPanel({ requirement }: { requirement: Workflo
 
 function EvidenceMetadata({ requirementId, outputId, onReviewFeedback }: { requirementId: string; outputId: string; onReviewFeedback?: (path: string) => void }) {
   const [open, setOpen] = useState(false);
-  const [state, setState] = useState("");
-  const [controller, setController] = useState<AbortController | null>(null);
-  const [localPreview, setLocalPreview] = useState<{ url: string; kind: string; filename: string; truncated: boolean } | null>(null);
-  const activeDownload = useRef<AbortController | null>(null);
-  useEffect(() => () => activeDownload.current?.abort(), []);
-  useEffect(() => () => { if (localPreview) URL.revokeObjectURL(localPreview.url); }, [localPreview]);
   const evidence = trpc.requirement.evidence.useQuery({ requirementId, outputId }, { enabled: open, retry: false });
-  const capabilities = trpc.plan.capabilities.useQuery({ projectId: evidence.data?.projectId ?? '' }, { enabled: open && !evidence.error && Boolean(evidence.data?.projectId), retry: false });
-  useEffect(() => { if (evidence.error) activeDownload.current?.abort(); }, [evidence.error]);
-  const transfer = async (purpose: 'preview' | 'download' | 'promotion') => {
-    const abort = new AbortController(); activeDownload.current = abort; setController(abort); let requestId: string | undefined;
-    try {
-      const csrf = await fetch('/api/auth/csrf', { credentials: 'same-origin', cache: 'no-store', signal: abort.signal });
-      if (!csrf.ok) throw new Error('Authentication unavailable');
-      const token = (await csrf.json()).csrfToken as string;
-      const post = (path: string, data: unknown) => fetch(`/api/evidence/${path}`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-csrf-token': token }, body: JSON.stringify(data), signal: abort.signal });
-      setState('Requesting evidence from the producing node…');
-      const opened = await post('open', { requirementId, outputId, purpose });
-      if (!opened.ok) throw new Error('Evidence producer is unavailable or access is denied');
-      requestId = (await opened.json()).requestId;
-      const deadline = Date.now() + 30_000;
-      while (Date.now() < deadline) {
-        const response = await fetch(`/api/evidence/${requestId}/status`, { credentials: 'same-origin', cache: 'no-store', signal: abort.signal });
-        if (!response.ok) throw new Error('Evidence request expired or access ended');
-        const status = await response.json() as { state: string; failure: string | null };
-        if (status.state === 'failed') throw new Error(`Evidence is ${status.failure ?? 'unavailable'}`);
-        if (status.state === 'verified') {
-          if (purpose === 'promotion') {
-            setState('Saving verified evidence as an attachment…');
-            const result = await post(`${requestId}/promote`, {});
-            if (!result.ok) throw new Error('Evidence promotion failed');
-            requestId = undefined; await evidence.refetch(); setState('Verified evidence saved as an attachment.'); return;
-          }
-          if (purpose === 'preview' && evidence.data?.kind === 'local') {
-            const kind = evidencePreviewKind(evidence.data.mimeType, evidence.data.sizeBytes);
-            if (kind === 'download') throw new Error('Preview is unavailable for this file');
-            setState('Reading a verified preview…');
-            const result = await fetch(`/api/evidence/${requestId}/content`, { credentials: 'same-origin', cache: 'no-store', signal: abort.signal });
-            if (!result.ok || !result.body) throw new Error('Evidence preview failed');
-            const limit = ['text', 'csv', 'tsv'].includes(kind) ? 256 * 1024 : 10 * 1024 * 1024;
-            const { parts, truncated } = await readEvidencePreview(result, evidence.data.sizeBytes, limit);
-            requestId = undefined;
-            const url = URL.createObjectURL(new Blob(parts, { type: evidence.data.mimeType }));
-            setLocalPreview({ url, kind, filename: evidence.data.originalFilename, truncated });
-            setState('Verified preview ready.'); return;
-          }
-          setState('Downloading verified bytes…');
-          const result = await fetch(`/api/evidence/${requestId}/content`, { credentials: 'same-origin', cache: 'no-store', signal: abort.signal });
-          if (!result.ok) throw new Error('Evidence download failed');
-          const blob = await result.blob(); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'evidence.bin'; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-          requestId = undefined; setState('Verified download completed.'); return;
-        }
-        await new Promise<void>((resolve, reject) => { const timer = setTimeout(resolve, 500); abort.signal.addEventListener('abort', () => { clearTimeout(timer); reject(abort.signal.reason); }, { once: true }); });
-      }
-      throw new Error('Evidence request timed out');
-    } catch (error) { setState(abort.signal.aborted ? 'Evidence request cancelled.' : error instanceof Error ? error.message : 'Evidence request failed'); }
-    finally {
-      if (requestId) {
-        try { const csrf = await fetch('/api/auth/csrf', { credentials: 'same-origin', cache: 'no-store' }); const token = (await csrf.json()).csrfToken; await fetch(`/api/evidence/${requestId}/cancel`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-csrf-token': token }, body: '{}' }); } catch { /* The request expires automatically. */ }
-      }
-      activeDownload.current = null; setController(null);
-    }
-  };
   return <div className="mt-2 space-y-1"><Button size="sm" variant="outline" onClick={() => setOpen(value => !value)}>{open ? "Hide delivery" : "View delivery"}</Button>
     {open && evidence.isLoading && <p>Loading evidence…</p>}
     {open && evidence.error && <div role="alert"><p>Evidence is unavailable or access is denied.</p><Button size="sm" variant="outline" disabled={evidence.isFetching} onClick={() => void evidence.refetch()}>Retry</Button></div>}
     {open && !evidence.error && evidence.data && <div className="space-y-1 text-xs"><p>Source: {evidence.data.kind} · {evidence.data.availability}</p>
-      {evidence.data.kind === "local" && evidence.data.availability !== "retired" && <><p>{evidence.data.originalFilename} · {evidence.data.sizeBytes} bytes</p><p>SHA-256: {evidence.data.sha256}</p><p>Preview transfers and verifies the entire file from its node before displaying a bounded sample. A connected compatible producer and enabled evidence service are required.</p><div className="flex flex-wrap gap-2">{evidencePreviewKind(evidence.data.mimeType, evidence.data.sizeBytes) !== 'download' && <Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('preview'); }}>Preview</Button>}<Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('download'); }}>Download original</Button>{!capabilities.error && capabilities.data?.canWrite && <Button size="sm" variant="outline" disabled={Boolean(controller) || evidence.data.availability !== 'available'} onClick={() => { void transfer('promotion'); }}>Save as attachment</Button>}{controller && <Button size="sm" variant="ghost" onClick={() => controller.abort()}>Cancel request</Button>}</div>{localPreview && <LocalEvidencePreview preview={localPreview} />}</>}
+      {evidence.data.kind === "local" && evidence.data.availability !== "retired" && <><p>{evidence.data.originalFilename} · {evidence.data.sizeBytes} bytes</p><p>SHA-256: {evidence.data.sha256}</p><p>This historical local file must be imported from its original machine before it can be viewed here. A project writer can run the command below with a human API key.</p><div className="flex flex-wrap gap-2"><code className="break-all">tw req output import {requirementId} {outputId}</code></div></>}
       {evidence.data.kind === "attachment" && evidence.data.availability !== "retired" && <PinnedAttachmentEvidence file={evidence.data} />}
       {evidence.data.availability === "retired" && <p>This output has been retired.</p>}
       {evidence.data.kind === "git" && <><p>{evidence.data.repositoryName} · {evidence.data.branch ?? "delivered commit"} → {evidence.data.baseBranch}</p>{!evidence.data.gitBaseline && <p>Historical delivery baseline was not captured. Current-target comparisons may be empty after integration.</p>}{evidence.data.commitUrl && <a className="underline" href={evidence.data.commitUrl} target="_blank" rel="noopener noreferrer">Open delivered commit on the forge</a>}<GitEvidence requirementId={requirementId} outputId={outputId} headCommit={evidence.data.headCommit} hasHistoricalBaseline={Boolean(evidence.data.gitBaseline)} onReviewFeedback={onReviewFeedback} /></>}
       {evidence.data.kind === "unsupported" && <p>This output does not have a supported immutable evidence identity.</p>}
-      {state && <p role="status">{state}</p>}
     </div>}
-  </div>;
-}
-
-function LocalEvidencePreview({ preview }: { preview: { url: string; kind: string; filename: string; truncated: boolean } }) {
-  return <div className="space-y-2">{preview.truncated && <p>Preview is truncated; download the original for the complete file.</p>}
-    {preview.kind === 'text' && <TextAttachmentPreview src={preview.url} filename={preview.filename} maximumBytes={256 * 1024} sampled={preview.truncated} />}
-    {(preview.kind === 'csv' || preview.kind === 'tsv') && <EvidenceTablePreview src={preview.url} filename={preview.filename} sizeBytes={preview.truncated ? 256 * 1024 + 1 : 0} delimiter={preview.kind === 'csv' ? ',' : '\t'} />}
-    {preview.kind === 'pdf' && <PdfAttachmentPreview src={preview.url} filename={preview.filename} />}
-    {preview.kind === 'audio' && <audio controls preload="metadata" src={preview.url}>Audio preview is not supported by this browser.</audio>}
-    {preview.kind === 'video' && <video controls preload="metadata" className="max-h-96 max-w-full" src={preview.url}>Video preview is not supported by this browser.</video>}
-    {/* eslint-disable-next-line @next/next/no-img-element */}
-    {preview.kind === 'image' && <img src={preview.url} alt={preview.filename} className="max-h-96 max-w-full object-contain" />}
   </div>;
 }
 

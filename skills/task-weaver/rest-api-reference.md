@@ -594,9 +594,12 @@ POST /api/v1/requirements/:id/workflow-inputs
 POST /api/v1/requirements/:id/workflow-output-availability
 POST /api/v1/requirements/:id/workflow-output-retire
 GET  /api/v1/requirements/:id/workflow-cleanup
+POST /api/v1/requirements/:id/workflow-outputs/:outputId/import
 ```
 
-Output registration accepts `type` (`comment`, `attachment`, `url`, `local`, `git_branch`, `git_pr`), optional `taskId`, `executionSliceId`, `requirementRepositoryId`, and `summary`. Comment and attachment outputs require a platform `referenceId`; URL outputs require `url`; local outputs require `nodeId`, normalized `relativePath`, `sizeBytes`, and `sha256`. Git outputs require a requirement repository link. The server validates ownership. Additional output types may coexist; advancing delivery requires evidence for the selected primary method.
+Output registration accepts `type` (`comment`, `attachment`, `url`, `local`, `git_branch`, `git_pr`), optional `taskId`, `requirementRepositoryId`, and `summary`. Comment and attachment outputs require a platform `referenceId`; URL outputs require `url`; local outputs require `nodeId`, normalized `relativePath`, `sizeBytes`, and `sha256`. Git outputs require a requirement repository link. The server validates ownership. Additional output types may coexist; advancing delivery requires evidence for the selected primary method.
+
+Historical local evidence can be recovered without a daemon. A human with requirement write access can send the original file as an `application/octet-stream` body to the import endpoint, or run `tw req output import <requirement-id> <output-id>` on its original node. The server verifies the registered size and SHA-256 and records the promotion; the result is a shared attachment. File availability on an old node is not guaranteed.
 
 Stage advancement requires `stage` (`delivery`, `acceptance`, `integration`), `decision` (`complete`, `changes_requested`, `failed`, `retry`), `reason`, and `expectedRevision` from `workflowStateRevision`. Acceptance may include `checks` as name/status entries. A conflicting revision returns `409`; manual stages require a human actor. Existing requirements with `workflow: null` retain the legacy Git flow.
 

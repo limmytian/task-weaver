@@ -180,6 +180,29 @@ export function registerRequirements(program: Command): void {
       printKv(data as Record<string, unknown>)
     })
 
+  output.command('import <requirement-id> <output-id>')
+    .description('recover a verified historical local output as a shared attachment')
+    .option('--json', 'output raw JSON')
+    .action(async (id, outputId, opts) => {
+      const config = loadConfig()
+      if (!config.apiKey) throw new Error('A human API key is required')
+      const outputs = await get<LocalWorkflowOutput[]>(`/api/v1/requirements/${id}/workflow-outputs`)
+      const target = outputs.find(entry => entry.id === outputId && entry.type === 'local')
+      if (!target) throw new Error('Local output not found')
+      const probe = await probeWorkflowArtifact(target, config.nodeId)
+      if (probe.availability !== 'available') throw new Error(probe.reason)
+      const path = localWorkflowOutputPath(target.relativePath!)
+      const bytes = readFileSync(path)
+      if (bytes.length !== target.sizeBytes) throw new Error('Artifact changed while reading')
+      const response = await fetch(`${config.apiUrl}/api/v1/requirements/${id}/workflow-outputs/${outputId}/import`, {
+        method: 'POST', headers: { authorization: `Bearer ${config.apiKey}`, 'content-type': 'application/octet-stream' }, body: bytes, redirect: 'error',
+      })
+      if (!response.ok) throw new Error(`Evidence import failed (HTTP ${response.status})`)
+      const result = await response.json() as Record<string, unknown>
+      if (opts.json) return printJson(result)
+      printKv(result)
+    })
+
   output.command('retire <requirement-id> <output-id>')
     .description('retire an output after retention and all consumer work have finished')
     .option('--delete-local', 'delete verified local bytes after retirement is authorized')
