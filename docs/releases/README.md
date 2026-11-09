@@ -6,7 +6,7 @@ Use the notes for your installed and target versions when planning an upgrade.
 
 | Version | Summary | Notes |
 | --- | --- | --- |
-| 0.3.22 | Task workers, durable events, and legacy scheduling retirement. | [English](0.3.22.md) · [简体中文](0.3.22.zh-CN.md) |
+| 0.3.23 | Task workers, durable events, and legacy scheduling retirement. | [English](0.3.23.md) · [简体中文](0.3.23.zh-CN.md) |
 | 0.3.21 | Delivery review references, workflow stage inspection, and executor dependency context. | [English](0.3.21.md) · [简体中文](0.3.21.zh-CN.md) |
 | 0.3.20 | Explicit delivery head reconciliation and bounded Docker readiness inspection. | [English](0.3.20.md) · [简体中文](0.3.20.zh-CN.md) |
 | 0.3.19 | Permission-aware attention, resumable first success and bounded daemon maintenance. | [English](0.3.19.md) · [简体中文](0.3.19.zh-CN.md) |
