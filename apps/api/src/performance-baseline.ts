@@ -338,7 +338,7 @@ try {
   assert.equal(finalSource.implementationSha256, initialSource.implementationSha256, "Measured source changed during execution");
   assert.equal(finalSource.commit, initialSource.commit, "Measured commit changed during execution");
   console.log("TW_PERFORMANCE_RECEIPT " + JSON.stringify({ source: initialSource, seed, fixtureHash,
-    fixture: { tier, projects: 2, requirements: generated.counts.requirements, tasks: generated.counts.tasks, documents: generated.counts.documents, documentBytes: 4096, taskDependencies: generated.counts.dependencies, documentLinks: 200, progressHistory: 0, identityProfile: "Reads rotate owner/member/viewer/agent/narrowed key; writes rotate owner/member/agent; revoked and outsider probes excluded from successful throughput" },
+    fixture: { tier, projects: 2, requirements: generated.counts.requirements, tasks: generated.counts.tasks, documents: generated.counts.documents, documentBytes: 4096, taskDependencies: generated.counts.dependencies, documentLinks: 200, progressHistory: 0, identityProfile: "Reads rotate owner/member/viewer/agent/narrowed key; writes rotate owner/member; agent direct writes denied; revoked and outsider probes excluded from successful throughput" },
     runtime: { node: process.version, cpu: cpus()[0]?.model, cpuCount: cpus().length, hostMemoryBytes: totalmem(), apiProcesses: 1, apiPoolMax: 10, monitorPoolMax: 1, realtimeStarted: false, transport: "loopback HTTP; API and load generator share one process" },
     coldTaskSummaryMs, cases, skippedProfiles, pagination, queryPlans, selector,
     profiles: [...profileSamples.entries()].map(([profile, aggregate]) => ({ profile, elapsedMs: aggregate.elapsedMs,
