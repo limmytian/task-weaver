@@ -115,6 +115,11 @@ export default function RequirementDetailPage({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const utils = trpc.useUtils();
 
+  useEffect(() => {
+    const task = new URLSearchParams(window.location.search).get("task");
+    if (task && /^[0-9a-f-]{36}$/i.test(task)) setSelectedTaskId(task);
+  }, []);
+
   const { data: requirement, isLoading } = trpc.requirement.get.useQuery(
     { id: reqId },
   );

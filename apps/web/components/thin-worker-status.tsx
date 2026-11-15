@@ -62,12 +62,12 @@ export function ThinWorkerStatusContent({ projectId, workers, attempts }: {
               <div key={attempt.id} className="space-y-1 border-b pb-3 text-sm last:border-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={attempt.effectiveStatus === "attention" || attempt.effectiveStatus === "expired" ? "destructive" : "secondary"}>{attempt.effectiveStatus}</Badge>
-                  <Link className="underline" href={`/projects/${projectId}/requirements/${attempt.requirementId}`}>Task {attempt.taskId.slice(0, 8)}</Link>
+                  <Link className="underline" href={`/projects/${projectId}/requirements/${attempt.requirementId}?task=${attempt.taskId}`}>{attempt.taskTitle || `Task ${attempt.taskId.slice(0, 8)}`}</Link>
                   <span>on {attempt.nodeId}</span>
                 </div>
-                <p className="text-muted-foreground">Last heartbeat: {time(attempt.heartbeatAt)} · Lease expires: {time(attempt.expiresAt)} · Usage: unknown</p>
+                <p className="text-muted-foreground">Started: {time(attempt.createdAt)} · Last heartbeat: {time(attempt.heartbeatAt)} · Lease expires: {time(attempt.expiresAt)} · Usage: unknown</p>
                 {summary && <p className="whitespace-pre-wrap break-words">{summary}</p>}
-                {outputId && <p>Shared evidence: {outputId}</p>}
+                {outputId ? <p>Shared evidence: {outputId} · <Link className="underline" href={`/projects/${projectId}/requirements/${attempt.requirementId}`}>View delivered work</Link></p> : <p>Shared evidence: unavailable. Local workspace may contain additional evidence.</p>}
                 {(attempt.effectiveStatus === "attention" || attempt.effectiveStatus === "expired") && (
                   <p>Inspect the local workspace and any external effects before deciding whether the attempt is safe to retry.</p>
                 )}
