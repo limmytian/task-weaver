@@ -42,6 +42,7 @@ import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { RequirementWorkflowPanel } from "@/components/requirement-workflow-panel";
 import { RequirementPlanDraft } from "@/components/plan-drafts";
 import { RequirementRepositories } from "@/components/repository-links";
+import { DeliveryInsights } from "@/components/delivery-insights";
 
 const statusOptions = [
   { value: "draft", label: "Draft" },
@@ -459,6 +460,7 @@ export default function RequirementDetailPage({
 
               {/* Burndown Chart */}
               <div id="workflow" className="scroll-mt-4"><RequirementWorkflowPanel requirement={requirement} /></div>
+              <DeliveryInsights projectId={projectId} requirementId={reqId} />
               <RequirementPlanDraft projectId={projectId} requirementId={reqId} disabled={isCancelled || requirement.projectId !== projectId} />
               <BurndownChart requirementId={reqId} />
 

@@ -3,7 +3,8 @@ import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { resourcePostgresFixture } from '../apps/api/src/resource-postgres-fixture';
-import { createDb, runMigrations, requirements, tasks, workerAttempts, agentUsageRuns } from '../packages/db/src/index';
+import { createDb, runMigrations, requirements, tasks, workerAttempts, agentUsageRuns, activityLog } from '../packages/db/src/index';
+import { createDeliveryInsightsService } from '../packages/core/src/services/delivery-insights';
 import { createThinWorkerService } from '../packages/core/src/services/thin-worker';
 const require = createRequire(new URL('../apps/api/package.json', import.meta.url));
 const { eq } = require('drizzle-orm');
@@ -43,4 +44,19 @@ test('worker usage is fenced, idempotent and bound to process and attempt', { sk
   await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: 'viewer', explicitPermissions: [] });
   await assert.rejects(service.reportUsage(db, { ...fresh, revision: 1 }));
   assert.equal((await db.select().from(agentUsageRuns)).length, 2);
+  const insights = createDeliveryInsightsService(f.owner.context);
+  const before = await insights.summary(db, { projectId: f.project.id, requirementId: req!.id });
+  assert.equal(before.workflow.acceptanceRate, null);
+  assert.equal(before.worker.additionalAttempts, 1);
+  assert.equal(before.humanRecoveryDecisions, 1);
+  await db.insert(activityLog).values([
+    { decision: 'changes_requested', to: { acceptance: 'failed' } },
+    { decision: 'complete', to: { acceptance: 'complete' } },
+    { decision: 'complete', to: { acceptance: 'skipped' } },
+  ].map(metadata => ({ entityType: 'requirement', entityId: req!.id, action: 'workflow_stage_advanced', actorId: f.owner.context.actor.id, actorType: 'human' as const, metadata: { stage: 'acceptance', ...metadata } })));
+  const summary = await insights.summary(db, { projectId: f.project.id });
+  assert.equal(summary.workflow.accepted, 1); assert.equal(summary.workflow.changesRequested, 1); assert.equal(summary.workflow.acceptanceRate, 0.5);
+  assert.equal((await insights.summary(db, { projectId: f.project.id, since: '2099-01-01T00:00:00.000Z' })).worker.count, 0);
+  await assert.rejects(createDeliveryInsightsService(f.outsider.context).summary(db, { projectId: f.project.id }));
+
 });

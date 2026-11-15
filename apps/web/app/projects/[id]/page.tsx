@@ -53,6 +53,7 @@ import { AssistantDialog } from "@/components/assistant-dialog";
 import { ProjectWorkspaceLinks, WorkspaceBreadcrumbs } from "@/components/project-navigation";
 import { RepositoryChips } from "@/components/repository-links";
 import { ThinWorkerStatus } from "@/components/thin-worker-status";
+import { DeliveryInsights } from "@/components/delivery-insights";
 
 const HealthDashboard = deferView(() => import("@/components/health-dashboard").then(module => module.HealthDashboard));
 const GanttChart = deferView(() => import("@/components/gantt-chart").then(module => module.GanttChart));
@@ -246,6 +247,7 @@ export default function ProjectDetailPage({
           </TabsContent>
 
           <TabsContent value="analytics" className="mt-4">
+            <DeliveryInsights projectId={id} />
             <AnalyticsTab projectId={id} />
           </TabsContent>
 
