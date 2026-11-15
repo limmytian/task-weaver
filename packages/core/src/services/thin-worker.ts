@@ -2,7 +2,8 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { createHash, randomBytes } from 'node:crypto';
 import { activityLog, documentFileVersions, documents, executionControls, executionDelegations, planDrafts, projects, requirementClaims, requirementRepositories, repositories, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinGitDeliveries, thinWorkers, tiAgentRuns, tiSandboxWorkspaces, workerAttempts, workerPlanReceipts, workerAcceptanceSnapshots, workflowOutputs, type Database } from '@task-weaver/db';
-import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerIntegrationPrepareSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
+import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerUsageSchema, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerIntegrationPrepareSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
+import { persistWorkerUsage } from './agent-usage';
 import { lockIdentityLifecycle } from './auth-security';
 import { resourceAuthority, requireResource, taskResourcePredicate, canAccessResource } from './resource-authorization';
 import { attachmentStorage } from './attachment-storage';
@@ -450,6 +451,25 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         const [task] = await tx.update(tasks).set({ status: 'in_progress', version: sql`${tasks.version} + 1`, updatedAt: sql`clock_timestamp()` }).where(eq(tasks.id, candidate.task_id)).returning();
         await tx.insert(taskStatusLog).values({ taskId: candidate.task_id, fromStatus: 'todo', toStatus: 'in_progress', changedBy: authority.actor.id, changedByType: authority.actor.type, reason: 'Acquired by thin worker' });
         return { attempt: publicAttempt(attempt!), task, token };
+      });
+    },
+    async reportUsage(db: Database, raw: z.input<typeof workerUsageSchema>) {
+      const input = workerUsageSchema.parse(raw);
+      return transact(db, async (tx, authority) => {
+        if (authority.actor.type !== 'agent' || context.credential.kind !== 'api_key') throw new AuthorizationError();
+        const [existing] = await tx.select().from(workerAttempts).where(eq(workerAttempts.id, input.attemptId));
+        if (!existing) throw new NotFoundError('Attempt not found');
+        await requireResource(tx, authority, 'task', existing.taskId, 'execution.run');
+        const project = await lockProject(tx, existing.projectId);
+        if (project.workerMode !== 'thin' || existing.actorId !== authority.actor.id || existing.credentialId !== context.credential.id || existing.workerId !== input.workerId || existing.tokenHash !== digest(input.token)) throw new AuthorizationError();
+        const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, existing.requirementId)).for('update');
+        const [task] = await tx.select().from(tasks).where(eq(tasks.id, existing.taskId)).for('update');
+        const [attempt] = await tx.select().from(workerAttempts).where(and(eq(workerAttempts.id, existing.id), eq(workerAttempts.status, 'running'), sql`${workerAttempts.expiresAt} > clock_timestamp()`)).for('update');
+        if (!attempt || !task || !requirement || requirement.planRevision !== attempt.planRevision || !['approved', 'in_progress'].includes(requirement.status)) throw new ConflictError('Usage attempt expired or plan changed', requirement?.planRevision ?? 0);
+        const report = await persistWorkerUsage(tx, { ...input, projectId: attempt.projectId, requirementId: attempt.requirementId, taskId: attempt.taskId, actorId: authority.actor.id, planRevision: attempt.planRevision, phase: task.tags?.includes('worker:acceptance') ? 'review' : task.tags?.includes('worker:integration') ? 'integration' : 'execution' });
+        const [live] = await tx.select({ id: workerAttempts.id }).from(workerAttempts).where(and(eq(workerAttempts.id, attempt.id), sql`${workerAttempts.expiresAt} > clock_timestamp()`));
+        if (!live) throw new ConflictError('Usage attempt expired before persistence', requirement.planRevision);
+        return report;
       });
     },
     async heartbeat(db: Database, raw: z.input<typeof workerHeartbeatSchema>) {

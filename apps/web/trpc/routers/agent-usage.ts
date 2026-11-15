@@ -2,10 +2,14 @@ import { z } from "zod";
 import {
   agentUsageQuerySchema,
   createResourceServices,
+  createDeliveryInsightsService,
+  deliveryInsightsQuerySchema,
 } from "@task-weaver/core";
 import { router, ordinaryResourceProcedure } from "../init";
 // Usage reads share the live core authorization used by REST.
 export const agentUsageRouter = router({
+  deliverySummary: ordinaryResourceProcedure.input(deliveryInsightsQuerySchema)
+    .query(({ ctx, input }) => createDeliveryInsightsService(ctx.identity).summary(ctx.db, input)),
   scopes: ordinaryResourceProcedure
     .input(
       z.object({

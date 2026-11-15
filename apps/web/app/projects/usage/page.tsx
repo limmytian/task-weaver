@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { use, useState } from "react";
 import Link from "next/link";
 import { ChartNoAxesCombined } from "lucide-react";
 import { agentUsageQuerySchema } from "@task-weaver/contracts";
@@ -13,14 +13,16 @@ const emptyId = "00000000-0000-0000-0000-000000000000";
 const selectClass = "h-9 w-full rounded-md border bg-background px-3 text-sm";
 const tokens = (value: string | number | null | undefined) =>
   value == null ? "Unknown" : String(value);
-export default function UsagePage() {
+export default function UsagePage({ searchParams }: { searchParams: Promise<{ project?: string; requirement?: string }> }) {
+  const params = use(searchParams);
+  const initial = agentUsageQuerySchema.safeParse({ projectId: params.project, requirementId: params.requirement });
   const [personal, setPersonal] = useState(false);
   const [source, setSource] = useState("");
   const [model, setModel] = useState("");
   const [groupBy, setGroupBy] = useState<"source" | "model">("source");
-  const [projectId, setProjectId] = useState("");
+  const [projectId, setProjectId] = useState(initial.success ? initial.data.projectId ?? "" : "");
   const [projectSearch, setProjectSearch] = useState("");
-  const [requirementId, setRequirementId] = useState("");
+  const [requirementId, setRequirementId] = useState(initial.success ? initial.data.requirementId ?? "" : "");
   const [requirementSearch, setRequirementSearch] = useState("");
   const [taskId, setTaskId] = useState("");
   const [taskSearch, setTaskSearch] = useState("");

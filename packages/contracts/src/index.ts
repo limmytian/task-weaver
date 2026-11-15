@@ -20,3 +20,4 @@ export * from './evidence-preview';
 export * from "./schemas/attention";
 
 export * from "./schemas/first-success";
+export * from "./schemas/delivery-insights";

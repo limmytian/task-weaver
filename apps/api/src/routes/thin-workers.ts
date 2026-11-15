@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { ConflictError, ValidationError, authenticationFailure, createAuthorizedEventStream, createThinWorkerService, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerIntegrationPrepareSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerReleaseSchema, workerResolveSchema, workerResultSchema } from '@task-weaver/core';
+import { ConflictError, ValidationError, authenticationFailure, createAuthorizedEventStream, createThinWorkerService, workerUsageSchema, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerIntegrationPrepareSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerReleaseSchema, workerResolveSchema, workerResultSchema } from '@task-weaver/core';
 import { z } from 'zod';
 import type { Env } from '../middleware/actor.js';
 
@@ -109,6 +109,11 @@ routes.post('/plan', async c => {
   const input = workerPlanSchema.safeParse(await c.req.json().catch(() => null));
   if (!input.success) return c.json({ error: 'Invalid coordinator plan' }, 400);
   return c.json(await createThinWorkerService(c.get('identity')).applyPlan(c.get('db'), input.data));
+});
+routes.post('/usage', async c => {
+  const input = workerUsageSchema.safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: 'Invalid worker usage' }, 400);
+  return c.json(await createThinWorkerService(c.get('identity')).reportUsage(c.get('db'), input.data));
 });
 routes.post('/result', async c => {
   const input = workerResultSchema.safeParse(await c.req.json().catch(() => null));

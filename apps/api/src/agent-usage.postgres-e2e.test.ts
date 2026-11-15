@@ -93,13 +93,16 @@ test("Chat invocations and legacy processes retain usage, snapshots and authenti
   const agentIdentity = await f.auth.resolve(new Headers({ authorization: `Bearer ${key.rawKey}` }));
   const agentUsage = createResourceServices(agentIdentity).agentUsageService;
   const [daemon] = await db.insert(daemons).values({ name: "Legacy fixture", actorId: agent.id, actorType: "agent", role: "executor" }).returning();
-  await db.update(requirements).set({ leaseGeneration: 1 }).where(eq(requirements.id, req!.id));
-  const [claim] = await db.insert(requirementClaims).values({ requirementId: req!.id, daemonId: daemon!.id, claimedBy: agent.id, claimedByType: "agent", generation: 1, workerIndex: "0", expiresAt: new Date(Date.now() + 60_000) }).returning();
   const summary = { inputTokens: 20, outputTokens: 5, cacheReadTokens: null, cacheWriteTokens: null, cacheSemantics: "unknown" as const, provider: "unknown", model: "legacy", completeness: "complete" as const };
-  const report = { processId: randomUUID(), projectId: f.project.id, requirementId: req!.id, daemonId: daemon!.id, runId: claim!.id, leaseGeneration: 1, workerIndex: "0", agent: "codex", phase: "execution" as const, startedAt: new Date().toISOString(), endedAt: null, outcome: "running" as const, revision: 1, summary };
-  await Promise.all([agentUsage.reportDaemonUsage(db, report, { id: agent.id, type: "agent" }), agentUsage.reportDaemonUsage(db, report, { id: agent.id, type: "agent" })]);
-  await assert.rejects(agentUsage.reportDaemonUsage(db, { ...report, summary: { ...summary, inputTokens: 21 } }, { id: agent.id, type: "agent" }));
-  const [run] = await db.insert(tiAgentRuns).values({ taskId: task!.id, assignedAgentId: actor.id, createdBy: actor.id, status: "running", leaseOwnerId: "worker", leaseOwnerType: "agent", leaseExpiresAt: new Date(Date.now() + 60_000), startedAt: new Date() }).returning();
+  const processId = randomUUID(), runId = randomUUID(), startedAt = new Date();
+  const historical = { processId, projectId: f.project.id, requirementId: req!.id, daemonId: daemon!.id, leaseRunId: runId, leaseGeneration: 1, workerIndex: "0", agent: "codex", source: "codex_jsonl" as const, phase: "execution" as const, startedAt, endedAt: new Date(), outcome: "succeeded" as const, revision: 1, summary, reportedBy: agent.id };
+  // Retained daemon usage remains readable; creating new legacy claims is forbidden.
+  await assert.rejects(db.insert(requirementClaims).values({ requirementId: req!.id, daemonId: daemon!.id, claimedBy: agent.id, claimedByType: "agent", generation: 1, workerIndex: "0", expiresAt: new Date(Date.now() + 60_000) }));
+  await db.insert(agentUsageRuns).values(historical).onConflictDoNothing();
+  await db.insert(agentUsageRuns).values(historical).onConflictDoNothing();
+  const report = { processId, projectId: f.project.id, requirementId: req!.id, daemonId: daemon!.id, runId, leaseGeneration: 1, workerIndex: "0", agent: "codex", phase: "execution" as const, startedAt: startedAt.toISOString(), endedAt: null, outcome: "running" as const, revision: 2, summary };
+  await assert.rejects(agentUsage.reportDaemonUsage(db, report, { id: agent.id, type: "agent" }));
+  const [run] = await db.insert(tiAgentRuns).values({ taskId: task!.id, assignedAgentId: actor.id, createdBy: actor.id, status: "cancelled", startedAt: new Date(), completedAt: new Date() }).returning();
   const ti = { processId: randomUUID(), workerId: "worker", attempt: 0, startedAt: new Date().toISOString(), endedAt: null, outcome: "running" as const, revision: 1, summary };
   const legacyTi = { processId: ti.processId, projectId: f.project.id, requirementId: req!.id, taskId: task!.id, tiRunId: run!.id,
     attempt: 0, source: "ti_runtime" as const, agent: "ti", phase: "execution" as const, outcome: "cancelled" as const,
