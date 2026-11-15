@@ -10,6 +10,8 @@ import { createThinWorkerService } from '../packages/core/src/services/thin-work
 const require = createRequire(import.meta.url);
 const { router } = require('../apps/web/trpc/init');
 const { workerRouter } = require('../apps/web/trpc/routers/worker');
+const { attentionRouter } = require('../apps/web/trpc/routers/attention');
+const { projectRouter } = require('../apps/web/trpc/routers/project');
 const api = createRequire(new URL('../apps/api/package.json', import.meta.url));
 const { eq, and } = api('drizzle-orm');
 const { serve } = api('@hono/node-server');
@@ -35,7 +37,7 @@ test('browser inspects and resolves an expired worker with live authorization', 
   const seed = async () => (await db.insert(workerAttempts).values({ projectId: f.project.id, requirementId: req!.id, taskId: task!.id, actorId: f.owner.context.actor.id, credentialId: randomUUID(), workerId: randomUUID(), nodeId: 'browser-fixture', tokenHash: 'fixture', planRevision: 1, status: 'attention', expiresAt: new Date(0) }).returning())[0]!;
   const attempt = await seed();
   const auth = createAuthenticationRuntime(db, f.configuration);
-  const appRouter = router({ worker: workerRouter });
+  const appRouter = router({ worker: workerRouter, attention: attentionRouter, project: projectRouter });
   const bundle = await build({ entryPoints: ['apps/web/lib/worker-browser-fixture.tsx'], bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic', tsconfig: 'apps/web/tsconfig.json', define: { fixture: JSON.stringify({ projectId: f.project.id, csrf: f.owner.headers.get('x-csrf-token') }), 'process.env.NODE_ENV': '"test"', 'process.env': '{}'  } });
   handler = async request => new URL(request.url).pathname.startsWith('/api/trpc')
     ? fetchRequestHandler({ endpoint: '/api/trpc', req: request, router: appRouter, createContext: () => ({ db, auth, req: request, responseHeaders: new Headers() }) })
@@ -49,6 +51,8 @@ test('browser inspects and resolves an expired worker with live authorization', 
   page.on('console', (message: { type(): string; text(): string }) => { if (message.type() === 'error') console.error(message.text()); });
   page.setDefaultTimeout(10000);
   await page.goto(origin);
+  await page.getByRole('heading', { name: 'Browser recovery', exact: true }).waitFor();
+  assert.ok((await page.getByRole('link', { name: 'Inspect evidence and recovery controls', exact: true }).getAttribute('href'))!.includes(req!.id));
   await page.getByText('Resolve attempt', { exact: true }).click();
   assert.equal(await page.getByRole('button', { name: 'Retry task' }).isDisabled(), true);
   await page.getByLabel('Inspection reason').fill('Inspected workspace; no external effects remain');
@@ -56,6 +60,7 @@ test('browser inspects and resolves an expired worker with live authorization', 
   await page.getByRole('checkbox').check();
   await page.getByRole('button', { name: 'Retry task' }).click();
   await page.getByText('resolved', { exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'Browser recovery', exact: true }).waitFor({ state: 'detached' });
   assert.equal((await db.query.tasks.findFirst({ where: eq(tasks.id, task!.id) }))!.status, 'todo');
   assert.equal((await db.query.workerAttempts.findFirst({ where: eq(workerAttempts.id, attempt.id) }))!.status, 'resolved');
   await db.update(tasks).set({ status: 'in_progress' }).where(eq(tasks.id, task!.id));
