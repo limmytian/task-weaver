@@ -15,14 +15,14 @@ function time(value: Date | string) {
   return new Date(value).toLocaleString();
 }
 
-export function ThinWorkerStatus({ projectId }: { projectId: string }) {
+export function ThinWorkerStatus({ projectId, requirementId }: { projectId: string; requirementId?: string }) {
   const workers = trpc.worker.thinWorkers.useQuery({ projectId }, { refetchInterval: 30000 });
-  const attempts = trpc.worker.thinAttempts.useQuery({ projectId }, { refetchInterval: 30000 });
+  const attempts = trpc.worker.thinAttempts.useQuery({ projectId, requirementId }, { refetchInterval: 30000 });
 
   return <ThinWorkerStatusContent projectId={projectId}
-    renderResolution={attemptId => <ResolveAttempt attemptId={attemptId} />}
-    workers={{ data: workers.data, isLoading: workers.isLoading, error: workers.error?.message }}
-    attempts={{ data: attempts.data, isLoading: attempts.isLoading, error: attempts.error?.message }} />;
+    renderResolution={attemptId => <ResolveAttempt projectId={projectId} attemptId={attemptId} />}
+    workers={{ data: workers.error ? undefined : workers.data, isLoading: workers.isLoading, error: workers.error?.message }}
+    attempts={{ data: attempts.error ? undefined : attempts.data, isLoading: attempts.isLoading, error: attempts.error?.message }} />;
 }
 
 export function ThinWorkerStatusContent({ projectId, workers, attempts, renderResolution }: {
@@ -53,7 +53,7 @@ export function ThinWorkerStatusContent({ projectId, workers, attempts, renderRe
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>Recent attempts</CardTitle></CardHeader>
+        <CardHeader><CardTitle>Recent attempts (up to 100)</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           {attempts.isLoading && <p>Loading attempts…</p>}
           {attempts.error && <p role="alert">Could not load attempts: {attempts.error}</p>}
@@ -83,16 +83,23 @@ export function ThinWorkerStatusContent({ projectId, workers, attempts, renderRe
   );
 }
 
-function ResolveAttempt({ attemptId }: { attemptId: string }) {
+function ResolveAttempt({ attemptId, projectId }: { attemptId: string; projectId: string }) {
   const [reason, setReason] = useState("");
   const [retrySafe, setRetrySafe] = useState(false);
   const utils = trpc.useUtils();
+  const deliveries = trpc.worker.gitDeliveries.useQuery({ projectId, attemptId }, { retry: false });
+  const reconcile = trpc.worker.reconcileGitDelivery.useMutation({ onSuccess: () => { void deliveries.refetch(); } });
+  const unresolved = !deliveries.data || Boolean(deliveries.error) || deliveries.data.some(delivery => ['prepared', 'pushing', 'uncertain'].includes(delivery.state));
   const resolve = trpc.worker.resolveAttempt.useMutation({ onSuccess: () => { void utils.worker.thinAttempts.invalidate(); void utils.attention.list.invalidate(); void utils.task.invalidate(); } });
   return <details><summary className="cursor-pointer">Resolve attempt</summary>
     <p>Record what you inspected and any external effects. Resolution requires project management permission.</p>
+    {deliveries.isLoading && <p>Loading delivery observations…</p>}
+    {deliveries.error && <p role="alert">Delivery observations unavailable: {deliveries.error.message}</p>}
+    {!deliveries.error && deliveries.data && <div><p>Known Git deliveries (up to 100): {deliveries.data.length}. Other external effects require inspection.</p>{deliveries.data.map(delivery => <div key={delivery.id} className="break-all"><p>{delivery.targetBranch}: {delivery.state} · proposed commit {delivery.proposedHead}</p>{['pushing', 'uncertain'].includes(delivery.state) && <button disabled={reason.trim().length < 10 || reconcile.isPending} onClick={() => reconcile.mutate({ deliveryId: delivery.id, reason })}>Verify remote delivery</button>}</div>)}</div>}
+    {reconcile.error && <p role="alert">Remote verification failed: {reconcile.error.message}</p>}
     <label className="block">Inspection reason<textarea className="block w-full rounded border bg-background p-2" value={reason} onChange={event => setReason(event.target.value)} maxLength={2000} /></label>
     <label className="block"><input type="checkbox" checked={retrySafe} onChange={event => setRetrySafe(event.target.checked)} /> I inspected external effects and determined retry is safe.</label>
-    <div className="flex gap-2"><button className="rounded border px-2 py-1" disabled={reason.trim().length < 10 || resolve.isPending} onClick={() => resolve.mutate({ attemptId, reason, disposition: "review", retrySafe: false })}>Send to review</button><button className="rounded border px-2 py-1" disabled={reason.trim().length < 10 || !retrySafe || resolve.isPending} onClick={() => resolve.mutate({ attemptId, reason, disposition: "retry", retrySafe })}>Retry task</button></div>
+    <div className="flex gap-2"><button className="rounded border px-2 py-1" disabled={reason.trim().length < 10 || resolve.isPending} onClick={() => resolve.mutate({ attemptId, reason, disposition: "review", retrySafe: false })}>Send to review</button><button className="rounded border px-2 py-1" disabled={reason.trim().length < 10 || !retrySafe || unresolved || resolve.isPending} onClick={() => resolve.mutate({ attemptId, reason, disposition: "retry", retrySafe })}>Retry task</button></div>
     {resolve.error && <p role="alert">Resolution failed: {resolve.error.message}</p>}
     {resolve.isSuccess && <p role="status">Resolution recorded.</p>}
   </details>;

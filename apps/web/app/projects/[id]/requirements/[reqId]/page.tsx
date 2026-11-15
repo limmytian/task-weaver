@@ -42,6 +42,7 @@ import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { RequirementWorkflowPanel } from "@/components/requirement-workflow-panel";
 import { RequirementPlanDraft } from "@/components/plan-drafts";
 import { RequirementRepositories } from "@/components/repository-links";
+import { ThinWorkerStatus } from "@/components/thin-worker-status";
 
 const statusOptions = [
   { value: "draft", label: "Draft" },
@@ -464,6 +465,7 @@ export default function RequirementDetailPage({
 
               {/* Burndown Chart */}
               <div id="workflow" className="scroll-mt-4"><RequirementWorkflowPanel requirement={requirement} /></div>
+              <details><summary className="cursor-pointer font-medium">Worker evidence and recovery</summary><ThinWorkerStatus projectId={projectId} requirementId={reqId} /></details>
               <RequirementPlanDraft projectId={projectId} requirementId={reqId} disabled={isCancelled || requirement.projectId !== projectId} />
               <BurndownChart requirementId={reqId} />
 
