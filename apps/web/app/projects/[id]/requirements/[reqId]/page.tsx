@@ -116,7 +116,14 @@ export default function RequirementDetailPage({
   const [editSubmitAttempted, setEditSubmitAttempted] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(taskFromUrl && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(taskFromUrl) ? taskFromUrl : null);
+  const linkedTaskId = taskFromUrl && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(taskFromUrl) ? taskFromUrl : null;
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(linkedTaskId);
+  const [previousLinkedTaskId, setPreviousLinkedTaskId] = useState(linkedTaskId);
+  // Same-page navigation must update the task selection without waiting for a remount.
+  if (previousLinkedTaskId !== linkedTaskId) {
+    setPreviousLinkedTaskId(linkedTaskId);
+    setSelectedTaskId(linkedTaskId);
+  }
   const utils = trpc.useUtils();
 
 
@@ -527,7 +534,10 @@ export default function RequirementDetailPage({
         projectId={projectId}
         open={!!selectedTaskId}
         onOpenChange={(open) => {
-          if (!open) setSelectedTaskId(null);
+          if (!open) {
+            setSelectedTaskId(null);
+            if (taskFromUrl) router.replace(`/projects/${projectId}/requirements/${reqId}`, { scroll: false });
+          }
         }}
         onTaskSelect={setSelectedTaskId}
       />
