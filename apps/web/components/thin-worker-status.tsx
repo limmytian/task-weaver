@@ -68,7 +68,8 @@ export function ThinWorkerStatusContent({ projectId, workers, attempts, renderRe
                   <Link className="underline" href={`/projects/${projectId}/requirements/${attempt.requirementId}?task=${attempt.taskId}`}>{attempt.taskTitle || `Task ${attempt.taskId.slice(0, 8)}`}</Link>
                   <span>on {attempt.nodeId}</span>
                 </div>
-                <p className="text-muted-foreground">Started: {time(attempt.createdAt)} · Last heartbeat: {time(attempt.heartbeatAt)} · Lease expires: {time(attempt.expiresAt)} · Usage: unknown</p>
+                <p className="text-muted-foreground">Started: {time(attempt.createdAt)} · Last heartbeat: {time(attempt.heartbeatAt)} · Lease expires: {time(attempt.expiresAt)}</p>
+                <Link className="underline" href={`/projects/usage?project=${projectId}&requirement=${attempt.requirementId}`}>View requirement usage reports</Link>
                 {summary && <p className="whitespace-pre-wrap break-words">{summary}</p>}
                 {outputId ? <p>Shared evidence: {outputId} · <Link className="underline" href={`/projects/${projectId}/requirements/${attempt.requirementId}`}>View delivered work</Link></p> : <p>Shared evidence: unavailable. Local workspace may contain additional evidence.</p>}
                 {(attempt.effectiveStatus === "attention" || attempt.effectiveStatus === "expired") && (

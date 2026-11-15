@@ -14,7 +14,7 @@ test('worker status preserves offline handoff and treats output as text', () => 
   assert.match(html, /cooldown/);
   assert.match(html, /Quota exhausted/);
   assert.match(html, /expired/);
-  assert.match(html, /Usage: unknown/);
+  assert.match(html, /\/projects\/usage\?project=project-fixture&amp;requirement=requirement-id/);
   assert.match(html, /Inspect the local workspace/);
   assert.match(html, /Shared evidence: output-id/);
   assert.match(html, /&lt;script&gt;bad\(\)&lt;\/script&gt;/);
