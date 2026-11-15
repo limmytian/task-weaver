@@ -43,7 +43,19 @@ test('once worker runs a bounded deterministic executor and parks empty results'
   const executor: ThinExecutor = { async preflight() { return { blocked: false, reason: 'Fixture', retryAt: null } }, async execute(input) { assert.equal(input.environment.TW_API_KEY, undefined); assert.ok(!Object.values(input.environment).includes(key.rawKey)); await new Promise(resolve => setTimeout(resolve, 300)); await writeFile(join(input.cwd, 'result.md'), 'Deterministic evidence\n'); return { ok: true, reason: 'Fixture', quotaBlocked: false, tokenUsage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 80, cacheWriteTokens: null, cacheSemantics: 'included', provider: 'unknown', model: 'unknown', completeness: 'complete' } } } };
   const phases: string[] = [];
   const opts = { config, projectId: f.project.id, model: 'fixture', effort: 'low', timeoutMs: 10000, heartbeatIntervalMs: 100, executor, onPhase: async (phase: string) => { phases.push(phase) } };
-  const runs = await Promise.all([runThinOnce(opts), runThinOnce(opts)]);
+  const [history] = await db.insert(requirements).values({ projectId: f.project.id, title: 'Synthetic retained load', status: 'done', createdBy: f.owner.context.actor.id }).returning();
+  for (let offset = 0; offset < 1000; offset += 250) await db.insert(tasks).values(Array.from({ length: 250 }, (_, index) => ({ projectId: f.project.id, requirementId: history!.id, title: `Historical load ${offset + index}`, status: 'done' as const, completedAt: new Date(), createdBy: f.owner.context.actor.id })));
+  const { createResourceServices, createAttentionService } = apiRequire('@task-weaver/core');
+  const reads: number[] = [];
+  const readLoad = async () => {
+    for (let round = 0; round < 20; round++) {
+      for (const read of [() => createResourceServices(f.owner.context).taskService.getKanbanBoardColumns(db, f.project.id, {}), () => createAttentionService(f.owner.context).list(db, { projectId: f.project.id, limit: 25 })]) {
+        const start = performance.now(); await read(); reads.push(performance.now() - start);
+      }
+    }
+  };
+  const [runs] = await Promise.all([Promise.all([runThinOnce(opts), runThinOnce(opts)]), readLoad()]);
+  console.log(JSON.stringify({ scope: 'synthetic concurrent workers with board and attention reads', workers: 2, retainedTasks: 1000, reads: reads.length, readP95Ms: [...reads].sort((a, b) => a - b)[Math.ceil(reads.length * 0.95) - 1] }));
   assert.deepEqual(new Set(runs.map(run => run.taskId)), new Set(children.map(child => child.id)));
   assert.ok(runs.every(run => run.state === 'completed'));
   assert.ok(runs.every(run => run.usage === 'unknown'));
