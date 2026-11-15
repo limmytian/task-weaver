@@ -136,6 +136,20 @@ async function persist(db: Database, input: UsageWrite) {
   });
 }
 
+/** Called only after the supervisor's current attempt fence has been verified. */
+export async function persistWorkerUsage(db: Database, input: {
+  processId: string; projectId: string; requirementId: string; taskId: string;
+  attemptId: string; workerId: string; actorId: string; planRevision: number;
+  startedAt: string; endedAt: string | null; revision: number;
+  summary: AgentUsageSummary; outcome: UsageWrite['outcome']; phase: UsageWrite['phase'];
+}) {
+  return persist(db, { processId: input.processId, projectId: input.projectId, requirementId: input.requirementId, taskId: input.taskId,
+    daemonId: null, tiRunId: null, leaseRunId: input.attemptId, leaseGeneration: input.planRevision, workerIndex: input.workerId,
+    agent: 'codex', source: 'codex_jsonl', phase: input.phase, reportedBy: input.actorId,
+    startedAt: new Date(input.startedAt), endedAt: input.endedAt ? new Date(input.endedAt) : null, revision: input.revision,
+    outcome: input.outcome, summary: normalizeOutcomeSummary(input.summary, input.outcome) });
+}
+
 export async function validateScope(
   db: Database,
   input: { projectId: string; requirementId?: string; taskId?: string },
@@ -438,7 +452,7 @@ export async function summarizeUsage(db: Database, input: AgentUsageQuery, visib
     knownUnregisteredTiAttempts,
     coverage: denominator ? row!.complete / denominator : null,
     accountingSince:
-      "Totals cover registered processes only. Known Ti attempts without reports reduce coverage across this project/requirement/task scope, regardless of date or phase filters because their process timestamps are unavailable. Unregistered daemon processes and earlier history cannot be counted.",
+      "Totals cover registered processes only. Known Ti attempts without reports reduce coverage across this project/requirement/task scope, regardless of date or phase filters because their process timestamps are unavailable. Unregistered worker or daemon processes and earlier history cannot be counted.",
   };
 }
 

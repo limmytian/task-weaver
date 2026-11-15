@@ -1976,6 +1976,19 @@ Daemon-owned mutations include `daemonId` and `leaseGeneration`. A human decisio
 
 Task workers use `/api/v1/thin-workers` for task acquisition, lease renewal, presence, artifacts and fenced completion. Use `tw worker start` to run a worker and `tw worker attempts` to inspect attempts.
 
+`POST /api/v1/thin-workers/usage` accepts a current worker fence (`attemptId`,
+`workerId`, `token`) plus `processId`, `startedAt`, nullable `endedAt`, `revision`,
+`outcome` and the shared usage `summary`. The supervisor registers each executor
+process with unknown counters, then reports supported Codex totals before
+completing its attempt. New processes use new UUIDs; cumulative revisions replace
+earlier snapshots. Missing or malformed counters remain unknown or partial.
+The server rechecks actor, credential, lease and plan authority. Expired or
+resolved attempts cannot register or update usage. Reports use existing usage
+storage with `leaseRunId` bound to the worker attempt, `workerIndex` to the worker
+UUID and `leaseGeneration` to the attempt plan revision. This does not represent
+a historical daemon lease. Cache reads may overlap input and must not be added.
+Unregistered worker processes remain outside the coverage denominator.
+
 ## Health Check
 
 ```

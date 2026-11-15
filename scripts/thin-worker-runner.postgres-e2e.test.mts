@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 import { createRequire } from 'node:module';
-import { createDb, runMigrations, requirements, requirementRepositories, repositories, tasks, taskDependencies, thinGitDeliveries, workerAcceptanceSnapshots, workerAttempts } from '../packages/db/src/index';
+import { createDb, runMigrations, requirements, requirementRepositories, repositories, tasks, taskDependencies, thinGitDeliveries, workerAcceptanceSnapshots, workerAttempts, agentUsageRuns } from '../packages/db/src/index';
 import { BASIC_WORKFLOW } from '../packages/contracts/src/index';
 import { createThinWorkerService } from '../packages/core/src/services/thin-worker';
 import { resourcePostgresFixture } from '../apps/api/src/resource-postgres-fixture';
@@ -40,13 +40,17 @@ test('once worker runs a bounded deterministic executor and parks empty results'
   const [accept] = await db.insert(tasks).values({ projectId: f.project.id, requirementId: req!.id, title: 'Acceptance', createdBy: f.owner.context.actor.id }).returning();
   await db.insert(taskDependencies).values(children.map(child => ({ taskId: accept!.id, dependsOnTaskId: child.id, type: 'blocks' as const })));
   const config = { apiUrl, apiKey: key.rawKey, nodeId: 'fixture-node' };
-  const executor: ThinExecutor = { async preflight() { return { blocked: false, reason: 'Fixture', retryAt: null } }, async execute(input) { assert.equal(input.environment.TW_API_KEY, undefined); assert.ok(!Object.values(input.environment).includes(key.rawKey)); await new Promise(resolve => setTimeout(resolve, 300)); await writeFile(join(input.cwd, 'result.md'), 'Deterministic evidence\n'); return { ok: true, reason: 'Fixture', quotaBlocked: false } } };
+  const executor: ThinExecutor = { async preflight() { return { blocked: false, reason: 'Fixture', retryAt: null } }, async execute(input) { assert.equal(input.environment.TW_API_KEY, undefined); assert.ok(!Object.values(input.environment).includes(key.rawKey)); await new Promise(resolve => setTimeout(resolve, 300)); await writeFile(join(input.cwd, 'result.md'), 'Deterministic evidence\n'); return { ok: true, reason: 'Fixture', quotaBlocked: false, tokenUsage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 80, cacheWriteTokens: null, cacheSemantics: 'included', provider: 'unknown', model: 'unknown', completeness: 'complete' } } } };
   const phases: string[] = [];
   const opts = { config, projectId: f.project.id, model: 'fixture', effort: 'low', timeoutMs: 10000, heartbeatIntervalMs: 100, executor, onPhase: async (phase: string) => { phases.push(phase) } };
   const runs = await Promise.all([runThinOnce(opts), runThinOnce(opts)]);
   assert.deepEqual(new Set(runs.map(run => run.taskId)), new Set(children.map(child => child.id)));
   assert.ok(runs.every(run => run.state === 'completed'));
   assert.ok(runs.every(run => run.usage === 'unknown'));
+  const usageRows = await db.select().from(agentUsageRuns);
+  assert.equal(usageRows.length, 2, 'Every executor process must register its usage counters');
+  assert.deepEqual(new Set(usageRows.map(row => row.leaseRunId)), new Set(runs.map(run => run.attemptId)));
+  assert.ok(usageRows.every(row => row.outcome === 'succeeded' && row.summary.completeness === 'complete' && row.summary.inputTokens === 100 && row.summary.outputTokens === 20));
   assert.deepEqual(new Set(phases), new Set(['preflight', 'acquiring', 'preparing', 'executing', 'publishing']));
   for (const run of runs) {
     const attempt = await db.query.workerAttempts.findFirst({ where: eq(workerAttempts.id, run.attemptId!) });

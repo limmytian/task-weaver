@@ -89,7 +89,7 @@ export const reportAgentUsageSchema = z
     ...snapshotFields,
   })
   .strict()
-  .superRefine(validateTimes);
+  .superRefine(validateUsageTimes);
 export const reportTiAgentUsageSchema = z
   .object({
     processId: z.string().uuid(),
@@ -100,8 +100,8 @@ export const reportTiAgentUsageSchema = z
     ...snapshotFields,
   })
   .strict()
-  .superRefine(validateTimes);
-function validateTimes(
+  .superRefine(validateUsageTimes);
+export function validateUsageTimes(
   value: { startedAt: string; endedAt: string | null; outcome: string },
   ctx: z.RefinementCtx,
 ) {

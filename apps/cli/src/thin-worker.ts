@@ -6,6 +6,8 @@ import { join } from 'node:path'
 import { ApiError, ApiTransportError, request } from './client.js'
 import type { Config } from './config.js'
 import { ExecutorSignalCollector, queryCodexQuota } from './executor-availability.js'
+import { CodexUsageCollector, unknownUsage } from './agent-usage.js'
+import type { AgentUsageSummary } from '@task-weaver/contracts'
 import { ThinSandboxDiagnostic } from './thin-sandbox-diagnostic.js'
 import { runCommand } from './async-command.js'
 import { buildAiEnvironment } from './repository-credentials.js'
@@ -22,7 +24,7 @@ interface ThinLane { attempt: ThinAttempt | null; task: ThinTask | null; token?:
 export type ThinOnceOutcome = { state: 'empty' | 'completed' | 'attention' | 'cooldown'; taskId?: string; attemptId?: string; reason?: string; workspacePath?: string; retryAt?: string | null; usage?: 'known' | 'unknown' }
 export interface ThinExecutor {
   preflight(environment: NodeJS.ProcessEnv): Promise<{ blocked: boolean; reason: string; retryAt: string | null; usage?: 'known' | 'unknown' }>
-  execute(input: { prompt: string; cwd: string; environment: NodeJS.ProcessEnv; model: string; effort: string; signal: AbortSignal; timeoutMs: number }): Promise<{ ok: boolean; reason: string; quotaBlocked: boolean; diagnostic?: string | null }>
+  execute(input: { prompt: string; cwd: string; environment: NodeJS.ProcessEnv; model: string; effort: string; signal: AbortSignal; timeoutMs: number }): Promise<{ ok: boolean; reason: string; quotaBlocked: boolean; diagnostic?: string | null; tokenUsage?: AgentUsageSummary }>
 }
 
 async function readBoundedJson(path: string, limit: number) {
@@ -55,11 +57,12 @@ export function codexThinExecutor(): ThinExecutor {
       const controller = new AbortController()
       const collector = new ExecutorSignalCollector('codex', 'thin-worker', () => controller.abort(new Error('Executor resources unavailable')))
       const diagnostic = new ThinSandboxDiagnostic()
+      const tokenUsage = new CodexUsageCollector()
       const signal = AbortSignal.any([input.signal, controller.signal])
       const args = ['exec', '--sandbox', 'workspace-write', '--skip-git-repo-check', '--json', '--color', 'never', '-C', input.cwd, '--model', input.model, '-c', `model_reasoning_effort="${input.effort}"`, input.prompt]
-      const result = await runCommand('codex', args, { cwd: input.cwd, env: input.environment, signal, timeoutMs: input.timeoutMs, maxOutputBytes: 0, onStdout: chunk => { collector.push('stdout', chunk); diagnostic.push(chunk) }, onStderr: chunk => collector.push('stderr', chunk) })
+      const result = await runCommand('codex', args, { cwd: input.cwd, env: input.environment, signal, timeoutMs: input.timeoutMs, maxOutputBytes: 0, onStdout: chunk => { collector.push('stdout', chunk); diagnostic.push(chunk); tokenUsage.push(chunk) }, onStderr: chunk => collector.push('stderr', chunk) })
       const observation = collector.finish()
-      return { ok: result.ok && !observation, reason: observation?.reason ?? (result.timedOut ? 'Executor timed out' : input.signal.aborted ? 'Execution authority or connection ended' : result.ok ? 'Executor completed' : 'Executor exited without a usable result'), quotaBlocked: observation?.state === 'cooling_down' || observation?.state === 'action_required', diagnostic: diagnostic.finish() }
+      return { ok: result.ok && !observation, reason: observation?.reason ?? (result.timedOut ? 'Executor timed out' : input.signal.aborted ? 'Execution authority or connection ended' : result.ok ? 'Executor completed' : 'Executor exited without a usable result'), quotaBlocked: observation?.state === 'cooling_down' || observation?.state === 'action_required', diagnostic: diagnostic.finish(), tokenUsage: tokenUsage.finish(result.ok && !observation) }
     },
   }
 }
@@ -91,6 +94,20 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
     const lane = await request<ThinLane>('POST', '/api/v1/thin-workers/acquire', { projectId: options.projectId, ...(options.requirementId ? { requirementId: options.requirementId } : {}), workerId, nodeId: options.config.nodeId, executor: 'codex', model: options.model, durationSeconds: 120 }, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) })
     if (!lane.attempt || !lane.task || !lane.token) return { state: 'empty', usage }
     const attempt = lane.attempt, task = lane.task, fence = { attemptId: attempt.id, workerId, token: lane.token }
+    const execute = async (input: Parameters<ThinExecutor['execute']>[0]) => {
+      const processId = randomUUID(), startedAt = new Date().toISOString()
+      const report = async (revision: number, outcome: 'running' | 'succeeded' | 'failed', summary: AgentUsageSummary, endedAt: string | null) => {
+        try {
+          await request('POST', '/api/v1/thin-workers/usage', { ...fence, processId, startedAt, endedAt, revision, outcome, summary }, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]) })
+        } catch {
+          console.error('Worker token usage report unavailable; coverage may be incomplete')
+        }
+      }
+      await report(0, 'running', unknownUsage(), null)
+      const result = await executor.execute(input)
+      await report(1, result.ok ? 'succeeded' : 'failed', result.tokenUsage ?? unknownUsage(), new Date().toISOString())
+      return result
+    }
     let workspacePath: string | undefined
     const heartbeat = async () => { await request('POST', '/api/v1/thin-workers/heartbeat', { ...fence, durationSeconds: 120 }, { credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) }) }
     timer = setInterval(() => {
@@ -124,7 +141,7 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
         for (const source of input.sources) {
           const version = await deliverThinVersion({ config: options.config, workspace, entries, source, fence, identity: options.gitIdentity, assertAuthority: heartbeat, signal: controller.signal,
             resolveConflict: async cwd => {
-              const resolution = await executor.execute({ prompt: 'Resolve the current Git merge conflicts in this integration worktree. Preserve both accepted requirement and target branch changes, stage all resolved files, and do not commit, push, access credentials, or perform external side effects.', cwd, environment, model: options.model, effort: options.effort, signal: controller.signal, timeoutMs: options.timeoutMs })
+              const resolution = await execute({ prompt: 'Resolve the current Git merge conflicts in this integration worktree. Preserve both accepted requirement and target branch changes, stage all resolved files, and do not commit, push, access credentials, or perform external side effects.', cwd, environment, model: options.model, effort: options.effort, signal: controller.signal, timeoutMs: options.timeoutMs })
               if (!resolution.ok || controller.signal.aborted) throw new Error('Merge conflict resolution failed; inspect the preserved workspace')
             },
           })
@@ -186,7 +203,7 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
       const acceptanceInstructions = acceptance ? '\nThis is an acceptance task. Review the verified dependency artifacts under inputs/ and the staged integration workspace. The manifest identifies each input and its kind. For a worker input, the JSON delivery package report field contains the text captured from that task\'s workspace-root result.md; repository patches are in its repositories array. This is evidence of what the worker delivered, not independent proof that its claims are correct. Human inputs retain their original file format. Run appropriate checks and explain the evidence and any unresolved findings in result.md. Write decision.json at the workspace root as {"decision":"accept" or "changes_requested","summary":"..."}. Use changes_requested whenever findings remain or evidence is insufficient.' : ''
       const prompt = `You are executing one bounded Task Weaver task. Work only in this isolated workspace. Do not use TW credentials, push, merge, commit, or perform external side effects. Leave repository changes uncommitted and write a concise result.md at the workspace root describing changes, verification and limitations. Do not claim completion without evidence.\nRequirement: ${requirement.title}\n${requirement.description ?? ''}\nTask: ${task.title}\n${task.description ?? ''}\nWorkspace: ${workspace.rootPath}\nRepository manifest: ${workspace.manifestPath}${planInstructions}${acceptanceInstructions}`
       await options.onPhase?.('executing')
-      const execution = await executor.execute({ prompt, cwd: workspace.rootPath, environment, model: options.model, effort: options.effort, signal: controller.signal, timeoutMs: options.timeoutMs })
+      const execution = await execute({ prompt, cwd: workspace.rootPath, environment, model: options.model, effort: options.effort, signal: controller.signal, timeoutMs: options.timeoutMs })
       if (!execution.ok || controller.signal.aborted) return finish(execution.reason, execution.quotaBlocked)
       await options.onPhase?.('publishing')
       await heartbeat()
@@ -213,7 +230,7 @@ export async function runThinOnce(options: { config: Config; projectId: string; 
         for (const patch of patches) {
           const delivery = await deliverThinGitRepository({ config: options.config, workspace, entries, repositoryId: patch.repositoryId, fence, identity: options.gitIdentity, message: `Complete task ${task.id}`, assertAuthority: heartbeat, signal: controller.signal,
             resolveConflict: async cwd => {
-              const resolution = await executor.execute({ prompt: 'Resolve the current Git merge conflicts in this task worktree. Preserve both task and requirement changes, stage all resolved files, and do not commit, push, access credentials, or perform external side effects.', cwd, environment, model: options.model, effort: options.effort, signal: controller.signal, timeoutMs: options.timeoutMs })
+              const resolution = await execute({ prompt: 'Resolve the current Git merge conflicts in this task worktree. Preserve both task and requirement changes, stage all resolved files, and do not commit, push, access credentials, or perform external side effects.', cwd, environment, model: options.model, effort: options.effort, signal: controller.signal, timeoutMs: options.timeoutMs })
               if (!resolution.ok || controller.signal.aborted) throw new Error('Merge conflict resolution failed; inspect the preserved workspace')
             },
           })
