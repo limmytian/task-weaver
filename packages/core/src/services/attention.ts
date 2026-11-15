@@ -50,6 +50,7 @@ export function createAttentionService(context: VerifiedRequestContext) {
         const executionFailure = exists(tx.select({ id: tiAgentRuns.id }).from(tiAgentRuns).innerJoin(tasks, eq(tasks.id, tiAgentRuns.taskId)).where(and(
           eq(tasks.requirementId, requirements.id), eq(tasks.projectId, requirements.projectId), taskResourcePredicate(authority),
           notInArray(tasks.status, ["done", "cancelled"]), inArray(tiAgentRuns.id, visibleRuns), eq(tiAgentRuns.status, "failed"),
+          sql`NOT EXISTS (${tx.select({ id: workerAttempts.id }).from(workerAttempts).where(and(eq(workerAttempts.taskId, tasks.id), gt(workerAttempts.createdAt, tiAgentRuns.createdAt)))})`,
           sql`NOT EXISTS (${tx.select({ id: newerRun.id }).from(newerRun).where(and(eq(newerRun.taskId, tiAgentRuns.taskId), or(gt(newerRun.createdAt, tiAgentRuns.createdAt), and(eq(newerRun.createdAt, tiAgentRuns.createdAt), gt(newerRun.id, tiAgentRuns.id)))))})`,
         )));
         // The latest historical observation is durable after a worker slot is reused.

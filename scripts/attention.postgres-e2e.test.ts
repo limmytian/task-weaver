@@ -68,6 +68,8 @@ test('attention uses current scope, priority, bounded pages and live exit condit
   assert.ok(await hasWorkerRecovery());
   await db.update(workerAttempts).set({ status: 'resolved' }).where(eq(workerAttempts.id, attempt.id));
   assert.ok(!(await hasWorkerRecovery()));
+  await db.insert(tiAgentRuns).values({ taskId: workerTask.id, status: 'failed', createdBy: f.owner.context.actor.id, createdAt: new Date('2020-01-01') });
+  assert.ok(!(await service.list(db, { category: 'failure' })).items.some((x: any) => x.requirementId === workerRequirement.id));
   await db.insert(workerAttempts).values({ projectId: f.project.id, requirementId: workerRequirement.id, taskId: workerTask.id, actorId: f.owner.context.actor.id, credentialId: randomUUID(), workerId: randomUUID(), nodeId: 'fixture', tokenHash: 'fixture', planRevision: 1, status: 'running', expiresAt: new Date(Date.now() + 60_000) });
   assert.ok(!(await hasWorkerRecovery()));
   const [incident] = await db.insert(eventCursorIncidents).values({ projectId: f.project.id, principalType: 'agent', principalId: 'agent-fixture', consumer: 'worker', cursor: 0n, retentionFloor: 2n }).returning();
