@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { resourcePostgresFixture } from '../apps/api/src/resource-postgres-fixture';
 const require = createRequire(new URL('../apps/api/package.json', import.meta.url));
-const { createDb, runMigrations, requirements, requirementDependencies, executionControls, tasks, tiAgentRuns, taskDependencies, projectMemberships, eventCursorIncidents, workerAttempts } = require('@task-weaver/db');
+const { createDb, runMigrations, requirements, requirementDependencies, executionControls, tasks, tiAgentRuns, taskDependencies, projectMemberships, eventCursorIncidents, workerAttempts, daemonWorkerProgressHistory } = require('@task-weaver/db');
 const { createAttentionService } = require('@task-weaver/core');
 const { eq, and } = require('drizzle-orm');
 const databaseUrl = process.env.TW_ATTENTION_E2E_DATABASE_URL;
@@ -69,6 +69,8 @@ test('attention uses current scope, priority, bounded pages and live exit condit
   await db.update(workerAttempts).set({ status: 'resolved' }).where(eq(workerAttempts.id, attempt.id));
   assert.ok(!(await hasWorkerRecovery()));
   await db.insert(tiAgentRuns).values({ taskId: workerTask.id, status: 'failed', createdBy: f.owner.context.actor.id, createdAt: new Date('2020-01-01') });
+  assert.ok(!(await service.list(db, { category: 'failure' })).items.some((x: any) => x.requirementId === workerRequirement.id));
+  await db.insert(daemonWorkerProgressHistory).values({ daemonId: randomUUID(), runId: randomUUID(), workerIndex: 0, role: 'executor', requirementId: workerRequirement.id, currentTaskId: workerTask.id, phase: 'failed', source: 'fixture', leaseGeneration: 1, version: 1, occurredAt: new Date('2020-01-01') });
   assert.ok(!(await service.list(db, { category: 'failure' })).items.some((x: any) => x.requirementId === workerRequirement.id));
   await db.insert(workerAttempts).values({ projectId: f.project.id, requirementId: workerRequirement.id, taskId: workerTask.id, actorId: f.owner.context.actor.id, credentialId: randomUUID(), workerId: randomUUID(), nodeId: 'fixture', tokenHash: 'fixture', planRevision: 1, status: 'running', expiresAt: new Date(Date.now() + 60_000) });
   assert.ok(!(await hasWorkerRecovery()));
