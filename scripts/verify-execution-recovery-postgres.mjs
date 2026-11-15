@@ -5,7 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const name = `tw-execution-recovery-e2e-${randomUUID().slice(0, 8)}`;
 const docker = (...args) => execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-docker("run", "--rm", "-d", "--name", name, "-e", "POSTGRES_DB=tw_execution_recovery_e2e", "-e", "POSTGRES_USER=fixture", "-e", "POSTGRES_PASSWORD=fixture-only", "-p", "127.0.0.1::5432", "pgvector/pgvector:0.8.6-pg16-bookworm");
+docker("run", "--rm", "-d", "--name", name, "--memory", "1g", "--cpus", "2", "-e", "POSTGRES_DB=tw_execution_recovery_e2e", "-e", "POSTGRES_USER=fixture", "-e", "POSTGRES_PASSWORD=fixture-only", "-p", "127.0.0.1::5432", "pgvector/pgvector:0.8.6-pg16-bookworm");
 try {
   let ready = false;
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -31,4 +31,9 @@ try {
     process.stdout.write(`${result.stdout ?? ""}${result.stderr ?? ""}`);
     assert.equal(result.status, 0, "Execution recovery PostgreSQL verification failed");
   }
+  const state = JSON.parse(docker("inspect", name))[0];
+  const peak = Number(docker("exec", name, "cat", "/sys/fs/cgroup/memory.peak"));
+  assert.equal(state.State.OOMKilled, false, "Disposable database was OOM-killed");
+  assert.ok(Number.isSafeInteger(peak) && peak > 0 && peak <= state.HostConfig.Memory, "Invalid database memory peak");
+  console.log(JSON.stringify({ scope: "isolated PostgreSQL 16 worker acquisition, recovery, upgrade and disconnect regression", memoryLimitBytes: state.HostConfig.Memory, memoryPeakBytes: peak, cpuLimit: 2, oomKilled: state.State.OOMKilled }));
 } finally { docker("rm", "-f", name); }

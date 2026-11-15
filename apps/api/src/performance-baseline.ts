@@ -127,7 +127,7 @@ try {
   const bearer = (rawKey: string) => new Headers({ authorization: `Bearer ${rawKey}`, "content-type": "application/json" });
   const agentHeaders = bearer(agentKey.rawKey), narrowHeaders = bearer(narrowedKey.rawKey);
   const readIdentities = [headers, member.headers, viewer.headers, agentHeaders, narrowHeaders];
-  const writeIdentities = [headers, member.headers, agentHeaders];
+  const writeIdentities = [headers, member.headers];
   const versions = new Map<string, number>();
   async function request(operation: Operation, index: number) {
     const taskId = id("task", index % 40);
@@ -152,14 +152,17 @@ try {
   console.log("TW_PERFORMANCE_STAGE isolation");
   const denied = await fetch(`${base}/projects/${other.id}/tasks?view=summary`, { headers, signal: AbortSignal.timeout(5000) });
   assert.ok([403, 404].includes(denied.status)); await denied.arrayBuffer();
+  let isolationProbe = 0;
   async function probe(subject: Headers, expected: number[], mutate = false) {
+    isolationProbe++;
     const response = await fetch(`${base}/tasks/${id("task", 0)}`, { headers: subject,
       method: mutate ? "PATCH" : "GET", signal: AbortSignal.timeout(5000),
       ...(mutate ? { body: JSON.stringify({ title: "Synthetic credential probe" }) } : {}) });
+    if (!expected.includes(response.status)) console.log(`TW_PERFORMANCE_ISOLATION ${isolationProbe} ${response.status}`);
     assert.ok(expected.includes(response.status), "Credential isolation preflight failed"); await response.arrayBuffer();
   }
   await probe(viewer.headers, [200]); await probe(viewer.headers, [403, 404], true);
-  await probe(member.headers, [200], true); await probe(agentHeaders, [200], true);
+  await probe(member.headers, [200], true); await probe(agentHeaders, [400], true);
   await probe(narrowHeaders, [200], true);
   await fixture.identity.updateKeyGrants(headers, owner.id, narrowedKey.id, { expectedVersion: narrowedKey.grantVersion, grants: [readGrant] });
   await probe(narrowHeaders, [200]); await probe(narrowHeaders, [403, 404], true);
@@ -335,7 +338,7 @@ try {
   assert.equal(finalSource.implementationSha256, initialSource.implementationSha256, "Measured source changed during execution");
   assert.equal(finalSource.commit, initialSource.commit, "Measured commit changed during execution");
   console.log("TW_PERFORMANCE_RECEIPT " + JSON.stringify({ source: initialSource, seed, fixtureHash,
-    fixture: { tier, projects: 2, requirements: generated.counts.requirements, tasks: generated.counts.tasks, documents: generated.counts.documents, documentBytes: 4096, taskDependencies: generated.counts.dependencies, documentLinks: 200, progressHistory: 0, identityProfile: "Reads rotate owner/member/viewer/agent/narrowed key; writes rotate owner/member/agent; revoked and outsider probes excluded from successful throughput" },
+    fixture: { tier, projects: 2, requirements: generated.counts.requirements, tasks: generated.counts.tasks, documents: generated.counts.documents, documentBytes: 4096, taskDependencies: generated.counts.dependencies, documentLinks: 200, progressHistory: 0, identityProfile: "Reads rotate owner/member/viewer/agent/narrowed key; writes rotate owner/member; agent direct writes denied; revoked and outsider probes excluded from successful throughput" },
     runtime: { node: process.version, cpu: cpus()[0]?.model, cpuCount: cpus().length, hostMemoryBytes: totalmem(), apiProcesses: 1, apiPoolMax: 10, monitorPoolMax: 1, realtimeStarted: false, transport: "loopback HTTP; API and load generator share one process" },
     coldTaskSummaryMs, cases, skippedProfiles, pagination, queryPlans, selector,
     profiles: [...profileSamples.entries()].map(([profile, aggregate]) => ({ profile, elapsedMs: aggregate.elapsedMs,
