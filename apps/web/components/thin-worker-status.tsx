@@ -72,7 +72,7 @@ export function ThinWorkerStatusContent({ projectId, workers, attempts, renderRe
                 {summary && <p className="whitespace-pre-wrap break-words">{summary}</p>}
                 {outputId ? <p>Shared evidence: {outputId} · <Link className="underline" href={`/projects/${projectId}/requirements/${attempt.requirementId}`}>View delivered work</Link></p> : <p>Shared evidence: unavailable. Local workspace may contain additional evidence.</p>}
                 {(attempt.effectiveStatus === "attention" || attempt.effectiveStatus === "expired") && (
-                  <><p>Inspect the local workspace and any external effects before deciding whether the attempt is safe to retry.</p>{renderResolution?.(attempt.id)}</>
+                  <><p>Inspect the local workspace and any external effects before deciding whether the attempt is safe to retry.</p>{attempt.canResolve && renderResolution?.(attempt.id)}</>
                 )}
               </div>
             );
@@ -87,7 +87,7 @@ function ResolveAttempt({ attemptId }: { attemptId: string }) {
   const [reason, setReason] = useState("");
   const [retrySafe, setRetrySafe] = useState(false);
   const utils = trpc.useUtils();
-  const resolve = trpc.worker.resolveAttempt.useMutation({ onSuccess: () => { void utils.worker.thinAttempts.invalidate(); void utils.attention.list.invalidate(); } });
+  const resolve = trpc.worker.resolveAttempt.useMutation({ onSuccess: () => { void utils.worker.thinAttempts.invalidate(); void utils.attention.list.invalidate(); void utils.task.invalidate(); } });
   return <details><summary className="cursor-pointer">Resolve attempt</summary>
     <p>Record what you inspected and any external effects. Resolution requires project management permission.</p>
     <label className="block">Inspection reason<textarea className="block w-full rounded border bg-background p-2" value={reason} onChange={event => setReason(event.target.value)} maxLength={2000} /></label>

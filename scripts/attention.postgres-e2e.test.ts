@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { resourcePostgresFixture } from '../apps/api/src/resource-postgres-fixture';
 const require = createRequire(new URL('../apps/api/package.json', import.meta.url));
 const { createDb, runMigrations, projects, requirements, requirementDependencies, executionControls, tasks, tiAgentRuns, taskDependencies, projectMemberships, eventCursorIncidents, workerAttempts, daemonWorkerProgressHistory } = require('@task-weaver/db');
-const { createAttentionService } = require('@task-weaver/core');
+const { createAttentionService, createThinWorkerService } = require('@task-weaver/core');
 const { eq, and } = require('drizzle-orm');
 const databaseUrl = process.env.TW_ATTENTION_E2E_DATABASE_URL;
 
@@ -72,7 +72,13 @@ test('attention uses current scope, priority, bounded pages and live exit condit
   await db.update(requirements).set({ status: 'draft' }).where(eq(requirements.id, workerRequirement.id));
   await db.update(workerAttempts).set({ status: 'attention' }).where(eq(workerAttempts.id, attempt.id));
   assert.ok(await hasWorkerRecovery());
-  await db.update(workerAttempts).set({ status: 'resolved' }).where(eq(workerAttempts.id, attempt.id));
+  await db.update(projects).set({ workerMode: 'thin' }).where(eq(projects.id, f.project.id));
+  const workerService = createThinWorkerService(f.owner.context);
+  assert.equal((await workerService.list(db, f.project.id)).find((row: any) => row.id === attempt.id).taskTitle, 'Worker task');
+  assert.equal((await workerService.list(db, f.project.id)).find((row: any) => row.id === attempt.id).canResolve, true);
+  await assert.rejects(createThinWorkerService(f.outsider.context).resolve(db, { attemptId: attempt.id, disposition: 'retry', retrySafe: true, reason: 'Inspected workspace and external effects' }));
+  await workerService.resolve(db, { attemptId: attempt.id, disposition: 'retry', retrySafe: true, reason: 'Inspected workspace and external effects' });
+  await assert.rejects(workerService.resolve(db, { attemptId: attempt.id, disposition: 'retry', retrySafe: true, reason: 'Repeated request must not change task' }));
   assert.ok(!(await hasWorkerRecovery()));
   await db.insert(tiAgentRuns).values({ taskId: workerTask.id, status: 'failed', createdBy: f.owner.context.actor.id, createdAt: new Date('2020-01-01') });
   assert.ok(!(await service.list(db, { category: 'failure' })).items.some((x: any) => x.requirementId === workerRequirement.id));
@@ -85,6 +91,7 @@ test('attention uses current scope, priority, bounded pages and live exit condit
   assert.deepEqual(await createAttentionService(f.outsider.context).incidents(db), []);
   const owner = f.owner.context.actor.id;
   await db.update(projectMemberships).set({ role: 'viewer' }).where(and(eq(projectMemberships.projectId, f.project.id), eq(projectMemberships.actorId, owner)));
+  assert.ok((await workerService.list(db, f.project.id)).every((row: any) => !row.canResolve));
   assert.ok((await service.list(db, {})).items.every((x: any) => !x.canAct));
   assert.deepEqual(await service.incidents(db), []);
   await db.delete(projectMemberships).where(and(eq(projectMemberships.projectId, f.project.id), eq(projectMemberships.actorId, owner)));

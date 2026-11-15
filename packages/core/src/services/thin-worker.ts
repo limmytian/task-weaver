@@ -4,7 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { activityLog, documentFileVersions, documents, executionControls, executionDelegations, planDrafts, projects, requirementClaims, requirementRepositories, repositories, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinGitDeliveries, thinWorkers, tiAgentRuns, tiSandboxWorkspaces, workerAttempts, workerPlanReceipts, workerAcceptanceSnapshots, workflowOutputs, type Database } from '@task-weaver/db';
 import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerIntegrationPrepareSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { lockIdentityLifecycle } from './auth-security';
-import { resourceAuthority, requireResource, taskResourcePredicate } from './resource-authorization';
+import { resourceAuthority, requireResource, taskResourcePredicate, canAccessResource } from './resource-authorization';
 import { attachmentStorage } from './attachment-storage';
 import { emit } from '@task-weaver/realtime';
 import { createResourceServices } from './resource-services';
@@ -373,7 +373,9 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
       return transact(db, async (tx, authority) => {
         await requireResource(tx, authority, 'project', projectId);
         const rows = await tx.select({ attempt: workerAttempts, taskTitle: tasks.title }).from(workerAttempts).innerJoin(tasks, eq(tasks.id, workerAttempts.taskId)).where(and(eq(workerAttempts.projectId, projectId), eq(tasks.projectId, projectId), taskResourcePredicate(authority))).orderBy(sql`${workerAttempts.createdAt} DESC`).limit(100);
-        return rows.map(({ attempt: row, taskTitle }) => ({ ...publicAttempt(row), taskTitle, effectiveStatus: row.status === 'running' && row.expiresAt <= new Date() ? 'expired' : row.status }));
+        return rows.map(({ attempt: row, taskTitle }) => ({ ...publicAttempt(row), taskTitle,
+          canResolve: authority.actor.type === 'human' && canAccessResource(authority, { projectId }, 'project.manage'),
+          effectiveStatus: row.status === 'running' && row.expiresAt <= new Date() ? 'expired' : row.status }));
       });
     },
     async setMode(db: Database, raw: z.input<typeof workerModeSchema>) {
