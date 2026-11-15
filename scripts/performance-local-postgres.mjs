@@ -153,6 +153,8 @@ try {
     const partial = output.split("\n").find(line => line.startsWith("TW_PERFORMANCE_PARTIAL "));
     if (partial) {
       const retained = JSON.parse(partial.slice("TW_PERFORMANCE_PARTIAL ".length));
+      const probe = output.split("\n").find(line => /^TW_PERFORMANCE_ISOLATION [0-9]+ [0-9]{3}$/.test(line));
+      if (probe) retained.isolationProbe = { ordinal: Number(probe.split(" ")[1]), status: Number(probe.split(" ")[2]) };
       cleanup();
       console.log(JSON.stringify({ ...retained, completed: false, cleanupVerified: true,
         localDatabase: { postgresVersion, vectorVersion, peakDbRssBytes, peakAddedRssBytes, sampledDbCpuSeconds: dbCpuSeconds, resourceSamples: samples } }, null, 2));

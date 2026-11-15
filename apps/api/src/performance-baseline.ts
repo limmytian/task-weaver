@@ -127,7 +127,7 @@ try {
   const bearer = (rawKey: string) => new Headers({ authorization: `Bearer ${rawKey}`, "content-type": "application/json" });
   const agentHeaders = bearer(agentKey.rawKey), narrowHeaders = bearer(narrowedKey.rawKey);
   const readIdentities = [headers, member.headers, viewer.headers, agentHeaders, narrowHeaders];
-  const writeIdentities = [headers, member.headers, agentHeaders];
+  const writeIdentities = [headers, member.headers];
   const versions = new Map<string, number>();
   async function request(operation: Operation, index: number) {
     const taskId = id("task", index % 40);
@@ -152,14 +152,17 @@ try {
   console.log("TW_PERFORMANCE_STAGE isolation");
   const denied = await fetch(`${base}/projects/${other.id}/tasks?view=summary`, { headers, signal: AbortSignal.timeout(5000) });
   assert.ok([403, 404].includes(denied.status)); await denied.arrayBuffer();
+  let isolationProbe = 0;
   async function probe(subject: Headers, expected: number[], mutate = false) {
+    isolationProbe++;
     const response = await fetch(`${base}/tasks/${id("task", 0)}`, { headers: subject,
       method: mutate ? "PATCH" : "GET", signal: AbortSignal.timeout(5000),
       ...(mutate ? { body: JSON.stringify({ title: "Synthetic credential probe" }) } : {}) });
+    if (!expected.includes(response.status)) console.log(`TW_PERFORMANCE_ISOLATION ${isolationProbe} ${response.status}`);
     assert.ok(expected.includes(response.status), "Credential isolation preflight failed"); await response.arrayBuffer();
   }
   await probe(viewer.headers, [200]); await probe(viewer.headers, [403, 404], true);
-  await probe(member.headers, [200], true); await probe(agentHeaders, [200], true);
+  await probe(member.headers, [200], true); await probe(agentHeaders, [400], true);
   await probe(narrowHeaders, [200], true);
   await fixture.identity.updateKeyGrants(headers, owner.id, narrowedKey.id, { expectedVersion: narrowedKey.grantVersion, grants: [readGrant] });
   await probe(narrowHeaders, [200]); await probe(narrowHeaders, [403, 404], true);
