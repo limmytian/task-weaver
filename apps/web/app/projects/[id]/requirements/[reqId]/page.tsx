@@ -102,10 +102,13 @@ const taskStatusBadgeClasses: Record<string, string> = {
 
 export default function RequirementDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string; reqId: string }>;
+  searchParams: Promise<{ task?: string }>;
 }) {
   const { id: projectId, reqId } = use(params);
+  const taskFromUrl = use(searchParams).task;
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -113,13 +116,9 @@ export default function RequirementDetailPage({
   const [editSubmitAttempted, setEditSubmitAttempted] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(taskFromUrl && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(taskFromUrl) ? taskFromUrl : null);
   const utils = trpc.useUtils();
 
-  useEffect(() => {
-    const task = new URLSearchParams(window.location.search).get("task");
-    if (task && /^[0-9a-f-]{36}$/i.test(task)) setSelectedTaskId(task);
-  }, []);
 
   const { data: requirement, isLoading } = trpc.requirement.get.useQuery(
     { id: reqId },
