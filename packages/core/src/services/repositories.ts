@@ -10,6 +10,7 @@ import {
   requirements,
   reviewRuns,
   workflowOutputs,
+  workerAttempts,
   taskRepositories,
   tasks,
 } from "@task-weaver/db";
@@ -1300,6 +1301,26 @@ export function aggregateRequirementDelivery(
 }
 
 
+async function assertHumanDeliveryIdle(
+  db: Database,
+  requirement: typeof requirements.$inferSelect,
+  actor: Actor,
+  revision: number,
+) {
+  const claim = await db.query.requirementClaims.findFirst({ where: eq(requirementClaims.requirementId, requirement.id) });
+  if (claim && claim.expiresAt.getTime() > Date.now() && (claim.claimedBy !== actor.id || claim.claimedByType !== "human" || claim.daemonId)) {
+    throw new ConflictError("An active execution lease owns this requirement; wait for its release", revision);
+  }
+  // The caller holds the requirement lock shared with worker acquisition and resolution.
+  const unresolvedAttempt = await db.query.workerAttempts.findFirst({
+    columns: { id: true },
+    where: and(eq(workerAttempts.projectId, requirement.projectId), eq(workerAttempts.requirementId, requirement.id), inArray(workerAttempts.status, ["running", "attention"])),
+  });
+  if (unresolvedAttempt) {
+    throw new ConflictError("A worker attempt owns this requirement; finish or resolve it before synchronizing delivery", revision);
+  }
+}
+
 export async function reconcileHumanRepositoryDelivery(
   db: Database, linkId: string, input: ReconcileHumanRepositoryDeliveryInput, actor: Actor,
 ) {
@@ -1320,8 +1341,7 @@ export async function reconcileHumanRepositoryDelivery(
     return { link, idempotent: true, revision: link.externalSyncRevision };
   }
   if (["done", "cancelled", "archived"].includes(requirement.status)) throw new ValidationError("Terminal requirements cannot change delivery evidence");
-  const claim = await db.query.requirementClaims.findFirst({ where: eq(requirementClaims.requirementId, requirement.id) });
-  if (claim && claim.expiresAt.getTime() > Date.now() && (claim.claimedBy !== actor.id || claim.claimedByType !== "human" || claim.daemonId)) throw new ConflictError("An active execution lease owns this requirement; wait for its release", link.externalSyncRevision);
+  await assertHumanDeliveryIdle(db, requirement, actor, link.externalSyncRevision);
   if (input.expectedRevision !== link.externalSyncRevision || input.expectedUpdatedAt.getTime() !== link.updatedAt.getTime()) throw new ConflictError("Repository delivery changed; reload it before synchronizing", link.externalSyncRevision);
   if (link.deliveryStatus === "unchanged") throw new ValidationError("Reopen unchanged delivery before registering a pull request");
   if (link.pullRequestExternalId && (link.pullRequestExternalId !== reference.externalId || link.pullRequestProvider !== reference.provider)) throw new ValidationError("Pull request does not match the registered delivery; reopen it before replacing evidence");
@@ -1394,8 +1414,7 @@ async function reconcileHumanDirectRepositoryDelivery(
     return { link, idempotent: true, revision: link.externalSyncRevision };
   }
   if (["done", "cancelled", "archived"].includes(requirement.status)) throw new ValidationError("Terminal requirements cannot change delivery evidence");
-  const claim = await db.query.requirementClaims.findFirst({ where: eq(requirementClaims.requirementId, requirement.id) });
-  if (claim && claim.expiresAt.getTime() > Date.now() && (claim.claimedBy !== actor.id || claim.claimedByType !== "human" || claim.daemonId)) throw new ConflictError("An active execution lease owns this requirement; wait for its release", link.externalSyncRevision);
+  await assertHumanDeliveryIdle(db, requirement, actor, link.externalSyncRevision);
   if (input.expectedRevision !== link.externalSyncRevision || input.expectedUpdatedAt.getTime() !== link.updatedAt.getTime()) throw new ConflictError("Repository delivery changed; reload it before synchronizing", link.externalSyncRevision);
   if (!link.baseBranch) throw new ValidationError("A target branch is required to verify direct integration");
   if (link.deliveryStatus === "unchanged") throw new ValidationError("Reopen unchanged delivery before registering direct integration");

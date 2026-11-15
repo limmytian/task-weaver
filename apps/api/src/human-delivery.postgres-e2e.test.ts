@@ -66,19 +66,32 @@ test("human PR reconciliation verifies server evidence, authority, leases, retri
   row.state = "closed"; current = (await json(await sync())).link; assert.equal(current.deliveryStatus, "failed");
   row.state = "open"; current = (await json(await sync())).link; assert.equal(current.deliveryStatus, "in_review");
   row.head.sha = "d".repeat(40); assert.equal((await sync()).status, 409); row.head.sha = "a".repeat(40);
-  await json(await api(`/requirements/${initial.r.id}/claim`, "POST", { durationMinutes: 5 }, f.owner.headers), 201);
+  assert.equal((await api(`/requirements/${initial.r.id}/claim`, "POST", { durationMinutes: 5 })).status, 409);
   await f.identity.setMembership(f.owner.headers, f.project.id, f.outsider.context.actor.id, { role: "maintainer", explicitPermissions: [] });
-  await json(await api(`/requirements/${initial.r.id}/release`, "POST", { reason: "Continue reconciliation" }));
-  const agent = await f.identity.createAgent(f.owner.headers, { displayName: "Daemon regression" });
+  const agent = await f.identity.createAgent(f.owner.headers, { displayName: "Worker regression" });
   await f.identity.setMembership(f.owner.headers, f.project.id, agent.id, { role: "maintainer", explicitPermissions: [] });
   const key = await f.identity.issueKey(f.owner.headers, agent.id, { name: "Fixture", expiresAt: null, grants: [{ scope: "project", projectId: f.project.id, permissions: ["resource.read", "resource.write", "execution.run", "repository.manage", "project.manage"] }, { scope: "personal", actorId: f.owner.context.actor.id, permissions: ["resource.read"] }] });
   const agentHeaders = new Headers({ authorization: `Bearer ${key.rawKey}`, "content-type": "application/json" });
   assert.equal((await sync(input(), agentHeaders)).status, 403);
-  const daemonId = randomUUID(); await json(await api("/daemons/register", "POST", { id: daemonId, name: "Fixture", role: "executor", capabilities: ["codex"] }, agentHeaders), 201);
-  await json(await api(`/requirements/${initial.r.id}/claim`, "POST", { daemonId, workerIndex: 0, durationMinutes: 5 }, agentHeaders), 201);
+  const acquireWorker = async (requirementId: string, taskId: string) => {
+    const workerId = randomUUID();
+    const lane = await json(await api("/thin-workers/acquire", "POST", { projectId: f.project.id, requirementId, workerId, nodeId: "human-delivery-fixture", executor: "codex", model: "fixture" }, agentHeaders));
+    assert.equal(lane.task?.id, taskId);
+    return { attemptId: lane.attempt.id, workerId, token: lane.token };
+  };
+  const interruptWorker = async (fence: Awaited<ReturnType<typeof acquireWorker>>) => {
+    await json(await api("/thin-workers/release", "POST", { ...fence, resultKey: randomUUID(), reason: "Fixture worker stopped before publishing" }, agentHeaders));
+  };
+  const resolveWorker = async (attemptId: string) => {
+    await json(await api("/thin-workers/resolve", "POST", { attemptId, disposition: "review", reason: "Inspected the stopped worker and its external effects" }));
+  };
+  const initialTask = await json(await api(`/projects/${f.project.id}/tasks`, "POST", { requirementId: initial.r.id, title: "Contended PR delivery" }), 201);
+  const worker = await acquireWorker(initial.r.id, initialTask.id);
   assert.equal((await sync()).status, 409);
-  const active = await json(await api(`/requirements/${initial.r.id}/claim`));
-  await json(await api(`/requirements/${initial.r.id}/release`, "POST", { daemonId, leaseGeneration: active.generation }, agentHeaders));
+  await interruptWorker(worker);
+  assert.equal((await sync()).status, 409);
+  await resolveWorker(worker.attemptId);
+  await json(await api(`/tasks/${initialTask.id}/status`, "PATCH", { status: "done", reason: "Inspected completed delivery evidence" }));
   row.state = "closed"; row.merged = true; row.merged_at = "2026-10-15T10:00:00Z"; row.merge_commit_sha = "c".repeat(40);
   const mergedRequest = input(); const merged = await json(await sync(mergedRequest)); current = merged.link;
   assert.equal(current.deliveryStatus, "merged"); assert.equal(current.reviewStatus, "pending"); assert.equal(current.mergerActorType, "human"); assert.equal(current.mergerDaemonId, null); assert.equal(current.externalState.mergeCommit, row.merge_commit_sha);
@@ -160,10 +173,10 @@ test("human PR reconciliation verifies server evidence, authority, leases, retri
   assert.equal((await syncDirect({ ...directInput(), snapshot: { merged: true } } as any)).status, 400);
   assert.equal((await syncDirect({ ...directInput(), commit: "f".repeat(40) })).status, 400);
   targetName = "other"; assert.equal((await syncDirect()).status, 400); targetName = "main";
-  await json(await api(`/requirements/${direct.r.id}/claim`, "POST", { daemonId, workerIndex: 0, durationMinutes: 5 }, agentHeaders), 201);
+  const directWorker = await acquireWorker(direct.r.id, task.id);
   assert.equal((await syncDirect()).status, 409);
-  const directClaim = await json(await api(`/requirements/${direct.r.id}/claim`));
-  await json(await api(`/requirements/${direct.r.id}/release`, "POST", { daemonId, leaseGeneration: directClaim.generation }, agentHeaders));
+  await interruptWorker(directWorker);
+  await resolveWorker(directWorker.attemptId);
   const directRequests = [directInput(), directInput()];
   const directResponses = await Promise.all(directRequests.map(body => syncDirect(body)));
   assert.deepEqual(directResponses.map(response => response.status).sort(), [200, 409]);
