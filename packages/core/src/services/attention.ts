@@ -1,6 +1,6 @@
 import { and, asc, eq, exists, gt, inArray, notInArray, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { daemonWorkerProgressHistory, tasks, taskDependencies, tiAgentRuns, executionControls, projects, requirements, requirementDependencies, requirementRepositories, repositories, type Database } from "@task-weaver/db";
+import { daemonWorkerProgressHistory, tasks, taskDependencies, tiAgentRuns, executionControls, projects, requirements, requirementDependencies, requirementRepositories, repositories, workerAttempts, type Database } from "@task-weaver/db";
 import { attentionPageSchema, attentionQuerySchema, AuthorizationError, type AttentionCategory, type VerifiedRequestContext } from "@task-weaver/contracts";
 import { lockIdentityLifecycle } from "./auth-security";
 import { canAccessResource, projectPredicate, requireResource, resourceAuthority, taskResourcePredicate } from "./resource-authorization";
@@ -50,10 +50,11 @@ export function createAttentionService(context: VerifiedRequestContext) {
         const executionFailure = exists(tx.select({ id: tiAgentRuns.id }).from(tiAgentRuns).innerJoin(tasks, eq(tasks.id, tiAgentRuns.taskId)).where(and(
           eq(tasks.requirementId, requirements.id), eq(tasks.projectId, requirements.projectId), taskResourcePredicate(authority),
           notInArray(tasks.status, ["done", "cancelled"]), inArray(tiAgentRuns.id, visibleRuns), eq(tiAgentRuns.status, "failed"),
+          sql`NOT EXISTS (${tx.select({ id: workerAttempts.id }).from(workerAttempts).where(and(eq(workerAttempts.taskId, tasks.id), gt(workerAttempts.createdAt, tiAgentRuns.createdAt)))})`,
           sql`NOT EXISTS (${tx.select({ id: newerRun.id }).from(newerRun).where(and(eq(newerRun.taskId, tiAgentRuns.taskId), or(gt(newerRun.createdAt, tiAgentRuns.createdAt), and(eq(newerRun.createdAt, tiAgentRuns.createdAt), gt(newerRun.id, tiAgentRuns.id)))))})`,
         )));
         // The latest historical observation is durable after a worker slot is reused.
-        const daemonFailure = and(metadata.requirement, sql`(SELECT ${daemonWorkerProgressHistory.phase} FROM ${daemonWorkerProgressHistory} WHERE ${daemonWorkerProgressHistory.requirementId} = ${requirements.id} AND ${metadata.history} ORDER BY ${daemonWorkerProgressHistory.occurredAt} DESC, ${daemonWorkerProgressHistory.id} DESC LIMIT 1) = 'failed'`)!;
+        const daemonFailure = and(metadata.requirement, sql`(SELECT ${daemonWorkerProgressHistory.phase} = 'failed' AND NOT EXISTS (SELECT 1 FROM ${workerAttempts} WHERE ${workerAttempts.taskId} = ${daemonWorkerProgressHistory.currentTaskId} AND ${workerAttempts.requirementId} = ${requirements.id} AND ${workerAttempts.projectId} = ${requirements.projectId} AND ${workerAttempts.createdAt} > ${daemonWorkerProgressHistory.occurredAt}) FROM ${daemonWorkerProgressHistory} WHERE ${daemonWorkerProgressHistory.requirementId} = ${requirements.id} AND ${metadata.history} ORDER BY ${daemonWorkerProgressHistory.occurredAt} DESC, ${daemonWorkerProgressHistory.id} DESC LIMIT 1)`)!;
         const upstreamTask = alias(tasks, "attention_upstream_task");
         const taskBlocked = exists(tx.select({ id: tasks.id }).from(tasks).innerJoin(taskDependencies, eq(taskDependencies.taskId, tasks.id))
           .innerJoin(upstreamTask, eq(upstreamTask.id, taskDependencies.dependsOnTaskId)).where(and(
@@ -63,7 +64,13 @@ export function createAttentionService(context: VerifiedRequestContext) {
         const upstream = alias(requirements, "attention_upstream");
         // Only the newest control describes the current recovery decision.
         const latestPhase = sql<string>`(SELECT ${executionControls.phase} FROM ${executionControls} WHERE ${executionControls.requirementId} = ${requirements.id} AND ${executionControls.projectId} = ${requirements.projectId} ORDER BY ${executionControls.createdAt} DESC, ${executionControls.id} DESC LIMIT 1)`;
-        const recovery = or(eq(requirements.evidenceNeedsReview, true), inArray(latestPhase, ["manual", "blocked"]))!;
+        const workerRecovery = exists(tx.select({ id: workerAttempts.id }).from(workerAttempts).innerJoin(tasks, eq(tasks.id, workerAttempts.taskId)).where(and(
+          eq(workerAttempts.requirementId, requirements.id), eq(workerAttempts.projectId, requirements.projectId),
+          eq(tasks.requirementId, requirements.id), eq(tasks.projectId, requirements.projectId), taskResourcePredicate(authority),
+          notInArray(tasks.status, ["done", "cancelled"]),
+          or(eq(workerAttempts.status, "attention"), and(eq(workerAttempts.status, "running"), sql`${workerAttempts.expiresAt} <= clock_timestamp()`)),
+        )));
+        const recovery = or(eq(requirements.evidenceNeedsReview, true), inArray(latestPhase, ["manual", "blocked"]), workerRecovery)!;
         const failure = or(executionFailure, daemonFailure, exists(tx.select({ id: requirementRepositories.id }).from(requirementRepositories)
           .innerJoin(repositories, eq(repositories.id, requirementRepositories.repositoryId))
           .where(and(eq(requirementRepositories.requirementId, requirements.id), eq(requirementRepositories.deliveryStatus, "failed"), repositoryPredicate(authority)))),

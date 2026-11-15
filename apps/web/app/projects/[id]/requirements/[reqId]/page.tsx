@@ -42,6 +42,7 @@ import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { RequirementWorkflowPanel } from "@/components/requirement-workflow-panel";
 import { RequirementPlanDraft } from "@/components/plan-drafts";
 import { RequirementRepositories } from "@/components/repository-links";
+import { ThinWorkerStatus } from "@/components/thin-worker-status";
 
 const statusOptions = [
   { value: "draft", label: "Draft" },
@@ -101,10 +102,13 @@ const taskStatusBadgeClasses: Record<string, string> = {
 
 export default function RequirementDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string; reqId: string }>;
+  searchParams: Promise<{ task?: string }>;
 }) {
   const { id: projectId, reqId } = use(params);
+  const taskFromUrl = use(searchParams).task;
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -112,8 +116,16 @@ export default function RequirementDetailPage({
   const [editSubmitAttempted, setEditSubmitAttempted] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const linkedTaskId = taskFromUrl && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(taskFromUrl) ? taskFromUrl : null;
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(linkedTaskId);
+  const [previousLinkedTaskId, setPreviousLinkedTaskId] = useState(linkedTaskId);
+  // Same-page navigation must update the task selection without waiting for a remount.
+  if (previousLinkedTaskId !== linkedTaskId) {
+    setPreviousLinkedTaskId(linkedTaskId);
+    setSelectedTaskId(linkedTaskId);
+  }
   const utils = trpc.useUtils();
+
 
   const { data: requirement, isLoading } = trpc.requirement.get.useQuery(
     { id: reqId },
@@ -459,6 +471,7 @@ export default function RequirementDetailPage({
 
               {/* Burndown Chart */}
               <div id="workflow" className="scroll-mt-4"><RequirementWorkflowPanel requirement={requirement} /></div>
+              <details><summary className="cursor-pointer font-medium">Worker evidence and recovery</summary><ThinWorkerStatus projectId={projectId} requirementId={reqId} /></details>
               <RequirementPlanDraft projectId={projectId} requirementId={reqId} disabled={isCancelled || requirement.projectId !== projectId} />
               <BurndownChart requirementId={reqId} />
 
@@ -521,7 +534,10 @@ export default function RequirementDetailPage({
         projectId={projectId}
         open={!!selectedTaskId}
         onOpenChange={(open) => {
-          if (!open) setSelectedTaskId(null);
+          if (!open) {
+            setSelectedTaskId(null);
+            if (taskFromUrl) router.replace(`/projects/${projectId}/requirements/${reqId}`, { scroll: false });
+          }
         }}
         onTaskSelect={setSelectedTaskId}
       />

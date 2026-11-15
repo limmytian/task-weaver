@@ -4,7 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { activityLog, documentFileVersions, documents, executionControls, executionDelegations, planDrafts, projects, requirementClaims, requirementRepositories, repositories, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinGitDeliveries, thinWorkers, tiAgentRuns, tiSandboxWorkspaces, workerAttempts, workerPlanReceipts, workerAcceptanceSnapshots, workflowOutputs, type Database } from '@task-weaver/db';
 import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerIntegrationPrepareSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { lockIdentityLifecycle } from './auth-security';
-import { resourceAuthority, requireResource } from './resource-authorization';
+import { resourceAuthority, requireResource, taskResourcePredicate, canAccessResource } from './resource-authorization';
 import { attachmentStorage } from './attachment-storage';
 import { emit } from '@task-weaver/realtime';
 import { createResourceServices } from './resource-services';
@@ -67,14 +67,15 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
     return inputs;
   };
   return {
-    async listGitDeliveries(db: Database, projectId: string) {
+    async listGitDeliveries(db: Database, projectId: string, attemptId?: string) {
       z.string().uuid().parse(projectId);
+      if (attemptId) z.string().uuid().parse(attemptId);
       return transact(db, async (tx, authority) => {
         if (authority.actor.type !== 'human') throw new AuthorizationError();
         await requireResource(tx, authority, 'project', projectId, 'project.manage');
         return tx.select({ delivery: thinGitDeliveries }).from(thinGitDeliveries)
           .innerJoin(repositories, eq(repositories.id, thinGitDeliveries.repositoryId))
-          .where(and(eq(thinGitDeliveries.projectId, projectId), repositoryPredicate(authority)))
+          .where(and(eq(thinGitDeliveries.projectId, projectId), attemptId ? eq(thinGitDeliveries.attemptId, attemptId) : undefined, repositoryPredicate(authority)))
           .orderBy(desc(thinGitDeliveries.updatedAt)).limit(100).then(rows => rows.map(row => row.delivery));
       });
     },
@@ -368,12 +369,15 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
         return rows.map(row => ({ workerId: row.id, nodeId: row.nodeId, heartbeatAt: row.heartbeatAt, activity: row.activity, activityChangedAt: row.activityChangedAt, reason: row.activityReason, retryAt: row.retryAt, status: !row.stoppedAt && Date.now() - row.heartbeatAt.getTime() <= 90000 ? 'online' : 'offline' }));
       });
     },
-    async list(db: Database, projectId: string) {
+    async list(db: Database, projectId: string, requirementId?: string) {
       z.string().uuid().parse(projectId);
+      if (requirementId) z.string().uuid().parse(requirementId);
       return transact(db, async (tx, authority) => {
         await requireResource(tx, authority, 'project', projectId);
-        const rows = await tx.select().from(workerAttempts).where(eq(workerAttempts.projectId, projectId)).orderBy(sql`${workerAttempts.createdAt} DESC`).limit(100);
-        return rows.map(row => ({ ...publicAttempt(row), effectiveStatus: row.status === 'running' && row.expiresAt <= new Date() ? 'expired' : row.status }));
+        const rows = await tx.select({ attempt: workerAttempts, taskTitle: tasks.title }).from(workerAttempts).innerJoin(tasks, eq(tasks.id, workerAttempts.taskId)).where(and(eq(workerAttempts.projectId, projectId), eq(tasks.projectId, projectId), requirementId ? eq(workerAttempts.requirementId, requirementId) : undefined, taskResourcePredicate(authority))).orderBy(sql`${workerAttempts.createdAt} DESC`).limit(100);
+        return rows.map(({ attempt: row, taskTitle }) => ({ ...publicAttempt(row), taskTitle,
+          canResolve: authority.actor.type === 'human' && canAccessResource(authority, { projectId }, 'project.manage'),
+          effectiveStatus: row.status === 'running' && row.expiresAt <= new Date() ? 'expired' : row.status }));
       });
     },
     async setMode(db: Database, raw: z.input<typeof workerModeSchema>) {
