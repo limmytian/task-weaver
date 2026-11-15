@@ -1,6 +1,6 @@
 import { and, eq, gte, lt, sql } from 'drizzle-orm';
 import { activityLog, requirements, tasks, workerAttempts, type Database } from '@task-weaver/db';
-import { AuthorizationError, deliveryInsightsQuerySchema, type VerifiedRequestContext } from '@task-weaver/contracts';
+import { AuthorizationError, ValidationError, deliveryInsightsQuerySchema, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { lockIdentityLifecycle } from './auth-security';
 import { requireResource, resourceAuthority, taskResourcePredicate } from './resource-authorization';
 
@@ -15,7 +15,10 @@ export function createDeliveryInsightsService(context: VerifiedRequestContext) {
         if (authority.bounds || authority.actor.type !== 'human') throw new AuthorizationError();
         await requireResource(tx, authority, 'project', input.projectId);
         await requireResource(tx, authority, 'project', input.projectId, 'audit.read');
-        if (input.requirementId) await requireResource(tx, authority, 'requirement', input.requirementId);
+        if (input.requirementId) {
+          const requirement = await requireResource(tx, authority, 'requirement', input.requirementId);
+          if (requirement.projectId !== input.projectId) throw new ValidationError('Requirement must belong to the selected project');
+        }
         const requirementScope = and(eq(requirements.projectId, input.projectId), input.requirementId ? eq(requirements.id, input.requirementId) : undefined);
         const window = (column: typeof activityLog.createdAt | typeof workerAttempts.createdAt) => and(input.since ? gte(column, new Date(input.since)) : undefined, input.until ? lt(column, new Date(input.until)) : undefined);
         const [decisions] = await tx.select({
