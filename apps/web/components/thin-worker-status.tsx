@@ -65,7 +65,8 @@ export function ThinWorkerStatusContent({ projectId, workers, attempts }: {
                   <Link className="underline" href={`/projects/${projectId}/requirements/${attempt.requirementId}`}>Task {attempt.taskId.slice(0, 8)}</Link>
                   <span>on {attempt.nodeId}</span>
                 </div>
-                <p className="text-muted-foreground">Last heartbeat: {time(attempt.heartbeatAt)} · Lease expires: {time(attempt.expiresAt)} · Usage: unknown</p>
+                <p className="text-muted-foreground">Last heartbeat: {time(attempt.heartbeatAt)} · Lease expires: {time(attempt.expiresAt)}</p>
+                <Link className="underline" href={`/projects/usage?project=${projectId}&requirement=${attempt.requirementId}`}>View requirement usage reports</Link>
                 {summary && <p className="whitespace-pre-wrap break-words">{summary}</p>}
                 {outputId && <p>Shared evidence: {outputId}</p>}
                 {(attempt.effectiveStatus === "attention" || attempt.effectiveStatus === "expired") && (
