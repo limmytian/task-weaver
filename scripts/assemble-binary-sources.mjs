@@ -36,15 +36,32 @@ async function worker() {
           child.on("error", reject);
           child.on("exit", (code) => code === 0 ? accept() : reject(Object.assign(new Error(`Download failed (${code})`), { code })));
         });
+        // Shared CI runner addresses can see transient HTTP errors from upstream
+        // hosts. Retry the same URL with backoff; every accepted download is
+        // verified against the locked checksum below, so retries cannot alter
+        // the acquired source identity.
+        const downloadRetryable = async (url, resume) => {
+          let lastError;
+          for (let attempt = 1; attempt <= 4; attempt++) {
+            try {
+              return await download(url, attempt === 1 && resume);
+            } catch (error) {
+              lastError = error;
+              if (![22, 28, 35, 56].includes(error.code)) throw error;
+              if (attempt < 4) await new Promise((accept) => setTimeout(accept, attempt * 30000));
+            }
+          }
+          throw lastError;
+        };
         let url = file.sha512 && file.component.startsWith("alpine-") && file.kind === "source"
           ? `https://distfiles.alpinelinux.org/distfiles/v3.23/${file.path.split("/").at(-1)}` : file.url;
-        try { await download(url, existsSync(`${target}.partial`)); }
+        try { await downloadRetryable(url, existsSync(`${target}.partial`)); }
         catch (error) {
           if (error.code === 33 || error.code === 22) {
             // Keep the prior partial bytes; restart if a server cannot resume or its mirror is unavailable.
             if (existsSync(`${target}.partial`)) renameSync(`${target}.partial`, `${target}.partial-${Date.now()}`);
             url = file.url;
-            await download(url, false);
+            await downloadRetryable(url, false);
           } else throw error;
         }
         file.downloadedFrom = url;

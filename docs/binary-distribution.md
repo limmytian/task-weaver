@@ -47,6 +47,9 @@ Acquisition computes SHA-256 where upstream metadata does not provide one. Such
 first-acquisition values must be reviewed and retained as a release input. Later
 runs use that lock without `--acquire` and fail on missing/mismatched hashes.
 The tools do not source APKBUILD shell code or execute downloaded build scripts.
+Transient transport and HTTP failures during download are retried with backoff;
+every accepted download is verified against the locked checksums, so retries
+cannot alter the acquired source identity.
 Downloads go only to generated local evidence; no repository/image is uploaded.
 
 The Rust vendor step archives every checksum-locked registry crate from the
