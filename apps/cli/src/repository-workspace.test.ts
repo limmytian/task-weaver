@@ -478,7 +478,7 @@ test('multi-cycle partial-success routing retries only failed push, review, and 
   assert.equal(successful.link.operationCheckpoints.push?.status, 'completed')
 })
 
-test('repository workspace locks serialize processes and expose one owner at a time', { timeout: 10_000 }, async () => {
+test('repository workspace locks reject a contender until the owner releases the lock', { timeout: 10_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'tw-repository-lock-'))
   const previousHome = process.env.HOME
   process.env.HOME = root
@@ -488,21 +488,19 @@ test('repository workspace locks serialize processes and expose one owner at a t
     name: 'lock', canonicalKey: 'local.test/task-weaver/lock', remote: 'file:///tmp/lock.git',
     workingBranch: 'req/lock',
   }).repository
-  const events: string[] = []
+  const lock = { config, repository }
 
   try {
-    const first = withRepositoryWorkspaceLock({ config, repository, operation: 'first' }, async () => {
-      events.push('first:start')
-      await new Promise((resolve) => setTimeout(resolve, 100))
-      events.push('first:end')
+    await withRepositoryWorkspaceLock({ ...lock, operation: 'first' }, async () => {
+      await assert.rejects(
+        () => withRepositoryWorkspaceLock({ ...lock, operation: 'second', timeoutMs: 0 }, async () => {
+          assert.fail('The second operation entered while the first held the lock')
+        }),
+        /Timed out waiting for repository lock .*owner=.*"operation":"first"/,
+      )
     })
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    const second = withRepositoryWorkspaceLock({ config, repository, operation: 'second' }, async () => {
-      events.push('second:start')
-      events.push('second:end')
-    })
-    await Promise.all([first, second])
-    assert.deepEqual(events, ['first:start', 'first:end', 'second:start', 'second:end'])
+    const result = await withRepositoryWorkspaceLock({ ...lock, operation: 'second' }, async () => 'acquired')
+    assert.equal(result, 'acquired')
   } finally {
     if (previousHome === undefined) delete process.env.HOME
     else process.env.HOME = previousHome
