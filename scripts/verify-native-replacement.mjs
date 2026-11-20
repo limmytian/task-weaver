@@ -41,7 +41,7 @@ const baselineHash = hash(readFileSync(resolve(root, "original.so")));
 const build = `cp /work/original.so /work/replacement/libvips-original.so &&
 patchelf --set-soname libvips-original.so /work/replacement/libvips-original.so &&
 tcc -nostdlib -shared /fixture.c -Wl,-soname,${location.filename} /work/replacement/libvips-original.so -Wl,-rpath,'$ORIGIN' -o /work/replacement/${location.filename}`;
-const compilerImage = "node:24.22.2-alpine3.23@sha256:9b69af715c7f9d038150b54ccccbaeffa9064bbc93e2904c29591ca097316af1";
+const compilerImage = "node:24.22.3-alpine3.23@sha256:3946fb783fdce8a2812136ea694bc95c698c4f4096f3fd18568dc27a8ac389dc";
 // BuildKit's cache does not populate the Docker engine's local image store.
 run(["pull", "--platform", platform, compilerImage]);
 console.log("Building the user-modified replacement in a disposable compiler container.");

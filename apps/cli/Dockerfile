@@ -1,4 +1,4 @@
-FROM node:24.22.2-alpine3.23@sha256:9b69af715c7f9d038150b54ccccbaeffa9064bbc93e2904c29591ca097316af1
+FROM node:24.22.3-alpine3.23@sha256:3946fb783fdce8a2812136ea694bc95c698c4f4096f3fd18568dc27a8ac389dc
 
 RUN apk add --no-cache git openssh-client \
     && npm install --global pnpm@9.15.0 @openai/codex@0.166.0
