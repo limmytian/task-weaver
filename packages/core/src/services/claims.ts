@@ -36,7 +36,7 @@ async function lockLegacyProjects(db: Database, taskIds: string[], requirementId
     ORDER BY p.id FOR UPDATE
   `);
   if ((rows as unknown as Array<{ worker_mode: string }>).some(row => row.worker_mode === 'thin')) {
-    throw new ValidationError('Legacy acquisition is disabled for this project');
+    throw new ValidationError('Legacy acquisition is disabled for this project. Use tw task claim <task-id> with an Agent API key or start a thin worker.');
   }
 }
 

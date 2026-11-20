@@ -505,10 +505,12 @@ PATCH /api/v1/tasks/batch
 
 ### Task execution coordination
 
-Task workers use fenced attempts under `/api/v1/thin-workers`; see the worker
-section below. Legacy task and requirement claims remain historical data and
-are not used to acquire work in worker-only projects. Inspect interrupted
-attempts and external effects before explicitly resolving a retry.
+Task workers use fenced attempts under `/api/v1/thin-workers`. An external
+Agent can acquire a specific task with `POST /api/v1/tasks/:id/claim` or
+`tw task claim <task-id> --json`. See [Task workers](#task-workers) for the
+lease and result protocol. Legacy requirement and batch claims apply to legacy
+projects. Inspect interrupted attempts and external effects before explicitly
+resolving a retry.
 
 ## Requirements
 
@@ -1975,6 +1977,52 @@ Daemon-owned mutations include `daemonId` and `leaseGeneration`. A human decisio
 ## Task workers
 
 Task workers use `/api/v1/thin-workers` for task acquisition, lease renewal, presence, artifacts and fenced completion. Use `tw worker start` to run a worker and `tw worker attempts` to inspect attempts.
+
+### Claim a specific task
+
+Use an Agent API key with project `resource.read`, `resource.write`, and
+`execution.run` permissions.
+
+```bash
+tw task claim "$TASK_ID" --json
+# Supply the model when the task requires one.
+tw task claim "$TASK_ID" --model "$MODEL" --json
+```
+
+`POST /api/v1/tasks/:id/claim` accepts optional `durationMinutes`, `model`,
+and `nodeId`. A thin lease defaults to 120 seconds, with explicit durations
+capped at 15 minutes. A successful response is HTTP 201 with
+`{ attempt, task, token }`. The response contains the raw token once. Keep it
+private with the API key. Use `attempt.id`, `attempt.workerId`, and the
+top-level `token` as the fields `attemptId`, `workerId`, and `token` in
+each subsequent request. Use the same Agent API key throughout the attempt.
+
+The claim targets exactly the supplied ID and follows the Worker queue's
+assignment, capability, requirement, dependency and recovery checks. A
+conflicting state returns HTTP 409 with a reason; unauthorized access is
+rejected before checking eligibility. A legacy project still returns its
+original claim record with a default duration of 30 minutes, as does a personal
+task using the legacy claim protocol. Inspect thin lease state through
+`tw worker attempts`; task claim status reads report legacy claims.
+
+1. Renew before `attempt.expiresAt` with `POST /api/v1/thin-workers/heartbeat`
+   using the fence fields and optional `durationSeconds` (30–900, default
+   120). Use the returned expiry to schedule the next renewal.
+2. Upload the result artifact in the same project with
+   `tw doc upload result.md --project "$PROJECT_ID" --json` under the same
+   key. Register that attachment with `POST /api/v1/thin-workers/output`
+   using the fence fields, its `documentId`, and a short `summary`.
+3. Submit `POST /api/v1/thin-workers/result` with the fence fields, a
+   fresh UUID `resultKey`, `outcome: "done"`, a `summary`, and the returned
+   `outputId`. Retry a lost result response with the same body and
+   `resultKey`. Git delivery and acceptance tasks require their usual
+   additional evidence.
+4. If execution must stop for review, submit `POST /api/v1/thin-workers/release`
+   with the fence fields, a fresh UUID `resultKey`, and a `reason`.
+   Use `tw worker attempts --project "$PROJECT_ID"` to inspect expired or
+   interrupted attempts and coordinate any retry.
+
+### Report process usage
 
 `POST /api/v1/thin-workers/usage` accepts a current worker fence (`attemptId`,
 `workerId`, `token`) plus `processId`, `startedAt`, nullable `endedAt`, `revision`,

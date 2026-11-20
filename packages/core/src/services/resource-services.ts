@@ -12,10 +12,10 @@ import { inArray, and, eq, isNull, sql, desc } from "drizzle-orm";
 import {
   startDatabasePhase, apiKeyProjectCreations, apiKeys, projectPreferences, type Database, daemons, requirementClaims, projects, requirements, tiAgentRuns, tasks, documents, memories, executionSlices,
   mcpServers, mcpTools, mcpLocalRequests, requirementRepositories, skillPackages, skillPackageVersions, embeddingProfiles, embeddingJobs, embeddingGenerations, taskDependencies, requirementDependencies, documentLinks, documentTaskLinks,
-  documentRequirementLinks, projectMemberships, activityLog, executionDelegations, taskComments, workflowOutputs, planDrafts,
+  documentRequirementLinks, projectMemberships, activityLog, executionDelegations, taskClaims, taskComments, workflowOutputs, planDrafts,
 } from "@task-weaver/db";
 import {
-  AuthenticationError, AuthorizationError, NotFoundError, ValidationError, type Actor,
+  AuthenticationError, AuthorizationError, ConflictError, NotFoundError, ValidationError, type Actor,
   type VerifiedRequestContext, stableActorReferenceSchema, credentialGrantsSchema, stagedPlanSchema,
 } from "@task-weaver/contracts";
 import * as projectImplementation from "./projects";
@@ -690,6 +690,14 @@ async function authorizeOperation(db: Database, authority: ResourceAuthority, gr
   }
   if (writeById[name]) {
     const scope = await requireResource(db, authority, writeById[name]!, id, group === "project" ? "project.manage" : name.includes("Requirement") && group === "claim" ? "execution.run" : "resource.write");
+    if (group === "claim" && scope.projectId && (name === "heartbeatClaim" || name === "releaseTask")) {
+      const [project] = await db.select({ workerMode: projects.workerMode }).from(projects).where(eq(projects.id, scope.projectId)).for("update");
+      if (project?.workerMode === "thin" && (name === "heartbeatClaim"
+        || !await db.query.taskClaims.findFirst({ where: eq(taskClaims.taskId, id), columns: { id: true } }))) {
+        const operation = name === "heartbeatClaim" ? "heartbeat" : "release";
+        throw new ConflictError(`Use POST /api/v1/thin-workers/${operation} with the current attempt fence`, 0);
+      }
+    }
     if (name === "updateMemory" || name === "forgetMemory") {
       const memory = await db.query.memories.findFirst({ where: eq(memories.id, id) });
       await checkMemoryEntity(db, authority, memory!);

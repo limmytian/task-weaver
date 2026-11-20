@@ -354,7 +354,7 @@ export function registerRequirements(program: Command): void {
 
   req
     .command('claim <id>')
-    .description('claim a requirement lane for exclusive work')
+    .description('claim a legacy requirement lane (thin projects claim individual tasks)')
     .option('--duration <minutes>', 'lease duration in minutes (default: 30)', '30')
     .option('--json', 'output raw JSON')
     .action(async (id, opts) => {

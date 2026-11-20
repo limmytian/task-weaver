@@ -5,12 +5,134 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
-import { apiKeys, createDb, executionControls, executionSlices, projects, repositories, runMigrations, requirements, requirementClaims, requirementRepositories, tasks, taskClaims, taskDependencies, thinGitDeliveries, tiAgentRuns, workerAttempts, workflowOutputs } from '@task-weaver/db';
+import { apiKeys, createDb, executionControls, executionSlices, projects, repositories, runMigrations, requirements, requirementClaims, requirementDependencies, requirementRepositories, tasks, taskClaims, taskDependencies, thinGitDeliveries, tiAgentRuns, workerAttempts, workflowOutputs } from '@task-weaver/db';
 import { createResourceServices, createThinWorkerService } from '@task-weaver/core';
 import { emit } from '@task-weaver/realtime';
 import { resourcePostgresFixture } from './resource-postgres-fixture';
 
 const url = process.env.TW_EXECUTION_RECOVERY_E2E_DATABASE_URL;
+test('external Agent claim selects only the requested task and uses the thin worker fence', { skip: !url, timeout: 60000 }, async t => {
+  const parsed = new URL(url!);
+  assert.equal(parsed.hostname, '127.0.0.1');
+  assert.equal(parsed.pathname, '/tw_execution_recovery_e2e');
+  await runMigrations(url!);
+  const db = createDb(url!);
+  t.after(() => db.$client.end());
+  const storage = await mkdtemp(join(tmpdir(), 'tw-targeted-claim-'));
+  const previousStorage = process.env.TW_ATTACHMENT_STORAGE_DIR;
+  process.env.TW_ATTACHMENT_STORAGE_DIR = storage;
+  t.after(async () => {
+    if (previousStorage === undefined) delete process.env.TW_ATTACHMENT_STORAGE_DIR;
+    else process.env.TW_ATTACHMENT_STORAGE_DIR = previousStorage;
+    await rm(storage, { recursive: true, force: true });
+  });
+  const f = await resourcePostgresFixture(db, url!);
+  const projectId = f.project.id;
+  const createdBy = f.owner.context.actor.id;
+  const agent = await f.identity.createAgent(f.owner.headers, { displayName: 'External claim fixture' });
+  await f.identity.setMembership(f.owner.headers, projectId, agent.id, { role: 'maintainer', explicitPermissions: [] });
+  const issue = async (execution: boolean) => {
+    const { rawKey } = await f.identity.issueKey(f.owner.headers, agent.id, { name: 'External claim', expiresAt: null, grants: [
+      { scope: 'project', projectId, permissions: execution ? ['resource.read', 'resource.write', 'execution.run'] : ['resource.read', 'resource.write'] },
+    ] });
+    return new Headers({ authorization: `Bearer ${rawKey}`, 'content-type': 'application/json' });
+  };
+  const worker = await issue(true);
+  const post = (path: string, body: object, headers = worker) =>
+    f.app.request(`/api/v1${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
+  const expectStatus = async (response: Response, status: number) => {
+    assert.equal(response.status, status, await response.clone().text());
+    return response;
+  };
+  const [requirement, upstream] = await db.insert(requirements).values([
+    { projectId, createdBy, title: 'Targeted claim', status: 'draft' },
+    { projectId, createdBy, title: 'Upstream requirement', status: 'approved' },
+  ]).returning();
+  const [sibling, target] = await db.insert(tasks).values([
+    { projectId, createdBy, requirementId: requirement!.id, title: 'Higher-priority sibling', priority: 'urgent' },
+    { projectId, createdBy, requirementId: requirement!.id, title: 'Explicit target', requestedModel: 'fixture-model' },
+  ]).returning();
+  const path = `/tasks/${target!.id}/claim`;
+  const claim = (headers = worker) => post(path, { model: 'fixture-model' }, headers);
+  const conflict = async (response: Response, message: RegExp) => {
+    const body = await (await expectStatus(response, 409)).json() as { error: string; code: string };
+    assert.equal(body.code, 'conflict');
+    assert.match(body.error, message);
+  };
+  await expectStatus(await claim(f.owner.headers), 403);
+  await expectStatus(await claim(await issue(false)), 403);
+  await expectStatus(await claim(f.outsider.headers), 404);
+  await conflict(await claim(), /Requirement must be approved/);
+  await db.update(requirements).set({ status: 'approved' }).where(eq(requirements.id, requirement!.id));
+  await expectStatus(await f.app.request(`/api/v1${path}`, { method: 'POST', headers: worker, body: '{' }), 400);
+  await conflict(await post(path, {}), /matching model/);
+  await db.insert(requirementDependencies).values({ requirementId: requirement!.id, dependsOnRequirementId: upstream!.id, type: 'blocks' });
+  await conflict(await claim(), /Requirement has unfinished blocking dependencies/);
+  await db.update(requirements).set({ status: 'done' }).where(eq(requirements.id, upstream!.id));
+  await db.insert(taskDependencies).values({ taskId: target!.id, dependsOnTaskId: sibling!.id, type: 'blocks' });
+  await conflict(await claim(), /Task has unfinished blocking dependencies/);
+  await db.delete(taskDependencies).where(eq(taskDependencies.taskId, target!.id));
+
+  const competitorHeaders = await issue(true);
+  const [first, second] = await Promise.all([claim(), claim(competitorHeaders)]);
+  const winner = first.status === 201 ? first : second;
+  const holderHeaders = first.status === 201 ? worker : competitorHeaders;
+  await expectStatus(winner, 201);
+  await conflict(first.status === 201 ? second : first, /active or unresolved worker attempt/);
+  assert.equal(winner.headers.get('cache-control'), 'no-store');
+  const { attempt, task, token } = await winner.json() as {
+    attempt: { id: string; workerId: string; expiresAt: string };
+    task: { id: string; status: string };
+    token: string;
+  };
+  assert.equal(task.id, target!.id);
+  assert.equal(task.status, 'in_progress');
+  assert.match(token, /^twa_[0-9a-f]{64}$/);
+  assert.equal('tokenHash' in attempt, false);
+  assert.equal((await db.query.tasks.findFirst({ where: eq(tasks.id, sibling!.id) }))!.status, 'todo');
+  const fence = { attemptId: attempt.id, workerId: attempt.workerId, token };
+  const otherCredential = first.status === 201 ? competitorHeaders : worker;
+  await conflict(await post('/thin-workers/heartbeat', fence, otherCredential), /authority changed/);
+  await conflict(await post(`/tasks/${target!.id}/heartbeat`, {}, holderHeaders), /thin-workers\/heartbeat/);
+  await conflict(await post(`/tasks/${target!.id}/release`, {}, holderHeaders), /thin-workers\/release/);
+  const heartbeat = await (await expectStatus(await post('/thin-workers/heartbeat', { ...fence, durationSeconds: 180 }, holderHeaders), 200)).json() as { expiresAt: string };
+  assert.ok(Date.parse(heartbeat.expiresAt) > Date.parse(attempt.expiresAt));
+  const attachmentHeaders = new Headers(holderHeaders);
+  attachmentHeaders.set('x-tw-attachment-metadata', encodeURIComponent(JSON.stringify({ projectId, title: 'External result', originalFilename: 'result.txt', mimeType: 'text/plain' })));
+  const attachment = await f.app.request('/api/v1/documents/attachments', { method: 'POST', headers: attachmentHeaders, body: Buffer.from('Verified external Agent result') });
+  const document = await (await expectStatus(attachment, 201)).json() as { id: string };
+  const output = await (await expectStatus(await post('/thin-workers/output', { ...fence, documentId: document.id, summary: 'External work verified' }, holderHeaders), 200)).json() as { id: string };
+  const result = { ...fence, resultKey: randomUUID(), outcome: 'done', summary: 'External work complete', outputId: output.id };
+  const completed = await (await expectStatus(await post('/thin-workers/result', result, holderHeaders), 200)).json() as { task: { id: string; status: string } };
+  assert.equal(completed.task.id, target!.id);
+  assert.equal(completed.task.status, 'done');
+  await conflict(await claim(), /Task must be in To Do/);
+
+  const [expiringTask] = await db.insert(tasks).values({ projectId, createdBy, requirementId: requirement!.id, title: 'Expiring direct claim' }).returning();
+  const expiredClaim = await (await expectStatus(await post(`/tasks/${expiringTask!.id}/claim`, { durationMinutes: 30 }), 201)).json() as {
+    attempt: { id: string; workerId: string; createdAt: string; expiresAt: string };
+    token: string;
+  };
+  const leaseMs = Date.parse(expiredClaim.attempt.expiresAt) - Date.parse(expiredClaim.attempt.createdAt);
+  assert.ok(leaseMs >= 900000 && leaseMs < 901000);
+  await db.update(workerAttempts).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(workerAttempts.id, expiredClaim.attempt.id));
+  const expiredFence = { attemptId: expiredClaim.attempt.id, workerId: expiredClaim.attempt.workerId, token: expiredClaim.token };
+  await conflict(await post('/thin-workers/heartbeat', expiredFence), /expired/);
+  await conflict(await post('/thin-workers/result', { ...expiredFence, resultKey: randomUUID(), outcome: 'attention', summary: 'Late write' }), /expired/);
+  await conflict(await post(`/tasks/${expiringTask!.id}/claim`, {}), /unresolved worker attempt/);
+  const automatic = await (await expectStatus(await post('/thin-workers/acquire', { projectId, workerId: randomUUID(), nodeId: 'fixture', executor: 'codex', model: 'fixture-model' }), 200)).json() as {
+    task: { id: string };
+  };
+  assert.equal(automatic.task.id, sibling!.id);
+
+  const personal = await (await expectStatus(await post('/personal/tasks', { title: 'Legacy task claim in personal scope' }, f.owner.headers), 201)).json() as { id: string };
+  const legacyClaim = await (await expectStatus(await post(`/tasks/${personal.id}/claim`, {}, f.owner.headers), 201)).json() as { taskId: string };
+  assert.equal(legacyClaim.taskId, personal.id);
+  assert.equal('attempt' in legacyClaim, false);
+  await expectStatus(await post(`/tasks/${personal.id}/heartbeat`, {}, f.owner.headers), 200);
+  await expectStatus(await post(`/tasks/${personal.id}/release`, {}, f.owner.headers), 200);
+});
+
 test('thin attempts serialize acquisition, retain expired work and respect live credentials', { skip: !url, timeout: 60000 }, async t => {
   const parsed = new URL(url!);
   assert.equal(parsed.hostname, '127.0.0.1');

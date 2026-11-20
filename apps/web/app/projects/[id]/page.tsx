@@ -25,6 +25,7 @@ import {
   Clock,
   Tag,
   GitBranch,
+  Bot,
 } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/trpc/client";
@@ -220,7 +221,10 @@ export default function ProjectDetailPage({
               Graph
             </TabsTrigger>
             <TabsTrigger value="activity"><Activity aria-hidden="true" className="mr-1 h-3.5 w-3.5" />Activity</TabsTrigger>
-            <TabsTrigger value="workers">Workers</TabsTrigger>
+            <TabsTrigger value="workers">
+              <Bot aria-hidden="true" className="mr-1 size-3.5" />
+              Workers
+            </TabsTrigger>
             <TabsTrigger value="settings"><Settings aria-hidden="true" className="mr-1 h-3.5 w-3.5" />Settings</TabsTrigger>
           </TabsList>
 

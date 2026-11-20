@@ -1,8 +1,8 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { activityLog, documentFileVersions, documents, executionControls, executionDelegations, planDrafts, projects, requirementClaims, requirementRepositories, repositories, requirements, taskClaims, taskDependencies, taskStatusLog, tasks, thinGitDeliveries, thinWorkers, tiAgentRuns, tiSandboxWorkspaces, workerAttempts, workerPlanReceipts, workerAcceptanceSnapshots, workflowOutputs, type Database } from '@task-weaver/db';
-import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerUsageSchema, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerIntegrationPrepareSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
+import { AuthorizationError, ConflictError, NotFoundError, ValidationError, redactObservabilityText, workerUsageSchema, claimTaskByIdSchema, workerModeSchema, workerAcquireSchema, workerFenceSchema, workerAcceptanceSnapshotSchema, workerIntegrationPrepareSchema, workerGitPrepareSchema, workerGitTransitionSchema, workerGitConfirmSchema, workerGitAbandonPreparedSchema, workerGitReconcileSchema, workerHeartbeatSchema, workerOutputSchema, workerPlanSchema, workerPresenceSchema, workerResolveSchema, workerResultSchema, type VerifiedRequestContext } from '@task-weaver/contracts';
 import { persistWorkerUsage } from './agent-usage';
 import { lockIdentityLifecycle } from './auth-security';
 import { resourceAuthority, requireResource, taskResourcePredicate, canAccessResource } from './resource-authorization';
@@ -24,19 +24,86 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function acquisitionChecks(actorId: string, model?: string) {
+  return [
+    [sql`NOT EXISTS (SELECT 1 FROM worker_attempts wa WHERE wa.task_id = t.id AND wa.status IN ('running', 'attention'))`, 'Task already has an active or unresolved worker attempt'],
+    [sql`t.status = 'todo'`, 'Task must be in To Do to acquire'],
+    [sql`r.status IN ('approved', 'in_progress')`, 'Requirement must be approved or in progress'],
+    [sql`(t.assignee IS NULL OR (t.assignee_type = 'agent' AND t.assignee = ${actorId}))`, 'Task is assigned to another actor'],
+    [sql`NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks b ON b.id = d.depends_on_task_id WHERE d.task_id = t.id AND d.type = 'blocks' AND b.status <> 'done')`, 'Task has unfinished blocking dependencies'],
+    [sql`NOT EXISTS (SELECT 1 FROM requirement_dependencies d JOIN requirements b ON b.id = d.depends_on_requirement_id WHERE d.requirement_id = r.id AND d.type = 'blocks' AND b.status NOT IN ('done', 'cancelled'))`, 'Requirement has unfinished blocking dependencies'],
+    [sql`NOT EXISTS (SELECT 1 FROM execution_controls ec WHERE ec.id = (SELECT latest.id FROM execution_controls latest WHERE latest.requirement_id = r.id ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) AND ec.phase <> 'resumed')`, 'Requirement execution requires review or recovery'],
+    [sql`(t.requested_provider IS NULL OR t.requested_provider = 'codex')`, 'Task requires a different executor'],
+    [sql`(t.requested_model IS NULL OR t.requested_model = ${model ?? null})`, 'Task requires a matching model'],
+    [sql`NOT EXISTS (SELECT 1 FROM unnest(COALESCE(t.tags, ARRAY[]::text[])) tag WHERE tag LIKE 'capability:%' OR tag LIKE 'capability-any:%')`, 'Task requires capabilities this worker cannot provide'],
+    [sql`(NOT EXISTS (SELECT 1 FROM unnest(COALESCE(t.tags, ARRAY[]::text[])) tag WHERE tag LIKE 'executor:%' OR tag LIKE 'tool:%') OR 'executor:codex' = ANY(COALESCE(t.tags, ARRAY[]::text[])) OR 'tool:codex' = ANY(COALESCE(t.tags, ARRAY[]::text[])))`, 'Task requires different executor or tool tags'],
+    [sql`NOT EXISTS (SELECT 1 FROM requirement_claims rc WHERE rc.requirement_id = r.id)`, 'Requirement has a legacy claim that requires inspection'],
+    [sql`NOT EXISTS (SELECT 1 FROM task_claims tc WHERE tc.task_id = t.id)`, 'Task has a legacy claim that requires inspection'],
+    [sql`NOT EXISTS (SELECT 1 FROM ti_agent_runs tr WHERE tr.task_id = t.id AND tr.status IN ('queued', 'running', 'in_review'))`, 'Task has queued or unresolved Ti execution'],
+  ] as const;
+}
+
 /** The credential is held by the worker; executors never receive it. */
 export function createThinWorkerService(context: VerifiedRequestContext, options: { forgeFetch?: typeof fetch } = {}) {
-  const transact = async <T>(db: Database, run: (tx: Database, authority: Awaited<ReturnType<typeof resourceAuthority>>) => Promise<T>) => db.transaction(async transaction => {
+  type Authority = Awaited<ReturnType<typeof resourceAuthority>>;
+  type Operation<T> = (tx: Database, authority: Authority) => Promise<T>;
+  const withAuthority = <T>(db: Database, run: Operation<T>) => db.transaction(async transaction => {
     await lockIdentityLifecycle(transaction);
     const tx = transaction as unknown as Database;
     const authority = await resourceAuthority(tx, context);
+    return run(tx, authority);
+  });
+  const transact = <T>(db: Database, run: Operation<T>) => withAuthority(db, (tx, authority) => {
     if (authority.bounds) throw new AuthorizationError();
     return run(tx, authority);
   });
+  const requireWorker = (authority: Authority) => {
+    if (authority.bounds || authority.actor.type !== 'agent' || context.credential.kind !== 'api_key') throw new AuthorizationError();
+  };
   const lockProject = async (tx: Database, id: string) => {
     const [project] = await tx.select().from(projects).where(eq(projects.id, id)).for('update');
     if (!project || project.status !== 'active') throw new NotFoundError('Project not found');
     return project;
+  };
+  const acquireTask = async (
+    tx: Database,
+    authority: Authority,
+    input: Omit<z.output<typeof workerAcquireSchema>, 'executor' | 'model'> & { taskId?: string; model?: string },
+  ) => {
+    const [running] = await tx.select({ id: workerAttempts.id }).from(workerAttempts).where(and(eq(workerAttempts.workerId, input.workerId), eq(workerAttempts.status, 'running')));
+    if (running) throw new ConflictError('Worker already has an unresolved attempt', 0);
+
+    const checks = acquisitionChecks(authority.actor.id, input.model);
+    const [candidate] = await tx.execute(sql`
+      SELECT t.id AS task_id, r.plan_revision FROM ${tasks} t JOIN ${requirements} r ON r.id = t.requirement_id
+      WHERE t.project_id = ${input.projectId} AND t.scope = 'project' AND r.project_id = ${input.projectId}
+        ${input.requirementId ? sql`AND r.id = ${input.requirementId}` : sql``}
+        ${input.taskId ? sql`AND t.id = ${input.taskId}` : sql`AND ${sql.join(checks.map(([condition]) => condition), sql` AND `)}`}
+      ORDER BY CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, t.created_at, t.id
+      LIMIT 1 FOR UPDATE OF r, t
+    `) as unknown as Array<{ task_id: string; plan_revision: number }>;
+    if (!candidate) {
+      if (input.taskId) throw new NotFoundError('Resource not found');
+      return { attempt: null, task: null };
+    }
+    await requireResource(tx, authority, 'task', candidate.task_id, 'execution.run');
+    await requireResource(tx, authority, 'task', candidate.task_id, 'resource.write');
+    // Recheck under the requirement and task locks with a fresh snapshot of blockers and attempts.
+    const [eligibility] = await tx.execute(sql`
+      SELECT r.id AS requirement_id, r.plan_revision,
+        CASE ${sql.join(checks.map(([condition, reason]) => sql`WHEN (${condition}) IS NOT TRUE THEN ${reason}::text`), sql` `)} END AS reason
+      FROM ${tasks} t JOIN ${requirements} r ON r.id = t.requirement_id
+      WHERE t.id = ${candidate.task_id}
+    `) as unknown as Array<{ requirement_id: string; plan_revision: number; reason: string | null }>;
+    if (!eligibility || eligibility.reason) {
+      if (input.taskId) throw new ConflictError(eligibility?.reason ?? 'Task is no longer eligible', candidate.plan_revision);
+      return { attempt: null, task: null };
+    }
+    const token = `twa_${randomBytes(32).toString('hex')}`;
+    const [attempt] = await tx.insert(workerAttempts).values({ projectId: input.projectId, requirementId: eligibility.requirement_id, taskId: candidate.task_id, actorId: authority.actor.id, credentialId: context.credential.id, workerId: input.workerId, nodeId: input.nodeId, tokenHash: digest(token), planRevision: eligibility.plan_revision, expiresAt: sql`clock_timestamp() + ${input.durationSeconds} * interval '1 second'` }).returning();
+    const [task] = await tx.update(tasks).set({ status: 'in_progress', version: sql`${tasks.version} + 1`, updatedAt: sql`clock_timestamp()` }).where(eq(tasks.id, candidate.task_id)).returning();
+    await tx.insert(taskStatusLog).values({ taskId: candidate.task_id, fromStatus: 'todo', toStatus: 'in_progress', changedBy: authority.actor.id, changedByType: authority.actor.type, reason: 'Acquired by thin worker' });
+    return { attempt: publicAttempt(attempt!), task, token };
   };
   const acceptanceInputs = async (tx: Database, authority: Awaited<ReturnType<typeof resourceAuthority>>, taskId: string, revision: number) => {
     const dependencies = await tx.select().from(taskDependencies).where(and(eq(taskDependencies.taskId, taskId), eq(taskDependencies.type, 'blocks')));
@@ -404,53 +471,34 @@ export function createThinWorkerService(context: VerifiedRequestContext, options
     async acquire(db: Database, raw: z.input<typeof workerAcquireSchema>) {
       const input = workerAcquireSchema.parse(raw);
       return transact(db, async (tx, authority) => {
-        if (authority.actor.type !== 'agent' || context.credential.kind !== 'api_key') throw new AuthorizationError();
+        requireWorker(authority);
         await requireResource(tx, authority, 'project', input.projectId, 'execution.run');
         await requireResource(tx, authority, 'project', input.projectId, 'resource.write');
         const project = await lockProject(tx, input.projectId);
         if (project.workerMode !== 'thin') throw new ValidationError('Thin worker mode is not enabled');
-        const [running] = await tx.select({ id: workerAttempts.id }).from(workerAttempts).where(and(eq(workerAttempts.workerId, input.workerId), eq(workerAttempts.status, 'running')));
-        if (running) throw new ConflictError('Worker already has an unresolved attempt', 0);
-        const rows = await tx.execute(sql`
-          SELECT t.id AS task_id, r.id AS requirement_id FROM ${tasks} t JOIN ${requirements} r ON r.id = t.requirement_id
-          WHERE t.project_id = ${input.projectId} AND t.scope = 'project' AND t.status = 'todo'
-            AND (t.assignee IS NULL OR (t.assignee_type = 'agent' AND t.assignee = ${authority.actor.id}))
-            AND r.project_id = ${input.projectId} AND r.status IN ('approved', 'in_progress')
-            AND (${input.requirementId ?? null}::uuid IS NULL OR r.id = ${input.requirementId ?? null}::uuid)
-            AND NOT EXISTS (SELECT 1 FROM execution_controls ec WHERE ec.id = (SELECT latest.id FROM execution_controls latest WHERE latest.requirement_id = r.id ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) AND ec.phase <> 'resumed')
-            AND (t.requested_provider IS NULL OR t.requested_provider = 'codex')
-            AND (t.requested_model IS NULL OR t.requested_model = ${input.model})
-            AND NOT EXISTS (SELECT 1 FROM unnest(COALESCE(t.tags, ARRAY[]::text[])) tag WHERE tag LIKE 'capability:%' OR tag LIKE 'capability-any:%')
-            AND (NOT EXISTS (SELECT 1 FROM unnest(COALESCE(t.tags, ARRAY[]::text[])) tag WHERE tag LIKE 'executor:%' OR tag LIKE 'tool:%') OR 'executor:codex' = ANY(COALESCE(t.tags, ARRAY[]::text[])) OR 'tool:codex' = ANY(COALESCE(t.tags, ARRAY[]::text[])))
-            AND NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks b ON b.id = d.depends_on_task_id WHERE d.task_id = t.id AND d.type = 'blocks' AND b.status <> 'done')
-            AND NOT EXISTS (SELECT 1 FROM requirement_dependencies d JOIN requirements b ON b.id = d.depends_on_requirement_id WHERE d.requirement_id = r.id AND d.type = 'blocks' AND b.status NOT IN ('done', 'cancelled'))
-            AND NOT EXISTS (SELECT 1 FROM requirement_claims rc WHERE rc.requirement_id = r.id)
-            AND NOT EXISTS (SELECT 1 FROM task_claims tc WHERE tc.task_id = t.id)
-            AND NOT EXISTS (SELECT 1 FROM worker_attempts wa WHERE wa.task_id = t.id AND wa.status IN ('running', 'attention'))
-            AND NOT EXISTS (SELECT 1 FROM ti_agent_runs tr WHERE tr.task_id = t.id AND tr.status IN ('queued', 'running', 'in_review'))
-          ORDER BY CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, t.created_at, t.id
-          LIMIT 1 FOR UPDATE OF r, t
-        `) as unknown as Array<{ task_id: string; requirement_id: string }>;
-        const candidate = rows[0];
-        if (!candidate) return { attempt: null, task: null };
-        await requireResource(tx, authority, 'task', candidate.task_id, 'execution.run');
-        await requireResource(tx, authority, 'task', candidate.task_id, 'resource.write');
-        const [requirement] = await tx.select().from(requirements).where(eq(requirements.id, candidate.requirement_id));
-        // Recheck cross-row eligibility after acquiring the requirement and task locks.
-        const [changed] = await tx.execute(sql`SELECT 1 AS changed WHERE
-          EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks b ON b.id = d.depends_on_task_id WHERE d.task_id = ${candidate.task_id} AND d.type = 'blocks' AND b.status <> 'done') OR
-          EXISTS (SELECT 1 FROM requirement_dependencies d JOIN requirements b ON b.id = d.depends_on_requirement_id WHERE d.requirement_id = ${candidate.requirement_id} AND d.type = 'blocks' AND b.status NOT IN ('done', 'cancelled')) OR
-          EXISTS (SELECT 1 FROM execution_controls ec WHERE ec.id = (SELECT latest.id FROM execution_controls latest WHERE latest.requirement_id = ${candidate.requirement_id} ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) AND ec.phase <> 'resumed') OR
-          EXISTS (SELECT 1 FROM requirement_claims rc WHERE rc.requirement_id = ${candidate.requirement_id}) OR
-          EXISTS (SELECT 1 FROM task_claims tc WHERE tc.task_id = ${candidate.task_id}) OR
-          EXISTS (SELECT 1 FROM worker_attempts wa WHERE wa.task_id = ${candidate.task_id} AND wa.status IN ('running', 'attention')) OR
-          EXISTS (SELECT 1 FROM ti_agent_runs tr WHERE tr.task_id = ${candidate.task_id} AND tr.status IN ('queued', 'running', 'in_review'))`) as unknown as Array<{ changed: number }>;
-        if (changed) return { attempt: null, task: null };
-        const token = `twa_${randomBytes(32).toString('hex')}`;
-        const [attempt] = await tx.insert(workerAttempts).values({ projectId: input.projectId, requirementId: candidate.requirement_id, taskId: candidate.task_id, actorId: authority.actor.id, credentialId: context.credential.id, workerId: input.workerId, nodeId: input.nodeId, tokenHash: digest(token), planRevision: requirement!.planRevision, expiresAt: sql`clock_timestamp() + ${input.durationSeconds} * interval '1 second'` }).returning();
-        const [task] = await tx.update(tasks).set({ status: 'in_progress', version: sql`${tasks.version} + 1`, updatedAt: sql`clock_timestamp()` }).where(eq(tasks.id, candidate.task_id)).returning();
-        await tx.insert(taskStatusLog).values({ taskId: candidate.task_id, fromStatus: 'todo', toStatus: 'in_progress', changedBy: authority.actor.id, changedByType: authority.actor.type, reason: 'Acquired by thin worker' });
-        return { attempt: publicAttempt(attempt!), task, token };
+        return acquireTask(tx, authority, input);
+      });
+    },
+    async claimTaskById(db: Database, taskId: string, raw: z.input<typeof claimTaskByIdSchema>) {
+      const input = claimTaskByIdSchema.parse(raw);
+      return withAuthority(db, async (tx, authority) => {
+        const scope = await requireResource(tx, authority, 'task', taskId, 'resource.write');
+        const project = scope.projectId ? await lockProject(tx, scope.projectId) : null;
+        if (!project || project.workerMode !== 'thin') {
+          const actor = { id: authority.actor.id, type: authority.actor.type };
+          return createResourceServices(context).claimService.claimTask(tx, taskId, actor, input.durationMinutes);
+        }
+        requireWorker(authority);
+        await requireResource(tx, authority, 'project', project.id, 'execution.run');
+        await requireResource(tx, authority, 'project', project.id, 'resource.write');
+        return acquireTask(tx, authority, {
+          projectId: project.id,
+          taskId,
+          workerId: randomUUID(),
+          nodeId: input.nodeId ?? 'external-agent',
+          model: input.model,
+          durationSeconds: input.durationMinutes === undefined ? 120 : Math.min(input.durationMinutes * 60, 900),
+        });
       });
     },
     async reportUsage(db: Database, raw: z.input<typeof workerUsageSchema>) {

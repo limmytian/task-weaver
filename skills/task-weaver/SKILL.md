@@ -421,6 +421,9 @@ tw doc versions $DOC_ID
 # Inspect worker attempts
 tw worker attempts --project $PROJECT_ID
 
+# Claim a specific thin task with an Agent API key
+tw task claim $TASK_ID --json
+
 # Search
 tw search "authentication" --project $PROJECT_ID
 
@@ -513,7 +516,9 @@ For detailed step-by-step workflow guides, see [workflows.md](workflows.md).
 Task workers acquire tasks atomically and renew their own leases. Follow the
 worker prompt and leave the outcome for the supervisor. Interactive agents
 coordinate with the owner, check task status and dependencies, and record
-progress; legacy claim commands do not reserve work in worker-only projects.
+progress. External Agents with an execution grant can claim a specific thin task
+with `tw task claim <task-id> --json` and use the returned fence to renew and
+submit results through the [thin worker API](rest-api-reference.md#claim-a-specific-task).
 Use `expectedVersion` on updates where available. An expired or uncertain
 worker attempt needs human inspection before an explicit retry.
 

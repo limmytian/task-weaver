@@ -1,6 +1,7 @@
 import { Command, Option } from 'commander'
 import * as readline from 'readline/promises'
 import { get, post, patch, del, ApiError } from '../client.js'
+import { loadConfig } from '../config.js'
 import { printJson, printTable, printKv } from '../output.js'
 
 type ListResponse = unknown[] | {
@@ -238,16 +239,19 @@ export function registerTasks(program: Command): void {
 
   task
     .command('claim <id>')
-    .description('claim a task for exclusive work')
-    .option('--duration <minutes>', 'lease duration in minutes (default: 30)', '30')
+    .description('claim the specified task for exclusive work')
+    .option('--duration <minutes>', 'lease duration (thin: default 2, capped at 15; legacy: default 30)')
+    .option('--model <model>', 'Codex model for thin tasks that require a specific model')
     .option('--json', 'output raw JSON')
+    .addHelpText('after', '\nThin projects return a private attempt token. Use the same Agent API key and the returned fence with the thin worker heartbeat, output, result, or release API.')
     .action(async (id, opts) => {
-      const data = await post(`/api/v1/tasks/${id}/claim`, {
-        action: 'claim',
-        durationMinutes: Number(opts.duration),
+      const data = await post<Record<string, unknown>>(`/api/v1/tasks/${id}/claim`, {
+        durationMinutes: opts.duration === undefined ? undefined : Number(opts.duration),
+        model: opts.model,
+        nodeId: loadConfig().nodeId,
       })
-      if (opts.json) return printJson(data)
-      printKv(data as Record<string, unknown>)
+      if (opts.json || 'attempt' in data) return printJson(data)
+      printKv(data)
     })
 
   task
@@ -272,7 +276,7 @@ export function registerTasks(program: Command): void {
 
   task
     .command('release <id>')
-    .description('release a claimed task')
+    .description('release a legacy task claim (thin attempts use the fenced worker release API)')
     .option('--reason <reason>', 'reason for release')
     .option('--json', 'output raw JSON')
     .action(async (id, opts) => {

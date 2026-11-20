@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import {
   createResourceServices,
+  createThinWorkerService,
   personalResourceOwnerId,
   createTaskSchema,
   createPersonalTaskSchema,
@@ -13,7 +14,7 @@ import {
   createTaskDependencySchema,
   batchCreateTasksSchema,
   batchUpdateTasksSchema,
-  claimTaskSchema,
+  claimTaskByIdSchema,
   releaseTaskSchema,
   batchClaimTasksSchema,
   NotFoundError,
@@ -443,18 +444,17 @@ tasks.delete("/tasks/:id/dependencies/:depId", async (c) => {
 // POST /tasks/:id/claim - Claim a task (acquire lease)
 tasks.post("/tasks/:id/claim", async (c) => {
   const db = c.get("db");
-  const actor = c.get("actor");
   const id = c.req.param("id");
-  const body = await c.req.json().catch(() => ({}));
-
-  const parsed = claimTaskSchema.safeParse(body);
+  const payload = await c.req.text();
+  const parsed = claimTaskByIdSchema.safeParse(payload ? JSON.parse(payload) : {});
 
   if (!parsed.success) {
     return c.json({ error: "Validation error", details: parsed.error.flatten() }, 400);
   }
 
   try {
-    const claim = await createResourceServices(c.get("identity")).claimService.claimTask(db, id, actor, parsed.data.durationMinutes);
+    const claim = await createThinWorkerService(c.get("identity")).claimTaskById(db, id, parsed.data);
+    c.header("Cache-Control", "no-store");
     return c.json(claim, 201);
   } catch (err) {
     if (err instanceof NotFoundError) {
@@ -462,6 +462,9 @@ tasks.post("/tasks/:id/claim", async (c) => {
     }
     if (err instanceof ValidationError) {
       return c.json({ error: err.message }, 409);
+    }
+    if (err instanceof ConflictError) {
+      return c.json({ error: err.message, code: "conflict", currentVersion: err.currentVersion }, 409);
     }
     throw err;
   }
@@ -484,6 +487,7 @@ tasks.post("/tasks/:id/release", async (c) => {
     const result = await createResourceServices(c.get("identity")).claimService.releaseTask(db, id, actor, parsed.data.reason);
     return c.json(result);
   } catch (err) {
+    if (err instanceof ConflictError) return c.json({ error: err.message, code: "conflict" }, 409);
     if (err instanceof NotFoundError) {
       return c.json({ error: "Resource not found" }, 404);
     }
@@ -507,6 +511,7 @@ tasks.post("/tasks/:id/heartbeat", async (c) => {
     const claim = await createResourceServices(c.get("identity")).claimService.heartbeatClaim(db, id, actor, extendMinutes);
     return c.json(claim);
   } catch (err) {
+    if (err instanceof ConflictError) return c.json({ error: err.message, code: "conflict" }, 409);
     if (err instanceof NotFoundError) {
       return c.json({ error: "Resource not found" }, 404);
     }
